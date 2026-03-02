@@ -63,6 +63,14 @@ const fmtDT = d  => d?new Date(d).toLocaleString("en-IN",{day:"2-digit",month:"s
 const amtClose=(a,b)=>Math.abs(a-b)<2;
 const strSim=(a,b)=>{a=(a||"").toLowerCase();b=(b||"").toLowerCase();let m=0;for(let c of a)if(b.includes(c))m++;return m/Math.max(a.length,b.length,1);};
 
+function decodeGoogleCredential(credential=""){
+  try{
+    const payload=credential.split(".")[1]||"";
+    const b64=payload.replace(/-/g,"+").replace(/_/g,"/");
+    return JSON.parse(atob(b64));
+  }catch{return null;}
+}
+
 function decodeB64(s){try{return decodeURIComponent(escape(atob(s.replace(/-/g,'+').replace(/_/g,'/'))));}catch{return "";}}
 function extractEmailText(payload,d=0){
   if(d>5||!payload)return"";
@@ -224,6 +232,9 @@ function initOAuth(clientId,cb){
 }
 
 export default function App(){
+  const[authCfg,setAuthCfg]=useState(()=>LS.get("ledger_auth_cfg",{enabled:true,googleClientId:"",ownerEmail:""}));
+  const[authUser,setAuthUser]=useState(()=>LS.get("ledger_auth_user",null));
+  const[authMsg,setAuthMsg]=useState("");
   const[tab,setTab]=useState("dashboard");
   const[txns,setTxns]=useState(()=>LS.get("ledger_txns",[]));
   const[acts,setActs]=useState(()=>LS.get("ledger_acts",DEF_ACTS));
@@ -244,7 +255,30 @@ export default function App(){
   const[sumLoad,setSumLoad]=useState(false);
   const[filter,setFilter]=useState({activity:"All",type:"All",from:"",to:""});
 
+  const onGoogleCredential=useCallback((resp)=>{
+    const payload=decodeGoogleCredential(resp?.credential||"");
+    if(!payload?.email){setAuthMsg("Google login failed. Please try again.");return;}
+    const email=(payload.email||"").toLowerCase();
+    const owner=(authCfg.ownerEmail||"").toLowerCase();
+    if(owner&&owner!==email){setAuthMsg(`Access denied. This dashboard is locked to ${authCfg.ownerEmail}.`);return;}
+    if(!owner)setAuthCfg(p=>({...p,ownerEmail:payload.email}));
+    setAuthUser({email:payload.email,name:payload.name||payload.email,picture:payload.picture||"",lastLoginAt:new Date().toISOString()});
+    setAuthMsg("");
+  },[authCfg.ownerEmail]);
+
+  const signOut=()=>{
+    setAuthUser(null);
+    try{window.google?.accounts?.id?.disableAutoSelect();}catch{}
+  };
+
   // ── localStorage mirrors ─────────────────────────────────────────────────
+  useEffect(()=>LS.set("ledger_auth_cfg",authCfg),[authCfg]);
+  useEffect(()=>{
+    try{
+      if(authUser)localStorage.setItem("ledger_auth_user",JSON.stringify(authUser));
+      else localStorage.removeItem("ledger_auth_user");
+    }catch{}
+  },[authUser]);
   useEffect(()=>LS.set("ledger_txns",txns),[txns]);
   useEffect(()=>LS.set("ledger_acts",acts),[acts]);
   useEffect(()=>LS.set("ledger_cats",cats),[cats]);
@@ -254,6 +288,12 @@ export default function App(){
   useEffect(()=>LS.set("ledger_sms",smsNums),[smsNums]);
   useEffect(()=>LS.set("ledger_odcfg",sbCfg),[sbCfg]);
   useEffect(()=>LS.set("ledger_lastsync",lastSync),[lastSync]);
+
+  useEffect(()=>{
+    const owner=(authCfg.ownerEmail||"").toLowerCase();
+    const current=(authUser?.email||"").toLowerCase();
+    if(owner&&current&&owner!==current)setAuthUser(null);
+  },[authCfg.ownerEmail,authUser]);
 
   // ── OneDrive sync helpers ────────────────────────────────────────────────
   const pushToCloud=useCallback(async(state={})=>{
@@ -359,6 +399,13 @@ export default function App(){
   });
   const TABS=[["dashboard","Dashboard"],["transactions","Ledger"],["inbox",`Inbox${inbox.length?` (${inbox.length})`:""}`],["email",`Email${emails.length?` (${emails.length})`:""}`],["messages",`Messages${smsNums.length?` (${smsNums.filter(s=>s.active).length}✓)`:""}`],["journal","Journal"],["accounts","Accounts"],["reports","Reports"],["settings","Settings"],["daily","Day Review"]];
 
+  if(authCfg.enabled&&!authCfg.googleClientId){
+    return <AuthSetupScreen authCfg={authCfg} setAuthCfg={setAuthCfg}/>;
+  }
+  if(authCfg.enabled&&!authUser){
+    return <AuthLoginScreen clientId={authCfg.googleClientId} ownerEmail={authCfg.ownerEmail} onCredential={onGoogleCredential} authMsg={authMsg} onUpdateClientId={v=>setAuthCfg(p=>({...p,googleClientId:v}))}/>;
+  }
+
   return(
     <div style={{fontFamily:"'DM Sans',sans-serif",background:"#07090f",minHeight:"100vh",color:"#e2e8f0"}}>
       <style>{CSS}</style>
@@ -379,6 +426,8 @@ export default function App(){
           {syncStatus==="idle"&&(sbCfg.enabled?"☁ Cloud":"⚠ Local only")}
           {syncStatus==="error"&&"☁ Sync error"}
         </div>
+        {authCfg.enabled&&authUser&&<div style={{marginRight:8,fontSize:11,color:"#94a3b8",whiteSpace:"nowrap",maxWidth:220,overflow:"hidden",textOverflow:"ellipsis"}} title={authUser.email}>👤 {authUser.email}</div>}
+        {authCfg.enabled&&authUser&&<button className="btn sm ghost" style={{marginRight:6}} onClick={signOut}>Sign out</button>}
         <button className="btn sm ghost" style={{marginRight:6}} onClick={()=>{setAddType("income");setEditTx(null);setShowAdd(true);}}>+ Income</button>
         <button className="btn sm pri" onClick={()=>{setAddType("expense");setEditTx(null);setShowAdd(true);}}>+ Expense</button>
         <button className="btn sm" style={{marginLeft:6,background:"#f59e0b",color:"#fff"}} onClick={()=>{setAddType("borrow");setEditTx(null);setShowAdd(true);}}>+ Borrowed</button>
@@ -397,6 +446,94 @@ export default function App(){
         {tab==="daily"&&<DailyTab todayTxns={todayTxns} todInc={todInc} todExp={todExp} summary={summary} sumLoad={sumLoad} getSummary={async()=>{setSumLoad(true);setSummary(await aiSummarize(todayTxns));setSumLoad(false);}} onEdit={tx=>{setEditTx(tx);setAddType(tx.type);setShowAdd(true);}} onDelete={delTx} inbox={inbox}/>}
       </div>
       {showAdd&&<AddModal type={addType} existing={editTx} acts={acts} cats={cats} accs={accs} onSave={saveTx} onClose={()=>{setShowAdd(false);setEditTx(null);}}/>}
+    </div>
+  );
+}
+
+function AuthSetupScreen({authCfg,setAuthCfg}){
+  const[clientId,setClientId]=useState(authCfg.googleClientId||"");
+  const[ownerEmail,setOwnerEmail]=useState(authCfg.ownerEmail||"");
+  const origin=typeof window!=="undefined"?window.location.origin:"";
+  return(
+    <div style={{fontFamily:"'DM Sans',sans-serif",background:"#07090f",minHeight:"100vh",color:"#e2e8f0",display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+      <style>{CSS}</style>
+      <div className="modal" style={{maxWidth:560}}>
+        <div style={{fontSize:18,fontWeight:700,marginBottom:10}}>Secure Access Setup</div>
+        <div style={{fontSize:13,color:"#64748b",lineHeight:1.8,marginBottom:12}}>
+          This dashboard is locked behind Google sign-in. Enter your Google Web Client ID once.
+        </div>
+        <div style={{background:"#0d0d2b",border:"1px solid #6366f1",borderRadius:8,padding:"10px 12px",fontSize:12,color:"#c7d2fe",marginBottom:10}}>
+          Add this to your Google OAuth Authorized JavaScript origins: <b>{origin}</b>
+        </div>
+        <label>Google Client ID</label>
+        <input value={clientId} onChange={e=>setClientId(e.target.value)} placeholder="xxxxxxxxxxxx-xxxx.apps.googleusercontent.com"/>
+        <label>Allowed Owner Email (optional now)</label>
+        <input value={ownerEmail} onChange={e=>setOwnerEmail(e.target.value)} placeholder="you@gmail.com"/>
+        <div style={{fontSize:11,color:"#475569",marginTop:6}}>If left blank, first successful login will become the owner.</div>
+        <button className="btn pri" style={{marginTop:14,width:"100%"}} onClick={()=>{
+          if(!clientId.trim())return alert("Enter Google Client ID");
+          setAuthCfg({enabled:true,googleClientId:clientId.trim(),ownerEmail:ownerEmail.trim()});
+        }}>Save & Continue</button>
+      </div>
+    </div>
+  );
+}
+
+function AuthLoginScreen({clientId,ownerEmail,onCredential,authMsg,onUpdateClientId}){
+  const btnRef=useRef(null);
+  const[loading,setLoading]=useState(true);
+  const[cid,setCid]=useState(clientId||"");
+
+  useEffect(()=>setCid(clientId||""),[clientId]);
+
+  useEffect(()=>{
+    let alive=true;
+    const mount=()=>{
+      if(!alive)return;
+      if(!window.google?.accounts?.id){setTimeout(mount,250);return;}
+      window.google.accounts.id.initialize({
+        client_id:clientId,
+        callback:onCredential,
+        auto_select:true,
+        cancel_on_tap_outside:false,
+      });
+      if(btnRef.current){
+        btnRef.current.innerHTML="";
+        window.google.accounts.id.renderButton(btnRef.current,{
+          theme:"filled_blue",
+          size:"large",
+          shape:"pill",
+          text:"continue_with",
+          width:320,
+        });
+      }
+      window.google.accounts.id.prompt();
+      setLoading(false);
+    };
+    if(clientId)mount();
+    return()=>{alive=false;};
+  },[clientId,onCredential]);
+
+  return(
+    <div style={{fontFamily:"'DM Sans',sans-serif",background:"#07090f",minHeight:"100vh",color:"#e2e8f0",display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+      <style>{CSS}</style>
+      <script src="https://accounts.google.com/gsi/client" async defer/>
+      <div className="modal" style={{maxWidth:560}}>
+        <div style={{fontSize:18,fontWeight:700,marginBottom:10}}>Sign in to LedgerAI</div>
+        <div style={{fontSize:13,color:"#64748b",marginBottom:10}}>
+          {ownerEmail?`Only ${ownerEmail} can access this dashboard.`:"Sign in with your Google account to claim owner access."}
+        </div>
+        <div style={{display:"flex",justifyContent:"center",padding:"10px 0 14px"}}>
+          {loading?<div style={{fontSize:12,color:"#64748b"}}>Loading Google sign-in…</div>:<div ref={btnRef}/>}
+        </div>
+        {authMsg&&<div style={{background:"#450a0a",border:"1px solid #f87171",borderRadius:8,padding:"8px 10px",fontSize:12,color:"#fca5a5",marginBottom:10}}>{authMsg}</div>}
+        <div style={{background:"#0a0c12",border:"1px solid #1e293b",borderRadius:8,padding:"10px 12px"}}>
+          <div style={{fontSize:11,color:"#475569",marginBottom:6,fontWeight:700,textTransform:"uppercase"}}>Troubleshooting</div>
+          <label style={{marginTop:0}}>Google Client ID</label>
+          <input value={cid} onChange={e=>setCid(e.target.value)} placeholder="xxxxxxxxxxxx-xxxx.apps.googleusercontent.com"/>
+          <button className="btn ghost" style={{marginTop:8,width:"100%"}} onClick={()=>onUpdateClientId(cid.trim())}>Update Client ID</button>
+        </div>
+      </div>
     </div>
   );
 }
