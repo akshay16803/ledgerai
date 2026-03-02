@@ -63,7 +63,7 @@ const fmtDT = d  => d?new Date(d).toLocaleString("en-IN",{day:"2-digit",month:"s
 const amtClose=(a,b)=>Math.abs(a-b)<2;
 const strSim=(a,b)=>{a=(a||"").toLowerCase();b=(b||"").toLowerCase();let m=0;for(let c of a)if(b.includes(c))m++;return m/Math.max(a.length,b.length,1);};
 const LOCKED_OWNER_EMAIL = "akshaychouhan16803@gmail.com";
-const DEFAULT_GOOGLE_CLIENT_ID = "";
+const DEFAULT_GOOGLE_CLIENT_ID = "975238186836-47bvtn56uhrlcbe11n1pe1h26qbor5s1.apps.googleusercontent.com";
 
 function decodeGoogleCredential(credential=""){
   try{
