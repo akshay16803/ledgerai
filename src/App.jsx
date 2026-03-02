@@ -24,7 +24,8 @@ const ACC_TYPES = [
   {key:"borrowing",label:"Borrowing (Friends)",cls:"liability"},
 ];
 const PAY_METHODS = ["UPI","Debit Card","Credit Card","Cash","Bank Transfer","NEFT/RTGS","Cheque","Pay Later","Wallet"];
-const GMAIL_QUERY = 'subject:(receipt OR invoice OR "order confirmation" OR "payment confirmation" OR "amount debited" OR "transaction" OR "bill") newer_than:2d';
+const LEGACY_GMAIL_QUERY = 'subject:(receipt OR invoice OR "order confirmation" OR "payment confirmation" OR "amount debited" OR "transaction" OR "bill") newer_than:2d';
+const GMAIL_QUERY = "in:anywhere";
 
 // SMS forwarder apps send emails in predictable subject formats
 // MacroDroid: "SMS from +91XXXXXXXXXX"  |  SMS Forwarder: "Fwd: SMS"  |  IFTTT: "New SMS received"
@@ -239,12 +240,34 @@ async function odSignOut(clientId) {
 }
 
 async function gmailFetch(url,token){const r=await fetch(url,{headers:{Authorization:`Bearer ${token}`}});if(!r.ok)throw new Error(`Gmail ${r.status}`);return r.json();}
-async function gmailListMessages(token,query,max=20){const d=await gmailFetch(`https://www.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(query)}&maxResults=${max}`,token);return d.messages||[];}
+async function gmailListMessages(token,query,max=20){
+  const target=Math.max(1,Math.min(Number(max)||20,5000));
+  let pageToken="";const all=[];
+  while(all.length<target){
+    const pageSize=Math.min(500,target-all.length);
+    const url=`https://www.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(query)}&maxResults=${pageSize}${pageToken?`&pageToken=${encodeURIComponent(pageToken)}`:""}`;
+    const d=await gmailFetch(url,token);
+    if(d.messages?.length)all.push(...d.messages);
+    if(!d.nextPageToken)break;
+    pageToken=d.nextPageToken;
+  }
+  return all;
+}
 async function gmailGetMessage(token,id){return gmailFetch(`https://www.googleapis.com/gmail/v1/users/me/messages/${id}?format=full`,token);}
 async function gmailGetProfile(token){return gmailFetch("https://www.googleapis.com/gmail/v1/users/me/profile",token);}
 function initOAuth(clientId,cb){
   if(!window.google?.accounts?.oauth2){cb(new Error("Google Identity Services not loaded"),null);return;}
   window.google.accounts.oauth2.initTokenClient({client_id:clientId,scope:"https://www.googleapis.com/auth/gmail.readonly",callback:(r)=>{if(r.error)cb(new Error(r.error),null);else cb(null,r.access_token);}}).requestAccessToken({prompt:"consent"});
+}
+
+function hydrateEmailAccount(acc={}){
+  const query=((acc.syncQuery||"")+"").trim();
+  return{
+    ...acc,
+    syncQuery:!query||query===LEGACY_GMAIL_QUERY?GMAIL_QUERY:query,
+    maxEmails:Math.max(1,Math.min(Number(acc.maxEmails)||100,5000)),
+    autoPost:acc.autoPost!==false,
+  };
 }
 
 export default function App(){
@@ -267,7 +290,7 @@ export default function App(){
   const[cats,setCats]=useState(()=>LS.get("ledger_cats",DEF_CATS));
   const[accs,setAccs]=useState(()=>LS.get("ledger_accs",[]));
   const[inbox,setInbox]=useState(()=>LS.get("ledger_inbox",[]));
-  const[emails,setEmails]=useState(()=>LS.get("ledger_emails",[]).map(a=>({...a,token:undefined})));
+  const[emails,setEmails]=useState(()=>LS.get("ledger_emails",[]).map(a=>({...hydrateEmailAccount(a),token:undefined})));
   const[smsNums,setSmsNums]=useState(()=>LS.get("ledger_sms",[]));
   const[sbCfg,setSbCfg]=useState(()=>LS.get("ledger_odcfg",{clientId:"",email:"",name:"",enabled:false})); // reusing name for compat
   const setSbCfgAlias=v=>setSbCfg(typeof v==="function"?v:v);
@@ -372,7 +395,7 @@ export default function App(){
       if(d.acts)setActs(d.acts);
       if(d.cats)setCats(d.cats);
       if(d.smsNums)setSmsNums(d.smsNums);
-      if(d.emails)setEmails(d.emails.map(a=>({...a,token:undefined})));
+      if(d.emails)setEmails(d.emails.map(a=>({...hydrateEmailAccount(a),token:undefined})));
       setLastSync(new Date().toISOString());setSyncStatus("ok");
       setTimeout(()=>setSyncStatus("idle"),3000);
     }catch(e){
@@ -405,6 +428,36 @@ export default function App(){
   },[txns,accs]);
   const delTx=id=>setTxns(p=>p.filter(t=>t.id!==id));
   const addInbox=items=>setInbox(p=>[...items.map(i=>({...i,_iid:gid(),_ts:Date.now()})),...p]);
+  const autoPostTxns=useCallback((items=[])=>{
+    const valid=items.filter(i=>i?.amount>0&&(i.type==="expense"||i.type==="income"));
+    if(!valid.length)return 0;
+    const addByAct={};
+    valid.forEach(i=>{
+      if(i.isNewCategory&&i.businessActivity&&i.category){
+        if(!addByAct[i.businessActivity])addByAct[i.businessActivity]=new Set();
+        addByAct[i.businessActivity].add(i.category);
+      }
+    });
+    if(Object.keys(addByAct).length){
+      setCats(prev=>{
+        const next={...prev};
+        Object.entries(addByAct).forEach(([act,set])=>{
+          const existing=new Set(next[act]||[]);
+          set.forEach(c=>existing.add(c));
+          next[act]=[...existing];
+        });
+        return next;
+      });
+    }
+    const prepared=valid.map(item=>{
+      const tx={...item,id:gid(),createdAt:new Date().toISOString(),source:item.source||"email"};
+      const accName=tx.accountId?accs.find(a=>a.id===tx.accountId)?.name||"":tx.accountName||"";
+      const liabName=tx.liabilityAccountId?accs.find(a=>a.id===tx.liabilityAccountId)?.name||"":tx.liabilityAccountName||"";
+      return {...tx,accountName:accName,liabilityAccountName:liabName,journalEntries:buildJE(tx,accs)};
+    });
+    setTxns(prev=>[...prepared,...prev]);
+    return prepared.length;
+  },[accs]);
   const approveInbox=item=>{
     if(item.isNewCategory)ensureCat(item.businessActivity,item.category);
     const tx={...item,id:gid(),createdAt:new Date().toISOString(),source:item.source||"auto"};
@@ -470,7 +523,7 @@ export default function App(){
         {tab==="dashboard"&&<DashTab byAct={byAct} totInc={totInc} totExp={totExp} todInc={todInc} todExp={todExp} txns={txns} todayTxns={todayTxns} inbox={inbox} emails={emails} onEdit={tx=>{setEditTx(tx);setAddType(tx.type);setShowAdd(true);}} onDelete={delTx}/>}
         {tab==="transactions"&&<LedgerTab txns={filtered} filter={filter} setFilter={setFilter} acts={acts} onEdit={tx=>{setEditTx(tx);setAddType(tx.type);setShowAdd(true);}} onDelete={delTx}/>}
         {tab==="inbox"&&<InboxTab inbox={inbox} addInbox={addInbox} acts={acts} cats={cats} onApprove={approveInbox} onEdit={editInbox} onDiscard={discardInbox}/>}
-        {tab==="email"&&<EmailTab emails={emails} setEmails={setEmails} inbox={inbox} addInbox={addInbox} acts={acts} cats={cats} defaultGoogleClientId={authCfg.googleClientId||DEFAULT_GOOGLE_CLIENT_ID}/>}
+        {tab==="email"&&<EmailTab emails={emails} setEmails={setEmails} inbox={inbox} addInbox={addInbox} autoPostTxns={autoPostTxns} acts={acts} cats={cats} defaultGoogleClientId={authCfg.googleClientId||DEFAULT_GOOGLE_CLIENT_ID}/>}
         {tab==="messages"&&<MessagesTab smsNums={smsNums} setSmsNums={setSmsNums} emails={emails} inbox={inbox} addInbox={addInbox} acts={acts} cats={cats}/>}
         {tab==="journal"&&<JournalTab txns={txns}/>}
         {tab==="accounts"&&<AccountsTab accs={accs} setAccs={setAccs} txns={txns} addInbox={addInbox} acts={acts} cats={cats}/>}
@@ -949,7 +1002,7 @@ function SmsOverviewModal({onClose}){
 }
 
 // ── EMAIL TAB ─────────────────────────────────────────────────────────────────
-function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClientId}){
+function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaultGoogleClientId}){
   const[showSetup,setShowSetup]=useState(false);
   const[showGuide,setShowGuide]=useState(false);
   const[syncingId,setSyncingId]=useState(null);
@@ -984,13 +1037,15 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClient
     });
   };
 
-  const sync=async(acc)=>{
+  const sync=async(acc,opts={})=>{
     if(!acc.token){alert("Connect this account first.");return;}
+    const scanAll=opts.scanAll===true;
     setSyncingId(acc.id);
     try{
-      const requestedMax=Math.max(1,Math.min(Number(acc.maxEmails)||30,500));
+      const requestedMax=scanAll?5000:Math.max(1,Math.min(Number(acc.maxEmails)||100,5000));
+      const query=scanAll?"in:anywhere":(acc.syncQuery||GMAIL_QUERY);
       log(acc.id,"Fetching email list…");
-      const messages=await gmailListMessages(acc.token,acc.syncQuery||GMAIL_QUERY,requestedMax);
+      const messages=await gmailListMessages(acc.token,query,requestedMax);
       if(!messages.length){log(acc.id,"✓ No matching emails found.");setSyncingId(null);return;}
       const processed=new Set(LS.get(`proc_${acc.id}`,[]));
       const fresh=messages.filter(m=>!processed.has(m.id));
@@ -1013,11 +1068,18 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClient
           log(acc.id,`Processed ${done}/${toProcess.length} emails — ${found.length} transaction(s) found…`);
         }catch(e){console.error(e);}
       }
-      LS.set(`proc_${acc.id}`,[...processed].slice(-500));
+      LS.set(`proc_${acc.id}`,[...processed].slice(-20000));
       setEmails(p=>p.map(a=>a.id===acc.id?{...a,lastSync:new Date().toISOString(),lastCount:found.length}:a));
       const valid=found.filter(i=>i.amount>0);
-      if(valid.length){addInbox(valid);log(acc.id,`✓ Done — ${valid.length} transaction(s) sent to Inbox for review.`);}
-      else log(acc.id,"✓ Done — no financial transactions found in these emails.");
+      if(valid.length){
+        if(acc.autoPost!==false){
+          const posted=autoPostTxns?autoPostTxns(valid):0;
+          log(acc.id,`✓ Done — ${posted||valid.length} transaction(s) auto-posted to Dashboard.`);
+        }else{
+          addInbox(valid);
+          log(acc.id,`✓ Done — ${valid.length} transaction(s) sent to Inbox for review.`);
+        }
+      }else log(acc.id,"✓ Done — no financial transactions found in these emails.");
     }catch(e){
       if(e.message.includes("401")){log(acc.id,"⚠ Token expired — please reconnect.");setEmails(p=>p.map(a=>a.id===acc.id?{...a,token:null,connected:false}:a));}
       else log(acc.id,"Error: "+e.message);
@@ -1092,16 +1154,18 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClient
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
                 <div><label>OAuth Mode</label><input value="Built-in LedgerAI Google OAuth" readOnly/></div>
                 <div><label>Account Label</label><input value={acc.label||""} onChange={e=>setEmails(p=>p.map(a=>a.id===acc.id?{...a,label:e.target.value}:a))} placeholder="e.g. Business Gmail"/></div>
+                <div><label>Auto-post to Dashboard</label><select value={acc.autoPost===false?"no":"yes"} onChange={e=>setEmails(p=>p.map(a=>a.id===acc.id?{...a,autoPost:e.target.value!=="no"}:a))}><option value="yes">Yes (no manual review)</option><option value="no">No (send to Inbox)</option></select></div>
                 <div><label>Max Emails per Sync</label><input type="number" value={acc.maxEmails||30} onChange={e=>setEmails(p=>p.map(a=>a.id===acc.id?{...a,maxEmails:Number(e.target.value)}:a))}/></div>
                 <div><label>Search Query</label><input value={acc.syncQuery||GMAIL_QUERY} onChange={e=>setEmails(p=>p.map(a=>a.id===acc.id?{...a,syncQuery:e.target.value}:a))}/></div>
               </div>
               <div style={{fontSize:11,color:"#475569",marginTop:8}}>
-                Default query includes <code>newer_than:2d</code>, so only recent emails are matched unless you change it.
+                Default query is <code>in:anywhere</code> to cover your full mailbox. Narrow it only if needed.
               </div>
               <div style={{marginTop:10,display:"flex",gap:8}}>
                 <button className="btn sm ghost" onClick={()=>setEmails(p=>p.map(a=>a.id===acc.id?{...a,_open:false}:a))}>Close</button>
                 {!acc.connected&&<button className="btn sm pri" onClick={()=>connect(acc)}>🔗 Connect Now</button>}
                 {acc.connected&&<button className="btn sm" style={{background:"#1a2234",color:"#818cf8"}} onClick={()=>sync(acc)} disabled={syncingId===acc.id}>{syncingId===acc.id?"⏳ Syncing…":"🔄 Sync Now"}</button>}
+                {acc.connected&&<button className="btn sm ghost" onClick={()=>sync(acc,{scanAll:true})} disabled={syncingId===acc.id}>🧠 Scan All Mailbox</button>}
               </div>
             </div>
           )}
@@ -1111,11 +1175,11 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClient
       {emails.length>0&&(
         <div className="card" style={{marginTop:16,background:"#0a0c12",fontSize:13,color:"#64748b",lineHeight:1.9}}>
           <div style={{fontSize:11,fontWeight:700,color:"#475569",marginBottom:8,textTransform:"uppercase",letterSpacing:".5px"}}>How Auto-Sync Works</div>
-          1. Click <b style={{color:"#94a3b8"}}>Sync</b> — fetches recent receipt/invoice emails via Gmail API.<br/>
+          1. Click <b style={{color:"#94a3b8"}}>Sync</b> (or <b style={{color:"#94a3b8"}}>Scan All Mailbox</b>) to fetch emails via Gmail API.<br/>
           2. AI reads each email and extracts amount, vendor, date, category automatically.<br/>
-          3. All transactions appear in <b style={{color:"#94a3b8"}}>Inbox</b> for your day-end review.<br/>
-          4. Approve, edit, or discard each item — nothing enters the ledger without your review.<br/>
-          5. Already-processed emails are remembered to avoid duplicates.
+          3. If <b style={{color:"#94a3b8"}}>Auto-post</b> is ON, transactions are added directly to Dashboard/Ledger.<br/>
+          4. If Auto-post is OFF, they go to <b style={{color:"#94a3b8"}}>Inbox</b> for review.<br/>
+          5. Processed emails are remembered to avoid duplicates.
         </div>
       )}
 
@@ -1126,16 +1190,21 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClient
 }
 
 function AddEmailModal({onSave,onClose}){
-  const[f,setF]=useState({label:"",syncQuery:GMAIL_QUERY,maxEmails:30});
+  const[f,setF]=useState({label:"",syncQuery:GMAIL_QUERY,maxEmails:100,autoPost:true});
   return(
     <div className="overlay"><div className="modal" style={{maxWidth:520}}>
       <MH title="Add Gmail Account" onClose={onClose}/>
       <div style={{background:"#0d0d2b",border:"1px solid #6366f1",borderRadius:8,padding:12,marginBottom:14,fontSize:13,color:"#c7d2fe"}}>
-        💡 One-click connect: no client ID input needed here. Just add the account and click <b>Connect</b>.
+        💡 One-click connect: no client ID input needed here. Add account, click <b>Connect</b>, then Sync.
       </div>
       <label>Account Label</label><input value={f.label} onChange={e=>setF(p=>({...p,label:e.target.value}))} placeholder="e.g. Personal Gmail / Business Gmail"/>
       <label>Email Search Query (Gmail format)</label><input value={f.syncQuery} onChange={e=>setF(p=>({...p,syncQuery:e.target.value}))}/>
-      <div style={{fontSize:11,color:"#475569",marginTop:4}}>Customize what emails to capture. Default covers receipts, invoices, payment alerts.</div>
+      <div style={{fontSize:11,color:"#475569",marginTop:4}}>Default <code>in:anywhere</code> scans your full mailbox.</div>
+      <label>Auto-post to Dashboard</label>
+      <select value={f.autoPost?"yes":"no"} onChange={e=>setF(p=>({...p,autoPost:e.target.value==="yes"}))}>
+        <option value="yes">Yes (no manual review)</option>
+        <option value="no">No (send to Inbox)</option>
+      </select>
       <label>Max Emails per Sync</label><input type="number" value={f.maxEmails} onChange={e=>setF(p=>({...p,maxEmails:Number(e.target.value)}))}/>
       <div style={{display:"flex",gap:10,marginTop:18}}>
         <button className="btn ghost" onClick={onClose} style={{flex:1}}>Cancel</button>
@@ -1156,7 +1225,7 @@ function SetupGuideModal({onClose}){
     {t:"Step 2 — Enable Gmail API",c:<div><ol style={{paddingLeft:18,lineHeight:2.4}}><li>In your project: <b>APIs & Services → Library</b></li><li>Search <b>"Gmail API"</b> → Click it → <b>Enable</b></li></ol></div>},
     {t:"Step 3 — OAuth Consent Screen",c:<div><ol style={{paddingLeft:18,lineHeight:2.4}}><li><b>APIs & Services → OAuth consent screen</b></li><li>Choose <b>External</b> → Create</li><li>Fill App name, support email, developer email → Save & Continue through all steps</li><li>On <b>Test users</b> step: <b>+ Add Users</b> → add your Gmail address(es)</li><li>Save and Continue → Back to Dashboard</li></ol></div>},
     {t:"Step 4 — Verify OAuth Client Settings",c:<div><ol style={{paddingLeft:18,lineHeight:2.4}}><li>Open your existing <b>OAuth client ID</b> (Web application)</li><li>Under <b>Authorised JavaScript origins</b> add:<br/><code style={{background:"#0a0c12",padding:"2px 8px",borderRadius:4,fontSize:12}}>{origin}</code>{httpsOrigin!==origin&&<><br/><code style={{background:"#0a0c12",padding:"2px 8px",borderRadius:4,fontSize:12}}>{httpsOrigin}</code></>}</li><li>Under <b>Authorised redirect URIs</b> add:<br/><code style={{background:"#0a0c12",padding:"2px 8px",borderRadius:4,fontSize:12}}>{origin}</code><br/><code style={{background:"#0a0c12",padding:"2px 8px",borderRadius:4,fontSize:12}}>{originSlash}</code>{httpsOrigin!==origin&&<><br/><code style={{background:"#0a0c12",padding:"2px 8px",borderRadius:4,fontSize:12}}>{httpsOrigin}</code><br/><code style={{background:"#0a0c12",padding:"2px 8px",borderRadius:4,fontSize:12}}>{httpsOriginSlash}</code></>}</li><li>Save and wait ~2 minutes for propagation</li></ol></div>},
-    {t:"Step 5 — One-Click Connect in LedgerAI",c:<div><ol style={{paddingLeft:18,lineHeight:2.4}}><li>Email tab → <b>+ Add Email</b></li><li>Click <b>Add Account</b> → then <b>🔗 Connect</b></li><li>Google OAuth popup appears → sign in → grant read-only access</li><li>Click <b>🔄 Sync</b> to fetch receipt emails</li><li>Review extracted transactions in <b>Inbox</b> tab</li></ol><div style={{background:"#052e16",border:"1px solid #34d399",borderRadius:8,padding:12,marginTop:14,fontSize:12,color:"#86efac"}}>✅ <b>Privacy:</b> Your emails are read directly in your browser with read-only access. No email content is stored on any server.</div></div>},
+    {t:"Step 5 — One-Click Connect in LedgerAI",c:<div><ol style={{paddingLeft:18,lineHeight:2.4}}><li>Email tab → <b>+ Add Email</b></li><li>Click <b>Add Account</b> → then <b>🔗 Connect</b></li><li>Google OAuth popup appears → sign in → grant read-only access</li><li>Turn <b>Auto-post to Dashboard</b> ON if you want direct posting</li><li>Click <b>🧠 Scan All Mailbox</b> for complete backfill, then use <b>🔄 Sync</b> for ongoing updates</li></ol><div style={{background:"#052e16",border:"1px solid #34d399",borderRadius:8,padding:12,marginTop:14,fontSize:12,color:"#86efac"}}>✅ <b>Privacy:</b> Your emails are read directly in your browser with read-only access. No email content is stored on any server.</div></div>},
   ];
   return(
     <div className="overlay"><div className="modal" style={{maxWidth:560}}>
