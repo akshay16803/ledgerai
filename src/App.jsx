@@ -523,7 +523,9 @@ export default function App(){
         {tab==="dashboard"&&<DashTab byAct={byAct} totInc={totInc} totExp={totExp} todInc={todInc} todExp={todExp} txns={txns} todayTxns={todayTxns} inbox={inbox} emails={emails} onEdit={tx=>{setEditTx(tx);setAddType(tx.type);setShowAdd(true);}} onDelete={delTx}/>}
         {tab==="transactions"&&<LedgerTab txns={filtered} filter={filter} setFilter={setFilter} acts={acts} onEdit={tx=>{setEditTx(tx);setAddType(tx.type);setShowAdd(true);}} onDelete={delTx}/>}
         {tab==="inbox"&&<InboxTab inbox={inbox} addInbox={addInbox} acts={acts} cats={cats} onApprove={approveInbox} onEdit={editInbox} onDiscard={discardInbox}/>}
-        {tab==="email"&&<EmailTab emails={emails} setEmails={setEmails} inbox={inbox} addInbox={addInbox} autoPostTxns={autoPostTxns} acts={acts} cats={cats} defaultGoogleClientId={authCfg.googleClientId||DEFAULT_GOOGLE_CLIENT_ID}/>}
+        <div style={{display:tab==="email"?"block":"none"}} aria-hidden={tab!=="email"}>
+          <EmailTab emails={emails} setEmails={setEmails} inbox={inbox} addInbox={addInbox} autoPostTxns={autoPostTxns} acts={acts} cats={cats} defaultGoogleClientId={authCfg.googleClientId||DEFAULT_GOOGLE_CLIENT_ID}/>
+        </div>
         {tab==="messages"&&<MessagesTab smsNums={smsNums} setSmsNums={setSmsNums} emails={emails} inbox={inbox} addInbox={addInbox} acts={acts} cats={cats}/>}
         {tab==="journal"&&<JournalTab txns={txns}/>}
         {tab==="accounts"&&<AccountsTab accs={accs} setAccs={setAccs} txns={txns} addInbox={addInbox} acts={acts} cats={cats}/>}
