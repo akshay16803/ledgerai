@@ -124,6 +124,72 @@ async function withTimeout(promise,ms,label="request"){
   }
 }
 
+const RETRYABLE_HTTP_STATUS = new Set([408,409,425,429,500,502,503,504]);
+const sleep = (ms)=>new Promise(res=>setTimeout(res,ms));
+
+function parseRetryAfterMs(value){
+  if(!value)return null;
+  const n=Number(value);
+  if(Number.isFinite(n)&&n>=0)return n*1000;
+  const t=Date.parse(value);
+  if(Number.isFinite(t))return Math.max(0,t-Date.now());
+  return null;
+}
+
+function nextRetryDelay(attempt,retryAfterMs=null){
+  if(Number.isFinite(retryAfterMs)&&retryAfterMs>0)return Math.min(retryAfterMs,15000);
+  const backoff=Math.min(9000,500*(2**(attempt-1)));
+  const jitter=Math.floor(Math.random()*350);
+  return backoff+jitter;
+}
+
+function classifySyncError(err){
+  const msg=String(err?.message||"").toLowerCase();
+  const m=msg.match(/\b(4\d\d|5\d\d)\b/);
+  const status=Number(err?.status||m?.[1]||0);
+  if(status===401||status===403)return "auth";
+  if(status===429)return "rate-limit";
+  if(status>=500&&status<600)return "server";
+  if(msg.includes("timed out"))return "timeout";
+  if(msg.includes("network")||msg.includes("failed to fetch"))return "network";
+  return status?`http-${status}`:"other";
+}
+
+function formatFailureSummary(reasons={}){
+  const labels={auth:"auth", "rate-limit":"rate limit", server:"server", timeout:"timeout", network:"network", other:"other"};
+  const top=Object.entries(reasons).sort((a,b)=>b[1]-a[1]).slice(0,3);
+  if(!top.length)return "";
+  return top.map(([k,v])=>`${labels[k]||k}: ${v}`).join(", ");
+}
+
+async function fetchJsonWithRetry(url,options={},label="Request",maxAttempts=4){
+  let lastErr=null;
+  for(let attempt=1;attempt<=maxAttempts;attempt++){
+    try{
+      const r=await fetch(url,options);
+      if(r.ok)return await r.json();
+      const body=await r.text();
+      const err=new Error(`${label} ${r.status}${body?`: ${body.slice(0,180)}`:""}`);
+      err.status=r.status;
+      if(attempt<maxAttempts&&RETRYABLE_HTTP_STATUS.has(r.status)){
+        await sleep(nextRetryDelay(attempt,parseRetryAfterMs(r.headers.get("retry-after"))));
+        continue;
+      }
+      throw err;
+    }catch(err){
+      const msg=String(err?.message||"").toLowerCase();
+      const retryableNetwork=msg.includes("failed to fetch")||msg.includes("network")||msg.includes("timed out");
+      if(attempt<maxAttempts&&retryableNetwork){
+        lastErr=err;
+        await sleep(nextRetryDelay(attempt));
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw lastErr||new Error(`${label} failed`);
+}
+
 function parseAmountFromText(text=""){
   const t=(text||"").replace(/[,]/g,"");
   const m=t.match(/(?:inr|rs\.?|₹)\s*([0-9]+(?:\.[0-9]{1,2})?)/i)||t.match(/\b([0-9]{2,7}(?:\.[0-9]{1,2})?)\b/);
@@ -376,31 +442,42 @@ async function odSignOut(clientId) {
   _msalApp = null; _msalClientId = null;
 }
 
-async function gmailFetch(url,token){const r=await fetch(url,{headers:{Authorization:`Bearer ${token}`}});if(!r.ok)throw new Error(`Gmail ${r.status}`);return r.json();}
+async function gmailFetch(url,token,label="Gmail"){
+  return fetchJsonWithRetry(url,{headers:{Authorization:`Bearer ${token}`}},label,4);
+}
 async function gmailListMessages(token,query,max=20){
   const target=Math.max(1,Math.min(Number(max)||20,50000));
   let pageToken="";const all=[];
   while(all.length<target){
     const pageSize=Math.min(500,target-all.length);
     const url=`https://www.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(query)}&maxResults=${pageSize}${pageToken?`&pageToken=${encodeURIComponent(pageToken)}`:""}`;
-    const d=await gmailFetch(url,token);
+    const d=await gmailFetch(url,token,"Gmail list");
     if(d.messages?.length)all.push(...d.messages);
     if(!d.nextPageToken)break;
     pageToken=d.nextPageToken;
   }
   return all;
 }
-async function gmailGetMessage(token,id){return gmailFetch(`https://www.googleapis.com/gmail/v1/users/me/messages/${id}?format=full`,token);}
-async function gmailGetProfile(token){return gmailFetch("https://www.googleapis.com/gmail/v1/users/me/profile",token);}
+async function gmailGetMessageMetadata(token,id){
+  return gmailFetch(`https://www.googleapis.com/gmail/v1/users/me/messages/${id}?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=Date`,token,"Gmail message metadata");
+}
+async function gmailGetMessage(token,id){
+  try{
+    return await gmailFetch(`https://www.googleapis.com/gmail/v1/users/me/messages/${id}?format=full`,token,"Gmail message full");
+  }catch(err){
+    // Fallback keeps sync moving for oversized/problematic messages.
+    const meta=await gmailGetMessageMetadata(token,id);
+    return {...meta,__lite:true};
+  }
+}
+async function gmailGetProfile(token){return gmailFetch("https://www.googleapis.com/gmail/v1/users/me/profile",token,"Gmail profile");}
 function initOAuth(clientId,cb){
   if(!window.google?.accounts?.oauth2){cb(new Error("Google Identity Services not loaded"),null);return;}
   window.google.accounts.oauth2.initTokenClient({client_id:clientId,scope:"https://www.googleapis.com/auth/gmail.readonly",callback:(r)=>{if(r.error)cb(new Error(r.error),null);else cb(null,r.access_token);}}).requestAccessToken({prompt:"consent"});
 }
 
 async function msGraphFetch(url,token,extraHeaders={}){
-  const r=await fetch(url,{headers:{Authorization:`Bearer ${token}`,...extraHeaders}});
-  if(!r.ok)throw new Error(`Microsoft Mail ${r.status}`);
-  return r.json();
+  return fetchJsonWithRetry(url,{headers:{Authorization:`Bearer ${token}`,...extraHeaders}},"Microsoft Mail",4);
 }
 
 async function msListMessages(token,max=100,fromDate=""){
@@ -1355,8 +1432,9 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
       }
       const toProcess=scanAll?fresh:fresh.slice(0,Math.max(1,Math.min(Number(acc.maxEmails)||100,5000)));
       log(acc.id,`Matched ${messages.length} email(s), ${fresh.length} new. Reading ${toProcess.length} now…`);
-      setProgress(acc.id,{phase:"processing",processed:0,total:toProcess.length,remaining:toProcess.length,matched:messages.length,newCount:fresh.length,found:0,failed:0,skipped:0});
+      setProgress(acc.id,{phase:"processing",processed:0,total:toProcess.length,remaining:toProcess.length,matched:messages.length,newCount:fresh.length,found:0,failed:0,skipped:0,failureReasons:{}});
       const found=[];let done=0;let failed=0;let skipped=0;let fallbackUsed=0;
+      const failureReasons={};
       for(const msg of toProcess){
         try{
           let subject="";let from="";let rawDate="";let body="";
@@ -1374,7 +1452,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
             subject=H.find(h=>h.name==="Subject")?.value||"";
             from=H.find(h=>h.name==="From")?.value||"";
             rawDate=H.find(h=>h.name==="Date")?.value||"";
-            body=extractEmailText(full.payload);
+            body=extractEmailText(full.payload)||full.snippet||"";
           }
           const parsedDate=rawDate?new Date(rawDate):null;
           const eDate=parsedDate&&!Number.isNaN(parsedDate.getTime())?parsedDate.toISOString().slice(0,10):today();
@@ -1396,6 +1474,8 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
           if(items.length)processed.add(msg.id);
         }catch(e){
           failed++;
+          const reason=classifySyncError(e);
+          failureReasons[reason]=(failureReasons[reason]||0)+1;
           console.error(e);
         }finally{
           done++;
@@ -1403,8 +1483,10 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
           if(failed>0)statusParts.push(`failed ${failed}`);
           if(skipped>0)statusParts.push(`skipped ${skipped}`);
           if(fallbackUsed>0)statusParts.push(`fallback ${fallbackUsed}`);
+          const failureSummary=formatFailureSummary(failureReasons);
+          if(failureSummary)statusParts.push(failureSummary);
           log(acc.id,`${statusParts.join(" · ")}…`);
-          setProgress(acc.id,{phase:"processing",processed:done,total:toProcess.length,remaining:Math.max(0,toProcess.length-done),matched:messages.length,newCount:fresh.length,found:found.length,failed,skipped});
+          setProgress(acc.id,{phase:"processing",processed:done,total:toProcess.length,remaining:Math.max(0,toProcess.length-done),matched:messages.length,newCount:fresh.length,found:found.length,failed,skipped,failureReasons:{...failureReasons}});
         }
       }
       LS.set(`proc_${acc.id}`,[...processed].slice(-50000));
@@ -1413,17 +1495,17 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
       if(!valid.length){
         if(failed===toProcess.length){
           log(acc.id,"⚠ Sync finished, but all emails failed extraction. Check network/auth and retry.");
-          setProgress(acc.id,{phase:"error",processed:toProcess.length,total:toProcess.length,remaining:0,matched:messages.length,newCount:fresh.length,found:0,failed,skipped});
+          setProgress(acc.id,{phase:"error",processed:toProcess.length,total:toProcess.length,remaining:0,matched:messages.length,newCount:fresh.length,found:0,failed,skipped,failureReasons:{...failureReasons}});
           setSyncing(acc.id,false);
           return;
         }
         log(acc.id,`✓ Done — no income/expense found.${failed?` Failed: ${failed}.`:""}${skipped?` Skipped: ${skipped}.`:""}`);
-        setProgress(acc.id,{phase:"done",processed:toProcess.length,total:toProcess.length,remaining:0,matched:messages.length,newCount:fresh.length,found:0,failed,skipped});
+        setProgress(acc.id,{phase:"done",processed:toProcess.length,total:toProcess.length,remaining:0,matched:messages.length,newCount:fresh.length,found:0,failed,skipped,failureReasons:{...failureReasons}});
         setSyncing(acc.id,false);
         return;
       }
       log(acc.id,`AI found ${valid.length} income/expense item(s). Review before posting.`);
-      setProgress(acc.id,{phase:"review",processed:toProcess.length,total:toProcess.length,remaining:0,matched:messages.length,newCount:fresh.length,found:valid.length,failed,skipped});
+      setProgress(acc.id,{phase:"review",processed:toProcess.length,total:toProcess.length,remaining:0,matched:messages.length,newCount:fresh.length,found:valid.length,failed,skipped,failureReasons:{...failureReasons}});
       setReviewState({accId:acc.id,items:valid});
     }catch(e){
       const msg=String(e.message||"");
@@ -1557,6 +1639,11 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
                 </div>
               )}
               {(Number(syncProgress[acc.id].failed)>0||Number(syncProgress[acc.id].skipped)>0)&&<div style={{marginTop:6,fontSize:11,color:"#64748b"}}>Failed = processing error/API issue. Skipped = no financial transaction extracted.</div>}
+              {Number(syncProgress[acc.id].failed)>0&&formatFailureSummary(syncProgress[acc.id].failureReasons||{})&&(
+                <div style={{marginTop:4,fontSize:11,color:"#94a3b8"}}>
+                  Failure reasons: {formatFailureSummary(syncProgress[acc.id].failureReasons||{})}
+                </div>
+              )}
             </div>
           )}
           {logs[acc.id]&&<div style={{background:"#0a0f1d",border:"1px solid #1e293b",borderRadius:8,padding:"8px 12px",fontSize:12,color:"#c7d2fe",marginBottom:acc._open?10:0}}>{logs[acc.id]}</div>}
