@@ -14,3 +14,25 @@ The React Compiler is not enabled on this template because of its impact on dev 
 ## Expanding the ESLint configuration
 
 If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+
+## LedgerAI AI Backend (Production)
+
+LedgerAI now expects an AI backend endpoint in **Settings -> AI Backend (Production)**.
+
+Use the included Cloudflare Worker:
+
+1. Install Wrangler: `npm i -g wrangler`
+2. Create a Worker project and copy `scripts/cloudflare-ai-worker.js` as worker code.
+3. Set Worker secrets:
+   - `ANTHROPIC_API_KEY` (required)
+   - `LEDGERAI_SHARED_KEY` (optional, recommended)
+4. Set optional Worker variable:
+   - `ALLOWED_ORIGIN=https://accounts.niprasha.com`
+5. Deploy worker and copy URL (for example `https://ledgerai-ai.your-subdomain.workers.dev`).
+6. In app Settings, set:
+   - `AI Endpoint URL` = worker URL
+   - `Shared Key` = same as `LEDGERAI_SHARED_KEY` (if used)
+   - `Model` = `claude-sonnet-4-20250514`
+7. Click **Save AI Config** then **Test AI Backend**.
+
+If AI backend is not configured, LedgerAI falls back to heuristic parsing with lower accuracy.

@@ -65,6 +65,7 @@ const amtClose=(a,b)=>Math.abs(a-b)<2;
 const strSim=(a,b)=>{a=(a||"").toLowerCase();b=(b||"").toLowerCase();let m=0;for(let c of a)if(b.includes(c))m++;return m/Math.max(a.length,b.length,1);};
 const LOCKED_OWNER_EMAIL = "akshaychouhan16803@gmail.com";
 const DEFAULT_GOOGLE_CLIENT_ID = "975238186836-47bvtn56uhrlcbe11n1pe1h26qbor5s1.apps.googleusercontent.com";
+const DEFAULT_AI_MODEL = "claude-sonnet-4-20250514";
 
 if(typeof window!=="undefined"){
   const h=window.location.hostname;
@@ -173,10 +174,15 @@ function buildJE(tx,accs=[]){
 }
 
 async function callAI(messages,max_tokens=800){
+  const cfg=LS.get("ledger_ai_cfg",{endpoint:"",secret:"",model:DEFAULT_AI_MODEL});
+  const endpoint=(cfg.endpoint||"").trim();
+  const secret=(cfg.secret||"").trim();
+  const model=(cfg.model||DEFAULT_AI_MODEL).trim()||DEFAULT_AI_MODEL;
+  if(!endpoint)throw new Error("AI backend not configured. Open Settings → AI Backend and set endpoint.");
   const ctrl=new AbortController();
   const timer=setTimeout(()=>ctrl.abort(),25000);
   try{
-    const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens,messages}),signal:ctrl.signal});
+    const r=await fetch(endpoint,{method:"POST",headers:{"Content-Type":"application/json",...(secret?{"x-ledgerai-key":secret}:{})},body:JSON.stringify({model,max_tokens,messages}),signal:ctrl.signal});
     const txt=await r.text();
     let d={};
     try{d=JSON.parse(txt||"{}");}catch{}
@@ -184,7 +190,7 @@ async function callAI(messages,max_tokens=800){
       const msg=d?.error?.message||d?.message||txt?.slice?.(0,180)||`HTTP ${r.status}`;
       throw new Error(`AI ${r.status}: ${msg}`);
     }
-    return d.content?.[0]?.text||"";
+    return d.text||d.output||d.content?.[0]?.text||d.result?.content?.[0]?.text||"";
   }catch(e){
     if(e?.name==="AbortError")throw new Error("AI request timed out");
     throw e;
@@ -194,25 +200,37 @@ async function callAI(messages,max_tokens=800){
 }
 async function aiClassify(text,acts,cats,type="expense"){
   const c=Object.entries(cats).map(([a,cs])=>`${a}: ${cs.join(", ")}`).join("\n");
-  const raw=await callAI([{role:"user",content:`Classify this ${type} for Indian trader.\nText: "${text.slice(0,800)}"\nActivities: ${acts.join(", ")}\nCategories:\n${c}\nReturn ONLY JSON: {"businessActivity":"","category":"","isNewCategory":false,"description":"","amount":null,"date":"YYYY-MM-DD","vendor":"","paymentMethod":""}`}]);
-  try{return JSON.parse(raw.replace(/```json|```/g,"").trim());}catch{return {};}
+  try{
+    const raw=await callAI([{role:"user",content:`Classify this ${type} for Indian trader.\nText: "${text.slice(0,800)}"\nActivities: ${acts.join(", ")}\nCategories:\n${c}\nReturn ONLY JSON: {"businessActivity":"","category":"","isNewCategory":false,"description":"","amount":null,"date":"YYYY-MM-DD","vendor":"","paymentMethod":""}`}]);
+    try{return JSON.parse(raw.replace(/```json|```/g,"").trim());}catch{return {};}
+  }catch{return {};}
 }
 async function aiExtractBatch(text,acts,cats){
   const c=Object.entries(cats).map(([a,cs])=>`${a}: ${cs.join(", ")}`).join("\n");
-  const raw=await callAI([{role:"user",content:`Extract ALL financial transactions from text. Indian context.\nText:\n${text.slice(0,3000)}\nActivities: ${acts.join(", ")}\nCategories:\n${c}\nReturn ONLY JSON array: [{"type":"expense|income","businessActivity":"","category":"","isNewCategory":false,"description":"","amount":0,"date":"YYYY-MM-DD","vendor":"","paymentMethod":""}]`}],1400);
-  try{const a=JSON.parse(raw.replace(/```json|```/g,"").trim());return Array.isArray(a)?a:[];}catch{return[];}
+  try{
+    const raw=await callAI([{role:"user",content:`Extract ALL financial transactions from text. Indian context.\nText:\n${text.slice(0,3000)}\nActivities: ${acts.join(", ")}\nCategories:\n${c}\nReturn ONLY JSON array: [{"type":"expense|income","businessActivity":"","category":"","isNewCategory":false,"description":"","amount":0,"date":"YYYY-MM-DD","vendor":"","paymentMethod":""}]`}],1400);
+    try{const a=JSON.parse(raw.replace(/```json|```/g,"").trim());return Array.isArray(a)?a:[];}catch{return[];}
+  }catch{return[];}
 }
 async function aiExtractEmail(subject,from,body,acts,cats){
   const c=Object.entries(cats).map(([a,cs])=>`${a}: ${cs.join(", ")}`).join("\n");
-  const raw=await callAI([{role:"user",content:`Extract financial transactions from this email. Indian context.\nSubject: "${subject}"\nFrom: "${from}"\nBody:\n${body.slice(0,2500)}\nActivities: ${acts.join(", ")}\nCategories:\n${c}\nIf no financial transaction, return []. Amount must be positive INR number.\nReturn ONLY JSON array: [{"type":"expense|income","businessActivity":"","category":"","isNewCategory":false,"description":"","amount":0,"date":"YYYY-MM-DD","vendor":"","paymentMethod":""}]`}],1000);
-  try{const a=JSON.parse(raw.replace(/```json|```/g,"").trim());return Array.isArray(a)?a:[];}catch{return[];}
+  try{
+    const raw=await callAI([{role:"user",content:`Extract financial transactions from this email. Indian context.\nSubject: "${subject}"\nFrom: "${from}"\nBody:\n${body.slice(0,2500)}\nActivities: ${acts.join(", ")}\nCategories:\n${c}\nIf no financial transaction, return []. Amount must be positive INR number.\nReturn ONLY JSON array: [{"type":"expense|income","businessActivity":"","category":"","isNewCategory":false,"description":"","amount":0,"date":"YYYY-MM-DD","vendor":"","paymentMethod":""}]`}],1000);
+    try{const a=JSON.parse(raw.replace(/```json|```/g,"").trim());return Array.isArray(a)?a:[];}catch{return[];}
+  }catch{return[];}
 }
 async function aiParseStatement(text,name,type){
-  const raw=await callAI([{role:"user",content:`Parse bank/card statement. Account: ${name} (${type}).\n${text.slice(0,5000)}\nReturn ONLY JSON array: [{"date":"YYYY-MM-DD","description":"","amount":0,"type":"debit|credit","reference":"","balance":null}]`}],1500);
-  try{const a=JSON.parse(raw.replace(/```json|```/g,"").trim());return Array.isArray(a)?a:[];}catch{return[];}
+  try{
+    const raw=await callAI([{role:"user",content:`Parse bank/card statement. Account: ${name} (${type}).\n${text.slice(0,5000)}\nReturn ONLY JSON array: [{"date":"YYYY-MM-DD","description":"","amount":0,"type":"debit|credit","reference":"","balance":null}]`}],1500);
+    try{const a=JSON.parse(raw.replace(/```json|```/g,"").trim());return Array.isArray(a)?a:[];}catch{return[];}
+  }catch{return[];}
 }
 async function aiSummarize(txns){
-  return callAI([{role:"user",content:`Summarize today's transactions for Indian trader. Brief, insightful, flag anomalies.\n${JSON.stringify(txns.slice(0,20))}\n3-5 bullet points.`}]);
+  try{
+    return await callAI([{role:"user",content:`Summarize today's transactions for Indian trader. Brief, insightful, flag anomalies.\n${JSON.stringify(txns.slice(0,20))}\n3-5 bullet points.`}]);
+  }catch{
+    return "AI summary unavailable right now. Configure AI backend in Settings or try again later.";
+  }
 }
 
 // ── ONEDRIVE / MICROSOFT GRAPH HELPERS ────────────────────────────────────────
@@ -1337,8 +1355,8 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
       }
       const toProcess=scanAll?fresh:fresh.slice(0,Math.max(1,Math.min(Number(acc.maxEmails)||100,5000)));
       log(acc.id,`Matched ${messages.length} email(s), ${fresh.length} new. Reading ${toProcess.length} now…`);
-      setProgress(acc.id,{phase:"processing",processed:0,total:toProcess.length,remaining:toProcess.length,matched:messages.length,newCount:fresh.length,found:0,failed:0});
-      const found=[];let done=0;let failed=0;let fallbackUsed=0;
+      setProgress(acc.id,{phase:"processing",processed:0,total:toProcess.length,remaining:toProcess.length,matched:messages.length,newCount:fresh.length,found:0,failed:0,skipped:0});
+      const found=[];let done=0;let failed=0;let skipped=0;let fallbackUsed=0;
       for(const msg of toProcess){
         try{
           let subject="";let from="";let rawDate="";let body="";
@@ -1363,6 +1381,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
           let items=[];
           try{
             items=await withTimeout(aiExtractEmail(subject,from,body,acts,cats),30000,"AI extraction");
+            if(!items.length)skipped++;
           }catch(aiErr){
             console.error(aiErr);
             const fb=fallbackExtractEmail(subject,from,body).map(item=>({...item,date:item.date||eDate}));
@@ -1370,7 +1389,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
               fallbackUsed++;
               items=fb;
             }else{
-              failed++;
+              skipped++;
             }
           }
           items.forEach(item=>found.push({...item,date:item.date||eDate,source:"email",emailProvider:provider,emailSubject:subject,emailFrom:from,emailAccountId:acc.id,emailMsgId:msg.id}));
@@ -1382,9 +1401,10 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
           done++;
           const statusParts=[`Processed ${done}/${toProcess.length} emails`,`found ${found.length}`];
           if(failed>0)statusParts.push(`failed ${failed}`);
+          if(skipped>0)statusParts.push(`skipped ${skipped}`);
           if(fallbackUsed>0)statusParts.push(`fallback ${fallbackUsed}`);
           log(acc.id,`${statusParts.join(" · ")}…`);
-          setProgress(acc.id,{phase:"processing",processed:done,total:toProcess.length,remaining:Math.max(0,toProcess.length-done),matched:messages.length,newCount:fresh.length,found:found.length,failed});
+          setProgress(acc.id,{phase:"processing",processed:done,total:toProcess.length,remaining:Math.max(0,toProcess.length-done),matched:messages.length,newCount:fresh.length,found:found.length,failed,skipped});
         }
       }
       LS.set(`proc_${acc.id}`,[...processed].slice(-50000));
@@ -1393,17 +1413,17 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
       if(!valid.length){
         if(failed===toProcess.length){
           log(acc.id,"⚠ Sync finished, but all emails failed extraction. Check network/auth and retry.");
-          setProgress(acc.id,{phase:"error",processed:toProcess.length,total:toProcess.length,remaining:0,matched:messages.length,newCount:fresh.length,found:0,failed});
+          setProgress(acc.id,{phase:"error",processed:toProcess.length,total:toProcess.length,remaining:0,matched:messages.length,newCount:fresh.length,found:0,failed,skipped});
           setSyncing(acc.id,false);
           return;
         }
-        log(acc.id,`✓ Done — no income/expense found in scanned emails.${failed?` Failed: ${failed}.`:""}`);
-        setProgress(acc.id,{phase:"done",processed:toProcess.length,total:toProcess.length,remaining:0,matched:messages.length,newCount:fresh.length,found:0,failed});
+        log(acc.id,`✓ Done — no income/expense found.${failed?` Failed: ${failed}.`:""}${skipped?` Skipped: ${skipped}.`:""}`);
+        setProgress(acc.id,{phase:"done",processed:toProcess.length,total:toProcess.length,remaining:0,matched:messages.length,newCount:fresh.length,found:0,failed,skipped});
         setSyncing(acc.id,false);
         return;
       }
       log(acc.id,`AI found ${valid.length} income/expense item(s). Review before posting.`);
-      setProgress(acc.id,{phase:"review",processed:toProcess.length,total:toProcess.length,remaining:0,matched:messages.length,newCount:fresh.length,found:valid.length,failed});
+      setProgress(acc.id,{phase:"review",processed:toProcess.length,total:toProcess.length,remaining:0,matched:messages.length,newCount:fresh.length,found:valid.length,failed,skipped});
       setReviewState({accId:acc.id,items:valid});
     }catch(e){
       const msg=String(e.message||"");
@@ -1522,7 +1542,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
               <div style={{display:"flex",justifyContent:"space-between",gap:10,marginBottom:6,flexWrap:"wrap"}}>
                 <span>
                   {syncProgress[acc.id].phase==="fetching"&&"Fetching emails…"}
-                  {syncProgress[acc.id].phase==="processing"&&`Processed ${syncProgress[acc.id].processed||0}/${syncProgress[acc.id].total||0}${syncProgress[acc.id].failed?` · failed ${syncProgress[acc.id].failed}`:""}`}
+                  {syncProgress[acc.id].phase==="processing"&&`Processed ${syncProgress[acc.id].processed||0}/${syncProgress[acc.id].total||0}${syncProgress[acc.id].failed?` · failed ${syncProgress[acc.id].failed}`:""}${syncProgress[acc.id].skipped?` · skipped ${syncProgress[acc.id].skipped}`:""}`}
                   {syncProgress[acc.id].phase==="review"&&`Scan complete. ${syncProgress[acc.id].found||0} item(s) awaiting review.`}
                   {syncProgress[acc.id].phase==="done"&&"Sync completed."}
                   {syncProgress[acc.id].phase==="error"&&"Sync failed."}
@@ -1536,6 +1556,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
                   <div style={{height:"100%",background:"#6366f1",width:`${Math.min(100,Math.round(((syncProgress[acc.id].processed||0)/(syncProgress[acc.id].total||1))*100))}%`,transition:"width .15s linear"}}/>
                 </div>
               )}
+              {(Number(syncProgress[acc.id].failed)>0||Number(syncProgress[acc.id].skipped)>0)&&<div style={{marginTop:6,fontSize:11,color:"#64748b"}}>Failed = processing error/API issue. Skipped = no financial transaction extracted.</div>}
             </div>
           )}
           {logs[acc.id]&&<div style={{background:"#0a0f1d",border:"1px solid #1e293b",borderRadius:8,padding:"8px 12px",fontSize:12,color:"#c7d2fe",marginBottom:acc._open?10:0}}>{logs[acc.id]}</div>}
@@ -2186,11 +2207,68 @@ function SettingsTab({acts,setActs,cats,setCats}){
   const[newAct,setNewAct]=useState("");const[selAct,setSelAct]=useState(acts[0]||"");
   const[newCN,setNewCN]=useState("");const[newCD,setNewCD]=useState("");
   const[aiLoad,setAiLoad]=useState(false);const[aiSug,setAiSug]=useState(null);
+  const savedAICfg=LS.get("ledger_ai_cfg",{endpoint:"",secret:"",model:DEFAULT_AI_MODEL});
+  const[aiEndpoint,setAiEndpoint]=useState(savedAICfg.endpoint||"");
+  const[aiSecret,setAiSecret]=useState(savedAICfg.secret||"");
+  const[aiModel,setAiModel]=useState(savedAICfg.model||DEFAULT_AI_MODEL);
+  const[aiStatus,setAiStatus]=useState("");
   const addAct=()=>{if(!newAct.trim())return;const n=newAct.trim();setActs(p=>[...p,n]);setCats(p=>({...p,[n]:["General","Marketing","Operations","Other"]}));setNewAct("");};
-  const checkAI=async()=>{if(!newCN.trim())return;setAiLoad(true);const ex=(cats[selAct]||[]).join(", ");const raw=await callAI([{role:"user",content:`Indian biz owner wants expense category. Activity: "${selAct}", Existing: ${ex}\nNew: "${newCN}" desc: "${newCD}"\nReturn ONLY JSON: {"useExisting":false,"suggestedName":"","existingMatch":"","explanation":""}`}]);try{setAiSug(JSON.parse(raw.replace(/```json|```/g,"").trim()));}catch{}setAiLoad(false);};
+  const checkAI=async()=>{
+    if(!newCN.trim())return;
+    setAiLoad(true);
+    const ex=(cats[selAct]||[]).join(", ");
+    try{
+      const raw=await callAI([{role:"user",content:`Indian biz owner wants expense category. Activity: "${selAct}", Existing: ${ex}\nNew: "${newCN}" desc: "${newCD}"\nReturn ONLY JSON: {"useExisting":false,"suggestedName":"","existingMatch":"","explanation":""}`}]);
+      try{setAiSug(JSON.parse(raw.replace(/```json|```/g,"").trim()));}
+      catch{setAiSug({useExisting:false,suggestedName:newCN,existingMatch:"",explanation:"AI returned invalid response. You can add category directly."});}
+    }catch(e){
+      setAiSug({useExisting:false,suggestedName:newCN,existingMatch:"",explanation:`AI unavailable: ${e.message||"backend not configured"}. You can still add category manually.`});
+    }
+    setAiLoad(false);
+  };
   const addCat=n=>{if(!n||!selAct)return;setCats(p=>({...p,[selAct]:[...(p[selAct]||[]).filter(c=>c!==n),n]}));setNewCN("");setNewCD("");setAiSug(null);};
+  const saveAICfg=()=>{
+    LS.set("ledger_ai_cfg",{endpoint:(aiEndpoint||"").trim(),secret:(aiSecret||"").trim(),model:(aiModel||DEFAULT_AI_MODEL).trim()||DEFAULT_AI_MODEL});
+    setAiStatus("Saved AI backend settings.");
+  };
+  const testAICfg=async()=>{
+    saveAICfg();
+    setAiStatus("Testing AI backend...");
+    try{
+      const out=await callAI([{role:"user",content:'Reply ONLY this JSON: {"ok":true}'}],120);
+      setAiStatus(`AI backend OK: ${out.slice(0,120)}`);
+    }catch(e){
+      setAiStatus(`AI backend error: ${e.message||"unknown error"}`);
+    }
+  };
   return(<div>
     <h2 className="h2" style={{marginBottom:18}}>Settings</h2>
+    <div className="card" style={{marginBottom:16}}>
+      <div style={{fontWeight:600,fontSize:14,marginBottom:10,color:"#94a3b8"}}>AI Backend (Production)</div>
+      <div style={{fontSize:12,color:"#64748b",lineHeight:1.8,marginBottom:10}}>
+        LedgerAI should call your backend endpoint (not Anthropic directly from browser). This avoids API-key exposure and reduces sync failures.
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+        <div style={{gridColumn:"1 / -1"}}>
+          <label>AI Endpoint URL</label>
+          <input value={aiEndpoint} onChange={e=>setAiEndpoint(e.target.value)} placeholder="https://ai.niprasha.com/extract"/>
+        </div>
+        <div>
+          <label>Shared Key (Optional)</label>
+          <input value={aiSecret} onChange={e=>setAiSecret(e.target.value)} placeholder="match backend header check"/>
+        </div>
+        <div>
+          <label>Model</label>
+          <input value={aiModel} onChange={e=>setAiModel(e.target.value)} placeholder={DEFAULT_AI_MODEL}/>
+        </div>
+      </div>
+      <div style={{display:"flex",gap:8,marginTop:10}}>
+        <button className="btn pri" onClick={saveAICfg}>Save AI Config</button>
+        <button className="btn ghost" onClick={testAICfg}>Test AI Backend</button>
+      </div>
+      {aiStatus&&<div style={{fontSize:12,color:"#c7d2fe",marginTop:8}}>{aiStatus}</div>}
+      <div style={{fontSize:11,color:"#475569",marginTop:8}}>If endpoint is empty or unreachable, email sync falls back to heuristic extraction with lower accuracy.</div>
+    </div>
     <div className="g2" style={{gap:18}}>
       <div className="card">
         <div style={{fontWeight:600,fontSize:14,marginBottom:14,color:"#94a3b8"}}>Business Activities</div>
@@ -2269,7 +2347,19 @@ function AddModal({type,existing,acts,cats,accs,onSave,onClose}){
   });
   const apply=r=>{if(!r)return;setForm(p=>({...p,description:r.description||p.description,vendor:r.vendor||p.vendor,amount:r.amount||p.amount,businessActivity:acts.includes(r.businessActivity)?r.businessActivity:p.businessActivity,category:r.category||p.category,date:r.date||p.date,paymentMethod:r.paymentMethod||p.paymentMethod,isNewCategory:r.isNewCategory||false,aiGenerated:true}));setSub("form");};
   const runText=async()=>{setLoad(true);apply(await aiClassify(raw,acts,cats,form.type));setLoad(false);};
-  const runImg=async()=>{if(!imgB64)return;setLoad(true);const c2=Object.entries(cats).map(([a,cs])=>`${a}: ${cs.join(", ")}`).join("\n");const raw2=await callAI([{role:"user",content:[{type:"image",source:{type:"base64",media_type:"image/jpeg",data:imgB64}},{type:"text",text:`Extract expense. Activities: ${acts.join(", ")}\n${c2}\nReturn ONLY JSON: {"businessActivity":"","category":"","isNewCategory":false,"description":"","amount":0,"date":"YYYY-MM-DD","vendor":"","paymentMethod":""}`}]}],500);try{apply(JSON.parse(raw2.replace(/```json|```/g,"").trim()));}catch{}setLoad(false);};
+  const runImg=async()=>{
+    if(!imgB64)return;
+    setLoad(true);
+    const c2=Object.entries(cats).map(([a,cs])=>`${a}: ${cs.join(", ")}`).join("\n");
+    try{
+      const raw2=await callAI([{role:"user",content:[{type:"image",source:{type:"base64",media_type:"image/jpeg",data:imgB64}},{type:"text",text:`Extract expense. Activities: ${acts.join(", ")}\n${c2}\nReturn ONLY JSON: {"businessActivity":"","category":"","isNewCategory":false,"description":"","amount":0,"date":"YYYY-MM-DD","vendor":"","paymentMethod":""}`}]}],500);
+      try{apply(JSON.parse(raw2.replace(/```json|```/g,"").trim()));}
+      catch{alert("AI returned invalid JSON for invoice image.");}
+    }catch(e){
+      alert(`AI image extraction failed: ${e.message||"backend unavailable"}`);
+    }
+    setLoad(false);
+  };
   const je=buildJE({...form,amount:Number(form.amount)||0},accs);
   return(
     <div className="overlay"><div className="modal">
