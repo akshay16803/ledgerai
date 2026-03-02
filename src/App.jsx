@@ -988,15 +988,17 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClient
     if(!acc.token){alert("Connect this account first.");return;}
     setSyncingId(acc.id);
     try{
+      const requestedMax=Math.max(1,Math.min(Number(acc.maxEmails)||30,500));
       log(acc.id,"Fetching email list…");
-      const messages=await gmailListMessages(acc.token,acc.syncQuery||GMAIL_QUERY,acc.maxEmails||30);
+      const messages=await gmailListMessages(acc.token,acc.syncQuery||GMAIL_QUERY,requestedMax);
       if(!messages.length){log(acc.id,"✓ No matching emails found.");setSyncingId(null);return;}
       const processed=new Set(LS.get(`proc_${acc.id}`,[]));
       const fresh=messages.filter(m=>!processed.has(m.id));
       if(!fresh.length){log(acc.id,"✓ All emails already processed.");setSyncingId(null);return;}
-      log(acc.id,`Reading ${Math.min(fresh.length,20)} new emails…`);
+      const toProcess=fresh.slice(0,requestedMax);
+      log(acc.id,`Matched ${messages.length} email(s), ${fresh.length} new. Reading ${toProcess.length} now…`);
       const found=[];let done=0;
-      for(const msg of fresh.slice(0,20)){
+      for(const msg of toProcess){
         try{
           const full=await gmailGetMessage(acc.token,msg.id);
           const H=full.payload?.headers||[];
@@ -1008,7 +1010,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClient
           const items=await aiExtractEmail(subject,from,body,acts,cats);
           items.forEach(item=>found.push({...item,date:item.date||eDate,source:"email",emailSubject:subject,emailFrom:from,emailAccountId:acc.id,emailMsgId:msg.id}));
           processed.add(msg.id);done++;
-          log(acc.id,`Processed ${done}/${Math.min(fresh.length,20)} emails — ${found.length} transactions found…`);
+          log(acc.id,`Processed ${done}/${toProcess.length} emails — ${found.length} transaction(s) found…`);
         }catch(e){console.error(e);}
       }
       LS.set(`proc_${acc.id}`,[...processed].slice(-500));
@@ -1092,6 +1094,9 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClient
                 <div><label>Account Label</label><input value={acc.label||""} onChange={e=>setEmails(p=>p.map(a=>a.id===acc.id?{...a,label:e.target.value}:a))} placeholder="e.g. Business Gmail"/></div>
                 <div><label>Max Emails per Sync</label><input type="number" value={acc.maxEmails||30} onChange={e=>setEmails(p=>p.map(a=>a.id===acc.id?{...a,maxEmails:Number(e.target.value)}:a))}/></div>
                 <div><label>Search Query</label><input value={acc.syncQuery||GMAIL_QUERY} onChange={e=>setEmails(p=>p.map(a=>a.id===acc.id?{...a,syncQuery:e.target.value}:a))}/></div>
+              </div>
+              <div style={{fontSize:11,color:"#475569",marginTop:8}}>
+                Default query includes <code>newer_than:2d</code>, so only recent emails are matched unless you change it.
               </div>
               <div style={{marginTop:10,display:"flex",gap:8}}>
                 <button className="btn sm ghost" onClick={()=>setEmails(p=>p.map(a=>a.id===acc.id?{...a,_open:false}:a))}>Close</button>
