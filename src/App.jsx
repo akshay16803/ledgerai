@@ -62,6 +62,8 @@ const fmtD  = d  => d?new Date(d).toLocaleDateString("en-IN",{day:"2-digit",mont
 const fmtDT = d  => d?new Date(d).toLocaleString("en-IN",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"}):"";
 const amtClose=(a,b)=>Math.abs(a-b)<2;
 const strSim=(a,b)=>{a=(a||"").toLowerCase();b=(b||"").toLowerCase();let m=0;for(let c of a)if(b.includes(c))m++;return m/Math.max(a.length,b.length,1);};
+const LOCKED_OWNER_EMAIL = "akshaychouhan16803@gmail.com";
+const DEFAULT_GOOGLE_CLIENT_ID = "";
 
 function decodeGoogleCredential(credential=""){
   try{
@@ -232,7 +234,16 @@ function initOAuth(clientId,cb){
 }
 
 export default function App(){
-  const[authCfg,setAuthCfg]=useState(()=>LS.get("ledger_auth_cfg",{enabled:true,googleClientId:"",ownerEmail:""}));
+  const[authCfg,setAuthCfg]=useState(()=>{
+    const saved=LS.get("ledger_auth_cfg",{enabled:true,googleClientId:"",ownerEmail:""});
+    const emailCfg=LS.get("ledger_emails",[]);
+    const fallbackClientId=emailCfg.find(a=>a.clientId)?.clientId||"";
+    return{
+      enabled:true,
+      googleClientId:saved.googleClientId||fallbackClientId||DEFAULT_GOOGLE_CLIENT_ID,
+      ownerEmail:LOCKED_OWNER_EMAIL,
+    };
+  });
   const[authUser,setAuthUser]=useState(()=>LS.get("ledger_auth_user",null));
   const[authMsg,setAuthMsg]=useState("");
   const[tab,setTab]=useState("dashboard");
@@ -259,12 +270,12 @@ export default function App(){
     const payload=decodeGoogleCredential(resp?.credential||"");
     if(!payload?.email){setAuthMsg("Google login failed. Please try again.");return;}
     const email=(payload.email||"").toLowerCase();
-    const owner=(authCfg.ownerEmail||"").toLowerCase();
-    if(owner&&owner!==email){setAuthMsg(`Access denied. This dashboard is locked to ${authCfg.ownerEmail}.`);return;}
-    if(!owner)setAuthCfg(p=>({...p,ownerEmail:payload.email}));
+    const owner=LOCKED_OWNER_EMAIL.toLowerCase();
+    if(owner!==email){setAuthMsg(`Access denied. This dashboard is locked to ${LOCKED_OWNER_EMAIL}.`);return;}
+    setAuthCfg(p=>({...p,ownerEmail:LOCKED_OWNER_EMAIL}));
     setAuthUser({email:payload.email,name:payload.name||payload.email,picture:payload.picture||"",lastLoginAt:new Date().toISOString()});
     setAuthMsg("");
-  },[authCfg.ownerEmail]);
+  },[]);
 
   const signOut=()=>{
     setAuthUser(null);
@@ -290,10 +301,13 @@ export default function App(){
   useEffect(()=>LS.set("ledger_lastsync",lastSync),[lastSync]);
 
   useEffect(()=>{
-    const owner=(authCfg.ownerEmail||"").toLowerCase();
+    const owner=LOCKED_OWNER_EMAIL.toLowerCase();
     const current=(authUser?.email||"").toLowerCase();
     if(owner&&current&&owner!==current)setAuthUser(null);
-  },[authCfg.ownerEmail,authUser]);
+  },[authUser]);
+  useEffect(()=>{
+    if(authCfg.ownerEmail!==LOCKED_OWNER_EMAIL)setAuthCfg(p=>({...p,ownerEmail:LOCKED_OWNER_EMAIL}));
+  },[authCfg.ownerEmail]);
 
   // ── OneDrive sync helpers ────────────────────────────────────────────────
   const pushToCloud=useCallback(async(state={})=>{
@@ -403,7 +417,7 @@ export default function App(){
     return <AuthSetupScreen authCfg={authCfg} setAuthCfg={setAuthCfg}/>;
   }
   if(authCfg.enabled&&!authUser){
-    return <AuthLoginScreen clientId={authCfg.googleClientId} ownerEmail={authCfg.ownerEmail} onCredential={onGoogleCredential} authMsg={authMsg} onUpdateClientId={v=>setAuthCfg(p=>({...p,googleClientId:v}))}/>;
+    return <AuthLoginScreen clientId={authCfg.googleClientId} ownerEmail={LOCKED_OWNER_EMAIL} onCredential={onGoogleCredential} authMsg={authMsg} onUpdateClientId={v=>setAuthCfg(p=>({...p,googleClientId:v,ownerEmail:LOCKED_OWNER_EMAIL}))}/>;
   }
 
   return(
@@ -452,7 +466,6 @@ export default function App(){
 
 function AuthSetupScreen({authCfg,setAuthCfg}){
   const[clientId,setClientId]=useState(authCfg.googleClientId||"");
-  const[ownerEmail,setOwnerEmail]=useState(authCfg.ownerEmail||"");
   const origin=typeof window!=="undefined"?window.location.origin:"http://accounts.niprasha.com";
   const httpsOrigin=origin.startsWith("http://")?origin.replace("http://","https://"):origin;
   return(
@@ -470,12 +483,10 @@ function AuthSetupScreen({authCfg,setAuthCfg}){
         </div>
         <label>Google Client ID</label>
         <input value={clientId} onChange={e=>setClientId(e.target.value)} placeholder="xxxxxxxxxxxx-xxxx.apps.googleusercontent.com"/>
-        <label>Allowed Owner Email (optional now)</label>
-        <input value={ownerEmail} onChange={e=>setOwnerEmail(e.target.value)} placeholder="you@gmail.com"/>
-        <div style={{fontSize:11,color:"#475569",marginTop:6}}>If left blank, first successful login will become the owner.</div>
+        <div style={{fontSize:11,color:"#64748b",marginTop:10}}>Allowed owner is locked to <b>{LOCKED_OWNER_EMAIL}</b>.</div>
         <button className="btn pri" style={{marginTop:14,width:"100%"}} onClick={()=>{
           if(!clientId.trim())return alert("Enter Google Client ID");
-          setAuthCfg({enabled:true,googleClientId:clientId.trim(),ownerEmail:ownerEmail.trim()});
+          setAuthCfg({enabled:true,googleClientId:clientId.trim(),ownerEmail:LOCKED_OWNER_EMAIL});
         }}>Save & Continue</button>
       </div>
     </div>
@@ -499,6 +510,7 @@ function AuthLoginScreen({clientId,ownerEmail,onCredential,authMsg,onUpdateClien
         callback:onCredential,
         auto_select:true,
         cancel_on_tap_outside:false,
+        login_hint:ownerEmail||LOCKED_OWNER_EMAIL,
       });
       if(btnRef.current){
         btnRef.current.innerHTML="";
