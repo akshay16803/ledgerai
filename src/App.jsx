@@ -280,9 +280,7 @@ export default function App(){
   const[summary,setSummary]=useState("");
   const[sumLoad,setSumLoad]=useState(false);
   const[filter,setFilter]=useState({activity:"All",type:"All",from:"",to:""});
-  const isLocalhost=typeof window!=="undefined"&&(window.location.hostname==="localhost"||window.location.hostname==="127.0.0.1");
-  const isInsecureOrigin=typeof window!=="undefined"&&window.location.protocol!=="https:"&&!isLocalhost;
-  const bypassActive=Boolean(authCfg.enabled&&authBypass&&isInsecureOrigin);
+  const bypassActive=Boolean(authCfg.enabled&&authBypass);
 
   const onGoogleCredential=useCallback((resp)=>{
     const payload=decodeGoogleCredential(resp?.credential||"");
@@ -328,9 +326,6 @@ export default function App(){
   useEffect(()=>{
     if(authCfg.ownerEmail!==LOCKED_OWNER_EMAIL)setAuthCfg(p=>({...p,ownerEmail:LOCKED_OWNER_EMAIL}));
   },[authCfg.ownerEmail]);
-  useEffect(()=>{
-    if(authBypass&&!isInsecureOrigin)setAuthBypass(false);
-  },[authBypass,isInsecureOrigin]);
 
   // ── OneDrive sync helpers ────────────────────────────────────────────────
   const pushToCloud=useCallback(async(state={})=>{
@@ -440,7 +435,7 @@ export default function App(){
     return <AuthSetupScreen authCfg={authCfg} setAuthCfg={setAuthCfg}/>;
   }
   if(authCfg.enabled&&!authUser&&!bypassActive){
-    return <AuthLoginScreen clientId={authCfg.googleClientId} ownerEmail={LOCKED_OWNER_EMAIL} onCredential={onGoogleCredential} authMsg={authMsg} allowTemporaryBypass={isInsecureOrigin} onBypass={()=>setAuthBypass(true)}/>;
+    return <AuthLoginScreen clientId={authCfg.googleClientId} ownerEmail={LOCKED_OWNER_EMAIL} onCredential={onGoogleCredential} authMsg={authMsg} allowTemporaryBypass onBypass={()=>setAuthBypass(true)}/>;
   }
 
   return(
@@ -587,7 +582,7 @@ function AuthLoginScreen({clientId,ownerEmail,onCredential,authMsg,allowTemporar
           <div style={{marginTop:10}}>
             <button className="btn ghost" style={{width:"100%"}} onClick={onBypass}>Continue temporarily without login</button>
             <div style={{fontSize:11,color:"#64748b",marginTop:8,lineHeight:1.5}}>
-              Temporary mode on HTTP only. Full Google lock returns automatically when HTTPS is active.
+              Temporary mode for testing. Use "Re-enable lock" from the top bar when ready.
             </div>
           </div>
         )}
