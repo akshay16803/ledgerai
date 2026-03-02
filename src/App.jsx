@@ -148,6 +148,7 @@ async function aiSummarize(txns){
 const GRAPH = "https://graph.microsoft.com/v1.0";
 const OD_FILE = "LedgerAI/ledgerai-data.json";         // saved at OneDrive root/LedgerAI/
 const OD_SCOPES = ["Files.ReadWrite", "User.Read"];
+const MS_MAIL_SCOPES = ["Mail.Read", "User.Read"];
 const MSAL_CDN = "https://alcdn.msauth.net/browser/2.38.2/js/msal-browser.min.js";
 
 let _msalApp = null;
@@ -198,6 +199,53 @@ async function odGetProfile(clientId) {
   const token = await odGetToken(clientId);
   const r = await fetch(`${GRAPH}/me`, { headers: { Authorization: `Bearer ${token}` } });
   return r.json();
+}
+
+async function msGetProfileByToken(token){
+  const r=await fetch(`${GRAPH}/me`,{headers:{Authorization:`Bearer ${token}`}});
+  if(!r.ok)throw new Error(`Microsoft profile ${r.status}`);
+  return r.json();
+}
+
+function pickMsAccount(msal,accountHint){
+  const all=msal.getAllAccounts();
+  if(accountHint?.homeAccountId){
+    const byId=all.find(a=>a.homeAccountId===accountHint.homeAccountId);
+    if(byId)return byId;
+  }
+  if(accountHint?.username){
+    const u=(accountHint.username||"").toLowerCase();
+    const byUser=all.find(a=>(a.username||"").toLowerCase()===u);
+    if(byUser)return byUser;
+  }
+  return all[0]||null;
+}
+
+async function msLoginMail(clientId){
+  const msal=await getMsal(clientId);
+  const login=await msal.loginPopup({scopes:MS_MAIL_SCOPES,prompt:"select_account"});
+  const account=login.account||pickMsAccount(msal,{});
+  if(!account)throw new Error("Microsoft account not found after login");
+  try{
+    const tok=await msal.acquireTokenSilent({scopes:MS_MAIL_SCOPES,account});
+    return{account,accessToken:tok.accessToken};
+  }catch{
+    const tok=await msal.acquireTokenPopup({scopes:MS_MAIL_SCOPES,account});
+    return{account,accessToken:tok.accessToken};
+  }
+}
+
+async function msGetMailToken(clientId,accountHint){
+  const msal=await getMsal(clientId);
+  const account=pickMsAccount(msal,accountHint);
+  if(!account)throw new Error("Not signed in to Microsoft");
+  try{
+    const tok=await msal.acquireTokenSilent({scopes:MS_MAIL_SCOPES,account});
+    return{account,accessToken:tok.accessToken};
+  }catch{
+    const tok=await msal.acquireTokenPopup({scopes:MS_MAIL_SCOPES,account,prompt:"select_account"});
+    return{account,accessToken:tok.accessToken};
+  }
 }
 
 async function odSave(clientId, data) {
@@ -260,13 +308,55 @@ function initOAuth(clientId,cb){
   window.google.accounts.oauth2.initTokenClient({client_id:clientId,scope:"https://www.googleapis.com/auth/gmail.readonly",callback:(r)=>{if(r.error)cb(new Error(r.error),null);else cb(null,r.access_token);}}).requestAccessToken({prompt:"consent"});
 }
 
+async function msGraphFetch(url,token,extraHeaders={}){
+  const r=await fetch(url,{headers:{Authorization:`Bearer ${token}`,...extraHeaders}});
+  if(!r.ok)throw new Error(`Microsoft Mail ${r.status}`);
+  return r.json();
+}
+
+async function msListMessages(token,max=100,fromDate=""){
+  const target=Math.max(1,Math.min(Number(max)||100,50000));
+  const params=new URLSearchParams({
+    "$top":String(Math.min(50,target)),
+    "$select":"id,subject,from,receivedDateTime",
+    "$orderby":"receivedDateTime desc",
+  });
+  if(fromDate)params.set("$filter",`receivedDateTime ge ${fromDate}T00:00:00Z`);
+  let next=`${GRAPH}/me/messages?${params.toString()}`;
+  const all=[];
+  while(next&&all.length<target){
+    const d=await msGraphFetch(next,token);
+    if(Array.isArray(d.value)&&d.value.length)all.push(...d.value);
+    next=d["@odata.nextLink"]||"";
+  }
+  return all.slice(0,target);
+}
+
+async function msGetMessage(token,id){
+  const url=`${GRAPH}/me/messages/${id}?$select=id,subject,from,receivedDateTime,body,bodyPreview`;
+  return msGraphFetch(url,token,{Prefer:'outlook.body-content-type="text"'});
+}
+
+function msExtractBody(msg){
+  const txt=(msg?.body?.content||msg?.bodyPreview||"")+"";
+  return txt.replace(/<[^>]*>/g," ").replace(/\s+/g," ").trim();
+}
+
 function hydrateEmailAccount(acc={}){
   const query=((acc.syncQuery||"")+"").trim();
+  const provider=((acc.provider||"google")+"").toLowerCase()==="microsoft"?"microsoft":"google";
   return{
     ...acc,
-    syncQuery:!query||query===LEGACY_GMAIL_QUERY?GMAIL_QUERY:query,
+    provider,
+    syncQuery:provider==="google"?(!query||query===LEGACY_GMAIL_QUERY?GMAIL_QUERY:query):query,
     maxEmails:Math.max(1,Math.min(Number(acc.maxEmails)||100,5000)),
     autoPost:acc.autoPost!==false,
+    connected:Boolean(acc.connected),
+    firstSyncCompleted:Boolean(acc.firstSyncCompleted),
+    syncFromDate:(acc.syncFromDate||"")+"",
+    msClientId:(acc.msClientId||"")+"",
+    msAccountId:(acc.msAccountId||"")+"",
+    msUsername:(acc.msUsername||"")+"",
   };
 }
 
@@ -524,7 +614,7 @@ export default function App(){
         {tab==="transactions"&&<LedgerTab txns={filtered} filter={filter} setFilter={setFilter} acts={acts} onEdit={tx=>{setEditTx(tx);setAddType(tx.type);setShowAdd(true);}} onDelete={delTx}/>}
         {tab==="inbox"&&<InboxTab inbox={inbox} addInbox={addInbox} acts={acts} cats={cats} onApprove={approveInbox} onEdit={editInbox} onDiscard={discardInbox}/>}
         <div style={{display:tab==="email"?"block":"none"}} aria-hidden={tab!=="email"}>
-          <EmailTab emails={emails} setEmails={setEmails} inbox={inbox} addInbox={addInbox} autoPostTxns={autoPostTxns} acts={acts} cats={cats} defaultGoogleClientId={authCfg.googleClientId||DEFAULT_GOOGLE_CLIENT_ID}/>
+          <EmailTab emails={emails} setEmails={setEmails} inbox={inbox} addInbox={addInbox} autoPostTxns={autoPostTxns} acts={acts} cats={cats} defaultGoogleClientId={authCfg.googleClientId||DEFAULT_GOOGLE_CLIENT_ID} defaultMicrosoftClientId={sbCfg.clientId||""}/>
         </div>
         {tab==="messages"&&<MessagesTab smsNums={smsNums} setSmsNums={setSmsNums} emails={emails} inbox={inbox} addInbox={addInbox} acts={acts} cats={cats}/>}
         {tab==="journal"&&<JournalTab txns={txns}/>}
@@ -1004,7 +1094,7 @@ function SmsOverviewModal({onClose}){
 }
 
 // ── EMAIL TAB ─────────────────────────────────────────────────────────────────
-function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaultGoogleClientId}){
+function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaultGoogleClientId,defaultMicrosoftClientId}){
   const[syncingIds,setSyncingIds]=useState({});
   const[syncProgress,setSyncProgress]=useState({});
   const[logs,setLogs]=useState({});
@@ -1012,9 +1102,22 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
   const[firstSyncPrompt,setFirstSyncPrompt]=useState(null); // {accId,fromDate,scanAll}
   const[reviewState,setReviewState]=useState(null); // {accId,items}
   const log=(id,msg)=>setLogs(p=>({...p,[id]:msg}));
-  const oauthClientId=(defaultGoogleClientId||DEFAULT_GOOGLE_CLIENT_ID||"").trim();
+  const googleClientId=(defaultGoogleClientId||DEFAULT_GOOGLE_CLIENT_ID||"").trim();
+  const microsoftClientId=(defaultMicrosoftClientId||"").trim();
+  const providerOf=acc=>(((acc?.provider||"google")+"").toLowerCase()==="microsoft"?"microsoft":"google");
+  const isSyncReady=(acc)=>{
+    if(!acc?.connected)return false;
+    const provider=providerOf(acc);
+    if(provider==="microsoft")return Boolean((acc.msClientId||microsoftClientId||"").trim());
+    return Boolean(acc.token);
+  };
   const emailInbox=inbox.filter(i=>i.source==="email").length;
-  const connected=emails.filter(a=>a.connected&&a.token).length;
+  const connected=emails.filter(a=>{
+    const provider=providerOf(a);
+    if(provider==="microsoft")return Boolean(a.connected);
+    return Boolean(a.connected&&a.token);
+  }).length;
+  const syncableAccounts=emails.filter(isSyncReady);
   const anySyncing=Object.values(syncingIds).some(Boolean);
   const setSyncing=(id,val)=>setSyncingIds(p=>({...p,[id]:val}));
   const setProgress=(id,patch)=>setSyncProgress(p=>({...p,[id]:{...(p[id]||{}),...patch}}));
@@ -1030,10 +1133,10 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
     try{return new Date(d).toISOString().slice(0,10).replace(/-/g,"/");}catch{return"";}
   };
 
-  const connectAccount=(existing=null)=>{
-    if(!oauthClientId){alert("Google OAuth is not configured for this app yet.");return;}
+  const connectGoogleAccount=(existing=null)=>{
+    if(!googleClientId){alert("Google OAuth is not configured for this app yet.");return;}
     if(!window.google?.accounts?.oauth2){alert("Google Identity Services loading… please wait a moment and try again.");return;}
-    initOAuth(oauthClientId,async(err,token)=>{
+    initOAuth(googleClientId,async(err,token)=>{
       if(err){
         const msg=String(err.message||"");
         if(msg.includes("access_denied")){
@@ -1049,26 +1152,68 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
         if(!mail)throw new Error("Google did not return email address.");
         setEmails(prev=>{
           const next=[...prev];
-          const ix=existing?next.findIndex(a=>a.id===existing.id):next.findIndex(a=>(a.email||"").toLowerCase()===mail.toLowerCase());
-          const base=hydrateEmailAccount({id:gid(),label:mail.split("@")[0],email:mail,syncQuery:GMAIL_QUERY,maxEmails:100,autoPost:false,enabled:true,firstSyncCompleted:false,syncFromDate:""});
+          const ix=existing
+            ?next.findIndex(a=>a.id===existing.id)
+            :next.findIndex(a=>providerOf(a)==="google"&&(a.email||"").toLowerCase()===mail.toLowerCase());
+          const base=hydrateEmailAccount({id:gid(),provider:"google",label:mail.split("@")[0],email:mail,syncQuery:GMAIL_QUERY,maxEmails:100,autoPost:false,enabled:true,firstSyncCompleted:false,syncFromDate:""});
           if(ix>=0){
             const cur=hydrateEmailAccount(next[ix]);
-            next[ix]={...cur,email:mail,token,connected:true,enabled:true,clientId:oauthClientId};
+            next[ix]={...cur,provider:"google",email:mail,token,connected:true,enabled:true,clientId:googleClientId};
           }else{
-            next.unshift({...base,token,connected:true,clientId:oauthClientId});
+            next.unshift({...base,token,connected:true,clientId:googleClientId});
           }
           return next;
         });
-        setToast(`✅ Account added successfully: ${mail}`);
+        setToast(`✅ Gmail connected: ${mail}`);
       }catch(e){
         alert("Profile fetch error: "+e.message);
       }
     });
   };
 
+  const connectMicrosoftAccount=async(existing=null)=>{
+    const msClient=(existing?.msClientId||microsoftClientId||"").trim();
+    if(!msClient){
+      alert("Microsoft client ID is missing. Set it in Cloud tab (OneDrive section) first, then try Connect Outlook.");
+      return;
+    }
+    try{
+      const login=await msLoginMail(msClient);
+      const account=login.account||{};
+      const profile=await msGetProfileByToken(login.accessToken);
+      const mail=(profile.mail||profile.userPrincipalName||account.username||"").trim();
+      if(!mail)throw new Error("Microsoft did not return an email address.");
+      setEmails(prev=>{
+        const next=[...prev];
+        const ix=existing
+          ?next.findIndex(a=>a.id===existing.id)
+          :next.findIndex(a=>providerOf(a)==="microsoft"&&(a.email||"").toLowerCase()===mail.toLowerCase());
+        const base=hydrateEmailAccount({id:gid(),provider:"microsoft",label:mail.split("@")[0],email:mail,syncQuery:"",maxEmails:100,autoPost:false,enabled:true,firstSyncCompleted:false,syncFromDate:"",msClientId:msClient,msAccountId:account.homeAccountId||"",msUsername:account.username||mail});
+        if(ix>=0){
+          const cur=hydrateEmailAccount(next[ix]);
+          next[ix]={...cur,provider:"microsoft",email:mail,token:login.accessToken,connected:true,enabled:true,msClientId:msClient,msAccountId:account.homeAccountId||cur.msAccountId||"",msUsername:account.username||cur.msUsername||mail};
+        }else{
+          next.unshift({...base,token:login.accessToken,connected:true});
+        }
+        return next;
+      });
+      setToast(`✅ Outlook connected: ${mail}`);
+    }catch(e){
+      const msg=String(e.message||"Microsoft OAuth failed.");
+      if(msg.includes("popup_window_error")||msg.includes("user_cancelled"))alert("Microsoft sign-in was cancelled.");
+      else alert(`Microsoft OAuth error: ${msg}`);
+    }
+  };
+
+  const connectAccount=(provider,existing=null)=>{
+    if(provider==="microsoft"){connectMicrosoftAccount(existing);return;}
+    connectGoogleAccount(existing);
+  };
+
   const disconnectAccount=(acc)=>{
+    const provider=providerOf(acc);
     setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,token:null,connected:false}:a));
-    setToast(`Disconnected ${acc.email||acc.label||"account"}`);
+    setToast(`${provider==="microsoft"?"Outlook":"Gmail"} disconnected: ${acc.email||acc.label||"account"}`);
   };
 
   const removeAccount=(acc)=>{
@@ -1077,7 +1222,10 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
   };
 
   const runSync=async(acc,opts={})=>{
-    if(!acc?.token){alert("Connect this account first.");return;}
+    const provider=providerOf(acc);
+    if(provider==="google"&&!acc?.token){alert("Connect this Gmail account first.");return;}
+    const msClient=(acc?.msClientId||microsoftClientId||"").trim();
+    if(provider==="microsoft"&&!msClient){alert("Microsoft client ID is missing. Configure Cloud tab first, then connect Outlook.");return;}
     const scanAll=opts.scanAll===true;
     const fromDate=(opts.fromDate||acc.syncFromDate||"").trim();
     const markFirst=opts.markFirstSync===true;
@@ -1085,12 +1233,23 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
     setProgress(acc.id,{phase:"fetching",processed:0,total:0,remaining:0,matched:0,newCount:0,found:0});
     try{
       const requestedMax=scanAll?50000:Math.max(1,Math.min(Number(acc.maxEmails)||100,5000));
-      const baseQuery=(acc.syncQuery||GMAIL_QUERY||"in:anywhere").trim();
-      const qParts=[baseQuery];
-      if(fromDate&&gmailDate(fromDate))qParts.push(`after:${gmailDate(fromDate)}`);
-      const finalQuery=qParts.join(" ").trim();
-      log(acc.id,scanAll?`Scanning mailbox from ${fromDate||"beginning"}…`:"Fetching email list…");
-      const messages=await gmailListMessages(acc.token,finalQuery,requestedMax);
+      let token=acc.token||"";
+      let messages=[];
+      if(provider==="microsoft"){
+        const auth=await msGetMailToken(msClient,{homeAccountId:acc.msAccountId,username:acc.msUsername||acc.email});
+        token=auth.accessToken;
+        const msAcc=auth.account||{};
+        setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,token,connected:true,msClientId:msClient,msAccountId:msAcc.homeAccountId||a.msAccountId||"",msUsername:msAcc.username||a.msUsername||a.email||""}:a));
+        log(acc.id,scanAll?`Scanning Outlook mailbox from ${fromDate||"beginning"}…`:"Fetching Outlook email list…");
+        messages=await msListMessages(token,requestedMax,fromDate);
+      }else{
+        const baseQuery=(acc.syncQuery||GMAIL_QUERY||"in:anywhere").trim();
+        const qParts=[baseQuery];
+        if(fromDate&&gmailDate(fromDate))qParts.push(`after:${gmailDate(fromDate)}`);
+        const finalQuery=qParts.join(" ").trim();
+        log(acc.id,scanAll?`Scanning Gmail mailbox from ${fromDate||"beginning"}…`:"Fetching Gmail email list…");
+        messages=await gmailListMessages(token,finalQuery,requestedMax);
+      }
       if(!messages.length){
         log(acc.id,"✓ No matching emails found.");
         setProgress(acc.id,{phase:"done",processed:0,total:0,remaining:0,matched:0,newCount:0,found:0});
@@ -1111,15 +1270,27 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
       const found=[];let done=0;
       for(const msg of toProcess){
         try{
-          const full=await gmailGetMessage(acc.token,msg.id);
-          const H=full.payload?.headers||[];
-          const subject=H.find(h=>h.name==="Subject")?.value||"";
-          const from=H.find(h=>h.name==="From")?.value||"";
-          const dateH=H.find(h=>h.name==="Date")?.value||"";
-          const body=extractEmailText(full.payload);
-          const eDate=dateH?new Date(dateH).toISOString().slice(0,10):today();
+          let subject="";let from="";let rawDate="";let body="";
+          if(provider==="microsoft"){
+            const full=await msGetMessage(token,msg.id);
+            subject=full.subject||"";
+            const addr=full.from?.emailAddress?.address||"";
+            const name=full.from?.emailAddress?.name||"";
+            from=name&&addr?`${name} <${addr}>`:(addr||name||"");
+            rawDate=full.receivedDateTime||msg.receivedDateTime||"";
+            body=msExtractBody(full);
+          }else{
+            const full=await gmailGetMessage(token,msg.id);
+            const H=full.payload?.headers||[];
+            subject=H.find(h=>h.name==="Subject")?.value||"";
+            from=H.find(h=>h.name==="From")?.value||"";
+            rawDate=H.find(h=>h.name==="Date")?.value||"";
+            body=extractEmailText(full.payload);
+          }
+          const parsedDate=rawDate?new Date(rawDate):null;
+          const eDate=parsedDate&&!Number.isNaN(parsedDate.getTime())?parsedDate.toISOString().slice(0,10):today();
           const items=await aiExtractEmail(subject,from,body,acts,cats);
-          items.forEach(item=>found.push({...item,date:item.date||eDate,source:"email",emailSubject:subject,emailFrom:from,emailAccountId:acc.id,emailMsgId:msg.id}));
+          items.forEach(item=>found.push({...item,date:item.date||eDate,source:"email",emailProvider:provider,emailSubject:subject,emailFrom:from,emailAccountId:acc.id,emailMsgId:msg.id}));
           processed.add(msg.id);done++;
           log(acc.id,`Processed ${done}/${toProcess.length} emails — ${found.length} transaction(s) found…`);
           setProgress(acc.id,{phase:"processing",processed:done,total:toProcess.length,remaining:Math.max(0,toProcess.length-done),matched:messages.length,newCount:fresh.length,found:found.length});
@@ -1127,7 +1298,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
       }
       LS.set(`proc_${acc.id}`,[...processed].slice(-50000));
       const valid=found.filter(i=>i.amount>0&&(i.type==="income"||i.type==="expense"));
-      setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,lastSync:new Date().toISOString(),lastCount:valid.length,firstSyncCompleted:a.firstSyncCompleted||markFirst,syncFromDate:fromDate||a.syncFromDate||""}:a));
+      setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,lastSync:new Date().toISOString(),lastCount:valid.length,firstSyncCompleted:a.firstSyncCompleted||markFirst,syncFromDate:fromDate||a.syncFromDate||"",msClientId:provider==="microsoft"?(a.msClientId||msClient):a.msClientId}:a));
       if(!valid.length){
         log(acc.id,"✓ Done — no income/expense found in scanned emails.");
         setProgress(acc.id,{phase:"done",processed:toProcess.length,total:toProcess.length,remaining:0,matched:messages.length,newCount:fresh.length,found:0});
@@ -1138,17 +1309,18 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
       setProgress(acc.id,{phase:"review",processed:toProcess.length,total:toProcess.length,remaining:0,matched:messages.length,newCount:fresh.length,found:valid.length});
       setReviewState({accId:acc.id,items:valid});
     }catch(e){
-      if(String(e.message||"").includes("401")){
-        log(acc.id,"⚠ Token expired — reconnect required.");
+      const msg=String(e.message||"");
+      if(msg.includes("401")||msg.includes("Not signed in to Microsoft")){
+        log(acc.id,provider==="microsoft"?"⚠ Microsoft session expired — reconnect required.":"⚠ Token expired — reconnect required.");
         setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,token:null,connected:false}:a));
-      }else log(acc.id,"Error: "+e.message);
+      }else log(acc.id,"Error: "+msg);
       setProgress(acc.id,{phase:"error"});
     }
     setSyncing(acc.id,false);
   };
 
   const startSync=(acc,scanAll=false)=>{
-    if(!acc.token){alert("Connect this account first.");return;}
+    if(!isSyncReady(acc)){alert(`Connect this ${providerOf(acc)==="microsoft"?"Outlook":"Gmail"} account first.`);return;}
     if(!acc.firstSyncCompleted){
       const d=acc.syncFromDate||new Date(Date.now()-90*24*60*60*1000).toISOString().slice(0,10);
       setFirstSyncPrompt({accId:acc.id,fromDate:d,scanAll:true});
@@ -1190,7 +1362,8 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
       <R style={{marginBottom:10}}>
         <h2 className="h2" style={{flex:1}}>Email Integration</h2>
         <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-          <button className="btn sm suc" onClick={()=>connectAccount(null)}>+ Connect Email Account</button>
+          <button className="btn sm suc" onClick={()=>connectAccount("google",null)}>+ Connect Gmail Account</button>
+          <button className="btn sm pri" onClick={()=>connectAccount("microsoft",null)}>+ Connect Outlook Account</button>
         </div>
       </R>
 
@@ -1202,7 +1375,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
             Connected accounts: <b style={{color:"#e2e8f0"}}>{connected}</b> / {emails.length}
             {emailInbox>0&&<span style={{marginLeft:10,color:"#f59e0b"}}>· {emailInbox} items pending in Inbox</span>}
           </div>
-          {emails.some(a=>a.connected&&a.token)&&<button className="btn sm pri" disabled={anySyncing} onClick={()=>emails.filter(a=>a.connected&&a.token).forEach(a=>startSync(a,false))}>{anySyncing?"⏳ Syncing…":"🔄 Sync All Accounts"}</button>}
+          {syncableAccounts.length>0&&<button className="btn sm pri" disabled={anySyncing} onClick={()=>syncableAccounts.forEach(a=>startSync(a,false))}>{anySyncing?"⏳ Syncing…":"🔄 Sync All Accounts"}</button>}
         </R>
       </div>
 
@@ -1210,32 +1383,39 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
         <div className="card" style={{textAlign:"center",padding:56,background:"linear-gradient(135deg,#0f1624,#081122)"}}>
           <div style={{fontSize:42,marginBottom:12}}>📬</div>
           <div style={{fontSize:20,fontWeight:700,marginBottom:8}}>Connect your first email account</div>
-          <div style={{fontSize:13,color:"#64748b",marginBottom:20}}>Click connect, sign in with Google, grant permission, and start syncing transactions.</div>
+          <div style={{fontSize:13,color:"#64748b",marginBottom:20}}>Choose Gmail or Outlook, sign in, grant permissions, then sync from a start date.</div>
           <div style={{display:"flex",justifyContent:"center",gap:10}}>
-            <button className="btn pri" onClick={()=>connectAccount(null)}>+ Connect Email Account</button>
+            <button className="btn suc" onClick={()=>connectAccount("google",null)}>+ Connect Gmail Account</button>
+            <button className="btn pri" onClick={()=>connectAccount("microsoft",null)}>+ Connect Outlook Account</button>
           </div>
         </div>
       )}
 
-      {emails.map(acc=>(
-        <div key={acc.id} className="card" style={{marginBottom:12,background:acc.connected?"linear-gradient(135deg,#0f1c36,#0b1530)":"#0f1624"}}>
+      {emails.map(rawAcc=>{
+        const acc=hydrateEmailAccount(rawAcc);
+        const provider=providerOf(acc);
+        const providerLabel=provider==="microsoft"?"Outlook":"Gmail";
+        const linked=provider==="microsoft"?Boolean(acc.connected):Boolean(acc.connected&&acc.token);
+        return(
+        <div key={acc.id} className="card" style={{marginBottom:12,background:linked?"linear-gradient(135deg,#0f1c36,#0b1530)":"#0f1624"}}>
           <R style={{marginBottom:8}}>
             <div style={{display:"flex",gap:12,alignItems:"center",flex:1,minWidth:0}}>
-              <div style={{width:40,height:40,borderRadius:20,display:"flex",alignItems:"center",justifyContent:"center",background:acc.connected?"#052e16":"#1a1a2e"}}>{acc.connected?"✅":"📧"}</div>
+              <div style={{width:40,height:40,borderRadius:20,display:"flex",alignItems:"center",justifyContent:"center",background:linked?"#052e16":"#1a1a2e"}}>{linked?"✅":provider==="microsoft"?"Ⓜ️":"📧"}</div>
               <div style={{minWidth:0}}>
                 <div style={{fontWeight:700,fontSize:15,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{acc.email||acc.label||"Email account"}</div>
                 <div style={{fontSize:12,color:"#64748b"}}>
-                  {acc.connected?<span style={{color:"#34d399"}}>Connected</span>:<span style={{color:"#f87171"}}>Disconnected</span>}
+                  <span>{providerLabel} · </span>
+                  {linked?<span style={{color:"#34d399"}}>Connected</span>:<span style={{color:"#f87171"}}>Disconnected</span>}
                   {acc.firstSyncCompleted&&acc.syncFromDate&&<span> · first synced from {fmtD(acc.syncFromDate)}</span>}
                   {acc.lastSync&&<span> · last sync {fmtDT(acc.lastSync)}</span>}
                 </div>
               </div>
             </div>
             <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-              {!acc.connected&&<button className="btn sm pri" onClick={()=>connectAccount(acc)}>Connect</button>}
-              {acc.connected&&<button className="btn sm" style={{background:"#1a2234",color:"#818cf8"}} disabled={Boolean(syncingIds[acc.id])} onClick={()=>startSync(acc,false)}>{syncingIds[acc.id]?"⏳ Syncing…":"🔄 Sync"}</button>}
-              {acc.connected&&<button className="btn sm ghost" disabled={Boolean(syncingIds[acc.id])} onClick={()=>setFirstSyncPrompt({accId:acc.id,fromDate:acc.syncFromDate||new Date(Date.now()-180*24*60*60*1000).toISOString().slice(0,10),scanAll:true})}>🧠 Scan From Date</button>}
-              {acc.connected&&<button className="btn sm dan" onClick={()=>disconnectAccount(acc)}>Disconnect</button>}
+              {!linked&&<button className="btn sm pri" onClick={()=>connectAccount(provider,acc)}>Connect {providerLabel}</button>}
+              {linked&&<button className="btn sm" style={{background:"#1a2234",color:"#818cf8"}} disabled={Boolean(syncingIds[acc.id])} onClick={()=>startSync(acc,false)}>{syncingIds[acc.id]?"⏳ Syncing…":"🔄 Sync"}</button>}
+              {linked&&<button className="btn sm ghost" disabled={Boolean(syncingIds[acc.id])} onClick={()=>setFirstSyncPrompt({accId:acc.id,fromDate:acc.syncFromDate||new Date(Date.now()-180*24*60*60*1000).toISOString().slice(0,10),scanAll:true})}>🧠 Scan From Date</button>}
+              {linked&&<button className="btn sm dan" onClick={()=>disconnectAccount(acc)}>Disconnect {providerLabel}</button>}
               <button className="btn sm ghost" onClick={()=>setEmails(p=>p.map(a=>a.id===acc.id?{...a,_open:!a._open}:a))}>⚙</button>
               <button className="btn sm ghost" onClick={()=>removeAccount(acc)}>Remove</button>
             </div>
@@ -1266,16 +1446,17 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
             <div style={{background:"#0a0f1d",border:"1px solid #1e293b",borderRadius:10,padding:14,marginTop:8}}>
               <div style={{fontSize:11,fontWeight:700,color:"#475569",marginBottom:10,textTransform:"uppercase"}}>Sync Preferences</div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-                <div><label>Account Label</label><input value={acc.label||""} onChange={e=>setEmails(p=>p.map(a=>a.id===acc.id?{...a,label:e.target.value}:a))} placeholder="Business Gmail"/></div>
+                <div><label>Account Label</label><input value={acc.label||""} onChange={e=>setEmails(p=>p.map(a=>a.id===acc.id?{...a,label:e.target.value}:a))} placeholder="Business email account"/></div>
                 <div><label>Max emails per sync</label><input type="number" min="1" max="5000" value={acc.maxEmails||100} onChange={e=>setEmails(p=>p.map(a=>a.id===acc.id?{...a,maxEmails:Number(e.target.value)}:a))}/></div>
-                <div><label>Search Query</label><input value={acc.syncQuery||GMAIL_QUERY} onChange={e=>setEmails(p=>p.map(a=>a.id===acc.id?{...a,syncQuery:e.target.value}:a))}/></div>
+                {provider==="google"&&<div><label>Search Query</label><input value={acc.syncQuery||GMAIL_QUERY} onChange={e=>setEmails(p=>p.map(a=>a.id===acc.id?{...a,syncQuery:e.target.value}:a))}/></div>}
                 <div><label>Post destination</label><select value={acc.autoPost===false?"inbox":"dashboard"} onChange={e=>setEmails(p=>p.map(a=>a.id===acc.id?{...a,autoPost:e.target.value==="dashboard"}:a))}><option value="dashboard">Dashboard (after review modal)</option><option value="inbox">Inbox (after review modal)</option></select></div>
               </div>
+              {provider==="microsoft"&&<div style={{fontSize:11,color:"#64748b",marginTop:8}}>Outlook sync scans inbox messages from selected date. Search query is only for Gmail.</div>}
               <div style={{fontSize:11,color:"#64748b",marginTop:8}}>First sync asks for a start date. AI scans emails from that date and pre-fills income/expense fields for your review.</div>
             </div>
           )}
         </div>
-      ))}
+      )})}
 
       {firstSyncPrompt&&<EmailFirstSyncModal value={firstSyncPrompt.fromDate} onClose={()=>setFirstSyncPrompt(null)} onStart={(fromDate)=>{
         const acc=emails.find(a=>a.id===firstSyncPrompt.accId);
