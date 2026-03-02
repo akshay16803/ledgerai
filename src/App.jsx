@@ -241,7 +241,7 @@ async function odSignOut(clientId) {
 
 async function gmailFetch(url,token){const r=await fetch(url,{headers:{Authorization:`Bearer ${token}`}});if(!r.ok)throw new Error(`Gmail ${r.status}`);return r.json();}
 async function gmailListMessages(token,query,max=20){
-  const target=Math.max(1,Math.min(Number(max)||20,5000));
+  const target=Math.max(1,Math.min(Number(max)||20,50000));
   let pageToken="";const all=[];
   while(all.length<target){
     const pageSize=Math.min(500,target-all.length);
@@ -1003,54 +1003,93 @@ function SmsOverviewModal({onClose}){
 
 // ── EMAIL TAB ─────────────────────────────────────────────────────────────────
 function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaultGoogleClientId}){
-  const[showSetup,setShowSetup]=useState(false);
   const[showGuide,setShowGuide]=useState(false);
   const[syncingId,setSyncingId]=useState(null);
   const[logs,setLogs]=useState({});
+  const[toast,setToast]=useState("");
+  const[firstSyncPrompt,setFirstSyncPrompt]=useState(null); // {accId,fromDate,scanAll}
+  const[reviewState,setReviewState]=useState(null); // {accId,items}
   const log=(id,msg)=>setLogs(p=>({...p,[id]:msg}));
   const oauthClientId=(defaultGoogleClientId||DEFAULT_GOOGLE_CLIENT_ID||"").trim();
+  const emailInbox=inbox.filter(i=>i.source==="email").length;
+  const connected=emails.filter(a=>a.connected&&a.token).length;
 
-  const connect=(acc)=>{
+  useEffect(()=>{
+    if(!toast)return;
+    const t=setTimeout(()=>setToast(""),2600);
+    return()=>clearTimeout(t);
+  },[toast]);
+
+  const gmailDate=(d)=>{
+    if(!d)return"";
+    try{return new Date(d).toISOString().slice(0,10).replace(/-/g,"/");}catch{return"";}
+  };
+
+  const connectAccount=(existing=null)=>{
     if(!oauthClientId){alert("Google OAuth is not configured for this app yet.");return;}
     if(!window.google?.accounts?.oauth2){alert("Google Identity Services loading… please wait a moment and try again.");return;}
     initOAuth(oauthClientId,async(err,token)=>{
       if(err){
         const msg=String(err.message||"");
-        if(msg.includes("redirect_uri_mismatch")){
-          alert(
-            "OAuth error: redirect_uri_mismatch\n\n"+
-            "Fix in Google Cloud Console for this app Client ID:\n"+
-            "1) OAuth client type must be Web application\n"+
-            `2) Authorized JavaScript origins: ${window.location.origin}\n`+
-            `3) Authorized redirect URIs: ${window.location.origin} and ${window.location.origin}/\n`+
-            "4) Save, wait 2 minutes, then retry Connect"
-          );
-        }else{
-          alert(`OAuth error: ${msg}`);
-        }
+        if(msg.includes("access_denied")){
+          alert("Access denied by Google OAuth. Add your email as a Test User in Google Auth Platform, or publish the OAuth app to production.");
+        }else if(msg.includes("redirect_uri_mismatch")){
+          alert(`OAuth error: redirect_uri_mismatch\n\nAdd this in Google OAuth:\nOrigin: ${window.location.origin}\nRedirect URIs: ${window.location.origin} and ${window.location.origin}/`);
+        }else alert(`OAuth error: ${msg}`);
         return;
       }
       try{
         const profile=await gmailGetProfile(token);
-        setEmails(p=>p.map(a=>a.id===acc.id?{...a,token,email:profile.emailAddress,connected:true,clientId:oauthClientId}:a));
-      }catch(e){alert("Profile fetch error: "+e.message);}
+        const mail=(profile.emailAddress||"").trim();
+        if(!mail)throw new Error("Google did not return email address.");
+        setEmails(prev=>{
+          const next=[...prev];
+          const ix=existing?next.findIndex(a=>a.id===existing.id):next.findIndex(a=>(a.email||"").toLowerCase()===mail.toLowerCase());
+          const base=hydrateEmailAccount({id:gid(),label:mail.split("@")[0],email:mail,syncQuery:GMAIL_QUERY,maxEmails:100,autoPost:false,enabled:true,firstSyncCompleted:false,syncFromDate:""});
+          if(ix>=0){
+            const cur=hydrateEmailAccount(next[ix]);
+            next[ix]={...cur,email:mail,token,connected:true,enabled:true,clientId:oauthClientId};
+          }else{
+            next.unshift({...base,token,connected:true,clientId:oauthClientId});
+          }
+          return next;
+        });
+        setToast(`✅ Account added successfully: ${mail}`);
+      }catch(e){
+        alert("Profile fetch error: "+e.message);
+      }
     });
   };
 
-  const sync=async(acc,opts={})=>{
-    if(!acc.token){alert("Connect this account first.");return;}
+  const disconnectAccount=(acc)=>{
+    setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,token:null,connected:false}:a));
+    setToast(`Disconnected ${acc.email||acc.label||"account"}`);
+  };
+
+  const removeAccount=(acc)=>{
+    if(!window.confirm(`Remove ${acc.email||acc.label||"this account"} from Email Integration?`))return;
+    setEmails(prev=>prev.filter(a=>a.id!==acc.id));
+  };
+
+  const runSync=async(acc,opts={})=>{
+    if(!acc?.token){alert("Connect this account first.");return;}
     const scanAll=opts.scanAll===true;
+    const fromDate=(opts.fromDate||acc.syncFromDate||"").trim();
+    const markFirst=opts.markFirstSync===true;
     setSyncingId(acc.id);
     try{
-      const requestedMax=scanAll?5000:Math.max(1,Math.min(Number(acc.maxEmails)||100,5000));
-      const query=scanAll?"in:anywhere":(acc.syncQuery||GMAIL_QUERY);
-      log(acc.id,"Fetching email list…");
-      const messages=await gmailListMessages(acc.token,query,requestedMax);
+      const requestedMax=scanAll?50000:Math.max(1,Math.min(Number(acc.maxEmails)||100,5000));
+      const baseQuery=(acc.syncQuery||GMAIL_QUERY||"in:anywhere").trim();
+      const qParts=[baseQuery];
+      if(fromDate&&gmailDate(fromDate))qParts.push(`after:${gmailDate(fromDate)}`);
+      const finalQuery=qParts.join(" ").trim();
+      log(acc.id,scanAll?`Scanning mailbox from ${fromDate||"beginning"}…`:"Fetching email list…");
+      const messages=await gmailListMessages(acc.token,finalQuery,requestedMax);
       if(!messages.length){log(acc.id,"✓ No matching emails found.");setSyncingId(null);return;}
       const processed=new Set(LS.get(`proc_${acc.id}`,[]));
       const fresh=messages.filter(m=>!processed.has(m.id));
       if(!fresh.length){log(acc.id,"✓ All emails already processed.");setSyncingId(null);return;}
-      const toProcess=fresh.slice(0,requestedMax);
+      const toProcess=scanAll?fresh:fresh.slice(0,Math.max(1,Math.min(Number(acc.maxEmails)||100,5000)));
       log(acc.id,`Matched ${messages.length} email(s), ${fresh.length} new. Reading ${toProcess.length} now…`);
       const found=[];let done=0;
       for(const msg of toProcess){
@@ -1068,147 +1107,195 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
           log(acc.id,`Processed ${done}/${toProcess.length} emails — ${found.length} transaction(s) found…`);
         }catch(e){console.error(e);}
       }
-      LS.set(`proc_${acc.id}`,[...processed].slice(-20000));
-      setEmails(p=>p.map(a=>a.id===acc.id?{...a,lastSync:new Date().toISOString(),lastCount:found.length}:a));
-      const valid=found.filter(i=>i.amount>0);
-      if(valid.length){
-        if(acc.autoPost!==false){
-          const posted=autoPostTxns?autoPostTxns(valid):0;
-          log(acc.id,`✓ Done — ${posted||valid.length} transaction(s) auto-posted to Dashboard.`);
-        }else{
-          addInbox(valid);
-          log(acc.id,`✓ Done — ${valid.length} transaction(s) sent to Inbox for review.`);
-        }
-      }else log(acc.id,"✓ Done — no financial transactions found in these emails.");
+      LS.set(`proc_${acc.id}`,[...processed].slice(-50000));
+      const valid=found.filter(i=>i.amount>0&&(i.type==="income"||i.type==="expense"));
+      setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,lastSync:new Date().toISOString(),lastCount:valid.length,firstSyncCompleted:a.firstSyncCompleted||markFirst,syncFromDate:fromDate||a.syncFromDate||""}:a));
+      if(!valid.length){log(acc.id,"✓ Done — no income/expense found in scanned emails.");setSyncingId(null);return;}
+      log(acc.id,`AI found ${valid.length} income/expense item(s). Review before posting.`);
+      setReviewState({accId:acc.id,items:valid});
     }catch(e){
-      if(e.message.includes("401")){log(acc.id,"⚠ Token expired — please reconnect.");setEmails(p=>p.map(a=>a.id===acc.id?{...a,token:null,connected:false}:a));}
-      else log(acc.id,"Error: "+e.message);
+      if(String(e.message||"").includes("401")){
+        log(acc.id,"⚠ Token expired — reconnect required.");
+        setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,token:null,connected:false}:a));
+      }else log(acc.id,"Error: "+e.message);
     }
     setSyncingId(null);
   };
 
-  const syncAll=()=>emails.filter(a=>a.enabled&&a.token).forEach(sync);
-  const emailInbox=inbox.filter(i=>i.source==="email").length;
+  const startSync=(acc,scanAll=false)=>{
+    if(!acc.token){alert("Connect this account first.");return;}
+    if(!acc.firstSyncCompleted){
+      const d=acc.syncFromDate||new Date(Date.now()-90*24*60*60*1000).toISOString().slice(0,10);
+      setFirstSyncPrompt({accId:acc.id,fromDate:d,scanAll:true});
+      return;
+    }
+    runSync(acc,{scanAll});
+  };
+
+  const submitReview=(rows,mode="dashboard")=>{
+    const normalized=rows.map(r=>{
+      const activity=r.businessActivity||acts[0]||"Personal";
+      const category=r.category||cats[activity]?.[0]||"Other";
+      const known=(cats[activity]||[]).includes(category);
+      return{
+        ...r,
+        type:r.type==="income"?"income":"expense",
+        amount:Number(r.amount)||0,
+        date:r.date||today(),
+        businessActivity:activity,
+        category,
+        isNewCategory:!known,
+      };
+    }).filter(r=>r.amount>0);
+    if(!normalized.length){setReviewState(null);return;}
+    if(mode==="inbox"){
+      addInbox(normalized.map(i=>({...i,source:"email"})));
+      setToast(`Queued ${normalized.length} item(s) to Inbox for review.`);
+    }else{
+      const posted=autoPostTxns?autoPostTxns(normalized.map(i=>({...i,source:"email"}))):0;
+      setToast(`Added ${posted||normalized.length} transaction(s) to Dashboard.`);
+    }
+    setReviewState(null);
+  };
 
   return(
     <div>
-      <R style={{marginBottom:4}}>
+      <R style={{marginBottom:10}}>
         <h2 className="h2" style={{flex:1}}>Email Integration</h2>
-        <div style={{display:"flex",gap:8}}>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
           <button className="btn sm ghost" onClick={()=>setShowGuide(true)}>📖 Setup Guide</button>
-          {emails.some(a=>a.connected)&&<button className="btn sm pri" onClick={syncAll}>🔄 Sync All</button>}
-          <button className="btn sm suc" onClick={()=>setShowSetup(true)}>+ Add Email</button>
+          <button className="btn sm suc" onClick={()=>connectAccount(null)}>+ Connect Email Account</button>
         </div>
       </R>
-      <p style={{fontSize:13,color:"#64748b",marginBottom:20}}>
-        Connect Gmail accounts to auto-import receipts and invoices. Extracted transactions go to Inbox for day-end review.
-        {emailInbox>0&&<span style={{color:"#f59e0b",marginLeft:8}}>⏳ {emailInbox} email items pending in Inbox.</span>}
-        <span style={{color:"#818cf8",marginLeft:8}}>No client ID entry needed here.</span>
-      </p>
+
+      {toast&&<div style={{background:"#052e16",border:"1px solid #34d399",borderRadius:10,padding:"10px 12px",fontSize:12,color:"#86efac",marginBottom:12}}>{toast}</div>}
+
+      <div className="card" style={{marginBottom:14,background:"linear-gradient(135deg,#10192d,#0a1220)"}}>
+        <R>
+          <div style={{fontSize:13,color:"#94a3b8"}}>
+            Connected accounts: <b style={{color:"#e2e8f0"}}>{connected}</b> / {emails.length}
+            {emailInbox>0&&<span style={{marginLeft:10,color:"#f59e0b"}}>· {emailInbox} items pending in Inbox</span>}
+          </div>
+          {emails.some(a=>a.connected&&a.token)&&<button className="btn sm pri" onClick={()=>emails.filter(a=>a.connected&&a.token).forEach(a=>startSync(a,false))}>🔄 Sync All Accounts</button>}
+        </R>
+      </div>
 
       {emails.length===0&&(
-        <div className="card" style={{textAlign:"center",padding:50}}>
-          <div style={{fontSize:40,marginBottom:12}}>📧</div>
-          <div style={{fontSize:15,fontWeight:600,marginBottom:8}}>No email accounts connected</div>
-          <div style={{fontSize:13,color:"#64748b",marginBottom:20,maxWidth:420,margin:"0 auto 20px"}}>Connect Gmail to automatically capture receipts, invoices and payment confirmations every day.</div>
-          <div style={{display:"flex",gap:10,justifyContent:"center"}}>
-            <button className="btn ghost" onClick={()=>setShowGuide(true)}>📖 Setup Guide (3 mins)</button>
-            <button className="btn pri" onClick={()=>setShowSetup(true)}>+ Connect Gmail</button>
+        <div className="card" style={{textAlign:"center",padding:56,background:"linear-gradient(135deg,#0f1624,#081122)"}}>
+          <div style={{fontSize:42,marginBottom:12}}>📬</div>
+          <div style={{fontSize:20,fontWeight:700,marginBottom:8}}>Connect your first email account</div>
+          <div style={{fontSize:13,color:"#64748b",marginBottom:20}}>Click connect, sign in with Google, grant permission, and start syncing transactions.</div>
+          <div style={{display:"flex",justifyContent:"center",gap:10}}>
+            <button className="btn ghost" onClick={()=>setShowGuide(true)}>📖 Setup Guide</button>
+            <button className="btn pri" onClick={()=>connectAccount(null)}>+ Connect Email Account</button>
           </div>
         </div>
       )}
 
       {emails.map(acc=>(
-        <div key={acc.id} className="card" style={{marginBottom:12}}>
-          <R style={{marginBottom:10}}>
-            <div style={{display:"flex",gap:12,alignItems:"center",flex:1}}>
-              <div style={{width:42,height:42,borderRadius:21,background:acc.connected?"#052e16":"#1a1a2e",display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,flexShrink:0}}>
-                {acc.connected?"✅":"📧"}
-              </div>
-              <div>
-                <div style={{fontWeight:600,fontSize:14}}>{acc.email||acc.label||"Gmail Account"}</div>
-                <div style={{fontSize:12,color:"#475569"}}>
-                  {acc.connected?<span style={{color:"#34d399"}}>● Connected</span>:<span style={{color:"#f87171"}}>○ Not connected</span>}
-                  {acc.lastSync&&<span style={{marginLeft:8}}>· Synced {fmtDT(acc.lastSync)}</span>}
-                  {acc.lastCount>0&&<span style={{marginLeft:6,color:"#818cf8"}}>· {acc.lastCount} found</span>}
+        <div key={acc.id} className="card" style={{marginBottom:12,background:acc.connected?"linear-gradient(135deg,#0f1c36,#0b1530)":"#0f1624"}}>
+          <R style={{marginBottom:8}}>
+            <div style={{display:"flex",gap:12,alignItems:"center",flex:1,minWidth:0}}>
+              <div style={{width:40,height:40,borderRadius:20,display:"flex",alignItems:"center",justifyContent:"center",background:acc.connected?"#052e16":"#1a1a2e"}}>{acc.connected?"✅":"📧"}</div>
+              <div style={{minWidth:0}}>
+                <div style={{fontWeight:700,fontSize:15,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{acc.email||acc.label||"Email account"}</div>
+                <div style={{fontSize:12,color:"#64748b"}}>
+                  {acc.connected?<span style={{color:"#34d399"}}>Connected</span>:<span style={{color:"#f87171"}}>Disconnected</span>}
+                  {acc.firstSyncCompleted&&acc.syncFromDate&&<span> · first synced from {fmtD(acc.syncFromDate)}</span>}
+                  {acc.lastSync&&<span> · last sync {fmtDT(acc.lastSync)}</span>}
                 </div>
               </div>
             </div>
-            <div style={{display:"flex",gap:8,alignItems:"center",flexShrink:0}}>
-              <label style={{display:"flex",alignItems:"center",gap:6,fontSize:12,color:"#64748b",margin:0,textTransform:"none",letterSpacing:0,cursor:"pointer"}}>
-                <input type="checkbox" checked={acc.enabled!==false} onChange={e=>setEmails(p=>p.map(a=>a.id===acc.id?{...a,enabled:e.target.checked}:a))} style={{width:"auto"}}/>
-                Auto
-              </label>
-              {!acc.connected
-                ?<button className="btn sm pri" onClick={()=>connect(acc)}>🔗 Connect</button>
-                :<button className="btn sm" style={{background:"#1a2234",color:"#818cf8"}} onClick={()=>sync(acc)} disabled={syncingId===acc.id}>{syncingId===acc.id?"⏳ Syncing…":"🔄 Sync"}</button>
-              }
+            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+              {!acc.connected&&<button className="btn sm pri" onClick={()=>connectAccount(acc)}>Connect</button>}
+              {acc.connected&&<button className="btn sm" style={{background:"#1a2234",color:"#818cf8"}} disabled={syncingId===acc.id} onClick={()=>startSync(acc,false)}>{syncingId===acc.id?"⏳ Syncing…":"🔄 Sync"}</button>}
+              {acc.connected&&<button className="btn sm ghost" disabled={syncingId===acc.id} onClick={()=>setFirstSyncPrompt({accId:acc.id,fromDate:acc.syncFromDate||new Date(Date.now()-180*24*60*60*1000).toISOString().slice(0,10),scanAll:true})}>🧠 Scan From Date</button>}
+              {acc.connected&&<button className="btn sm dan" onClick={()=>disconnectAccount(acc)}>Disconnect</button>}
               <button className="btn sm ghost" onClick={()=>setEmails(p=>p.map(a=>a.id===acc.id?{...a,_open:!a._open}:a))}>⚙</button>
-              <button className="btn sm dan" onClick={()=>setEmails(p=>p.filter(a=>a.id!==acc.id))}>✕</button>
+              <button className="btn sm ghost" onClick={()=>removeAccount(acc)}>Remove</button>
             </div>
           </R>
-          {logs[acc.id]&&<div style={{background:"#0a0c12",borderRadius:6,padding:"8px 12px",fontSize:12,color:"#818cf8",marginBottom:acc._open?10:0}}>{logs[acc.id]}</div>}
+          {logs[acc.id]&&<div style={{background:"#0a0f1d",border:"1px solid #1e293b",borderRadius:8,padding:"8px 12px",fontSize:12,color:"#c7d2fe",marginBottom:acc._open?10:0}}>{logs[acc.id]}</div>}
           {acc._open&&(
-            <div style={{background:"#0a0c12",borderRadius:8,padding:14,marginTop:8}}>
-              <div style={{fontSize:12,color:"#64748b",fontWeight:700,marginBottom:10,textTransform:"uppercase"}}>Account Settings</div>
+            <div style={{background:"#0a0f1d",border:"1px solid #1e293b",borderRadius:10,padding:14,marginTop:8}}>
+              <div style={{fontSize:11,fontWeight:700,color:"#475569",marginBottom:10,textTransform:"uppercase"}}>Sync Preferences</div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-                <div><label>OAuth Mode</label><input value="Built-in LedgerAI Google OAuth" readOnly/></div>
-                <div><label>Account Label</label><input value={acc.label||""} onChange={e=>setEmails(p=>p.map(a=>a.id===acc.id?{...a,label:e.target.value}:a))} placeholder="e.g. Business Gmail"/></div>
-                <div><label>Auto-post to Dashboard</label><select value={acc.autoPost===false?"no":"yes"} onChange={e=>setEmails(p=>p.map(a=>a.id===acc.id?{...a,autoPost:e.target.value!=="no"}:a))}><option value="yes">Yes (no manual review)</option><option value="no">No (send to Inbox)</option></select></div>
-                <div><label>Max Emails per Sync</label><input type="number" value={acc.maxEmails||30} onChange={e=>setEmails(p=>p.map(a=>a.id===acc.id?{...a,maxEmails:Number(e.target.value)}:a))}/></div>
+                <div><label>Account Label</label><input value={acc.label||""} onChange={e=>setEmails(p=>p.map(a=>a.id===acc.id?{...a,label:e.target.value}:a))} placeholder="Business Gmail"/></div>
+                <div><label>Max emails per sync</label><input type="number" min="1" max="5000" value={acc.maxEmails||100} onChange={e=>setEmails(p=>p.map(a=>a.id===acc.id?{...a,maxEmails:Number(e.target.value)}:a))}/></div>
                 <div><label>Search Query</label><input value={acc.syncQuery||GMAIL_QUERY} onChange={e=>setEmails(p=>p.map(a=>a.id===acc.id?{...a,syncQuery:e.target.value}:a))}/></div>
+                <div><label>Post destination</label><select value={acc.autoPost===false?"inbox":"dashboard"} onChange={e=>setEmails(p=>p.map(a=>a.id===acc.id?{...a,autoPost:e.target.value==="dashboard"}:a))}><option value="dashboard">Dashboard (after review modal)</option><option value="inbox">Inbox (after review modal)</option></select></div>
               </div>
-              <div style={{fontSize:11,color:"#475569",marginTop:8}}>
-                Default query is <code>in:anywhere</code> to cover your full mailbox. Narrow it only if needed.
-              </div>
-              <div style={{marginTop:10,display:"flex",gap:8}}>
-                <button className="btn sm ghost" onClick={()=>setEmails(p=>p.map(a=>a.id===acc.id?{...a,_open:false}:a))}>Close</button>
-                {!acc.connected&&<button className="btn sm pri" onClick={()=>connect(acc)}>🔗 Connect Now</button>}
-                {acc.connected&&<button className="btn sm" style={{background:"#1a2234",color:"#818cf8"}} onClick={()=>sync(acc)} disabled={syncingId===acc.id}>{syncingId===acc.id?"⏳ Syncing…":"🔄 Sync Now"}</button>}
-                {acc.connected&&<button className="btn sm ghost" onClick={()=>sync(acc,{scanAll:true})} disabled={syncingId===acc.id}>🧠 Scan All Mailbox</button>}
-              </div>
+              <div style={{fontSize:11,color:"#64748b",marginTop:8}}>First sync asks for a start date. AI scans emails from that date and pre-fills income/expense fields for your review.</div>
             </div>
           )}
         </div>
       ))}
 
-      {emails.length>0&&(
-        <div className="card" style={{marginTop:16,background:"#0a0c12",fontSize:13,color:"#64748b",lineHeight:1.9}}>
-          <div style={{fontSize:11,fontWeight:700,color:"#475569",marginBottom:8,textTransform:"uppercase",letterSpacing:".5px"}}>How Auto-Sync Works</div>
-          1. Click <b style={{color:"#94a3b8"}}>Sync</b> (or <b style={{color:"#94a3b8"}}>Scan All Mailbox</b>) to fetch emails via Gmail API.<br/>
-          2. AI reads each email and extracts amount, vendor, date, category automatically.<br/>
-          3. If <b style={{color:"#94a3b8"}}>Auto-post</b> is ON, transactions are added directly to Dashboard/Ledger.<br/>
-          4. If Auto-post is OFF, they go to <b style={{color:"#94a3b8"}}>Inbox</b> for review.<br/>
-          5. Processed emails are remembered to avoid duplicates.
-        </div>
-      )}
-
-      {showSetup&&<AddEmailModal onSave={a=>{setEmails(p=>[...p,{...a,id:gid(),connected:false,enabled:true}]);setShowSetup(false);}} onClose={()=>setShowSetup(false)}/>}
       {showGuide&&<SetupGuideModal onClose={()=>setShowGuide(false)}/>}
+      {firstSyncPrompt&&<EmailFirstSyncModal value={firstSyncPrompt.fromDate} onClose={()=>setFirstSyncPrompt(null)} onStart={(fromDate)=>{
+        const acc=emails.find(a=>a.id===firstSyncPrompt.accId);
+        if(acc)runSync(acc,{scanAll:firstSyncPrompt.scanAll,fromDate,markFirstSync:!acc.firstSyncCompleted});
+        setFirstSyncPrompt(null);
+      }}/>}
+      {reviewState&&<EmailReviewModal acts={acts} cats={cats} initialItems={reviewState.items} onClose={()=>setReviewState(null)} onSubmit={submitReview}/>}
     </div>
   );
 }
 
-function AddEmailModal({onSave,onClose}){
-  const[f,setF]=useState({label:"",syncQuery:GMAIL_QUERY,maxEmails:100,autoPost:true});
+function EmailFirstSyncModal({value,onClose,onStart}){
+  const[fromDate,setFromDate]=useState(value||new Date(Date.now()-90*24*60*60*1000).toISOString().slice(0,10));
   return(
     <div className="overlay"><div className="modal" style={{maxWidth:520}}>
-      <MH title="Add Gmail Account" onClose={onClose}/>
-      <div style={{background:"#0d0d2b",border:"1px solid #6366f1",borderRadius:8,padding:12,marginBottom:14,fontSize:13,color:"#c7d2fe"}}>
-        💡 One-click connect: no client ID input needed here. Add account, click <b>Connect</b>, then Sync.
+      <MH title="First Sync Date" onClose={onClose}/>
+      <div style={{fontSize:13,color:"#94a3b8",lineHeight:1.7,marginBottom:10}}>
+        Choose the starting date. LedgerAI will scan all emails from this date to today and use AI to extract income/expense transactions.
       </div>
-      <label>Account Label</label><input value={f.label} onChange={e=>setF(p=>({...p,label:e.target.value}))} placeholder="e.g. Personal Gmail / Business Gmail"/>
-      <label>Email Search Query (Gmail format)</label><input value={f.syncQuery} onChange={e=>setF(p=>({...p,syncQuery:e.target.value}))}/>
-      <div style={{fontSize:11,color:"#475569",marginTop:4}}>Default <code>in:anywhere</code> scans your full mailbox.</div>
-      <label>Auto-post to Dashboard</label>
-      <select value={f.autoPost?"yes":"no"} onChange={e=>setF(p=>({...p,autoPost:e.target.value==="yes"}))}>
-        <option value="yes">Yes (no manual review)</option>
-        <option value="no">No (send to Inbox)</option>
-      </select>
-      <label>Max Emails per Sync</label><input type="number" value={f.maxEmails} onChange={e=>setF(p=>({...p,maxEmails:Number(e.target.value)}))}/>
+      <label>Sync from date</label>
+      <input type="date" value={fromDate} onChange={e=>setFromDate(e.target.value)} max={today()}/>
       <div style={{display:"flex",gap:10,marginTop:18}}>
-        <button className="btn ghost" onClick={onClose} style={{flex:1}}>Cancel</button>
-        <button className="btn pri" style={{flex:2}} onClick={()=>onSave(f)}>Add Account</button>
+        <button className="btn ghost" style={{flex:1}} onClick={onClose}>Cancel</button>
+        <button className="btn pri" style={{flex:2}} onClick={()=>{if(!fromDate)return alert("Select a date.");onStart(fromDate);}}>Start Sync</button>
+      </div>
+    </div></div>
+  );
+}
+
+function EmailReviewModal({initialItems,acts,cats,onClose,onSubmit}){
+  const normalize=(i)=>{
+    const act=i.businessActivity||acts[0]||"Personal";
+    const cat=i.category||cats[act]?.[0]||"Other";
+    return{...i,type:i.type==="income"?"income":"expense",businessActivity:act,category:cat,date:i.date||today(),amount:Number(i.amount)||0,description:i.description||i.vendor||cat,paymentMethod:i.paymentMethod||""};
+  };
+  const[rows,setRows]=useState(()=>initialItems.map(normalize));
+  const update=(idx,patch)=>setRows(p=>p.map((r,i)=>i===idx?{...r,...patch}:r));
+  const remove=(idx)=>setRows(p=>p.filter((_,i)=>i!==idx));
+  return(
+    <div className="overlay"><div className="modal" style={{maxWidth:980}}>
+      <MH title={`Review AI Extraction (${rows.length})`} onClose={onClose}/>
+      <div style={{fontSize:12,color:"#64748b",marginBottom:12}}>Edit any field before posting. This is where you confirm business activity/category accuracy.</div>
+      <div style={{maxHeight:"58vh",overflowY:"auto",display:"grid",gap:10,paddingRight:4}}>
+        {rows.map((r,i)=>(
+          <div key={`${r.emailMsgId||"m"}-${i}`} style={{border:"1px solid #1e293b",borderRadius:10,padding:10,background:"#0a0f1d"}}>
+            <div style={{display:"grid",gridTemplateColumns:"110px 120px 120px 1fr 1fr",gap:8,marginBottom:8}}>
+              <div><label>Type</label><select value={r.type} onChange={e=>update(i,{type:e.target.value})}><option value="expense">Expense</option><option value="income">Income</option></select></div>
+              <div><label>Date</label><input type="date" value={r.date||""} onChange={e=>update(i,{date:e.target.value})}/></div>
+              <div><label>Amount</label><input type="number" value={r.amount||""} onChange={e=>update(i,{amount:Number(e.target.value)})}/></div>
+              <div><label>Business</label><select value={r.businessActivity||acts[0]||""} onChange={e=>update(i,{businessActivity:e.target.value,category:cats[e.target.value]?.[0]||r.category||"Other"})}>{acts.map(a=><option key={a} value={a}>{a}</option>)}</select></div>
+              <div><label>Category</label><input list={`cat-${i}`} value={r.category||""} onChange={e=>update(i,{category:e.target.value})}/><datalist id={`cat-${i}`}>{(cats[r.businessActivity]||[]).map(c=><option key={c} value={c}/>)}</datalist></div>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr auto",gap:8,alignItems:"end"}}>
+              <div><label>Description</label><input value={r.description||""} onChange={e=>update(i,{description:e.target.value})}/></div>
+              <div><label>Vendor</label><input value={r.vendor||""} onChange={e=>update(i,{vendor:e.target.value})}/></div>
+              <div><label>Payment</label><select value={r.paymentMethod||""} onChange={e=>update(i,{paymentMethod:e.target.value})}><option value="">Select</option>{PAY_METHODS.map(m=><option key={m} value={m}>{m}</option>)}</select></div>
+              <button className="btn sm dan" onClick={()=>remove(i)}>Remove</button>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div style={{display:"flex",gap:10,marginTop:14}}>
+        <button className="btn ghost" style={{flex:1}} onClick={onClose}>Cancel</button>
+        <button className="btn ghost" style={{flex:1}} onClick={()=>onSubmit(rows,"inbox")}>Send to Inbox</button>
+        <button className="btn pri" style={{flex:2}} onClick={()=>onSubmit(rows,"dashboard")}>Approve & Add to Dashboard</button>
       </div>
     </div></div>
   );
