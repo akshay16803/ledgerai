@@ -1003,7 +1003,8 @@ function SmsOverviewModal({onClose}){
 
 // ── EMAIL TAB ─────────────────────────────────────────────────────────────────
 function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaultGoogleClientId}){
-  const[syncingId,setSyncingId]=useState(null);
+  const[syncingIds,setSyncingIds]=useState({});
+  const[syncProgress,setSyncProgress]=useState({});
   const[logs,setLogs]=useState({});
   const[toast,setToast]=useState("");
   const[firstSyncPrompt,setFirstSyncPrompt]=useState(null); // {accId,fromDate,scanAll}
@@ -1012,6 +1013,9 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
   const oauthClientId=(defaultGoogleClientId||DEFAULT_GOOGLE_CLIENT_ID||"").trim();
   const emailInbox=inbox.filter(i=>i.source==="email").length;
   const connected=emails.filter(a=>a.connected&&a.token).length;
+  const anySyncing=Object.values(syncingIds).some(Boolean);
+  const setSyncing=(id,val)=>setSyncingIds(p=>({...p,[id]:val}));
+  const setProgress=(id,patch)=>setSyncProgress(p=>({...p,[id]:{...(p[id]||{}),...patch}}));
 
   useEffect(()=>{
     if(!toast)return;
@@ -1075,7 +1079,8 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
     const scanAll=opts.scanAll===true;
     const fromDate=(opts.fromDate||acc.syncFromDate||"").trim();
     const markFirst=opts.markFirstSync===true;
-    setSyncingId(acc.id);
+    setSyncing(acc.id,true);
+    setProgress(acc.id,{phase:"fetching",processed:0,total:0,remaining:0,matched:0,newCount:0,found:0});
     try{
       const requestedMax=scanAll?50000:Math.max(1,Math.min(Number(acc.maxEmails)||100,5000));
       const baseQuery=(acc.syncQuery||GMAIL_QUERY||"in:anywhere").trim();
@@ -1084,12 +1089,23 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
       const finalQuery=qParts.join(" ").trim();
       log(acc.id,scanAll?`Scanning mailbox from ${fromDate||"beginning"}…`:"Fetching email list…");
       const messages=await gmailListMessages(acc.token,finalQuery,requestedMax);
-      if(!messages.length){log(acc.id,"✓ No matching emails found.");setSyncingId(null);return;}
+      if(!messages.length){
+        log(acc.id,"✓ No matching emails found.");
+        setProgress(acc.id,{phase:"done",processed:0,total:0,remaining:0,matched:0,newCount:0,found:0});
+        setSyncing(acc.id,false);
+        return;
+      }
       const processed=new Set(LS.get(`proc_${acc.id}`,[]));
       const fresh=messages.filter(m=>!processed.has(m.id));
-      if(!fresh.length){log(acc.id,"✓ All emails already processed.");setSyncingId(null);return;}
+      if(!fresh.length){
+        log(acc.id,"✓ All emails already processed.");
+        setProgress(acc.id,{phase:"done",processed:0,total:0,remaining:0,matched:messages.length,newCount:0,found:0});
+        setSyncing(acc.id,false);
+        return;
+      }
       const toProcess=scanAll?fresh:fresh.slice(0,Math.max(1,Math.min(Number(acc.maxEmails)||100,5000)));
       log(acc.id,`Matched ${messages.length} email(s), ${fresh.length} new. Reading ${toProcess.length} now…`);
+      setProgress(acc.id,{phase:"processing",processed:0,total:toProcess.length,remaining:toProcess.length,matched:messages.length,newCount:fresh.length,found:0});
       const found=[];let done=0;
       for(const msg of toProcess){
         try{
@@ -1104,21 +1120,29 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
           items.forEach(item=>found.push({...item,date:item.date||eDate,source:"email",emailSubject:subject,emailFrom:from,emailAccountId:acc.id,emailMsgId:msg.id}));
           processed.add(msg.id);done++;
           log(acc.id,`Processed ${done}/${toProcess.length} emails — ${found.length} transaction(s) found…`);
+          setProgress(acc.id,{phase:"processing",processed:done,total:toProcess.length,remaining:Math.max(0,toProcess.length-done),matched:messages.length,newCount:fresh.length,found:found.length});
         }catch(e){console.error(e);}
       }
       LS.set(`proc_${acc.id}`,[...processed].slice(-50000));
       const valid=found.filter(i=>i.amount>0&&(i.type==="income"||i.type==="expense"));
       setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,lastSync:new Date().toISOString(),lastCount:valid.length,firstSyncCompleted:a.firstSyncCompleted||markFirst,syncFromDate:fromDate||a.syncFromDate||""}:a));
-      if(!valid.length){log(acc.id,"✓ Done — no income/expense found in scanned emails.");setSyncingId(null);return;}
+      if(!valid.length){
+        log(acc.id,"✓ Done — no income/expense found in scanned emails.");
+        setProgress(acc.id,{phase:"done",processed:toProcess.length,total:toProcess.length,remaining:0,matched:messages.length,newCount:fresh.length,found:0});
+        setSyncing(acc.id,false);
+        return;
+      }
       log(acc.id,`AI found ${valid.length} income/expense item(s). Review before posting.`);
+      setProgress(acc.id,{phase:"review",processed:toProcess.length,total:toProcess.length,remaining:0,matched:messages.length,newCount:fresh.length,found:valid.length});
       setReviewState({accId:acc.id,items:valid});
     }catch(e){
       if(String(e.message||"").includes("401")){
         log(acc.id,"⚠ Token expired — reconnect required.");
         setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,token:null,connected:false}:a));
       }else log(acc.id,"Error: "+e.message);
+      setProgress(acc.id,{phase:"error"});
     }
-    setSyncingId(null);
+    setSyncing(acc.id,false);
   };
 
   const startSync=(acc,scanAll=false)=>{
@@ -1132,6 +1156,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
   };
 
   const submitReview=(rows,mode="dashboard")=>{
+    const reviewAccId=reviewState?.accId;
     const normalized=rows.map(r=>{
       const activity=r.businessActivity||acts[0]||"Personal";
       const category=r.category||cats[activity]?.[0]||"Other";
@@ -1154,6 +1179,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
       const posted=autoPostTxns?autoPostTxns(normalized.map(i=>({...i,source:"email"}))):0;
       setToast(`Added ${posted||normalized.length} transaction(s) to Dashboard.`);
     }
+    if(reviewAccId)setProgress(reviewAccId,{phase:"done",remaining:0});
     setReviewState(null);
   };
 
@@ -1174,7 +1200,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
             Connected accounts: <b style={{color:"#e2e8f0"}}>{connected}</b> / {emails.length}
             {emailInbox>0&&<span style={{marginLeft:10,color:"#f59e0b"}}>· {emailInbox} items pending in Inbox</span>}
           </div>
-          {emails.some(a=>a.connected&&a.token)&&<button className="btn sm pri" onClick={()=>emails.filter(a=>a.connected&&a.token).forEach(a=>startSync(a,false))}>🔄 Sync All Accounts</button>}
+          {emails.some(a=>a.connected&&a.token)&&<button className="btn sm pri" disabled={anySyncing} onClick={()=>emails.filter(a=>a.connected&&a.token).forEach(a=>startSync(a,false))}>{anySyncing?"⏳ Syncing…":"🔄 Sync All Accounts"}</button>}
         </R>
       </div>
 
@@ -1205,13 +1231,34 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
             </div>
             <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
               {!acc.connected&&<button className="btn sm pri" onClick={()=>connectAccount(acc)}>Connect</button>}
-              {acc.connected&&<button className="btn sm" style={{background:"#1a2234",color:"#818cf8"}} disabled={syncingId===acc.id} onClick={()=>startSync(acc,false)}>{syncingId===acc.id?"⏳ Syncing…":"🔄 Sync"}</button>}
-              {acc.connected&&<button className="btn sm ghost" disabled={syncingId===acc.id} onClick={()=>setFirstSyncPrompt({accId:acc.id,fromDate:acc.syncFromDate||new Date(Date.now()-180*24*60*60*1000).toISOString().slice(0,10),scanAll:true})}>🧠 Scan From Date</button>}
+              {acc.connected&&<button className="btn sm" style={{background:"#1a2234",color:"#818cf8"}} disabled={Boolean(syncingIds[acc.id])} onClick={()=>startSync(acc,false)}>{syncingIds[acc.id]?"⏳ Syncing…":"🔄 Sync"}</button>}
+              {acc.connected&&<button className="btn sm ghost" disabled={Boolean(syncingIds[acc.id])} onClick={()=>setFirstSyncPrompt({accId:acc.id,fromDate:acc.syncFromDate||new Date(Date.now()-180*24*60*60*1000).toISOString().slice(0,10),scanAll:true})}>🧠 Scan From Date</button>}
               {acc.connected&&<button className="btn sm dan" onClick={()=>disconnectAccount(acc)}>Disconnect</button>}
               <button className="btn sm ghost" onClick={()=>setEmails(p=>p.map(a=>a.id===acc.id?{...a,_open:!a._open}:a))}>⚙</button>
               <button className="btn sm ghost" onClick={()=>removeAccount(acc)}>Remove</button>
             </div>
           </R>
+          {syncProgress[acc.id]&&(
+            <div style={{background:"#0a0f1d",border:"1px solid #1e293b",borderRadius:8,padding:"8px 12px",fontSize:12,color:"#c7d2fe",marginBottom:8}}>
+              <div style={{display:"flex",justifyContent:"space-between",gap:10,marginBottom:6,flexWrap:"wrap"}}>
+                <span>
+                  {syncProgress[acc.id].phase==="fetching"&&"Fetching emails…"}
+                  {syncProgress[acc.id].phase==="processing"&&`Processed ${syncProgress[acc.id].processed||0}/${syncProgress[acc.id].total||0}`}
+                  {syncProgress[acc.id].phase==="review"&&`Scan complete. ${syncProgress[acc.id].found||0} item(s) awaiting review.`}
+                  {syncProgress[acc.id].phase==="done"&&"Sync completed."}
+                  {syncProgress[acc.id].phase==="error"&&"Sync failed."}
+                </span>
+                <span style={{color:"#94a3b8"}}>
+                  {(syncProgress[acc.id].phase==="processing"||syncProgress[acc.id].phase==="review"||syncProgress[acc.id].phase==="done")&&`Left ${Math.max(0,syncProgress[acc.id].remaining||0)}`}
+                </span>
+              </div>
+              {Number(syncProgress[acc.id].total)>0&&(
+                <div style={{height:6,background:"#1e293b",borderRadius:4,overflow:"hidden"}}>
+                  <div style={{height:"100%",background:"#6366f1",width:`${Math.min(100,Math.round(((syncProgress[acc.id].processed||0)/(syncProgress[acc.id].total||1))*100))}%`,transition:"width .15s linear"}}/>
+                </div>
+              )}
+            </div>
+          )}
           {logs[acc.id]&&<div style={{background:"#0a0f1d",border:"1px solid #1e293b",borderRadius:8,padding:"8px 12px",fontSize:12,color:"#c7d2fe",marginBottom:acc._open?10:0}}>{logs[acc.id]}</div>}
           {acc._open&&(
             <div style={{background:"#0a0f1d",border:"1px solid #1e293b",borderRadius:10,padding:14,marginTop:8}}>
