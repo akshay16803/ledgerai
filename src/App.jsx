@@ -470,7 +470,7 @@ export default function App(){
         {tab==="dashboard"&&<DashTab byAct={byAct} totInc={totInc} totExp={totExp} todInc={todInc} todExp={todExp} txns={txns} todayTxns={todayTxns} inbox={inbox} emails={emails} onEdit={tx=>{setEditTx(tx);setAddType(tx.type);setShowAdd(true);}} onDelete={delTx}/>}
         {tab==="transactions"&&<LedgerTab txns={filtered} filter={filter} setFilter={setFilter} acts={acts} onEdit={tx=>{setEditTx(tx);setAddType(tx.type);setShowAdd(true);}} onDelete={delTx}/>}
         {tab==="inbox"&&<InboxTab inbox={inbox} addInbox={addInbox} acts={acts} cats={cats} onApprove={approveInbox} onEdit={editInbox} onDiscard={discardInbox}/>}
-        {tab==="email"&&<EmailTab emails={emails} setEmails={setEmails} inbox={inbox} addInbox={addInbox} acts={acts} cats={cats}/>}
+        {tab==="email"&&<EmailTab emails={emails} setEmails={setEmails} inbox={inbox} addInbox={addInbox} acts={acts} cats={cats} defaultGoogleClientId={authCfg.googleClientId||DEFAULT_GOOGLE_CLIENT_ID}/>}
         {tab==="messages"&&<MessagesTab smsNums={smsNums} setSmsNums={setSmsNums} emails={emails} inbox={inbox} addInbox={addInbox} acts={acts} cats={cats}/>}
         {tab==="journal"&&<JournalTab txns={txns}/>}
         {tab==="accounts"&&<AccountsTab accs={accs} setAccs={setAccs} txns={txns} addInbox={addInbox} acts={acts} cats={cats}/>}
@@ -949,27 +949,28 @@ function SmsOverviewModal({onClose}){
 }
 
 // ── EMAIL TAB ─────────────────────────────────────────────────────────────────
-function EmailTab({emails,setEmails,inbox,addInbox,acts,cats}){
+function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClientId}){
   const[showSetup,setShowSetup]=useState(false);
   const[showGuide,setShowGuide]=useState(false);
   const[syncingId,setSyncingId]=useState(null);
   const[logs,setLogs]=useState({});
   const log=(id,msg)=>setLogs(p=>({...p,[id]:msg}));
+  const oauthClientId=(defaultGoogleClientId||DEFAULT_GOOGLE_CLIENT_ID||"").trim();
 
   const connect=(acc)=>{
-    if(!acc.clientId?.trim()){alert("Enter your Google OAuth Client ID in account settings first.");return;}
+    if(!oauthClientId){alert("Google OAuth is not configured for this app yet.");return;}
     if(!window.google?.accounts?.oauth2){alert("Google Identity Services loading… please wait a moment and try again.");return;}
-    initOAuth(acc.clientId,async(err,token)=>{
+    initOAuth(oauthClientId,async(err,token)=>{
       if(err){
         const msg=String(err.message||"");
         if(msg.includes("redirect_uri_mismatch")){
           alert(
             "OAuth error: redirect_uri_mismatch\n\n"+
-            "Fix in Google Cloud Console:\n"+
+            "Fix in Google Cloud Console for this app Client ID:\n"+
             "1) OAuth client type must be Web application\n"+
-            `2) Authorized JavaScript origins must include ${window.location.origin}\n`+
-            `3) Authorized redirect URIs must include ${window.location.origin} and ${window.location.origin}/\n`+
-            "4) Save, then retry Connect"
+            `2) Authorized JavaScript origins: ${window.location.origin}\n`+
+            `3) Authorized redirect URIs: ${window.location.origin} and ${window.location.origin}/\n`+
+            "4) Save, wait 2 minutes, then retry Connect"
           );
         }else{
           alert(`OAuth error: ${msg}`);
@@ -978,7 +979,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats}){
       }
       try{
         const profile=await gmailGetProfile(token);
-        setEmails(p=>p.map(a=>a.id===acc.id?{...a,token,email:profile.emailAddress,connected:true}:a));
+        setEmails(p=>p.map(a=>a.id===acc.id?{...a,token,email:profile.emailAddress,connected:true,clientId:oauthClientId}:a));
       }catch(e){alert("Profile fetch error: "+e.message);}
     });
   };
@@ -1038,6 +1039,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats}){
       <p style={{fontSize:13,color:"#64748b",marginBottom:20}}>
         Connect Gmail accounts to auto-import receipts and invoices. Extracted transactions go to Inbox for day-end review.
         {emailInbox>0&&<span style={{color:"#f59e0b",marginLeft:8}}>⏳ {emailInbox} email items pending in Inbox.</span>}
+        <span style={{color:"#818cf8",marginLeft:8}}>No client ID entry needed here.</span>
       </p>
 
       {emails.length===0&&(
@@ -1086,14 +1088,14 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats}){
             <div style={{background:"#0a0c12",borderRadius:8,padding:14,marginTop:8}}>
               <div style={{fontSize:12,color:"#64748b",fontWeight:700,marginBottom:10,textTransform:"uppercase"}}>Account Settings</div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-                <div><label>OAuth Client ID</label><input value={acc.clientId||""} onChange={e=>setEmails(p=>p.map(a=>a.id===acc.id?{...a,clientId:e.target.value}:a))} placeholder="xxxx.apps.googleusercontent.com"/></div>
+                <div><label>OAuth Mode</label><input value="Built-in LedgerAI Google OAuth" readOnly/></div>
                 <div><label>Account Label</label><input value={acc.label||""} onChange={e=>setEmails(p=>p.map(a=>a.id===acc.id?{...a,label:e.target.value}:a))} placeholder="e.g. Business Gmail"/></div>
                 <div><label>Max Emails per Sync</label><input type="number" value={acc.maxEmails||30} onChange={e=>setEmails(p=>p.map(a=>a.id===acc.id?{...a,maxEmails:Number(e.target.value)}:a))}/></div>
                 <div><label>Search Query</label><input value={acc.syncQuery||GMAIL_QUERY} onChange={e=>setEmails(p=>p.map(a=>a.id===acc.id?{...a,syncQuery:e.target.value}:a))}/></div>
               </div>
               <div style={{marginTop:10,display:"flex",gap:8}}>
                 <button className="btn sm ghost" onClick={()=>setEmails(p=>p.map(a=>a.id===acc.id?{...a,_open:false}:a))}>Close</button>
-                {!acc.connected&&acc.clientId&&<button className="btn sm pri" onClick={()=>connect(acc)}>🔗 Connect Now</button>}
+                {!acc.connected&&<button className="btn sm pri" onClick={()=>connect(acc)}>🔗 Connect Now</button>}
                 {acc.connected&&<button className="btn sm" style={{background:"#1a2234",color:"#818cf8"}} onClick={()=>sync(acc)} disabled={syncingId===acc.id}>{syncingId===acc.id?"⏳ Syncing…":"🔄 Sync Now"}</button>}
               </div>
             </div>
@@ -1119,21 +1121,20 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats}){
 }
 
 function AddEmailModal({onSave,onClose}){
-  const[f,setF]=useState({label:"",clientId:"",syncQuery:GMAIL_QUERY,maxEmails:30});
+  const[f,setF]=useState({label:"",syncQuery:GMAIL_QUERY,maxEmails:30});
   return(
     <div className="overlay"><div className="modal" style={{maxWidth:520}}>
       <MH title="Add Gmail Account" onClose={onClose}/>
       <div style={{background:"#0d0d2b",border:"1px solid #6366f1",borderRadius:8,padding:12,marginBottom:14,fontSize:13,color:"#c7d2fe"}}>
-        💡 You need a free Google OAuth Client ID (type: <b>Web application</b>). Takes ~3 minutes to set up. Click <b>"Setup Guide"</b> for step-by-step instructions.
+        💡 One-click connect: no client ID input needed here. Just add the account and click <b>Connect</b>.
       </div>
       <label>Account Label</label><input value={f.label} onChange={e=>setF(p=>({...p,label:e.target.value}))} placeholder="e.g. Personal Gmail / Business Gmail"/>
-      <label>Google OAuth Client ID</label><input value={f.clientId} onChange={e=>setF(p=>({...p,clientId:e.target.value}))} placeholder="xxxxxxxxxx.apps.googleusercontent.com"/>
       <label>Email Search Query (Gmail format)</label><input value={f.syncQuery} onChange={e=>setF(p=>({...p,syncQuery:e.target.value}))}/>
       <div style={{fontSize:11,color:"#475569",marginTop:4}}>Customize what emails to capture. Default covers receipts, invoices, payment alerts.</div>
       <label>Max Emails per Sync</label><input type="number" value={f.maxEmails} onChange={e=>setF(p=>({...p,maxEmails:Number(e.target.value)}))}/>
       <div style={{display:"flex",gap:10,marginTop:18}}>
         <button className="btn ghost" onClick={onClose} style={{flex:1}}>Cancel</button>
-        <button className="btn pri" style={{flex:2}} onClick={()=>{if(!f.clientId.trim())return alert("Enter your Google OAuth Client ID");onSave(f);}}>Add Account</button>
+        <button className="btn pri" style={{flex:2}} onClick={()=>onSave(f)}>Add Account</button>
       </div>
     </div></div>
   );
@@ -1149,8 +1150,8 @@ function SetupGuideModal({onClose}){
     {t:"Step 1 — Create Google Cloud Project",c:<div><p style={{marginBottom:12}}>You need a free Google Cloud project (no cost, no card needed).</p><ol style={{paddingLeft:18,lineHeight:2.4}}><li>Go to <a href="https://console.cloud.google.com" target="_blank" rel="noreferrer">console.cloud.google.com</a></li><li>Click <b>Select a project → New Project</b></li><li>Name it "LedgerAI" → Click <b>Create</b></li></ol></div>},
     {t:"Step 2 — Enable Gmail API",c:<div><ol style={{paddingLeft:18,lineHeight:2.4}}><li>In your project: <b>APIs & Services → Library</b></li><li>Search <b>"Gmail API"</b> → Click it → <b>Enable</b></li></ol></div>},
     {t:"Step 3 — OAuth Consent Screen",c:<div><ol style={{paddingLeft:18,lineHeight:2.4}}><li><b>APIs & Services → OAuth consent screen</b></li><li>Choose <b>External</b> → Create</li><li>Fill App name, support email, developer email → Save & Continue through all steps</li><li>On <b>Test users</b> step: <b>+ Add Users</b> → add your Gmail address(es)</li><li>Save and Continue → Back to Dashboard</li></ol></div>},
-    {t:"Step 4 — Create OAuth Client ID",c:<div><ol style={{paddingLeft:18,lineHeight:2.4}}><li><b>APIs & Services → Credentials → + Create Credentials → OAuth client ID</b></li><li>Application type: <b>Web application</b></li><li>Under <b>Authorised JavaScript origins</b> add:<br/><code style={{background:"#0a0c12",padding:"2px 8px",borderRadius:4,fontSize:12}}>{origin}</code>{httpsOrigin!==origin&&<><br/><code style={{background:"#0a0c12",padding:"2px 8px",borderRadius:4,fontSize:12}}>{httpsOrigin}</code></>}</li><li>Under <b>Authorised redirect URIs</b> add:<br/><code style={{background:"#0a0c12",padding:"2px 8px",borderRadius:4,fontSize:12}}>{origin}</code><br/><code style={{background:"#0a0c12",padding:"2px 8px",borderRadius:4,fontSize:12}}>{originSlash}</code>{httpsOrigin!==origin&&<><br/><code style={{background:"#0a0c12",padding:"2px 8px",borderRadius:4,fontSize:12}}>{httpsOrigin}</code><br/><code style={{background:"#0a0c12",padding:"2px 8px",borderRadius:4,fontSize:12}}>{httpsOriginSlash}</code></>}</li><li>Click <b>Create</b> → Copy your <b>Client ID</b></li><li>It looks like: <code style={{background:"#0a0c12",padding:"2px 6px",borderRadius:4,fontSize:12}}>1234567890.apps.googleusercontent.com</code></li></ol></div>},
-    {t:"Step 5 — Connect in LedgerAI",c:<div><ol style={{paddingLeft:18,lineHeight:2.4}}><li>Email tab → <b>+ Add Email</b> → paste your Client ID</li><li>Click <b>Add Account</b> → then <b>🔗 Connect</b></li><li>Google OAuth popup appears → sign in → grant read-only access</li><li>Click <b>🔄 Sync</b> to fetch receipt emails</li><li>Review extracted transactions in <b>Inbox</b> tab</li></ol><div style={{background:"#052e16",border:"1px solid #34d399",borderRadius:8,padding:12,marginTop:14,fontSize:12,color:"#86efac"}}>✅ <b>Privacy:</b> Your emails are read directly in your browser with read-only access. No email content is stored on any server.</div></div>},
+    {t:"Step 4 — Verify OAuth Client Settings",c:<div><ol style={{paddingLeft:18,lineHeight:2.4}}><li>Open your existing <b>OAuth client ID</b> (Web application)</li><li>Under <b>Authorised JavaScript origins</b> add:<br/><code style={{background:"#0a0c12",padding:"2px 8px",borderRadius:4,fontSize:12}}>{origin}</code>{httpsOrigin!==origin&&<><br/><code style={{background:"#0a0c12",padding:"2px 8px",borderRadius:4,fontSize:12}}>{httpsOrigin}</code></>}</li><li>Under <b>Authorised redirect URIs</b> add:<br/><code style={{background:"#0a0c12",padding:"2px 8px",borderRadius:4,fontSize:12}}>{origin}</code><br/><code style={{background:"#0a0c12",padding:"2px 8px",borderRadius:4,fontSize:12}}>{originSlash}</code>{httpsOrigin!==origin&&<><br/><code style={{background:"#0a0c12",padding:"2px 8px",borderRadius:4,fontSize:12}}>{httpsOrigin}</code><br/><code style={{background:"#0a0c12",padding:"2px 8px",borderRadius:4,fontSize:12}}>{httpsOriginSlash}</code></>}</li><li>Save and wait ~2 minutes for propagation</li></ol></div>},
+    {t:"Step 5 — One-Click Connect in LedgerAI",c:<div><ol style={{paddingLeft:18,lineHeight:2.4}}><li>Email tab → <b>+ Add Email</b></li><li>Click <b>Add Account</b> → then <b>🔗 Connect</b></li><li>Google OAuth popup appears → sign in → grant read-only access</li><li>Click <b>🔄 Sync</b> to fetch receipt emails</li><li>Review extracted transactions in <b>Inbox</b> tab</li></ol><div style={{background:"#052e16",border:"1px solid #34d399",borderRadius:8,padding:12,marginTop:14,fontSize:12,color:"#86efac"}}>✅ <b>Privacy:</b> Your emails are read directly in your browser with read-only access. No email content is stored on any server.</div></div>},
   ];
   return(
     <div className="overlay"><div className="modal" style={{maxWidth:560}}>
