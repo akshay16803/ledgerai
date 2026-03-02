@@ -259,6 +259,7 @@ export default function App(){
     };
   });
   const[authUser,setAuthUser]=useState(()=>LS.get("ledger_auth_user",null));
+  const[authBypass,setAuthBypass]=useState(()=>LS.get("ledger_auth_bypass",false));
   const[authMsg,setAuthMsg]=useState("");
   const[tab,setTab]=useState("dashboard");
   const[txns,setTxns]=useState(()=>LS.get("ledger_txns",[]));
@@ -279,6 +280,9 @@ export default function App(){
   const[summary,setSummary]=useState("");
   const[sumLoad,setSumLoad]=useState(false);
   const[filter,setFilter]=useState({activity:"All",type:"All",from:"",to:""});
+  const isLocalhost=typeof window!=="undefined"&&(window.location.hostname==="localhost"||window.location.hostname==="127.0.0.1");
+  const isInsecureOrigin=typeof window!=="undefined"&&window.location.protocol!=="https:"&&!isLocalhost;
+  const bypassActive=Boolean(authCfg.enabled&&authBypass&&isInsecureOrigin);
 
   const onGoogleCredential=useCallback((resp)=>{
     const payload=decodeGoogleCredential(resp?.credential||"");
@@ -288,6 +292,7 @@ export default function App(){
     if(owner!==email){setAuthMsg(`Access denied. This dashboard is locked to ${LOCKED_OWNER_EMAIL}.`);return;}
     setAuthCfg(p=>({...p,ownerEmail:LOCKED_OWNER_EMAIL}));
     setAuthUser({email:payload.email,name:payload.name||payload.email,picture:payload.picture||"",lastLoginAt:new Date().toISOString()});
+    setAuthBypass(false);
     setAuthMsg("");
   },[]);
 
@@ -298,6 +303,7 @@ export default function App(){
 
   // ── localStorage mirrors ─────────────────────────────────────────────────
   useEffect(()=>LS.set("ledger_auth_cfg",authCfg),[authCfg]);
+  useEffect(()=>LS.set("ledger_auth_bypass",authBypass),[authBypass]);
   useEffect(()=>{
     try{
       if(authUser)localStorage.setItem("ledger_auth_user",JSON.stringify(authUser));
@@ -322,6 +328,9 @@ export default function App(){
   useEffect(()=>{
     if(authCfg.ownerEmail!==LOCKED_OWNER_EMAIL)setAuthCfg(p=>({...p,ownerEmail:LOCKED_OWNER_EMAIL}));
   },[authCfg.ownerEmail]);
+  useEffect(()=>{
+    if(authBypass&&!isInsecureOrigin)setAuthBypass(false);
+  },[authBypass,isInsecureOrigin]);
 
   // ── OneDrive sync helpers ────────────────────────────────────────────────
   const pushToCloud=useCallback(async(state={})=>{
@@ -430,8 +439,8 @@ export default function App(){
   if(authCfg.enabled&&!authCfg.googleClientId){
     return <AuthSetupScreen authCfg={authCfg} setAuthCfg={setAuthCfg}/>;
   }
-  if(authCfg.enabled&&!authUser){
-    return <AuthLoginScreen clientId={authCfg.googleClientId} ownerEmail={LOCKED_OWNER_EMAIL} onCredential={onGoogleCredential} authMsg={authMsg}/>;
+  if(authCfg.enabled&&!authUser&&!bypassActive){
+    return <AuthLoginScreen clientId={authCfg.googleClientId} ownerEmail={LOCKED_OWNER_EMAIL} onCredential={onGoogleCredential} authMsg={authMsg} allowTemporaryBypass={isInsecureOrigin} onBypass={()=>setAuthBypass(true)}/>;
   }
 
   return(
@@ -454,6 +463,8 @@ export default function App(){
           {syncStatus==="idle"&&(sbCfg.enabled?"☁ Cloud":"⚠ Local only")}
           {syncStatus==="error"&&"☁ Sync error"}
         </div>
+        {bypassActive&&<div style={{marginRight:8,fontSize:11,color:"#fbbf24",whiteSpace:"nowrap"}}>⚠ Auth bypass active (HTTP)</div>}
+        {bypassActive&&<button className="btn sm ghost" style={{marginRight:6}} onClick={()=>setAuthBypass(false)}>Re-enable lock</button>}
         {authCfg.enabled&&authUser&&<div style={{marginRight:8,fontSize:11,color:"#94a3b8",whiteSpace:"nowrap",maxWidth:220,overflow:"hidden",textOverflow:"ellipsis"}} title={authUser.email}>👤 {authUser.email}</div>}
         {authCfg.enabled&&authUser&&<button className="btn sm ghost" style={{marginRight:6}} onClick={signOut}>Sign out</button>}
         <button className="btn sm ghost" style={{marginRight:6}} onClick={()=>{setAddType("income");setEditTx(null);setShowAdd(true);}}>+ Income</button>
@@ -507,7 +518,7 @@ function AuthSetupScreen({authCfg,setAuthCfg}){
   );
 }
 
-function AuthLoginScreen({clientId,ownerEmail,onCredential,authMsg}){
+function AuthLoginScreen({clientId,ownerEmail,onCredential,authMsg,allowTemporaryBypass=false,onBypass=()=>{}}){
   const btnRef=useRef(null);
   const[loading,setLoading]=useState(true);
   const[loginErr,setLoginErr]=useState("");
@@ -557,7 +568,7 @@ function AuthLoginScreen({clientId,ownerEmail,onCredential,authMsg}){
     };
     if(clientId)mount();
     return()=>{alive=false;};
-  },[clientId,onCredential]);
+  },[clientId,onCredential,ownerEmail]);
 
   return(
     <div style={{fontFamily:"'DM Sans',sans-serif",background:"#07090f",minHeight:"100vh",color:"#e2e8f0",display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
@@ -572,6 +583,14 @@ function AuthLoginScreen({clientId,ownerEmail,onCredential,authMsg}){
         </div>
         {authMsg&&<div style={{background:"#450a0a",border:"1px solid #f87171",borderRadius:8,padding:"8px 10px",fontSize:12,color:"#fca5a5",marginBottom:10}}>{authMsg}</div>}
         {loginErr&&<div style={{background:"#1a1a2e",border:"1px solid #818cf8",borderRadius:8,padding:"10px 12px",fontSize:12,color:"#c7d2fe"}}>{loginErr}</div>}
+        {allowTemporaryBypass&&(
+          <div style={{marginTop:10}}>
+            <button className="btn ghost" style={{width:"100%"}} onClick={onBypass}>Continue temporarily without login</button>
+            <div style={{fontSize:11,color:"#64748b",marginTop:8,lineHeight:1.5}}>
+              Temporary mode on HTTP only. Full Google lock returns automatically when HTTPS is active.
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
