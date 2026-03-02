@@ -1003,7 +1003,6 @@ function SmsOverviewModal({onClose}){
 
 // ── EMAIL TAB ─────────────────────────────────────────────────────────────────
 function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaultGoogleClientId}){
-  const[showGuide,setShowGuide]=useState(false);
   const[syncingId,setSyncingId]=useState(null);
   const[logs,setLogs]=useState({});
   const[toast,setToast]=useState("");
@@ -1163,7 +1162,6 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
       <R style={{marginBottom:10}}>
         <h2 className="h2" style={{flex:1}}>Email Integration</h2>
         <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-          <button className="btn sm ghost" onClick={()=>setShowGuide(true)}>📖 Setup Guide</button>
           <button className="btn sm suc" onClick={()=>connectAccount(null)}>+ Connect Email Account</button>
         </div>
       </R>
@@ -1186,7 +1184,6 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
           <div style={{fontSize:20,fontWeight:700,marginBottom:8}}>Connect your first email account</div>
           <div style={{fontSize:13,color:"#64748b",marginBottom:20}}>Click connect, sign in with Google, grant permission, and start syncing transactions.</div>
           <div style={{display:"flex",justifyContent:"center",gap:10}}>
-            <button className="btn ghost" onClick={()=>setShowGuide(true)}>📖 Setup Guide</button>
             <button className="btn pri" onClick={()=>connectAccount(null)}>+ Connect Email Account</button>
           </div>
         </div>
@@ -1231,7 +1228,6 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
         </div>
       ))}
 
-      {showGuide&&<SetupGuideModal onClose={()=>setShowGuide(false)}/>}
       {firstSyncPrompt&&<EmailFirstSyncModal value={firstSyncPrompt.fromDate} onClose={()=>setFirstSyncPrompt(null)} onStart={(fromDate)=>{
         const acc=emails.find(a=>a.id===firstSyncPrompt.accId);
         if(acc)runSync(acc,{scanAll:firstSyncPrompt.scanAll,fromDate,markFirstSync:!acc.firstSyncCompleted});
@@ -1296,35 +1292,6 @@ function EmailReviewModal({initialItems,acts,cats,onClose,onSubmit}){
         <button className="btn ghost" style={{flex:1}} onClick={onClose}>Cancel</button>
         <button className="btn ghost" style={{flex:1}} onClick={()=>onSubmit(rows,"inbox")}>Send to Inbox</button>
         <button className="btn pri" style={{flex:2}} onClick={()=>onSubmit(rows,"dashboard")}>Approve & Add to Dashboard</button>
-      </div>
-    </div></div>
-  );
-}
-
-function SetupGuideModal({onClose}){
-  const[step,setStep]=useState(0);
-  const origin=typeof window!=="undefined"?window.location.origin:"http://accounts.niprasha.com";
-  const httpsOrigin=origin.startsWith("http://")?origin.replace("http://","https://"):origin;
-  const originSlash=origin.endsWith("/")?origin:`${origin}/`;
-  const httpsOriginSlash=httpsOrigin.endsWith("/")?httpsOrigin:`${httpsOrigin}/`;
-  const steps=[
-    {t:"Step 1 — Create Google Cloud Project",c:<div><p style={{marginBottom:12}}>You need a free Google Cloud project (no cost, no card needed).</p><ol style={{paddingLeft:18,lineHeight:2.4}}><li>Go to <a href="https://console.cloud.google.com" target="_blank" rel="noreferrer">console.cloud.google.com</a></li><li>Click <b>Select a project → New Project</b></li><li>Name it "LedgerAI" → Click <b>Create</b></li></ol></div>},
-    {t:"Step 2 — Enable Gmail API",c:<div><ol style={{paddingLeft:18,lineHeight:2.4}}><li>In your project: <b>APIs & Services → Library</b></li><li>Search <b>"Gmail API"</b> → Click it → <b>Enable</b></li></ol></div>},
-    {t:"Step 3 — OAuth Consent Screen",c:<div><ol style={{paddingLeft:18,lineHeight:2.4}}><li><b>APIs & Services → OAuth consent screen</b></li><li>Choose <b>External</b> → Create</li><li>Fill App name, support email, developer email → Save & Continue through all steps</li><li>On <b>Test users</b> step: <b>+ Add Users</b> → add your Gmail address(es)</li><li>Save and Continue → Back to Dashboard</li></ol></div>},
-    {t:"Step 4 — Verify OAuth Client Settings",c:<div><ol style={{paddingLeft:18,lineHeight:2.4}}><li>Open your existing <b>OAuth client ID</b> (Web application)</li><li>Under <b>Authorised JavaScript origins</b> add:<br/><code style={{background:"#0a0c12",padding:"2px 8px",borderRadius:4,fontSize:12}}>{origin}</code>{httpsOrigin!==origin&&<><br/><code style={{background:"#0a0c12",padding:"2px 8px",borderRadius:4,fontSize:12}}>{httpsOrigin}</code></>}</li><li>Under <b>Authorised redirect URIs</b> add:<br/><code style={{background:"#0a0c12",padding:"2px 8px",borderRadius:4,fontSize:12}}>{origin}</code><br/><code style={{background:"#0a0c12",padding:"2px 8px",borderRadius:4,fontSize:12}}>{originSlash}</code>{httpsOrigin!==origin&&<><br/><code style={{background:"#0a0c12",padding:"2px 8px",borderRadius:4,fontSize:12}}>{httpsOrigin}</code><br/><code style={{background:"#0a0c12",padding:"2px 8px",borderRadius:4,fontSize:12}}>{httpsOriginSlash}</code></>}</li><li>Save and wait ~2 minutes for propagation</li></ol></div>},
-    {t:"Step 5 — One-Click Connect in LedgerAI",c:<div><ol style={{paddingLeft:18,lineHeight:2.4}}><li>Email tab → <b>+ Add Email</b></li><li>Click <b>Add Account</b> → then <b>🔗 Connect</b></li><li>Google OAuth popup appears → sign in → grant read-only access</li><li>Turn <b>Auto-post to Dashboard</b> ON if you want direct posting</li><li>Click <b>🧠 Scan All Mailbox</b> for complete backfill, then use <b>🔄 Sync</b> for ongoing updates</li></ol><div style={{background:"#052e16",border:"1px solid #34d399",borderRadius:8,padding:12,marginTop:14,fontSize:12,color:"#86efac"}}>✅ <b>Privacy:</b> Your emails are read directly in your browser with read-only access. No email content is stored on any server.</div></div>},
-  ];
-  return(
-    <div className="overlay"><div className="modal" style={{maxWidth:560}}>
-      <MH title="Gmail Setup Guide" onClose={onClose}/>
-      <div style={{display:"flex",gap:6,marginBottom:18,overflowX:"auto"}}>
-        {steps.map((s,i)=><div key={i} onClick={()=>setStep(i)} style={{padding:"4px 14px",borderRadius:16,fontSize:12,fontWeight:700,cursor:"pointer",background:step===i?"#6366f1":"#1e293b",color:step===i?"#fff":"#64748b",whiteSpace:"nowrap",flexShrink:0}}>{i+1}</div>)}
-      </div>
-      <div style={{fontWeight:700,fontSize:15,marginBottom:12,color:"#f1f5f9"}}>{steps[step].t}</div>
-      <div style={{fontSize:13,color:"#94a3b8",lineHeight:1.8}}>{steps[step].c}</div>
-      <div style={{display:"flex",gap:10,marginTop:20}}>
-        <button className="btn ghost" onClick={()=>setStep(Math.max(0,step-1))} disabled={step===0} style={{flex:1}}>← Prev</button>
-        {step<steps.length-1?<button className="btn pri" onClick={()=>setStep(step+1)} style={{flex:2}}>Next →</button>:<button className="btn suc" onClick={onClose} style={{flex:2}}>✓ Got it!</button>}
       </div>
     </div></div>
   );
