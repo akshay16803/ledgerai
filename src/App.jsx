@@ -111,6 +111,52 @@ function extractEmailText(payload,d=0){
   return"";
 }
 
+async function withTimeout(promise,ms,label="request"){
+  let timer;
+  try{
+    return await Promise.race([
+      promise,
+      new Promise((_,rej)=>{timer=setTimeout(()=>rej(new Error(`${label} timed out after ${Math.ceil(ms/1000)}s`)),ms);}),
+    ]);
+  }finally{
+    clearTimeout(timer);
+  }
+}
+
+function parseAmountFromText(text=""){
+  const t=(text||"").replace(/[,]/g,"");
+  const m=t.match(/(?:inr|rs\.?|₹)\s*([0-9]+(?:\.[0-9]{1,2})?)/i)||t.match(/\b([0-9]{2,7}(?:\.[0-9]{1,2})?)\b/);
+  if(!m)return 0;
+  const n=Number(m[1]);
+  return Number.isFinite(n)?n:0;
+}
+
+function fallbackExtractEmail(subject="",from="",body=""){
+  const text=`${subject}\n${from}\n${body}`.replace(/\s+/g," ").trim();
+  const lower=text.toLowerCase();
+  const amount=parseAmountFromText(text);
+  if(amount<=0)return[];
+  const expenseHints=["debited","paid","payment","purchase","invoice","receipt","order","bill","spent","charged","upi"];
+  const incomeHints=["credited","received","refund","salary","payout","settlement","deposit"];
+  const hasExp=expenseHints.some(k=>lower.includes(k));
+  const hasInc=incomeHints.some(k=>lower.includes(k));
+  if(!hasExp&&!hasInc)return[];
+  const type=hasInc&&!hasExp?"income":"expense";
+  const em=(from.match(/([a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,})/i)?.[1]||"").toLowerCase();
+  const vendor=(from||em||"email").replace(/\s+/g," ").trim().slice(0,120);
+  return[{
+    type,
+    businessActivity:"Personal",
+    category:"Other",
+    isNewCategory:false,
+    description:(subject||`${type==="income"?"Email income":"Email expense"}`).trim().slice(0,140),
+    amount,
+    date:today(),
+    vendor,
+    paymentMethod:"",
+  }];
+}
+
 function buildJE(tx,accs=[]){
   const accName=id=>{const a=accs.find(x=>x.id===id);return a?.name||"";};
   const payAcc=()=>{if(tx.accountId){const n=accName(tx.accountId);if(n)return n;}return tx.paymentMethod==="Credit Card"?"Credit Card Payable":"Bank Account – Savings";};
@@ -127,8 +173,24 @@ function buildJE(tx,accs=[]){
 }
 
 async function callAI(messages,max_tokens=800){
-  const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens,messages})});
-  const d=await r.json();return d.content?.[0]?.text||"";
+  const ctrl=new AbortController();
+  const timer=setTimeout(()=>ctrl.abort(),25000);
+  try{
+    const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens,messages}),signal:ctrl.signal});
+    const txt=await r.text();
+    let d={};
+    try{d=JSON.parse(txt||"{}");}catch{}
+    if(!r.ok){
+      const msg=d?.error?.message||d?.message||txt?.slice?.(0,180)||`HTTP ${r.status}`;
+      throw new Error(`AI ${r.status}: ${msg}`);
+    }
+    return d.content?.[0]?.text||"";
+  }catch(e){
+    if(e?.name==="AbortError")throw new Error("AI request timed out");
+    throw e;
+  }finally{
+    clearTimeout(timer);
+  }
 }
 async function aiClassify(text,acts,cats,type="expense"){
   const c=Object.entries(cats).map(([a,cs])=>`${a}: ${cs.join(", ")}`).join("\n");
@@ -1275,13 +1337,13 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
       }
       const toProcess=scanAll?fresh:fresh.slice(0,Math.max(1,Math.min(Number(acc.maxEmails)||100,5000)));
       log(acc.id,`Matched ${messages.length} email(s), ${fresh.length} new. Reading ${toProcess.length} now…`);
-      setProgress(acc.id,{phase:"processing",processed:0,total:toProcess.length,remaining:toProcess.length,matched:messages.length,newCount:fresh.length,found:0});
-      const found=[];let done=0;
+      setProgress(acc.id,{phase:"processing",processed:0,total:toProcess.length,remaining:toProcess.length,matched:messages.length,newCount:fresh.length,found:0,failed:0});
+      const found=[];let done=0;let failed=0;let fallbackUsed=0;
       for(const msg of toProcess){
         try{
           let subject="";let from="";let rawDate="";let body="";
           if(provider==="microsoft"){
-            const full=await msGetMessage(token,msg.id);
+            const full=await withTimeout(msGetMessage(token,msg.id),20000,"Outlook message fetch");
             subject=full.subject||"";
             const addr=full.from?.emailAddress?.address||"";
             const name=full.from?.emailAddress?.name||"";
@@ -1289,7 +1351,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
             rawDate=full.receivedDateTime||msg.receivedDateTime||"";
             body=msExtractBody(full);
           }else{
-            const full=await gmailGetMessage(token,msg.id);
+            const full=await withTimeout(gmailGetMessage(token,msg.id),20000,"Gmail message fetch");
             const H=full.payload?.headers||[];
             subject=H.find(h=>h.name==="Subject")?.value||"";
             from=H.find(h=>h.name==="From")?.value||"";
@@ -1298,24 +1360,50 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
           }
           const parsedDate=rawDate?new Date(rawDate):null;
           const eDate=parsedDate&&!Number.isNaN(parsedDate.getTime())?parsedDate.toISOString().slice(0,10):today();
-          const items=await aiExtractEmail(subject,from,body,acts,cats);
+          let items=[];
+          try{
+            items=await withTimeout(aiExtractEmail(subject,from,body,acts,cats),30000,"AI extraction");
+          }catch(aiErr){
+            console.error(aiErr);
+            const fb=fallbackExtractEmail(subject,from,body).map(item=>({...item,date:item.date||eDate}));
+            if(fb.length){
+              fallbackUsed++;
+              items=fb;
+            }else{
+              failed++;
+            }
+          }
           items.forEach(item=>found.push({...item,date:item.date||eDate,source:"email",emailProvider:provider,emailSubject:subject,emailFrom:from,emailAccountId:acc.id,emailMsgId:msg.id}));
-          processed.add(msg.id);done++;
-          log(acc.id,`Processed ${done}/${toProcess.length} emails — ${found.length} transaction(s) found…`);
-          setProgress(acc.id,{phase:"processing",processed:done,total:toProcess.length,remaining:Math.max(0,toProcess.length-done),matched:messages.length,newCount:fresh.length,found:found.length});
-        }catch(e){console.error(e);}
+          if(items.length)processed.add(msg.id);
+        }catch(e){
+          failed++;
+          console.error(e);
+        }finally{
+          done++;
+          const statusParts=[`Processed ${done}/${toProcess.length} emails`,`found ${found.length}`];
+          if(failed>0)statusParts.push(`failed ${failed}`);
+          if(fallbackUsed>0)statusParts.push(`fallback ${fallbackUsed}`);
+          log(acc.id,`${statusParts.join(" · ")}…`);
+          setProgress(acc.id,{phase:"processing",processed:done,total:toProcess.length,remaining:Math.max(0,toProcess.length-done),matched:messages.length,newCount:fresh.length,found:found.length,failed});
+        }
       }
       LS.set(`proc_${acc.id}`,[...processed].slice(-50000));
       const valid=found.filter(i=>i.amount>0&&(i.type==="income"||i.type==="expense"));
       setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,lastSync:new Date().toISOString(),lastCount:valid.length,firstSyncCompleted:a.firstSyncCompleted||markFirst,syncFromDate:fromDate||a.syncFromDate||"",msClientId:provider==="microsoft"?(a.msClientId||msClient):a.msClientId}:a));
       if(!valid.length){
-        log(acc.id,"✓ Done — no income/expense found in scanned emails.");
-        setProgress(acc.id,{phase:"done",processed:toProcess.length,total:toProcess.length,remaining:0,matched:messages.length,newCount:fresh.length,found:0});
+        if(failed===toProcess.length){
+          log(acc.id,"⚠ Sync finished, but all emails failed extraction. Check network/auth and retry.");
+          setProgress(acc.id,{phase:"error",processed:toProcess.length,total:toProcess.length,remaining:0,matched:messages.length,newCount:fresh.length,found:0,failed});
+          setSyncing(acc.id,false);
+          return;
+        }
+        log(acc.id,`✓ Done — no income/expense found in scanned emails.${failed?` Failed: ${failed}.`:""}`);
+        setProgress(acc.id,{phase:"done",processed:toProcess.length,total:toProcess.length,remaining:0,matched:messages.length,newCount:fresh.length,found:0,failed});
         setSyncing(acc.id,false);
         return;
       }
       log(acc.id,`AI found ${valid.length} income/expense item(s). Review before posting.`);
-      setProgress(acc.id,{phase:"review",processed:toProcess.length,total:toProcess.length,remaining:0,matched:messages.length,newCount:fresh.length,found:valid.length});
+      setProgress(acc.id,{phase:"review",processed:toProcess.length,total:toProcess.length,remaining:0,matched:messages.length,newCount:fresh.length,found:valid.length,failed});
       setReviewState({accId:acc.id,items:valid});
     }catch(e){
       const msg=String(e.message||"");
@@ -1434,7 +1522,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
               <div style={{display:"flex",justifyContent:"space-between",gap:10,marginBottom:6,flexWrap:"wrap"}}>
                 <span>
                   {syncProgress[acc.id].phase==="fetching"&&"Fetching emails…"}
-                  {syncProgress[acc.id].phase==="processing"&&`Processed ${syncProgress[acc.id].processed||0}/${syncProgress[acc.id].total||0}`}
+                  {syncProgress[acc.id].phase==="processing"&&`Processed ${syncProgress[acc.id].processed||0}/${syncProgress[acc.id].total||0}${syncProgress[acc.id].failed?` · failed ${syncProgress[acc.id].failed}`:""}`}
                   {syncProgress[acc.id].phase==="review"&&`Scan complete. ${syncProgress[acc.id].found||0} item(s) awaiting review.`}
                   {syncProgress[acc.id].phase==="done"&&"Sync completed."}
                   {syncProgress[acc.id].phase==="error"&&"Sync failed."}
