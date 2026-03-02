@@ -73,6 +73,20 @@ function decodeGoogleCredential(credential=""){
   }catch{return null;}
 }
 
+function loadGoogleIdentityScript(){
+  if(window.google?.accounts?.id)return Promise.resolve();
+  const existing=document.querySelector('script[src="https://accounts.google.com/gsi/client"]');
+  if(existing)return new Promise((res,rej)=>{existing.addEventListener("load",res,{once:true});existing.addEventListener("error",()=>rej(new Error("Failed to load Google Identity Services")), {once:true});});
+  return new Promise((res,rej)=>{
+    const s=document.createElement("script");
+    s.src="https://accounts.google.com/gsi/client";
+    s.async=true;s.defer=true;
+    s.onload=()=>res();
+    s.onerror=()=>rej(new Error("Failed to load Google Identity Services"));
+    document.head.appendChild(s);
+  });
+}
+
 function decodeB64(s){try{return decodeURIComponent(escape(atob(s.replace(/-/g,'+').replace(/_/g,'/'))));}catch{return "";}}
 function extractEmailText(payload,d=0){
   if(d>5||!payload)return"";
@@ -240,7 +254,7 @@ export default function App(){
     const fallbackClientId=emailCfg.find(a=>a.clientId)?.clientId||"";
     return{
       enabled:true,
-      googleClientId:saved.googleClientId||fallbackClientId||DEFAULT_GOOGLE_CLIENT_ID,
+      googleClientId:DEFAULT_GOOGLE_CLIENT_ID||saved.googleClientId||fallbackClientId,
       ownerEmail:LOCKED_OWNER_EMAIL,
     };
   });
@@ -417,7 +431,7 @@ export default function App(){
     return <AuthSetupScreen authCfg={authCfg} setAuthCfg={setAuthCfg}/>;
   }
   if(authCfg.enabled&&!authUser){
-    return <AuthLoginScreen clientId={authCfg.googleClientId} ownerEmail={LOCKED_OWNER_EMAIL} onCredential={onGoogleCredential} authMsg={authMsg} onUpdateClientId={v=>setAuthCfg(p=>({...p,googleClientId:v,ownerEmail:LOCKED_OWNER_EMAIL}))}/>;
+    return <AuthLoginScreen clientId={authCfg.googleClientId} ownerEmail={LOCKED_OWNER_EMAIL} onCredential={onGoogleCredential} authMsg={authMsg}/>;
   }
 
   return(
@@ -493,36 +507,52 @@ function AuthSetupScreen({authCfg,setAuthCfg}){
   );
 }
 
-function AuthLoginScreen({clientId,ownerEmail,onCredential,authMsg,onUpdateClientId}){
+function AuthLoginScreen({clientId,ownerEmail,onCredential,authMsg}){
   const btnRef=useRef(null);
   const[loading,setLoading]=useState(true);
-  const[cid,setCid]=useState(clientId||"");
-
-  useEffect(()=>setCid(clientId||""),[clientId]);
+  const[loginErr,setLoginErr]=useState("");
 
   useEffect(()=>{
     let alive=true;
-    const mount=()=>{
+    const mount=async()=>{
       if(!alive)return;
-      if(!window.google?.accounts?.id){setTimeout(mount,250);return;}
-      window.google.accounts.id.initialize({
-        client_id:clientId,
-        callback:onCredential,
-        auto_select:true,
-        cancel_on_tap_outside:false,
-        login_hint:ownerEmail||LOCKED_OWNER_EMAIL,
-      });
-      if(btnRef.current){
-        btnRef.current.innerHTML="";
-        window.google.accounts.id.renderButton(btnRef.current,{
-          theme:"filled_blue",
-          size:"large",
-          shape:"pill",
-          text:"continue_with",
-          width:320,
-        });
+      setLoginErr("");
+      if(!clientId){
+        setLoginErr("Google Client ID is missing.");
+        setLoading(false);
+        return;
       }
-      window.google.accounts.id.prompt();
+      const isLocalhost=window.location.hostname==="localhost"||window.location.hostname==="127.0.0.1";
+      const isHttps=window.location.protocol==="https:";
+      if(!isHttps&&!isLocalhost){
+        setLoginErr("Google Sign-In needs HTTPS on custom domains. Open this app on HTTPS after certificate activation.");
+        setLoading(false);
+        return;
+      }
+      try{
+        await loadGoogleIdentityScript();
+        if(!window.google?.accounts?.id)throw new Error("Google Identity Services not available.");
+        window.google.accounts.id.initialize({
+          client_id:clientId,
+          callback:onCredential,
+          auto_select:true,
+          cancel_on_tap_outside:false,
+          login_hint:ownerEmail||LOCKED_OWNER_EMAIL,
+        });
+        if(btnRef.current){
+          btnRef.current.innerHTML="";
+          window.google.accounts.id.renderButton(btnRef.current,{
+            theme:"filled_blue",
+            size:"large",
+            shape:"pill",
+            text:"continue_with",
+            width:320,
+          });
+        }
+        window.google.accounts.id.prompt();
+      }catch(e){
+        setLoginErr(e.message||"Unable to start Google Sign-In.");
+      }
       setLoading(false);
     };
     if(clientId)mount();
@@ -532,7 +562,6 @@ function AuthLoginScreen({clientId,ownerEmail,onCredential,authMsg,onUpdateClien
   return(
     <div style={{fontFamily:"'DM Sans',sans-serif",background:"#07090f",minHeight:"100vh",color:"#e2e8f0",display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
       <style>{CSS}</style>
-      <script src="https://accounts.google.com/gsi/client" async defer/>
       <div className="modal" style={{maxWidth:560}}>
         <div style={{fontSize:18,fontWeight:700,marginBottom:10}}>Sign in to LedgerAI</div>
         <div style={{fontSize:13,color:"#64748b",marginBottom:10}}>
@@ -542,12 +571,7 @@ function AuthLoginScreen({clientId,ownerEmail,onCredential,authMsg,onUpdateClien
           {loading?<div style={{fontSize:12,color:"#64748b"}}>Loading Google sign-in…</div>:<div ref={btnRef}/>}
         </div>
         {authMsg&&<div style={{background:"#450a0a",border:"1px solid #f87171",borderRadius:8,padding:"8px 10px",fontSize:12,color:"#fca5a5",marginBottom:10}}>{authMsg}</div>}
-        <div style={{background:"#0a0c12",border:"1px solid #1e293b",borderRadius:8,padding:"10px 12px"}}>
-          <div style={{fontSize:11,color:"#475569",marginBottom:6,fontWeight:700,textTransform:"uppercase"}}>Troubleshooting</div>
-          <label style={{marginTop:0}}>Google Client ID</label>
-          <input value={cid} onChange={e=>setCid(e.target.value)} placeholder="xxxxxxxxxxxx-xxxx.apps.googleusercontent.com"/>
-          <button className="btn ghost" style={{marginTop:8,width:"100%"}} onClick={()=>onUpdateClientId(cid.trim())}>Update Client ID</button>
-        </div>
+        {loginErr&&<div style={{background:"#1a1a2e",border:"1px solid #818cf8",borderRadius:8,padding:"10px 12px",fontSize:12,color:"#c7d2fe"}}>{loginErr}</div>}
       </div>
     </div>
   );
