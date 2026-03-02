@@ -960,7 +960,22 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats}){
     if(!acc.clientId?.trim()){alert("Enter your Google OAuth Client ID in account settings first.");return;}
     if(!window.google?.accounts?.oauth2){alert("Google Identity Services loading… please wait a moment and try again.");return;}
     initOAuth(acc.clientId,async(err,token)=>{
-      if(err){alert(`OAuth error: ${err.message}`);return;}
+      if(err){
+        const msg=String(err.message||"");
+        if(msg.includes("redirect_uri_mismatch")){
+          alert(
+            "OAuth error: redirect_uri_mismatch\n\n"+
+            "Fix in Google Cloud Console:\n"+
+            "1) OAuth client type must be Web application\n"+
+            `2) Authorized JavaScript origins must include ${window.location.origin}\n`+
+            `3) Authorized redirect URIs must include ${window.location.origin} and ${window.location.origin}/\n`+
+            "4) Save, then retry Connect"
+          );
+        }else{
+          alert(`OAuth error: ${msg}`);
+        }
+        return;
+      }
       try{
         const profile=await gmailGetProfile(token);
         setEmails(p=>p.map(a=>a.id===acc.id?{...a,token,email:profile.emailAddress,connected:true}:a));
@@ -1109,7 +1124,7 @@ function AddEmailModal({onSave,onClose}){
     <div className="overlay"><div className="modal" style={{maxWidth:520}}>
       <MH title="Add Gmail Account" onClose={onClose}/>
       <div style={{background:"#0d0d2b",border:"1px solid #6366f1",borderRadius:8,padding:12,marginBottom:14,fontSize:13,color:"#c7d2fe"}}>
-        💡 You need a free Google OAuth Client ID. Takes ~3 minutes to set up. Click <b>"Setup Guide"</b> for step-by-step instructions.
+        💡 You need a free Google OAuth Client ID (type: <b>Web application</b>). Takes ~3 minutes to set up. Click <b>"Setup Guide"</b> for step-by-step instructions.
       </div>
       <label>Account Label</label><input value={f.label} onChange={e=>setF(p=>({...p,label:e.target.value}))} placeholder="e.g. Personal Gmail / Business Gmail"/>
       <label>Google OAuth Client ID</label><input value={f.clientId} onChange={e=>setF(p=>({...p,clientId:e.target.value}))} placeholder="xxxxxxxxxx.apps.googleusercontent.com"/>
@@ -1128,11 +1143,13 @@ function SetupGuideModal({onClose}){
   const[step,setStep]=useState(0);
   const origin=typeof window!=="undefined"?window.location.origin:"http://accounts.niprasha.com";
   const httpsOrigin=origin.startsWith("http://")?origin.replace("http://","https://"):origin;
+  const originSlash=origin.endsWith("/")?origin:`${origin}/`;
+  const httpsOriginSlash=httpsOrigin.endsWith("/")?httpsOrigin:`${httpsOrigin}/`;
   const steps=[
     {t:"Step 1 — Create Google Cloud Project",c:<div><p style={{marginBottom:12}}>You need a free Google Cloud project (no cost, no card needed).</p><ol style={{paddingLeft:18,lineHeight:2.4}}><li>Go to <a href="https://console.cloud.google.com" target="_blank" rel="noreferrer">console.cloud.google.com</a></li><li>Click <b>Select a project → New Project</b></li><li>Name it "LedgerAI" → Click <b>Create</b></li></ol></div>},
     {t:"Step 2 — Enable Gmail API",c:<div><ol style={{paddingLeft:18,lineHeight:2.4}}><li>In your project: <b>APIs & Services → Library</b></li><li>Search <b>"Gmail API"</b> → Click it → <b>Enable</b></li></ol></div>},
     {t:"Step 3 — OAuth Consent Screen",c:<div><ol style={{paddingLeft:18,lineHeight:2.4}}><li><b>APIs & Services → OAuth consent screen</b></li><li>Choose <b>External</b> → Create</li><li>Fill App name, support email, developer email → Save & Continue through all steps</li><li>On <b>Test users</b> step: <b>+ Add Users</b> → add your Gmail address(es)</li><li>Save and Continue → Back to Dashboard</li></ol></div>},
-    {t:"Step 4 — Create OAuth Client ID",c:<div><ol style={{paddingLeft:18,lineHeight:2.4}}><li><b>APIs & Services → Credentials → + Create Credentials → OAuth client ID</b></li><li>Application type: <b>Web application</b></li><li>Under <b>Authorised JavaScript origins</b> add:<br/><code style={{background:"#0a0c12",padding:"2px 8px",borderRadius:4,fontSize:12}}>{origin}</code>{httpsOrigin!==origin&&<><br/><code style={{background:"#0a0c12",padding:"2px 8px",borderRadius:4,fontSize:12}}>{httpsOrigin}</code></>}</li><li>Click <b>Create</b> → Copy your <b>Client ID</b></li><li>It looks like: <code style={{background:"#0a0c12",padding:"2px 6px",borderRadius:4,fontSize:12}}>1234567890.apps.googleusercontent.com</code></li></ol></div>},
+    {t:"Step 4 — Create OAuth Client ID",c:<div><ol style={{paddingLeft:18,lineHeight:2.4}}><li><b>APIs & Services → Credentials → + Create Credentials → OAuth client ID</b></li><li>Application type: <b>Web application</b></li><li>Under <b>Authorised JavaScript origins</b> add:<br/><code style={{background:"#0a0c12",padding:"2px 8px",borderRadius:4,fontSize:12}}>{origin}</code>{httpsOrigin!==origin&&<><br/><code style={{background:"#0a0c12",padding:"2px 8px",borderRadius:4,fontSize:12}}>{httpsOrigin}</code></>}</li><li>Under <b>Authorised redirect URIs</b> add:<br/><code style={{background:"#0a0c12",padding:"2px 8px",borderRadius:4,fontSize:12}}>{origin}</code><br/><code style={{background:"#0a0c12",padding:"2px 8px",borderRadius:4,fontSize:12}}>{originSlash}</code>{httpsOrigin!==origin&&<><br/><code style={{background:"#0a0c12",padding:"2px 8px",borderRadius:4,fontSize:12}}>{httpsOrigin}</code><br/><code style={{background:"#0a0c12",padding:"2px 8px",borderRadius:4,fontSize:12}}>{httpsOriginSlash}</code></>}</li><li>Click <b>Create</b> → Copy your <b>Client ID</b></li><li>It looks like: <code style={{background:"#0a0c12",padding:"2px 6px",borderRadius:4,fontSize:12}}>1234567890.apps.googleusercontent.com</code></li></ol></div>},
     {t:"Step 5 — Connect in LedgerAI",c:<div><ol style={{paddingLeft:18,lineHeight:2.4}}><li>Email tab → <b>+ Add Email</b> → paste your Client ID</li><li>Click <b>Add Account</b> → then <b>🔗 Connect</b></li><li>Google OAuth popup appears → sign in → grant read-only access</li><li>Click <b>🔄 Sync</b> to fetch receipt emails</li><li>Review extracted transactions in <b>Inbox</b> tab</li></ol><div style={{background:"#052e16",border:"1px solid #34d399",borderRadius:8,padding:12,marginTop:14,fontSize:12,color:"#86efac"}}>✅ <b>Privacy:</b> Your emails are read directly in your browser with read-only access. No email content is stored on any server.</div></div>},
   ];
   return(
