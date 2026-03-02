@@ -112,6 +112,63 @@ function extractEmailText(payload,d=0){
   return"";
 }
 
+function collectGmailAttachmentNames(payload,out=[]){
+  if(!payload)return out;
+  const name=(payload.filename||"").trim();
+  if(name)out.push(name);
+  if(Array.isArray(payload.parts))payload.parts.forEach(p=>collectGmailAttachmentNames(p,out));
+  return out;
+}
+
+const RECEIPT_KEYWORDS = [
+  "invoice","tax invoice","receipt","payment receipt","payment confirmation",
+  "payment successful","amount debited","amount credited","bill","cash memo",
+  "order receipt","order invoice","refund","payout","settlement",
+];
+const NON_FINANCIAL_EMAIL_KEYWORDS = [
+  "security alert","security notice","verification code","otp","one-time password",
+  "password","sign in","signin","login","2fa","two-factor","new device",
+  "recover account","reset your password","welcome to","newsletter","digest",
+  "policy update","privacy update",
+];
+
+function hasMoneyEvidence(text=""){
+  const t=(text||"").replace(/[,]/g," ");
+  return /(₹\s*\d|(?:inr|rs\.?)\s*\d|\b(?:amount|amt|total|paid|payment|debited|credited|refund|payout|settlement)\b[^0-9]{0,20}\d)/i.test(t);
+}
+
+function isReceiptLikeEmail({subject="",from="",body="",attachmentNames=[],hasAttachment=false}={}){
+  const text=`${subject}\n${from}\n${body}`.toLowerCase();
+  const attachmentText=(attachmentNames||[]).join(" ").toLowerCase();
+  const hasReceiptKeyword=RECEIPT_KEYWORDS.some(k=>text.includes(k)||attachmentText.includes(k));
+  const hasNonFinancialKeyword=NON_FINANCIAL_EMAIL_KEYWORDS.some(k=>text.includes(k));
+  if(hasNonFinancialKeyword&&!hasReceiptKeyword)return false;
+  if(hasReceiptKeyword)return true;
+  if(hasAttachment){
+    // For mails with attachments, still require at least one transaction phrase in subject/body.
+    return /\b(payment|paid|debited|credited|refund|invoice|receipt|bill|order)\b/i.test(text);
+  }
+  return false;
+}
+
+function sanitizeEmailTransactions(items=[],ctx={}){
+  if(!Array.isArray(items)||!items.length)return[];
+  const evidenceText=`${ctx.subject||""}\n${ctx.from||""}\n${ctx.body||""}\n${(ctx.attachmentNames||[]).join(" ")}`;
+  const strongReceipt=isReceiptLikeEmail(ctx);
+  const hasMoney=hasMoneyEvidence(evidenceText);
+  if(!strongReceipt)return[];
+  if(!hasMoney&&!ctx.hasAttachment)return[];
+  return items.map(x=>({
+    ...x,
+    type:x?.type==="income"?"income":"expense",
+    amount:Number(x?.amount)||0,
+  })).filter(x=>{
+    if(!(x.amount>0))return false;
+    if(Number.isInteger(x.amount)&&x.amount>=1900&&x.amount<=2100&&!/(₹|inr|rs\.?)/i.test(evidenceText))return false;
+    return x.type==="income"||x.type==="expense";
+  });
+}
+
 async function withTimeout(promise,ms,label="request"){
   let timer;
   try{
@@ -192,7 +249,9 @@ async function fetchJsonWithRetry(url,options={},label="Request",maxAttempts=4){
 
 function parseAmountFromText(text=""){
   const t=(text||"").replace(/[,]/g,"");
-  const m=t.match(/(?:inr|rs\.?|₹)\s*([0-9]+(?:\.[0-9]{1,2})?)/i)||t.match(/\b([0-9]{2,7}(?:\.[0-9]{1,2})?)\b/);
+  const m1=t.match(/(?:inr|rs\.?|₹)\s*([0-9]+(?:\.[0-9]{1,2})?)/i);
+  const m2=t.match(/\b(?:amount|amt|paid|payment|debited|credited|refund|total|payout|settlement)\b[^0-9]{0,20}([0-9]{2,9}(?:\.[0-9]{1,2})?)/i);
+  const m=m1||m2;
   if(!m)return 0;
   const n=Number(m[1]);
   return Number.isFinite(n)?n:0;
@@ -203,6 +262,8 @@ function fallbackExtractEmail(subject="",from="",body=""){
   const lower=text.toLowerCase();
   const amount=parseAmountFromText(text);
   if(amount<=0)return[];
+  if(!isReceiptLikeEmail({subject,from,body}))return[];
+  if(!hasMoneyEvidence(text))return[];
   const expenseHints=["debited","paid","payment","purchase","invoice","receipt","order","bill","spent","charged","upi"];
   const incomeHints=["credited","received","refund","salary","payout","settlement","deposit"];
   const hasExp=expenseHints.some(k=>lower.includes(k));
@@ -278,10 +339,31 @@ async function aiExtractBatch(text,acts,cats){
     try{const a=JSON.parse(raw.replace(/```json|```/g,"").trim());return Array.isArray(a)?a:[];}catch{return[];}
   }catch{return[];}
 }
-async function aiExtractEmail(subject,from,body,acts,cats){
+async function aiExtractEmail(subject,from,body,acts,cats,meta={}){
   const c=Object.entries(cats).map(([a,cs])=>`${a}: ${cs.join(", ")}`).join("\n");
+  const attachmentNames=(meta.attachmentNames||[]).slice(0,10).join(", ");
+  const hasAttachment=meta.hasAttachment?"yes":"no";
   try{
-    const raw=await callAI([{role:"user",content:`Extract financial transactions from this email. Indian context.\nSubject: "${subject}"\nFrom: "${from}"\nBody:\n${body.slice(0,2500)}\nActivities: ${acts.join(", ")}\nCategories:\n${c}\nIf no financial transaction, return []. Amount must be positive INR number.\nReturn ONLY JSON array: [{"type":"expense|income","businessActivity":"","category":"","isNewCategory":false,"description":"","amount":0,"date":"YYYY-MM-DD","vendor":"","paymentMethod":""}]`}],1000);
+    const raw=await callAI([{role:"user",content:`Extract ONLY real completed financial transactions from this email (Indian context).
+Strict rules:
+1) Return [] unless there is clear receipt/invoice/payment proof in subject/body, or clear receipt-like attachment metadata.
+2) Ignore security/login/OTP/verification/newsletter alerts.
+3) Do NOT guess amounts from years, OTPs, IDs, order numbers, or ticket numbers.
+4) If amount is not clearly present, return [].
+
+Subject: "${subject}"
+From: "${from}"
+Has attachment: ${hasAttachment}
+Attachment names: "${attachmentNames}"
+Body:
+${body.slice(0,2500)}
+
+Activities: ${acts.join(", ")}
+Categories:
+${c}
+
+Return ONLY JSON array:
+[{"type":"expense|income","businessActivity":"","category":"","isNewCategory":false,"description":"","amount":0,"date":"YYYY-MM-DD","vendor":"","paymentMethod":""}]`}],1000);
     try{const a=JSON.parse(raw.replace(/```json|```/g,"").trim());return Array.isArray(a)?a:[];}catch{return[];}
   }catch{return[];}
 }
@@ -484,7 +566,7 @@ async function msListMessages(token,max=100,fromDate=""){
   const target=Math.max(1,Math.min(Number(max)||100,50000));
   const params=new URLSearchParams({
     "$top":String(Math.min(50,target)),
-    "$select":"id,subject,from,receivedDateTime",
+    "$select":"id,subject,from,receivedDateTime,hasAttachments",
     "$orderby":"receivedDateTime desc",
   });
   if(fromDate)params.set("$filter",`receivedDateTime ge ${fromDate}T00:00:00Z`);
@@ -499,7 +581,7 @@ async function msListMessages(token,max=100,fromDate=""){
 }
 
 async function msGetMessage(token,id){
-  const url=`${GRAPH}/me/messages/${id}?$select=id,subject,from,receivedDateTime,body,bodyPreview`;
+  const url=`${GRAPH}/me/messages/${id}?$select=id,subject,from,receivedDateTime,body,bodyPreview,hasAttachments`;
   return msGraphFetch(url,token,{Prefer:'outlook.body-content-type="text"'});
 }
 
@@ -1438,6 +1520,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
       for(const msg of toProcess){
         try{
           let subject="";let from="";let rawDate="";let body="";
+          let hasAttachment=false;let attachmentNames=[];
           if(provider==="microsoft"){
             const full=await withTimeout(msGetMessage(token,msg.id),20000,"Outlook message fetch");
             subject=full.subject||"";
@@ -1446,6 +1529,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
             from=name&&addr?`${name} <${addr}>`:(addr||name||"");
             rawDate=full.receivedDateTime||msg.receivedDateTime||"";
             body=msExtractBody(full);
+            hasAttachment=Boolean(full.hasAttachments||msg.hasAttachments);
           }else{
             const full=await withTimeout(gmailGetMessage(token,msg.id),20000,"Gmail message fetch");
             const H=full.payload?.headers||[];
@@ -1453,22 +1537,33 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
             from=H.find(h=>h.name==="From")?.value||"";
             rawDate=H.find(h=>h.name==="Date")?.value||"";
             body=extractEmailText(full.payload)||full.snippet||"";
+            attachmentNames=collectGmailAttachmentNames(full.payload,[]);
+            hasAttachment=attachmentNames.length>0;
+          }
+          const emailContext={subject,from,body,attachmentNames,hasAttachment};
+          if(!isReceiptLikeEmail(emailContext)){
+            skipped++;
+            processed.add(msg.id);
+            continue;
           }
           const parsedDate=rawDate?new Date(rawDate):null;
           const eDate=parsedDate&&!Number.isNaN(parsedDate.getTime())?parsedDate.toISOString().slice(0,10):today();
           let items=[];
           try{
-            items=await withTimeout(aiExtractEmail(subject,from,body,acts,cats),30000,"AI extraction");
-            if(!items.length)skipped++;
+            items=await withTimeout(aiExtractEmail(subject,from,body,acts,cats,{attachmentNames,hasAttachment}),30000,"AI extraction");
           }catch(aiErr){
             console.error(aiErr);
             const fb=fallbackExtractEmail(subject,from,body).map(item=>({...item,date:item.date||eDate}));
             if(fb.length){
               fallbackUsed++;
               items=fb;
-            }else{
-              skipped++;
             }
+          }
+          items=sanitizeEmailTransactions(items,emailContext);
+          if(!items.length){
+            skipped++;
+            processed.add(msg.id);
+            continue;
           }
           items.forEach(item=>found.push({...item,date:item.date||eDate,source:"email",emailProvider:provider,emailSubject:subject,emailFrom:from,emailAccountId:acc.id,emailMsgId:msg.id}));
           if(items.length)processed.add(msg.id);
@@ -1490,7 +1585,14 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
         }
       }
       LS.set(`proc_${acc.id}`,[...processed].slice(-50000));
-      const valid=found.filter(i=>i.amount>0&&(i.type==="income"||i.type==="expense"));
+      const deduped=[];const seen=new Set();
+      for(const i of found){
+        const key=[i.emailMsgId||"",i.type||"",Number(i.amount)||0,(i.date||""),String(i.description||"").toLowerCase().slice(0,80)].join("|");
+        if(seen.has(key))continue;
+        seen.add(key);
+        deduped.push(i);
+      }
+      const valid=deduped.filter(i=>i.amount>0&&(i.type==="income"||i.type==="expense"));
       setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,lastSync:new Date().toISOString(),lastCount:valid.length,firstSyncCompleted:a.firstSyncCompleted||markFirst,syncFromDate:fromDate||a.syncFromDate||"",msClientId:provider==="microsoft"?(a.msClientId||msClient):a.msClientId}:a));
       if(!valid.length){
         if(failed===toProcess.length){
