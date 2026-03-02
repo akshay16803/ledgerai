@@ -66,6 +66,15 @@ const strSim=(a,b)=>{a=(a||"").toLowerCase();b=(b||"").toLowerCase();let m=0;for
 const LOCKED_OWNER_EMAIL = "akshaychouhan16803@gmail.com";
 const DEFAULT_GOOGLE_CLIENT_ID = "975238186836-47bvtn56uhrlcbe11n1pe1h26qbor5s1.apps.googleusercontent.com";
 
+if(typeof window!=="undefined"){
+  const h=window.location.hostname;
+  const isLocal=h==="localhost"||h==="127.0.0.1";
+  if(window.location.protocol==="http:"&&!isLocal){
+    const target=`https://${window.location.host}${window.location.pathname}${window.location.search}${window.location.hash}`;
+    window.location.replace(target);
+  }
+}
+
 function decodeGoogleCredential(credential=""){
   try{
     const payload=credential.split(".")[1]||"";
