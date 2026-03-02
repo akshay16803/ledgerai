@@ -78,7 +78,13 @@ function extractEmailText(payload,d=0){
 }
 
 function buildJE(tx,accs=[]){
-  const payAcc=()=>{if(tx.accountId){const a=accs.find(x=>x.id===tx.accountId);if(a)return a.name;}return tx.paymentMethod==="Credit Card"?"Credit Card Payable":"Bank Account – Savings";};
+  const accName=id=>{const a=accs.find(x=>x.id===id);return a?.name||"";};
+  const payAcc=()=>{if(tx.accountId){const n=accName(tx.accountId);if(n)return n;}return tx.paymentMethod==="Credit Card"?"Credit Card Payable":"Bank Account – Savings";};
+  if(tx.type==="borrow"){
+    const receivedIn=payAcc();
+    const borrowedFrom=tx.liabilityAccountId?accName(tx.liabilityAccountId):(tx.borrowSource?`Borrowings – ${tx.borrowSource}`:"Borrowings – Other");
+    return[{account:receivedIn||"Cash on Hand",dr:tx.amount,cr:0},{account:borrowedFrom||"Borrowings – Other",dr:0,cr:tx.amount}];
+  }
   const eMap={"Futures & Commodities Trading":"Trading Expenses – Futures","Equity Trading":"Trading Expenses – Equity","Kite / Zerodha Platform":"Kite Platform Charges","Personal":"Personal Drawings"};
   const iMap={"Futures & Commodities Trading":"Trading Income – Futures","Equity Trading":"Trading Income – Equity"};
   if(tx.type==="expense"){const ea=tx.businessActivity==="Personal"?"Drawings Account":(eMap[tx.businessActivity]||`${tx.businessActivity} – Expenses`);return[{account:ea,dr:tx.amount,cr:0},{account:payAcc(),dr:0,cr:tx.amount}];}
@@ -318,7 +324,9 @@ export default function App(){
   const ensureCat=(act,cat)=>setCats(p=>({...p,[act]:(p[act]||[]).includes(cat)?p[act]:[...(p[act]||[]),cat]}));
   const saveTx=useCallback((tx)=>{
     if(tx.isNewCategory)ensureCat(tx.businessActivity,tx.category);
-    const je=buildJE(tx,accs);const full={...tx,journalEntries:je};
+    const accName=tx.accountId?accs.find(a=>a.id===tx.accountId)?.name||"":tx.accountName||"";
+    const liabName=tx.liabilityAccountId?accs.find(a=>a.id===tx.liabilityAccountId)?.name||"":tx.liabilityAccountName||"";
+    const je=buildJE(tx,accs);const full={...tx,accountName:accName,liabilityAccountName:liabName,journalEntries:je};
     if(tx.id&&txns.find(t=>t.id===tx.id))setTxns(p=>p.map(t=>t.id===tx.id?full:t));
     else setTxns(p=>[{...full,id:gid(),createdAt:new Date().toISOString()},...p]);
     setShowAdd(false);setEditTx(null);
@@ -328,7 +336,9 @@ export default function App(){
   const approveInbox=item=>{
     if(item.isNewCategory)ensureCat(item.businessActivity,item.category);
     const tx={...item,id:gid(),createdAt:new Date().toISOString(),source:item.source||"auto"};
-    setTxns(p=>[{...tx,journalEntries:buildJE(tx,accs)},...p]);
+    const accName=tx.accountId?accs.find(a=>a.id===tx.accountId)?.name||"":tx.accountName||"";
+    const liabName=tx.liabilityAccountId?accs.find(a=>a.id===tx.liabilityAccountId)?.name||"":tx.liabilityAccountName||"";
+    setTxns(p=>[{...tx,accountName:accName,liabilityAccountName:liabName,journalEntries:buildJE(tx,accs)},...p]);
     setInbox(p=>p.filter(i=>i._iid!==item._iid));
   };
   const editInbox=item=>{setEditTx({...item,id:undefined});setAddType(item.type||"expense");setShowAdd(true);setInbox(p=>p.filter(i=>i._iid!==item._iid));};
@@ -371,6 +381,7 @@ export default function App(){
         </div>
         <button className="btn sm ghost" style={{marginRight:6}} onClick={()=>{setAddType("income");setEditTx(null);setShowAdd(true);}}>+ Income</button>
         <button className="btn sm pri" onClick={()=>{setAddType("expense");setEditTx(null);setShowAdd(true);}}>+ Expense</button>
+        <button className="btn sm" style={{marginLeft:6,background:"#f59e0b",color:"#fff"}} onClick={()=>{setAddType("borrow");setEditTx(null);setShowAdd(true);}}>+ Borrowed</button>
       </nav>
       <div className="wrap">
         {tab==="dashboard"&&<DashTab byAct={byAct} totInc={totInc} totExp={totExp} todInc={todInc} todExp={todExp} txns={txns} todayTxns={todayTxns} inbox={inbox} emails={emails} onEdit={tx=>{setEditTx(tx);setAddType(tx.type);setShowAdd(true);}} onDelete={delTx}/>}
@@ -999,7 +1010,7 @@ function LedgerTab({txns,filter,setFilter,acts,onEdit,onDelete}){
         <option value="All">All Activities</option>{acts.map(a=><option key={a}>{a}</option>)}
       </select>
       <select style={{width:"auto"}} value={filter.type} onChange={e=>setFilter(p=>({...p,type:e.target.value}))}>
-        <option value="All">All Types</option><option value="income">Income</option><option value="expense">Expense</option>
+        <option value="All">All Types</option><option value="income">Income</option><option value="expense">Expense</option><option value="borrow">Borrowed Cash</option>
       </select>
       <input type="date" style={{width:"auto"}} value={filter.from} onChange={e=>setFilter(p=>({...p,from:e.target.value}))}/>
       <input type="date" style={{width:"auto"}} value={filter.to} onChange={e=>setFilter(p=>({...p,to:e.target.value}))}/>
@@ -1035,8 +1046,9 @@ function InboxTab({inbox,addInbox,acts,cats,onApprove,onEdit,onDiscard}){
 
 function ICard({item,onApprove,onEdit,onDiscard}){
   const[ex,setEx]=useState(false);
+  const typeColor=item.type==="income"?"#34d399":item.type==="borrow"?"#f59e0b":"#f87171";
   return(
-    <div className="card" style={{marginBottom:8,borderLeft:`3px solid ${item.type==="income"?"#34d399":"#f87171"}`}}>
+    <div className="card" style={{marginBottom:8,borderLeft:`3px solid ${typeColor}`}}>
       <R style={{marginBottom:8}}>
         <div style={{flex:1}}>
           <div style={{display:"flex",gap:6,marginBottom:3,flexWrap:"wrap",alignItems:"center"}}>
@@ -1048,11 +1060,11 @@ function ICard({item,onApprove,onEdit,onDiscard}){
             <span style={{fontSize:11,color:"#64748b"}}>{fmtD(item.date)}</span>
           </div>
           <div style={{fontWeight:500,fontSize:14}}>{item.description||item.category}</div>
-          <div style={{fontSize:12,color:"#475569"}}>{item.businessActivity} · {item.category}{item.vendor?` · ${item.vendor}`:""}{item.paymentMethod?` · ${item.paymentMethod}`:""}</div>
+          <div style={{fontSize:12,color:"#475569"}}>{item.businessActivity} · {item.category}{item.vendor?` · ${item.vendor}`:""}{item.paymentMethod?` · ${item.paymentMethod}`:""}{item.accountName?` · ${item.accountName}`:""}{item.borrowSource?` · Borrowed from ${item.borrowSource}`:""}</div>
           {item.emailSubject&&<div style={{fontSize:11,color:"#374151",marginTop:3,cursor:"pointer"}} onClick={()=>setEx(!ex)}>📧 {item.emailSubject.slice(0,60)}{item.emailSubject.length>60?"…":""} {ex?"▲":"▼"}</div>}
           {ex&&item.emailFrom&&<div style={{fontSize:11,color:"#374151",marginTop:2}}>From: {item.emailFrom}</div>}
         </div>
-        <div className="mono" style={{fontSize:20,fontWeight:700,color:item.type==="income"?"#34d399":"#f87171",whiteSpace:"nowrap",marginLeft:12}}>{fmt(item.amount)}</div>
+        <div className="mono" style={{fontSize:20,fontWeight:700,color:typeColor,whiteSpace:"nowrap",marginLeft:12}}>{fmt(item.amount)}</div>
       </R>
       <div style={{display:"flex",gap:8}}>
         <button className="btn sm suc" onClick={()=>onApprove(item)}>✓ Approve</button>
@@ -1564,11 +1576,32 @@ function DailyTab({todayTxns,todInc,todExp,summary,sumLoad,getSummary,onEdit,onD
 
 // ── ADD/EDIT MODAL ────────────────────────────────────────────────────────────
 function AddModal({type,existing,acts,cats,accs,onSave,onClose}){
-  const[form,setForm]=useState({type,date:today(),description:"",vendor:"",amount:"",businessActivity:acts[0]||"",category:"",paymentMethod:"UPI",accountId:"",notes:"",...existing});
+  const defaultAct=acts.includes("Personal")?"Personal":(acts[0]||"");
+  const[form,setForm]=useState({
+    type,date:today(),description:"",vendor:"",amount:"",
+    businessActivity:type==="borrow"?defaultAct:(acts[0]||""),
+    category:type==="borrow"?"Borrowed Cash":"",
+    paymentMethod:type==="borrow"?"Cash":"UPI",
+    accountId:"",liabilityAccountId:"",borrowSource:"",
+    notes:"",
+    ...existing
+  });
   const[raw,setRaw]=useState("");const[imgB64,setImg]=useState(null);const[load,setLoad]=useState(false);const[sub,setSub]=useState("form");
   const fref=useRef();
   const set=(k,v)=>setForm(p=>({...p,[k]:v}));
   const clist=cats[form.businessActivity]||["Other"];
+  const assetAccs=accs.filter(a=>a.cls==="asset");
+  const liabAccs=accs.filter(a=>a.cls==="liability");
+  const setType=t=>setForm(p=>{
+    if(t==="borrow"){
+      const src=(p.borrowSource||p.vendor||"").trim();
+      return {...p,type:t,businessActivity:defaultAct,category:"Borrowed Cash",paymentMethod:p.paymentMethod||"Cash",borrowSource:src,vendor:src||p.vendor};
+    }
+    const nextAct=p.businessActivity||acts[0]||"";
+    const nextCats=cats[nextAct]||["Other"];
+    const nextCat=p.category&&p.category!=="Borrowed Cash"?p.category:(nextCats[0]||"Other");
+    return {...p,type:t,businessActivity:nextAct,category:nextCat};
+  });
   const apply=r=>{if(!r)return;setForm(p=>({...p,description:r.description||p.description,vendor:r.vendor||p.vendor,amount:r.amount||p.amount,businessActivity:acts.includes(r.businessActivity)?r.businessActivity:p.businessActivity,category:r.category||p.category,date:r.date||p.date,paymentMethod:r.paymentMethod||p.paymentMethod,isNewCategory:r.isNewCategory||false,aiGenerated:true}));setSub("form");};
   const runText=async()=>{setLoad(true);apply(await aiClassify(raw,acts,cats,form.type));setLoad(false);};
   const runImg=async()=>{if(!imgB64)return;setLoad(true);const c2=Object.entries(cats).map(([a,cs])=>`${a}: ${cs.join(", ")}`).join("\n");const raw2=await callAI([{role:"user",content:[{type:"image",source:{type:"base64",media_type:"image/jpeg",data:imgB64}},{type:"text",text:`Extract expense. Activities: ${acts.join(", ")}\n${c2}\nReturn ONLY JSON: {"businessActivity":"","category":"","isNewCategory":false,"description":"","amount":0,"date":"YYYY-MM-DD","vendor":"","paymentMethod":""}`}]}],500);try{apply(JSON.parse(raw2.replace(/```json|```/g,"").trim()));}catch{}setLoad(false);};
@@ -1576,36 +1609,52 @@ function AddModal({type,existing,acts,cats,accs,onSave,onClose}){
   return(
     <div className="overlay"><div className="modal">
       <R style={{marginBottom:14}}>
-        <div style={{flex:1}}><div style={{display:"flex",gap:6,marginBottom:4}}>{["income","expense"].map(t=><button key={t} className={`btn sm ${form.type===t?(t==="income"?"suc":"dan"):"ghost"}`} onClick={()=>set("type",t)}>{t==="income"?"+ Income":"− Expense"}</button>)}</div><div style={{fontSize:16,fontWeight:700}}>{existing?"Edit":"New"} {form.type==="income"?"Income":"Expense"}</div></div>
+        <div style={{flex:1}}><div style={{display:"flex",gap:6,marginBottom:4}}>{["income","expense","borrow"].map(t=><button key={t} className={`btn sm ${form.type===t?(t==="income"?"suc":t==="expense"?"dan":""):"ghost"}`} style={form.type===t&&t==="borrow"?{background:"#f59e0b",color:"#fff"}:{}} onClick={()=>{setType(t);if(t==="borrow")setSub("form");}}>{t==="income"?"+ Income":t==="expense"?"− Expense":"↘ Borrowed"}</button>)}</div><div style={{fontSize:16,fontWeight:700}}>{existing?"Edit":"New"} {form.type==="income"?"Income":form.type==="expense"?"Expense":"Borrowed Cash"}</div></div>
         <button className="btn ghost" onClick={onClose} style={{fontSize:16,padding:"3px 10px"}}>✕</button>
       </R>
-      <div style={{display:"flex",gap:6,marginBottom:14,borderBottom:"1px solid #1e293b",paddingBottom:12}}>
+      {form.type!=="borrow"&&<div style={{display:"flex",gap:6,marginBottom:14,borderBottom:"1px solid #1e293b",paddingBottom:12}}>
         {[["form","📝 Manual"],["paste","📋 Text AI"],["invoice","📷 Invoice"]].map(([k,l])=><button key={k} className={`btn sm ${sub===k?"pri":"ghost"}`} onClick={()=>setSub(k)}>{l}</button>)}
-      </div>
-      {sub==="paste"&&<><label>Paste receipt / SMS / email text</label><textarea rows={5} value={raw} onChange={e=>setRaw(e.target.value)} placeholder="Paste any receipt, bank SMS, Kite message…"/><button className="btn pri" style={{marginTop:10,width:"100%"}} onClick={runText} disabled={load||!raw.trim()}>{load?"🤖 Classifying…":"🤖 Auto-fill with AI"}</button></>}
-      {sub==="invoice"&&<><label>Upload invoice image</label><input type="file" ref={fref} accept="image/*" onChange={e=>{const f=e.target.files?.[0];if(!f)return;const rd=new FileReader();rd.onload=()=>setImg(rd.result.split(",")[1]);rd.readAsDataURL(f);}}/>{imgB64&&<img src={`data:image/jpeg;base64,${imgB64}`} style={{width:"100%",borderRadius:8,maxHeight:180,objectFit:"contain",background:"#0f172a",marginTop:8}} alt=""/>}<button className="btn pri" style={{marginTop:10,width:"100%"}} onClick={runImg} disabled={load||!imgB64}>{load?"🤖 Reading…":"🤖 Extract with AI"}</button></>}
+      </div>}
+      {form.type!=="borrow"&&sub==="paste"&&<><label>Paste receipt / SMS / email text</label><textarea rows={5} value={raw} onChange={e=>setRaw(e.target.value)} placeholder="Paste any receipt, bank SMS, Kite message…"/><button className="btn pri" style={{marginTop:10,width:"100%"}} onClick={runText} disabled={load||!raw.trim()}>{load?"🤖 Classifying…":"🤖 Auto-fill with AI"}</button></>}
+      {form.type!=="borrow"&&sub==="invoice"&&<><label>Upload invoice image</label><input type="file" ref={fref} accept="image/*" onChange={e=>{const f=e.target.files?.[0];if(!f)return;const rd=new FileReader();rd.onload=()=>setImg(rd.result.split(",")[1]);rd.readAsDataURL(f);}}/>{imgB64&&<img src={`data:image/jpeg;base64,${imgB64}`} style={{width:"100%",borderRadius:8,maxHeight:180,objectFit:"contain",background:"#0f172a",marginTop:8}} alt=""/>}<button className="btn pri" style={{marginTop:10,width:"100%"}} onClick={runImg} disabled={load||!imgB64}>{load?"🤖 Reading…":"🤖 Extract with AI"}</button></>}
       {sub==="form"&&<>
+        {accs.length===0&&<div style={{background:"#450a0a",border:"1px solid #f87171",borderRadius:8,padding:"8px 12px",marginBottom:10,fontSize:12,color:"#fca5a5"}}>Add at least one account in the Accounts tab before saving transactions.</div>}
         {form.aiGenerated&&<div style={{background:"#0a0a1e",border:"1px solid #6366f1",borderRadius:8,padding:"7px 12px",marginBottom:10,fontSize:12,color:"#c7d2fe"}}>✨ AI auto-filled — review all fields</div>}
         {form.isNewCategory&&<div style={{background:"#0d0920",border:"1px solid #a855f7",borderRadius:8,padding:"5px 12px",marginBottom:8,fontSize:12,color:"#d8b4fe"}}>🆕 New category "{form.category}" will be created</div>}
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
           <div><label>Date</label><input type="date" value={form.date} onChange={e=>set("date",e.target.value)}/></div>
           <div><label>Amount (₹)</label><input type="number" value={form.amount} onChange={e=>set("amount",e.target.value)} placeholder="0"/></div>
         </div>
-        <label>Business Activity</label><select value={form.businessActivity} onChange={e=>set("businessActivity",e.target.value)}>{acts.map(a=><option key={a}>{a}</option>)}</select>
-        <label>Category</label><select value={form.category} onChange={e=>set("category",e.target.value)}>{clist.map(c=><option key={c}>{c}</option>)}</select>
+        {form.type!=="borrow"&&<><label>Business Activity</label><select value={form.businessActivity} onChange={e=>set("businessActivity",e.target.value)}>{acts.map(a=><option key={a}>{a}</option>)}</select></>}
+        {form.type!=="borrow"&&<><label>Category</label><select value={form.category} onChange={e=>set("category",e.target.value)}>{clist.map(c=><option key={c}>{c}</option>)}</select></>}
+        {form.type==="borrow"&&<><label>Borrowed From Source</label><input value={form.borrowSource||""} onChange={e=>set("borrowSource",e.target.value)} placeholder="e.g. Rahul, Family, NBFC, Friend"/></>}
+        {form.type==="borrow"&&liabAccs.length>0&&<><label>Liability Account (Optional)</label><select value={form.liabilityAccountId||""} onChange={e=>set("liabilityAccountId",e.target.value)}><option value="">— Select liability source —</option>{liabAccs.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select></>}
+        {accs.length>0&&<><label>{form.type==="expense"?"Paid From Account":form.type==="income"?"Received In Account":"Received In Account (Cash/Bank)"}</label><select value={form.accountId||""} onChange={e=>set("accountId",e.target.value)}><option value="">— Select account —</option>{(form.type==="borrow"?assetAccs:accs).map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select></>}
         <label>Description</label><input value={form.description} onChange={e=>set("description",e.target.value)} placeholder="Brief description"/>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
           <div><label>Vendor</label><input value={form.vendor||""} onChange={e=>set("vendor",e.target.value)} placeholder="Optional"/></div>
           <div><label>Payment Method</label><select value={form.paymentMethod} onChange={e=>set("paymentMethod",e.target.value)}>{PAY_METHODS.map(m=><option key={m}>{m}</option>)}</select></div>
         </div>
-        {accs.length>0&&<><label>Account</label><select value={form.accountId||""} onChange={e=>set("accountId",e.target.value)}><option value="">— Select —</option>{accs.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select></>}
         <label>Notes</label><textarea rows={2} value={form.notes||""} onChange={e=>set("notes",e.target.value)} placeholder="Optional"/>
         {Number(form.amount)>0&&<div style={{marginTop:12,background:"#0a0c12",border:"1px solid #1e293b",borderRadius:8,padding:12}}><div className="lxs" style={{marginBottom:8}}>Journal Preview</div>
           {je.map((e,i)=><div key={i} style={{display:"grid",gridTemplateColumns:"1fr 90px 90px",gap:6,fontSize:12,color:"#94a3b8",padding:"2px 0"}}><span style={{color:e.dr>0?"#e2e8f0":"#64748b",paddingLeft:e.dr===0?16:0}}>{e.account}</span><span className="mono" style={{textAlign:"right",color:"#34d399"}}>{e.dr>0?fmt(e.dr):""}</span><span className="mono" style={{textAlign:"right",color:"#f87171"}}>{e.cr>0?fmt(e.cr):""}</span></div>)}
         </div>}
         <div style={{display:"flex",gap:10,marginTop:16}}>
           <button className="btn ghost" onClick={onClose} style={{flex:1}}>Cancel</button>
-          <button className="btn pri" style={{flex:2}} onClick={()=>{if(!form.amount||isNaN(Number(form.amount)))return alert("Enter a valid amount");onSave({...form,amount:Number(form.amount),type:form.type});}}>{existing?"Update Entry":`Save ${form.type==="income"?"Income":"Expense"}`}</button>
+          <button className="btn pri" style={{flex:2}} onClick={()=>{
+            if(!form.amount||isNaN(Number(form.amount)))return alert("Enter a valid amount");
+            if(accs.length===0)return alert("Add at least one account in Accounts tab.");
+            if(!form.accountId)return alert("Select which account this transaction used.");
+            if(form.type==="borrow"&&!form.liabilityAccountId&&!(form.borrowSource||"").trim())return alert("Select liability account or enter borrowed source.");
+            const amt=Number(form.amount);
+            if(form.type==="borrow"){
+              const src=(form.borrowSource||form.vendor||"").trim();
+              const desc=(form.description||"").trim()||`Cash borrowed from ${src||"Other source"}`;
+              onSave({...form,amount:amt,type:"borrow",description:desc,borrowSource:src,vendor:src||form.vendor||"",businessActivity:defaultAct,category:"Borrowed Cash",isNewCategory:false});
+              return;
+            }
+            onSave({...form,amount:amt,type:form.type});
+          }}>{existing?"Update Entry":`Save ${form.type==="income"?"Income":form.type==="expense"?"Expense":"Borrowed Cash"}`}</button>
         </div>
       </>}
     </div></div>
@@ -1624,7 +1673,7 @@ function TxTable({txns,onEdit,onDelete}){
         <span style={{color:"#475569",fontFamily:"DM Mono",fontSize:11}}>{fmtD(tx.date)}</span>
         <div><div style={{fontWeight:500}}>{tx.description||tx.category}</div>
           <div style={{fontSize:11,color:"#475569",display:"flex",gap:5,marginTop:1,flexWrap:"wrap"}}>
-            {tx.vendor&&<span>{tx.vendor}</span>}{tx.paymentMethod&&<span>· {tx.paymentMethod}</span>}
+            {tx.vendor&&<span>{tx.vendor}</span>}{tx.paymentMethod&&<span>· {tx.paymentMethod}</span>}{tx.accountName&&<span>· {tx.accountName}</span>}{tx.borrowSource&&<span>· from {tx.borrowSource}</span>}
             {tx.source==="email"&&<span style={{background:"#1a2010",color:"#86efac",padding:"0 4px",borderRadius:3,fontSize:10}}>📧</span>}
             {tx.source==="auto"&&<span style={{background:"#1e1b4b",color:"#818cf8",padding:"0 4px",borderRadius:3,fontSize:10}}>AI</span>}
             {tx.source==="statement"&&<span style={{background:"#052e16",color:"#34d399",padding:"0 4px",borderRadius:3,fontSize:10}}>Stmt</span>}
@@ -1632,7 +1681,7 @@ function TxTable({txns,onEdit,onDelete}){
         </div>
         <span style={{fontSize:11,color:tx.businessActivity==="Personal"?"#c084fc":"#64748b"}}>{tx.businessActivity}</span>
         <span style={{fontSize:11,color:"#64748b"}}>{tx.category}</span>
-        <span className="mono" style={{fontWeight:700,color:tx.type==="income"?"#34d399":"#f87171"}}>{tx.type==="income"?"+":"−"}{fmt(tx.amount)}</span>
+        <span className="mono" style={{fontWeight:700,color:tx.type==="income"?"#34d399":tx.type==="borrow"?"#f59e0b":"#f87171"}}>{tx.type==="income"?"+":tx.type==="borrow"?"↘":"−"}{fmt(tx.amount)}</span>
         <button className="btn sm dan" style={{padding:"2px 6px"}} onClick={e=>{e.stopPropagation();onDelete(tx.id);}}>✕</button>
       </div>
     ))}
@@ -1659,7 +1708,7 @@ nav{border-bottom:1px solid #1a2438;padding:0 18px;display:flex;align-items:cent
 .btn.ghost{background:transparent;color:#94a3b8;border:1px solid #1e293b}.btn.ghost:hover{background:#1e293b;color:#e2e8f0}
 .btn:disabled{opacity:.5;cursor:not-allowed}
 .tag{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600}
-.tincome{background:#052e16;color:#34d399}.texpense{background:#450a0a;color:#f87171}
+.tincome{background:#052e16;color:#34d399}.texpense{background:#450a0a;color:#f87171}.tborrow{background:#422006;color:#f59e0b}
 input,select,textarea{background:#0a0d18;border:1px solid #1a2438;border-radius:8px;color:#e2e8f0;font-family:inherit;padding:8px 12px;font-size:13px;width:100%;outline:none;transition:border .15s}
 input:focus,select:focus,textarea:focus{border-color:#6366f1}
 input[type=checkbox]{width:auto;height:auto;margin:0}
