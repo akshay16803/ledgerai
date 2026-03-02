@@ -453,7 +453,8 @@ export default function App(){
 function AuthSetupScreen({authCfg,setAuthCfg}){
   const[clientId,setClientId]=useState(authCfg.googleClientId||"");
   const[ownerEmail,setOwnerEmail]=useState(authCfg.ownerEmail||"");
-  const origin=typeof window!=="undefined"?window.location.origin:"";
+  const origin=typeof window!=="undefined"?window.location.origin:"http://accounts.niprasha.com";
+  const httpsOrigin=origin.startsWith("http://")?origin.replace("http://","https://"):origin;
   return(
     <div style={{fontFamily:"'DM Sans',sans-serif",background:"#07090f",minHeight:"100vh",color:"#e2e8f0",display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
       <style>{CSS}</style>
@@ -462,8 +463,10 @@ function AuthSetupScreen({authCfg,setAuthCfg}){
         <div style={{fontSize:13,color:"#64748b",lineHeight:1.8,marginBottom:12}}>
           This dashboard is locked behind Google sign-in. Enter your Google Web Client ID once.
         </div>
-        <div style={{background:"#0d0d2b",border:"1px solid #6366f1",borderRadius:8,padding:"10px 12px",fontSize:12,color:"#c7d2fe",marginBottom:10}}>
-          Add this to your Google OAuth Authorized JavaScript origins: <b>{origin}</b>
+        <div style={{background:"#0d0d2b",border:"1px solid #6366f1",borderRadius:8,padding:"10px 12px",fontSize:12,color:"#c7d2fe",marginBottom:10,lineHeight:1.8}}>
+          Add this to your Google OAuth Authorized JavaScript origins:
+          <br/><code style={{background:"#0a0c12",padding:"2px 6px",borderRadius:4}}>{origin}</code>
+          {httpsOrigin!==origin&&<><br/>Also add:<br/><code style={{background:"#0a0c12",padding:"2px 6px",borderRadius:4}}>{httpsOrigin}</code></>}
         </div>
         <label>Google Client ID</label>
         <input value={clientId} onChange={e=>setClientId(e.target.value)} placeholder="xxxxxxxxxxxx-xxxx.apps.googleusercontent.com"/>
@@ -1073,11 +1076,13 @@ function AddEmailModal({onSave,onClose}){
 
 function SetupGuideModal({onClose}){
   const[step,setStep]=useState(0);
+  const origin=typeof window!=="undefined"?window.location.origin:"http://accounts.niprasha.com";
+  const httpsOrigin=origin.startsWith("http://")?origin.replace("http://","https://"):origin;
   const steps=[
     {t:"Step 1 — Create Google Cloud Project",c:<div><p style={{marginBottom:12}}>You need a free Google Cloud project (no cost, no card needed).</p><ol style={{paddingLeft:18,lineHeight:2.4}}><li>Go to <a href="https://console.cloud.google.com" target="_blank" rel="noreferrer">console.cloud.google.com</a></li><li>Click <b>Select a project → New Project</b></li><li>Name it "LedgerAI" → Click <b>Create</b></li></ol></div>},
     {t:"Step 2 — Enable Gmail API",c:<div><ol style={{paddingLeft:18,lineHeight:2.4}}><li>In your project: <b>APIs & Services → Library</b></li><li>Search <b>"Gmail API"</b> → Click it → <b>Enable</b></li></ol></div>},
     {t:"Step 3 — OAuth Consent Screen",c:<div><ol style={{paddingLeft:18,lineHeight:2.4}}><li><b>APIs & Services → OAuth consent screen</b></li><li>Choose <b>External</b> → Create</li><li>Fill App name, support email, developer email → Save & Continue through all steps</li><li>On <b>Test users</b> step: <b>+ Add Users</b> → add your Gmail address(es)</li><li>Save and Continue → Back to Dashboard</li></ol></div>},
-    {t:"Step 4 — Create OAuth Client ID",c:<div><ol style={{paddingLeft:18,lineHeight:2.4}}><li><b>APIs & Services → Credentials → + Create Credentials → OAuth client ID</b></li><li>Application type: <b>Web application</b></li><li>Under <b>Authorised JavaScript origins</b> add:<br/><code style={{background:"#0a0c12",padding:"2px 8px",borderRadius:4,fontSize:12}}>https://claude.ai</code></li><li>Click <b>Create</b> → Copy your <b>Client ID</b></li><li>It looks like: <code style={{background:"#0a0c12",padding:"2px 6px",borderRadius:4,fontSize:12}}>1234567890.apps.googleusercontent.com</code></li></ol></div>},
+    {t:"Step 4 — Create OAuth Client ID",c:<div><ol style={{paddingLeft:18,lineHeight:2.4}}><li><b>APIs & Services → Credentials → + Create Credentials → OAuth client ID</b></li><li>Application type: <b>Web application</b></li><li>Under <b>Authorised JavaScript origins</b> add:<br/><code style={{background:"#0a0c12",padding:"2px 8px",borderRadius:4,fontSize:12}}>{origin}</code>{httpsOrigin!==origin&&<><br/><code style={{background:"#0a0c12",padding:"2px 8px",borderRadius:4,fontSize:12}}>{httpsOrigin}</code></>}</li><li>Click <b>Create</b> → Copy your <b>Client ID</b></li><li>It looks like: <code style={{background:"#0a0c12",padding:"2px 6px",borderRadius:4,fontSize:12}}>1234567890.apps.googleusercontent.com</code></li></ol></div>},
     {t:"Step 5 — Connect in LedgerAI",c:<div><ol style={{paddingLeft:18,lineHeight:2.4}}><li>Email tab → <b>+ Add Email</b> → paste your Client ID</li><li>Click <b>Add Account</b> → then <b>🔗 Connect</b></li><li>Google OAuth popup appears → sign in → grant read-only access</li><li>Click <b>🔄 Sync</b> to fetch receipt emails</li><li>Review extracted transactions in <b>Inbox</b> tab</li></ol><div style={{background:"#052e16",border:"1px solid #34d399",borderRadius:8,padding:12,marginTop:14,fontSize:12,color:"#86efac"}}>✅ <b>Privacy:</b> Your emails are read directly in your browser with read-only access. No email content is stored on any server.</div></div>},
   ];
   return(
@@ -1630,7 +1635,7 @@ function CloudTab({sbCfg,setSbCfg,syncStatus,lastSync,onSync,onLoad,txns,setTxns
 
 function AzureGuideModal({onClose}){
   const[step,setStep]=useState(0);
-  const origin=typeof window!=="undefined"?window.location.origin:"https://claude.ai";
+  const origin=typeof window!=="undefined"?window.location.origin:"https://accounts.niprasha.com";
   const steps=[
     {t:"Step 1 — Sign in to Azure Portal",c:<div><p style={{marginBottom:12,color:"#94a3b8"}}>Azure is Microsoft's cloud platform. App Registration is free — no Azure subscription or billing needed.</p><ol style={{paddingLeft:18,lineHeight:2.4,color:"#94a3b8"}}><li>Go to <a href="https://portal.azure.com" target="_blank" rel="noreferrer">portal.azure.com</a></li><li>Sign in with your Microsoft account (Outlook, Hotmail, or work/school account)</li><li>Search for <b style={{color:"#e2e8f0"}}>"App registrations"</b> in the top search bar</li><li>Click <b style={{color:"#e2e8f0"}}>+ New registration</b></li></ol></div>},
     {t:"Step 2 — Register the App",c:<div><ol style={{paddingLeft:18,lineHeight:2.4,color:"#94a3b8"}}><li><b style={{color:"#e2e8f0"}}>Name:</b> anything, e.g. "LedgerAI"</li><li><b style={{color:"#e2e8f0"}}>Supported account types:</b> Choose <b style={{color:"#e2e8f0"}}>"Personal Microsoft accounts only"</b> (or "any account" if work/school)</li><li><b style={{color:"#e2e8f0"}}>Redirect URI:</b> Select <b style={{color:"#e2e8f0"}}>Single-page application (SPA)</b> and enter:<br/><code style={{background:"#07090f",padding:"3px 10px",borderRadius:4,fontSize:11,display:"block",marginTop:4}}>{origin}</code></li><li>Click <b style={{color:"#e2e8f0"}}>Register</b></li></ol></div>},
