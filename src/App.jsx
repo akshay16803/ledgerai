@@ -75,7 +75,7 @@ const sanitizeMsClientId = (id="") => {
   return BLOCKED_MS_CLIENT_IDS.has(v) ? "" : v;
 };
 const DEFAULT_MICROSOFT_CLIENT_ID = sanitizeMsClientId(import.meta.env.VITE_MICROSOFT_CLIENT_ID || "");
-const DEFAULT_AI_MODEL = "claude-sonnet-4-20250514";
+const DEFAULT_AI_MODEL = "gpt-4.1-mini";
 const EMAIL_SYNC_CACHE_VERSION = "v5";
 const BACKUP_KEY = "ledger_backups";
 const MAX_BACKUPS = 50;

@@ -57,7 +57,7 @@ export default {
       return json({ error: "Invalid JSON body" }, 400, cors);
     }
 
-    const model = (payload?.model || "claude-sonnet-4-20250514") + "";
+    const model = (payload?.model || "gpt-4.1-mini") + "";
     const maxTokens = Math.max(64, Math.min(Number(payload?.max_tokens) || 800, 4096));
     const messages = Array.isArray(payload?.messages) ? payload.messages : null;
     if (!messages || !messages.length) {
