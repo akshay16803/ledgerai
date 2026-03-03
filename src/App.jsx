@@ -66,7 +66,7 @@ const strSim=(a,b)=>{a=(a||"").toLowerCase();b=(b||"").toLowerCase();let m=0;for
 const LOCKED_OWNER_EMAIL = "akshaychouhan16803@gmail.com";
 const DEFAULT_GOOGLE_CLIENT_ID = "975238186836-47bvtn56uhrlcbe11n1pe1h26qbor5s1.apps.googleusercontent.com";
 const DEFAULT_AI_MODEL = "claude-sonnet-4-20250514";
-const EMAIL_SYNC_CACHE_VERSION = "v4";
+const EMAIL_SYNC_CACHE_VERSION = "v5";
 
 if(typeof window!=="undefined"){
   const h=window.location.hostname;
