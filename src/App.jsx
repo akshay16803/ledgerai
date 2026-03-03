@@ -1169,6 +1169,7 @@ export default function App(){
   },[]);
 
   const factoryReset=useCallback(()=>{
+    const preservedMsClientId=sanitizeMsClientId((sbCfg?.clientId||DEFAULT_MICROSOFT_CLIENT_ID||"").trim());
     try{
       const preReset=buildBackupSnapshot("factory-reset-before-clear");
       LS.set("ledger_last_reset_backup",preReset);
@@ -1185,6 +1186,7 @@ export default function App(){
         if(k.startsWith(`proc_${EMAIL_SYNC_CACHE_VERSION}_`))purge.push(k);
       }
       purge.forEach(k=>localStorage.removeItem(k));
+      if(preservedMsClientId)clearStaleMsalInteractionState(preservedMsClientId);
     }catch{}
     setTxns([]);
     setActs([...DEF_ACTS]);
@@ -1193,7 +1195,16 @@ export default function App(){
     setInbox([]);
     setEmails([]);
     setSmsNums([]);
-    setSbCfg(defaultCloudCfg());
+    setSbCfg({
+      ...defaultCloudCfg(),
+      clientId:preservedMsClientId,
+      enabled:false,
+      url:"",
+      key:"",
+      email:"",
+      name:"",
+      needsReconnect:false,
+    });
     setSyncStatus("idle");
     setLastSync("");
     setSummary("");
@@ -1206,7 +1217,7 @@ export default function App(){
     setAuthBypass(false);
     setBackups(LS.get(BACKUP_KEY,[]));
     alert("Reset complete. LedgerAI is now fresh.");
-  },[buildBackupSnapshot,pushBackupSnapshot]);
+  },[buildBackupSnapshot,pushBackupSnapshot,sbCfg]);
 
   const onGoogleCredential=useCallback((resp)=>{
     let payload=decodeGoogleCredential(resp?.credential||"");
