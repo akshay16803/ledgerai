@@ -2253,6 +2253,18 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
         return;
       }
       const toProcess=scanAll?fresh:fresh.slice(0,Math.max(1,Math.min(Number(acc.maxEmails)||100,5000)));
+      // Fail fast on AI backend misconfiguration so we don't enqueue every email as config-failed.
+      try{
+        await withTimeout(
+          callAI([{role:"user",content:'Reply ONLY this JSON: {"ok":true}'}],60),
+          12000,
+          "AI backend preflight",
+        );
+      }catch(preErr){
+        if(classifySyncError(preErr)==="config"){
+          throw new Error(`ai_config_error: ${String(preErr?.message||"AI backend not configured")}`);
+        }
+      }
       setProgress(acc.id,{phase:"processing",processed:0,total:toProcess.length,remaining:toProcess.length,matched:messages.length,newCount:fresh.length,found:0,failed:0,skipped:0,pending:0,failureReasons:{}});
       const found=[];let done=0;let failed=0;let skipped=0;let pendingQueued=0;
       const failureReasons={};
@@ -2283,9 +2295,12 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
           items.forEach(item=>found.push({...item,date:item.date||evidence.eDate||today(),source:"email",emailProvider:provider,emailSubject:evidence.subject||"",emailFrom:evidence.from||"",emailAccountId:acc.id,emailMsgId:msg.id}));
           processed.add(msg.id);
         }catch(e){
+          const reason=classifySyncError(e);
+          if(reason==="config"){
+            throw new Error(`ai_config_error: ${String(e?.message||"AI backend config issue")}`);
+          }
           failed++;
           pendingQueued++;
-          const reason=classifySyncError(e);
           failureReasons[reason]=(failureReasons[reason]||0)+1;
           const nowIso=new Date().toISOString();
           enqueueAiPending({
@@ -2370,10 +2385,15 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
       }else if(msg.includes("401")||msg.includes("Not signed in to Microsoft")){
         log(acc.id,provider==="microsoft"?"⚠ Microsoft session expired — reconnect required.":"⚠ Token expired — reconnect required.");
         setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,token:null,connected:true,userDisconnected:false,reauthRequired:true}:a));
+      }else if(msg.includes("ai_config_error")){
+        const detail=msg.replace("ai_config_error:","").trim();
+        log(acc.id,`⚠ AI backend config issue: ${detail}`);
+        if(!silent)alert(`AI backend config issue:\n${detail}\n\nGo to Settings → AI Backend and click Test AI Backend.`);
+        setProgress(acc.id,{phase:"error",pending:0,failureReasons:{config:1}});
       }else{
         log(acc.id,"Error: "+msg);
+        setProgress(acc.id,{phase:"error",pending:0});
       }
-      setProgress(acc.id,{phase:"error",pending:0});
     }
     setSyncing(acc.id,false);
   };
