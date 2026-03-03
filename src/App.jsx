@@ -66,6 +66,7 @@ const strSim=(a,b)=>{a=(a||"").toLowerCase();b=(b||"").toLowerCase();let m=0;for
 const LOCKED_OWNER_EMAIL = "akshaychouhan16803@gmail.com";
 const DEFAULT_GOOGLE_CLIENT_ID = "975238186836-47bvtn56uhrlcbe11n1pe1h26qbor5s1.apps.googleusercontent.com";
 const DEFAULT_AI_MODEL = "claude-sonnet-4-20250514";
+const EMAIL_SYNC_CACHE_VERSION = "v2";
 
 if(typeof window!=="undefined"){
   const h=window.location.hostname;
@@ -1541,7 +1542,8 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
         setSyncing(acc.id,false);
         return;
       }
-      const processed=new Set(LS.get(`proc_${acc.id}`,[]));
+      const processedKey=`proc_${EMAIL_SYNC_CACHE_VERSION}_${acc.id}`;
+      const processed=new Set(LS.get(processedKey,[]));
       const fresh=messages.filter(m=>!processed.has(m.id));
       if(!fresh.length){
         log(acc.id,"✓ All emails already processed.");
@@ -1625,7 +1627,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
           setProgress(acc.id,{phase:"processing",processed:done,total:toProcess.length,remaining:Math.max(0,toProcess.length-done),matched:messages.length,newCount:fresh.length,found:found.length,failed,skipped,failureReasons:{...failureReasons}});
         }
       }
-      LS.set(`proc_${acc.id}`,[...processed].slice(-50000));
+      LS.set(processedKey,[...processed].slice(-50000));
       const deduped=[];const seen=new Set();
       for(const i of found){
         const key=[i.emailMsgId||"",i.type||"",Number(i.amount)||0,(i.date||""),String(i.description||"").toLowerCase().slice(0,80)].join("|");
