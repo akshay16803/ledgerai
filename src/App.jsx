@@ -177,10 +177,12 @@ function isReceiptLikeEmail({subject="",from="",body="",attachmentNames=[],attac
   const hasReceiptKeyword=RECEIPT_KEYWORDS.some(k=>text.includes(k)||attachmentNameText.includes(k));
   const hasTxnAlertKeyword=TRANSACTION_ALERT_KEYWORDS.some(k=>text.includes(k));
   const senderLooksFinancial=/\b(bank|card|wallet|upi|finance|payments?)\b/.test((from||"").toLowerCase());
+  const hasMoney=hasMoneyEvidence(text);
   const hasNonFinancialKeyword=NON_FINANCIAL_EMAIL_KEYWORDS.some(k=>text.includes(k));
-  if(hasNonFinancialKeyword&&!hasReceiptKeyword)return false;
+  // If transaction evidence is strong, do not reject only because body contains words like "login".
+  if(hasNonFinancialKeyword&&!hasReceiptKeyword&&!(hasTxnAlertKeyword&&hasMoney))return false;
   if(hasReceiptKeyword)return true;
-  if(hasTxnAlertKeyword&&hasMoneyEvidence(text)&&(senderLooksFinancial||/\b(account|a\/c|acc|card)\b/.test(text)))return true;
+  if(hasTxnAlertKeyword&&hasMoney&&(senderLooksFinancial||/\b(account|a\/c|acc|card)\b/.test(text)))return true;
   if(hasAttachment){
     // For mails with attachments, still require at least one transaction phrase in subject/body.
     return /\b(payment|paid|debited|credited|refund|invoice|receipt|bill|order|transaction|charges?)\b/i.test(text);
@@ -292,7 +294,8 @@ function parseAmountFromText(text=""){
   const m1=t.match(/(?:inr|rs\.?|₹|\$|usd|eur|gbp)\s*([0-9]+(?:\.[0-9]{1,2})?)/i);
   const m1b=t.match(/\b([0-9]+(?:\.[0-9]{1,2})?)\s*(?:usd|inr|eur|gbp)\b/i);
   const m2=t.match(/\b(?:amount|amt|paid|payment|debited|credited|refund|total|payout|settlement)\b[^0-9]{0,20}([0-9]{2,9}(?:\.[0-9]{1,2})?)/i);
-  const m=m1||m1b||m2;
+  const m3=t.match(/\b([0-9]{1,6}\.[0-9]{2})\b/); // useful for receipt PDFs like 17.30
+  const m=m1||m1b||m2||m3;
   if(!m)return 0;
   const n=Number(m[1]);
   return Number.isFinite(n)?n:0;
