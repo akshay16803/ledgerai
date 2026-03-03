@@ -503,6 +503,15 @@ const MSAL_CDN = "https://alcdn.msauth.net/browser/2.38.2/js/msal-browser.min.js
 
 let _msalApp = null;
 let _msalClientId = null;
+let _msalInteractionQueue = Promise.resolve();
+
+function queueMsalInteraction(task){
+  const run = () => Promise.resolve().then(task);
+  const next = _msalInteractionQueue.then(run, run);
+  // Keep queue alive even when one interactive auth step fails.
+  _msalInteractionQueue = next.catch(() => {});
+  return next;
+}
 
 async function loadMsal() {
   if (window.msal) return;
@@ -528,7 +537,7 @@ async function getMsal(clientId) {
 
 async function odLogin(clientId) {
   const msal = await getMsal(clientId);
-  const result = await msal.loginPopup({ scopes: OD_SCOPES });
+  const result = await queueMsalInteraction(() => msal.loginPopup({ scopes: OD_SCOPES }));
   return result.account;
 }
 
@@ -540,7 +549,7 @@ async function odGetToken(clientId) {
     const r = await msal.acquireTokenSilent({ scopes: OD_SCOPES, account: accounts[0] });
     return r.accessToken;
   } catch {
-    const r = await msal.acquireTokenPopup({ scopes: OD_SCOPES, account: accounts[0] });
+    const r = await queueMsalInteraction(() => msal.acquireTokenPopup({ scopes: OD_SCOPES, account: accounts[0] }));
     return r.accessToken;
   }
 }
@@ -573,14 +582,14 @@ function pickMsAccount(msal,accountHint){
 
 async function msLoginMail(clientId){
   const msal=await getMsal(clientId);
-  const login=await msal.loginPopup({scopes:MS_MAIL_SCOPES,prompt:"select_account"});
+  const login=await queueMsalInteraction(() => msal.loginPopup({scopes:MS_MAIL_SCOPES,prompt:"select_account"}));
   const account=login.account||pickMsAccount(msal,{});
   if(!account)throw new Error("Microsoft account not found after login");
   try{
     const tok=await msal.acquireTokenSilent({scopes:MS_MAIL_SCOPES,account});
     return{account,accessToken:tok.accessToken};
   }catch{
-    const tok=await msal.acquireTokenPopup({scopes:MS_MAIL_SCOPES,account});
+    const tok=await queueMsalInteraction(() => msal.acquireTokenPopup({scopes:MS_MAIL_SCOPES,account}));
     return{account,accessToken:tok.accessToken};
   }
 }
@@ -593,7 +602,7 @@ async function msGetMailToken(clientId,accountHint){
     const tok=await msal.acquireTokenSilent({scopes:MS_MAIL_SCOPES,account});
     return{account,accessToken:tok.accessToken};
   }catch{
-    const tok=await msal.acquireTokenPopup({scopes:MS_MAIL_SCOPES,account,prompt:"select_account"});
+    const tok=await queueMsalInteraction(() => msal.acquireTokenPopup({scopes:MS_MAIL_SCOPES,account,prompt:"select_account"}));
     return{account,accessToken:tok.accessToken};
   }
 }
