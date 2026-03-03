@@ -166,13 +166,43 @@ const NON_FINANCIAL_EMAIL_KEYWORDS = [
   "recover account","reset your password","welcome to","newsletter","digest",
   "policy update","privacy update",
 ];
+const MARKET_SIGNAL_KEYWORDS = [
+  "tradingview","kitealgo","signal alert","signal received","trade signal","buy signal","sell signal",
+  "entry","target","stop loss","stop-loss","sl hit","tp hit","take profit","call option","put option",
+  "ce "," pe ","banknifty","nifty","breakout alert","indicator alert","strategy alert","webhook alert",
+];
+const CASH_CONFIRMATION_KEYWORDS = [
+  "debited","credited","paid","payment successful","payment received","charged","purchase","withdrawn",
+  "deposit","refund processed","salary credited","settlement","payout","invoice","receipt","bill paid",
+];
 
 function hasMoneyEvidence(text=""){
   const t=(text||"").replace(/[,]/g," ");
   return /((?:₹|rs\.?|inr|\$|usd|eur|gbp)\s*\d|\d\s*(?:usd|inr|eur|gbp)|\b(?:amount|amt|total|paid|payment|debited|credited|refund|payout|settlement|invoice total|grand total)\b[^0-9]{0,24}\d)/i.test(t);
 }
 
+function hasCashEvidenceForBooking(text="",attachmentNameText=""){
+  const lower=(text||"").toLowerCase();
+  const attach=(attachmentNameText||"").toLowerCase();
+  const hasReceiptKeyword=RECEIPT_KEYWORDS.some(k=>lower.includes(k)||attach.includes(k));
+  const hasCashKeyword=CASH_CONFIRMATION_KEYWORDS.some(k=>lower.includes(k));
+  const hasMoney=hasMoneyEvidence(text);
+  if(hasReceiptKeyword&&(hasMoney||/\b(invoice|receipt)\b/.test(lower)))return true;
+  if(hasCashKeyword&&hasMoney)return true;
+  return false;
+}
+
+function isMarketSignalAlert({subject="",from="",body="",attachmentNames=[],attachmentText=""}={}){
+  const text=`${subject}\n${from}\n${body}\n${attachmentText}`.toLowerCase();
+  const attachmentNameText=(attachmentNames||[]).join(" ").toLowerCase();
+  const hasSignal=MARKET_SIGNAL_KEYWORDS.some(k=>text.includes(k)||attachmentNameText.includes(k));
+  if(!hasSignal)return false;
+  // Allow only when there is explicit payment/receipt evidence.
+  return !hasCashEvidenceForBooking(text,attachmentNameText);
+}
+
 function isReceiptLikeEmail({subject="",from="",body="",attachmentNames=[],attachmentText="",hasAttachment=false}={}){
+  if(isMarketSignalAlert({subject,from,body,attachmentNames,attachmentText}))return false;
   const text=`${subject}\n${from}\n${body}\n${attachmentText}`.toLowerCase();
   const attachmentNameText=(attachmentNames||[]).join(" ").toLowerCase();
   const hasReceiptKeyword=RECEIPT_KEYWORDS.some(k=>text.includes(k)||attachmentNameText.includes(k));
@@ -194,6 +224,7 @@ function isReceiptLikeEmail({subject="",from="",body="",attachmentNames=[],attac
 function sanitizeEmailTransactions(items=[],ctx={}){
   if(!Array.isArray(items)||!items.length)return[];
   const evidenceText=`${ctx.subject||""}\n${ctx.from||""}\n${ctx.body||""}\n${(ctx.attachmentNames||[]).join(" ")}\n${ctx.attachmentText||""}`;
+  if(isMarketSignalAlert(ctx))return[];
   const strongReceipt=isReceiptLikeEmail(ctx);
   const hasMoney=hasMoneyEvidence(evidenceText);
   const hasTxnAlert=TRANSACTION_ALERT_KEYWORDS.some(k=>evidenceText.toLowerCase().includes(k));
@@ -207,7 +238,7 @@ function sanitizeEmailTransactions(items=[],ctx={}){
     return x.type==="income"||x.type==="expense";
   });
   if(!normalized.length)return[];
-  if(ctx.aiCashFlow===true)return normalized;
+  if(ctx.aiCashFlow===true&&(strongReceipt||(hasTxnAlert&&hasMoney)))return normalized;
   if(!(strongReceipt||(hasTxnAlert&&hasMoney)))return[];
   const hasReceiptContext=RECEIPT_KEYWORDS.some(k=>evidenceText.toLowerCase().includes(k));
   if(!hasMoney&&!(ctx.hasAttachment&&hasReceiptContext)&&!hasTxnAlert)return[];
@@ -308,6 +339,7 @@ function fallbackExtractEmail(subject="",from="",body="",meta={}){
   const attachmentText=(meta?.attachmentText||"")+"";
   const attachmentNames=(meta?.attachmentNames||[]);
   const hasAttachment=Boolean(meta?.hasAttachment);
+  if(isMarketSignalAlert({subject,from,body,attachmentNames,attachmentText}))return[];
   const text=`${subject}\n${from}\n${body}\n${attachmentText}\n${attachmentNames.join(" ")}`.replace(/\s+/g," ").trim();
   const lower=text.toLowerCase();
   const amount=parseAmountFromText(text);
@@ -404,6 +436,7 @@ Strict rules:
 1) Read COMPLETE provided email body and COMPLETE provided attachment text and detect transactions from either source.
 2) Return [] unless there is clear receipt/invoice/payment/debit/credit evidence.
 2) Ignore security/login/OTP/verification/newsletter alerts.
+3) Ignore trading/investing signal alerts (TradingView/Kite/KiteAlgo entry-target-stoploss buy/sell calls) unless there is explicit debit/credit/receipt proof.
 3) Do NOT guess amounts from years, OTPs, IDs, order numbers, or ticket numbers.
 4) If amount is not clearly present, return [].
 
@@ -442,6 +475,7 @@ Rules:
 - Consider BOTH body and attachment text.
 - Bank alerts with debited/credited + amount are valid transactions.
 - Ignore newsletters, OTP, login/security notifications unless they clearly include a transaction.
+- Ignore TradingView/Kite/KiteAlgo market signal alerts (entry/target/SL/buy/sell) unless there is explicit payment/receipt/debit/credit evidence.
 - Do not use years/IDs/OTP/order IDs as amounts.
 - If no valid transaction evidence, return isCashFlow=false and transactions=[].
 
