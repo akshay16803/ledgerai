@@ -363,6 +363,9 @@ function classifySyncError(err){
   const msg=String(err?.message||"").toLowerCase();
   const m=msg.match(/\b(4\d\d|5\d\d)\b/);
   const status=Number(err?.status||m?.[1]||0);
+  if(msg.includes("not configured")||msg.includes("missing openai_api_key")||msg.includes("missing anthropic_api_key"))return "config";
+  if(msg.includes("unauthorized")||msg.includes("forbidden"))return "auth";
+  if(msg.includes("replace is not a function")||msg.includes("invalid ai response")||msg.includes("ai response missing"))return "backend-format";
   if(status===401||status===403)return "auth";
   if(status===429)return "rate-limit";
   if(status>=500&&status<600)return "server";
@@ -372,7 +375,7 @@ function classifySyncError(err){
 }
 
 function formatFailureSummary(reasons={}){
-  const labels={auth:"auth", "rate-limit":"rate limit", server:"server", timeout:"timeout", network:"network", other:"other"};
+  const labels={auth:"auth","rate-limit":"rate limit",server:"server",timeout:"timeout",network:"network",config:"config","backend-format":"backend format",other:"other"};
   const top=Object.entries(reasons).sort((a,b)=>b[1]-a[1]).slice(0,3);
   if(!top.length)return "";
   return top.map(([k,v])=>`${labels[k]||k}: ${v}`).join(", ");
@@ -490,6 +493,23 @@ function buildJE(tx,accs=[]){
 }
 
 async function callAI(messages,max_tokens=800){
+  const normalizeAIText=(value)=>{
+    if(typeof value==="string")return value;
+    if(Array.isArray(value)){
+      const joined=value.map(part=>{
+        if(typeof part==="string")return part;
+        if(part&&typeof part==="object"){
+          return String(part.text||part.output_text||part.content||"");
+        }
+        return "";
+      }).filter(Boolean).join("\n");
+      return joined;
+    }
+    if(value&&typeof value==="object"){
+      return String(value.text||value.output_text||value.content||"");
+    }
+    return "";
+  };
   const cfg=LS.get("ledger_ai_cfg",{endpoint:"",secret:"",model:DEFAULT_AI_MODEL});
   const endpoint=(cfg.endpoint||"").trim();
   const secret=(cfg.secret||"").trim();
@@ -506,7 +526,18 @@ async function callAI(messages,max_tokens=800){
       const msg=d?.error?.message||d?.message||txt?.slice?.(0,180)||`HTTP ${r.status}`;
       throw new Error(`AI ${r.status}: ${msg}`);
     }
-    return d.text||d.output||d.content?.[0]?.text||d.result?.content?.[0]?.text||"";
+    const out=
+      d.text
+      ?? d.output_text
+      ?? d.output
+      ?? d.content?.[0]?.text
+      ?? d.content
+      ?? d.result?.content?.[0]?.text
+      ?? d.result?.output_text
+      ?? "";
+    const normalized=normalizeAIText(out);
+    if(typeof normalized!=="string")throw new Error("Invalid AI response format");
+    return normalized;
   }catch(e){
     if(e?.name==="AbortError")throw new Error("AI request timed out");
     throw e;
