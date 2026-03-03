@@ -132,6 +132,11 @@ const RECEIPT_KEYWORDS = [
   "payment successful","amount debited","amount credited","bill","cash memo",
   "order receipt","order invoice","refund","payout","settlement",
 ];
+const TRANSACTION_ALERT_KEYWORDS = [
+  "debited","credited","debit","credit","charges","charged","card","upi","imps",
+  "neft","rtgs","transaction","spent","purchase","paid","received","withdrawn",
+  "salary","refund",
+];
 const NON_FINANCIAL_EMAIL_KEYWORDS = [
   "security alert","security notice","verification code","otp","one-time password",
   "password","sign in","signin","login","2fa","two-factor","new device",
@@ -148,12 +153,15 @@ function isReceiptLikeEmail({subject="",from="",body="",attachmentNames=[],attac
   const text=`${subject}\n${from}\n${body}\n${attachmentText}`.toLowerCase();
   const attachmentNameText=(attachmentNames||[]).join(" ").toLowerCase();
   const hasReceiptKeyword=RECEIPT_KEYWORDS.some(k=>text.includes(k)||attachmentNameText.includes(k));
+  const hasTxnAlertKeyword=TRANSACTION_ALERT_KEYWORDS.some(k=>text.includes(k));
+  const senderLooksFinancial=/\b(bank|card|wallet|upi|finance|payments?)\b/.test((from||"").toLowerCase());
   const hasNonFinancialKeyword=NON_FINANCIAL_EMAIL_KEYWORDS.some(k=>text.includes(k));
   if(hasNonFinancialKeyword&&!hasReceiptKeyword)return false;
   if(hasReceiptKeyword)return true;
+  if(hasTxnAlertKeyword&&hasMoneyEvidence(text)&&(senderLooksFinancial||/\b(account|a\/c|acc|card)\b/.test(text)))return true;
   if(hasAttachment){
     // For mails with attachments, still require at least one transaction phrase in subject/body.
-    return /\b(payment|paid|debited|credited|refund|invoice|receipt|bill|order)\b/i.test(text);
+    return /\b(payment|paid|debited|credited|refund|invoice|receipt|bill|order|transaction|charges?)\b/i.test(text);
   }
   return false;
 }
@@ -164,8 +172,7 @@ function sanitizeEmailTransactions(items=[],ctx={}){
   const strongReceipt=isReceiptLikeEmail(ctx);
   const hasMoney=hasMoneyEvidence(evidenceText);
   if(!strongReceipt)return[];
-  if(!hasMoney)return[];
-  return items.map(x=>({
+  const normalized=items.map(x=>({
     ...x,
     type:x?.type==="income"?"income":"expense",
     amount:Number(x?.amount)||0,
@@ -174,6 +181,10 @@ function sanitizeEmailTransactions(items=[],ctx={}){
     if(Number.isInteger(x.amount)&&x.amount>=1900&&x.amount<=2100&&!/(₹|inr|rs\.?)/i.test(evidenceText))return false;
     return x.type==="income"||x.type==="expense";
   });
+  if(!normalized.length)return[];
+  const hasReceiptContext=RECEIPT_KEYWORDS.some(k=>evidenceText.toLowerCase().includes(k));
+  if(!hasMoney&&!(ctx.hasAttachment&&hasReceiptContext))return[];
+  return normalized;
 }
 
 async function withTimeout(promise,ms,label="request"){
@@ -571,8 +582,17 @@ async function gmailGetAttachment(token,msgId,attachmentId){
   return gmailFetch(`https://www.googleapis.com/gmail/v1/users/me/messages/${msgId}/attachments/${attachmentId}`,token,"Gmail attachment");
 }
 function extractReadableAttachmentText(rawBinary=""){
-  const ascii=(rawBinary||"").replace(/[^\x20-\x7E\r\n]+/g," ");
-  return ascii.replace(/\s+/g," ").trim();
+  return (rawBinary||"").replace(/[^\x20-\x7E\r\n]+/g," ");
+}
+function extractAttachmentMoneyHints(text=""){
+  const src=(text||"").replace(/\s+/g," ");
+  const re=/((?:₹|rs\.?|inr|\$|usd|eur|gbp)\s*[0-9]+(?:\.[0-9]{1,2})?|[0-9]+(?:\.[0-9]{1,2})?\s*(?:usd|inr|eur|gbp))/ig;
+  const out=[];let m;
+  while((m=re.exec(src))&&out.length<8){
+    const v=(m[1]||"").trim();
+    if(v&&!out.includes(v))out.push(v);
+  }
+  return out.join(", ");
 }
 async function gmailAttachmentEvidenceText(token,msgId,attachments=[]){
   if(!Array.isArray(attachments)||!attachments.length)return "";
@@ -583,8 +603,11 @@ async function gmailAttachmentEvidenceText(token,msgId,attachments=[]){
     try{
       const payload=await withTimeout(gmailGetAttachment(token,msgId,a.attachmentId),18000,`Attachment ${a.name||a.attachmentId}`);
       const binary=decodeB64Binary(payload?.data||"");
-      const text=extractReadableAttachmentText(binary).slice(0,4000);
-      if(text)chunks.push(`[${a.name}] ${text}`);
+      const text=extractReadableAttachmentText(binary);
+      const compact=text.replace(/\s+/g," ").trim();
+      const hints=extractAttachmentMoneyHints(compact);
+      const sample=compact.length>7000?`${compact.slice(0,3500)} ... ${compact.slice(-3500)}`:compact;
+      if(sample)chunks.push(`[${a.name}] ${hints?`Amount hints: ${hints}. `:""}${sample}`);
     }catch(e){
       console.warn("Attachment read skipped",a?.name||a?.attachmentId,e);
     }
