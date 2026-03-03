@@ -65,11 +65,15 @@ const amtClose=(a,b)=>Math.abs(a-b)<2;
 const strSim=(a,b)=>{a=(a||"").toLowerCase();b=(b||"").toLowerCase();let m=0;for(let c of a)if(b.includes(c))m++;return m/Math.max(a.length,b.length,1);};
 const LOCKED_OWNER_EMAIL = "akshaychouhan16803@gmail.com";
 const DEFAULT_GOOGLE_CLIENT_ID = "975238186836-47bvtn56uhrlcbe11n1pe1h26qbor5s1.apps.googleusercontent.com";
-const DEFAULT_MICROSOFT_CLIENT_ID = (
-  import.meta.env.VITE_MICROSOFT_CLIENT_ID
-  || "c44b4083-3bb0-49c1-b47d-974e53cbdf3c"
-  || ""
-).trim();
+const BLOCKED_MS_CLIENT_IDS = new Set([
+  // This legacy app id is in a tenant that does not allow personal Microsoft accounts.
+  "c44b4083-3bb0-49c1-b47d-974e53cbdf3c",
+]);
+const sanitizeMsClientId = (id="") => {
+  const v = String(id || "").trim();
+  return BLOCKED_MS_CLIENT_IDS.has(v) ? "" : v;
+};
+const DEFAULT_MICROSOFT_CLIENT_ID = sanitizeMsClientId(import.meta.env.VITE_MICROSOFT_CLIENT_ID || "");
 const DEFAULT_AI_MODEL = "claude-sonnet-4-20250514";
 const EMAIL_SYNC_CACHE_VERSION = "v5";
 const BACKUP_KEY = "ledger_backups";
@@ -77,7 +81,7 @@ const MAX_BACKUPS = 50;
 
 function defaultCloudCfg(){
   return{
-    clientId:(DEFAULT_MICROSOFT_CLIENT_ID||"").trim(),
+    clientId:sanitizeMsClientId(DEFAULT_MICROSOFT_CLIENT_ID||""),
     email:"",
     name:"",
     enabled:false,
@@ -953,7 +957,7 @@ function hydrateEmailAccount(acc={}){
     lastAutoSyncAt:(acc.lastAutoSyncAt||"")+"",
     lastAuthAt:(acc.lastAuthAt||"")+"",
     reauthRequired:Boolean(acc.reauthRequired),
-    msClientId:(acc.msClientId||"")+"",
+    msClientId:sanitizeMsClientId((acc.msClientId||"")+""),
     msAccountId:(acc.msAccountId||"")+"",
     msUsername:(acc.msUsername||"")+"",
   };
@@ -984,7 +988,7 @@ export default function App(){
   const[sbCfg,setSbCfg]=useState(()=>{
     const base=defaultCloudCfg();
     const saved=LS.get("ledger_odcfg",base); // reusing name for compat
-    return{...base,...saved,clientId:(saved.clientId||base.clientId||"").trim()};
+    return{...base,...saved,clientId:sanitizeMsClientId((saved.clientId||base.clientId||"").trim())};
   });
   const setSbCfgAlias=v=>setSbCfg(typeof v==="function"?v:v);
   const[syncStatus,setSyncStatus]=useState("idle"); // idle|syncing|ok|error
@@ -1953,9 +1957,9 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClient
   };
 
   const connectMicrosoftAccount=async(existing=null)=>{
-    const msClient=(existing?.msClientId||microsoftClientId||DEFAULT_MICROSOFT_CLIENT_ID||"").trim();
+    const msClient=sanitizeMsClientId((existing?.msClientId||microsoftClientId||DEFAULT_MICROSOFT_CLIENT_ID||"").trim());
     if(!msClient){
-      alert("Outlook connector is not configured for this deployment. Admin needs to set VITE_MICROSOFT_CLIENT_ID once.");
+      alert("Outlook connector is not configured with your Azure app Client ID yet. Open Cloud tab and set your own Azure Application (client) ID once.");
       return;
     }
     try{
@@ -2006,9 +2010,9 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClient
     const provider=providerOf(acc);
     const interactive=opts.interactive!==false;
     const silent=opts.silent===true;
-    const msClient=(acc?.msClientId||microsoftClientId||"").trim();
+    const msClient=sanitizeMsClientId((acc?.msClientId||microsoftClientId||"").trim());
     if(provider==="microsoft"&&!msClient){
-      if(!silent)alert("Outlook connector is not configured for this deployment. Admin needs to set VITE_MICROSOFT_CLIENT_ID once.");
+      if(!silent)alert("Outlook connector is not configured with your Azure app Client ID yet. Open Cloud tab and set your own Azure Application (client) ID once.");
       return;
     }
     const scanAll=opts.scanAll===true;
@@ -2754,9 +2758,9 @@ function CloudTab({sbCfg,setSbCfg,syncStatus,lastSync,onSync,onLoad,txns,setTxns
   const dataSize=()=>(JSON.stringify({txns,inbox,accs,acts,cats,smsNums}).length/1024).toFixed(1)+"KB";
 
   const connect=async()=>{
-    const resolvedClientId=(clientId||sbCfg.clientId||DEFAULT_MICROSOFT_CLIENT_ID||"").trim();
+    const resolvedClientId=sanitizeMsClientId((clientId||sbCfg.clientId||DEFAULT_MICROSOFT_CLIENT_ID||"").trim());
     if(!resolvedClientId){
-      alert("Microsoft connector is not configured. Admin: set VITE_MICROSOFT_CLIENT_ID or enter Azure Application (Client) ID here.");
+      alert("Microsoft connector is not configured. Paste your own Azure Application (client) ID here once.");
       return;
     }
     // Persist client ID even if auth popup fails, so Email->Connect Outlook can still use it.
