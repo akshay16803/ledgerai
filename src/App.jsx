@@ -196,7 +196,6 @@ function sanitizeEmailTransactions(items=[],ctx={}){
   const strongReceipt=isReceiptLikeEmail(ctx);
   const hasMoney=hasMoneyEvidence(evidenceText);
   const hasTxnAlert=TRANSACTION_ALERT_KEYWORDS.some(k=>evidenceText.toLowerCase().includes(k));
-  if(!(strongReceipt||(hasTxnAlert&&hasMoney)))return[];
   const normalized=items.map(x=>({
     ...x,
     type:x?.type==="income"?"income":"expense",
@@ -207,6 +206,8 @@ function sanitizeEmailTransactions(items=[],ctx={}){
     return x.type==="income"||x.type==="expense";
   });
   if(!normalized.length)return[];
+  if(ctx.aiCashFlow===true)return normalized;
+  if(!(strongReceipt||(hasTxnAlert&&hasMoney)))return[];
   const hasReceiptContext=RECEIPT_KEYWORDS.some(k=>evidenceText.toLowerCase().includes(k));
   if(!hasMoney&&!(ctx.hasAttachment&&hasReceiptContext)&&!hasTxnAlert)return[];
   return normalized;
@@ -422,6 +423,61 @@ Return ONLY JSON array:
 [{"type":"expense|income","businessActivity":"","category":"","isNewCategory":false,"description":"","amount":0,"date":"YYYY-MM-DD","vendor":"","paymentMethod":""}]`}],1300);
     try{const a=JSON.parse(raw.replace(/```json|```/g,"").trim());return Array.isArray(a)?a:[];}catch{return[];}
   }catch{return[];}
+}
+
+async function aiAnalyzeEmail(subject,from,body,acts,cats,meta={}){
+  const c=Object.entries(cats).map(([a,cs])=>`${a}: ${cs.join(", ")}`).join("\n");
+  const attachmentNames=(meta.attachmentNames||[]).slice(0,12).join(", ");
+  const attachmentText=clipTextForAI((meta.attachmentText||"")+"",14000);
+  const emailBody=clipTextForAI((body||"")+"",14000);
+  const hasAttachment=meta.hasAttachment?"yes":"no";
+  const raw=await callAI([{role:"user",content:`You are a cashflow extraction engine for bookkeeping.
+Analyze this ENTIRE email body and ENTIRE attachment text.
+Goal:
+1) Decide if this email contains real cash inflow/outflow transaction evidence.
+2) If yes, extract all transactions with amount, type, date, vendor, category.
+
+Rules:
+- Consider BOTH body and attachment text.
+- Bank alerts with debited/credited + amount are valid transactions.
+- Ignore newsletters, OTP, login/security notifications unless they clearly include a transaction.
+- Do not use years/IDs/OTP/order IDs as amounts.
+- If no valid transaction evidence, return isCashFlow=false and transactions=[].
+
+Subject: "${subject}"
+From: "${from}"
+Has attachment: ${hasAttachment}
+Attachment names: "${attachmentNames}"
+Body:
+${emailBody}
+Attachment text:
+${attachmentText}
+
+Activities: ${acts.join(", ")}
+Categories:
+${c}
+
+Return ONLY JSON:
+{
+  "isCashFlow": true/false,
+  "confidence": 0.0,
+  "reason": "",
+  "transactions": [
+    {"type":"expense|income","businessActivity":"","category":"","isNewCategory":false,"description":"","amount":0,"date":"YYYY-MM-DD","vendor":"","paymentMethod":""}
+  ]
+}`}],1600);
+  try{
+    const obj=JSON.parse(raw.replace(/```json|```/g,"").trim());
+    const tx=Array.isArray(obj?.transactions)?obj.transactions:[];
+    return{
+      isCashFlow:Boolean(obj?.isCashFlow),
+      confidence:Number(obj?.confidence)||0,
+      reason:String(obj?.reason||""),
+      transactions:tx,
+    };
+  }catch{
+    return{isCashFlow:false,confidence:0,reason:"parse_failed",transactions:[]};
+  }
 }
 async function aiParseStatement(text,name,type){
   try{
@@ -1691,8 +1747,14 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
           const parsedDate=rawDate?new Date(rawDate):null;
           const eDate=parsedDate&&!Number.isNaN(parsedDate.getTime())?parsedDate.toISOString().slice(0,10):today();
           let items=[];
+          let aiResult={isCashFlow:false,confidence:0,reason:"",transactions:[]};
           try{
-            items=await withTimeout(aiExtractEmail(subject,from,body,acts,cats,{attachmentNames,attachmentText,hasAttachment}),30000,"AI extraction");
+            aiResult=await withTimeout(
+              aiAnalyzeEmail(subject,from,body,acts,cats,{attachmentNames,attachmentText,hasAttachment}),
+              35000,
+              "AI mail analysis",
+            );
+            items=Array.isArray(aiResult.transactions)?aiResult.transactions:[];
           }catch(aiErr){
             console.error(aiErr);
           }
@@ -1700,7 +1762,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
             const fb=fallbackExtractEmail(subject,from,body,{attachmentNames,attachmentText,hasAttachment}).map(item=>({...item,date:item.date||eDate}));
             if(fb.length){fallbackUsed++;items=fb;}
           }
-          items=sanitizeEmailTransactions(items,emailContext);
+          items=sanitizeEmailTransactions(items,{...emailContext,aiCashFlow:Boolean(aiResult?.isCashFlow)});
           if(!items.length){
             skipped++;
             processed.add(msg.id);

@@ -24,7 +24,7 @@ Use the included Cloudflare Worker:
 1. Install Wrangler: `npm i -g wrangler`
 2. Create a Worker project and copy `scripts/cloudflare-ai-worker.js` as worker code.
 3. Set Worker secrets:
-   - `ANTHROPIC_API_KEY` (required)
+   - `ANTHROPIC_API_KEY` (for Claude models) OR `OPENAI_API_KEY` (for ChatGPT models)
    - `LEDGERAI_SHARED_KEY` (optional, recommended)
 4. Set optional Worker variable:
    - `ALLOWED_ORIGIN=https://accounts.niprasha.com`
@@ -32,7 +32,7 @@ Use the included Cloudflare Worker:
 6. In app Settings, set:
    - `AI Endpoint URL` = worker URL
    - `Shared Key` = same as `LEDGERAI_SHARED_KEY` (if used)
-   - `Model` = `claude-sonnet-4-20250514`
+   - `Model` = `claude-sonnet-4-20250514` or `gpt-4.1-mini`
 7. Click **Save AI Config** then **Test AI Backend**.
 
 If AI backend is not configured, LedgerAI falls back to heuristic parsing with lower accuracy.

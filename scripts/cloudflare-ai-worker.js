@@ -2,7 +2,8 @@
  * Cloudflare Worker: LedgerAI AI proxy
  *
  * Deploy this worker and set:
- * - ANTHROPIC_API_KEY (required)
+ * - ANTHROPIC_API_KEY (optional)
+ * - OPENAI_API_KEY (optional)
  * - LEDGERAI_SHARED_KEY (optional, recommended)
  * - ALLOWED_ORIGIN (optional, e.g. https://accounts.niprasha.com)
  *
@@ -49,10 +50,6 @@ export default {
       }
     }
 
-    if (!env.ANTHROPIC_API_KEY) {
-      return json({ error: "Missing ANTHROPIC_API_KEY" }, 500, cors);
-    }
-
     let payload;
     try {
       payload = await request.json();
@@ -67,19 +64,43 @@ export default {
       return json({ error: "messages[] is required" }, 400, cors);
     }
 
-    const upstream = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": env.ANTHROPIC_API_KEY,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model,
-        max_tokens: maxTokens,
-        messages,
-      }),
-    });
+    const useOpenAI = /^(gpt|o[0-9])/i.test(model);
+    let upstream;
+    if (useOpenAI) {
+      if (!env.OPENAI_API_KEY) {
+        return json({ error: "Missing OPENAI_API_KEY for model " + model }, 500, cors);
+      }
+      upstream = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${env.OPENAI_API_KEY}`,
+        },
+        body: JSON.stringify({
+          model,
+          messages,
+          temperature: 0,
+          max_tokens: maxTokens,
+        }),
+      });
+    } else {
+      if (!env.ANTHROPIC_API_KEY) {
+        return json({ error: "Missing ANTHROPIC_API_KEY for model " + model }, 500, cors);
+      }
+      upstream = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": env.ANTHROPIC_API_KEY,
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify({
+          model,
+          max_tokens: maxTokens,
+          messages,
+        }),
+      });
+    }
 
     const raw = await upstream.text();
     let data = {};
@@ -98,14 +119,9 @@ export default {
       );
     }
 
-    return json(
-      {
-        text: data?.content?.[0]?.text || "",
-        usage: data?.usage || null,
-      },
-      200,
-      cors,
-    );
+    const text = useOpenAI
+      ? (data?.choices?.[0]?.message?.content || "")
+      : (data?.content?.[0]?.text || "");
+    return json({ text, usage: data?.usage || null }, 200, cors);
   },
 };
-
