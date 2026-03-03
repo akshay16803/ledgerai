@@ -202,6 +202,11 @@ const NON_FINANCIAL_EMAIL_KEYWORDS = [
   "recover account","reset your password","welcome to","newsletter","digest",
   "policy update","privacy update",
 ];
+const PROMOTIONAL_EMAIL_KEYWORDS = [
+  "introducing","exclusive","coupon","offer","offers","discount","sale","deal",
+  "limited time","buy now","shop now","new launch","launch","preorder","promo code",
+  "save up to","flat off","cashback offer","trending now",
+];
 const MARKET_SIGNAL_KEYWORDS = [
   "tradingview","kitealgo","signal alert","signal received","trade signal","buy signal","sell signal",
   "entry","target","stop loss","stop-loss","sl hit","tp hit","take profit","call option","put option",
@@ -254,6 +259,9 @@ function isReceiptLikeEmail({subject="",from="",body="",attachmentNames=[],attac
   if(isMarketSignalAlert({subject,from,body,attachmentNames,attachmentText}))return false;
   const text=`${subject}\n${from}\n${body}\n${attachmentText}`.toLowerCase();
   const attachmentNameText=(attachmentNames||[]).join(" ").toLowerCase();
+  const hasPromoKeyword=PROMOTIONAL_EMAIL_KEYWORDS.some(k=>text.includes(k)||attachmentNameText.includes(k));
+  const strongTxnPhrase=/\b(amount debited|amount credited|debited from|credited to|payment successful|payment received|receipt attached|tax invoice|transaction id|utr|rrn|invoice number)\b/.test(text);
+  if(hasPromoKeyword&&!strongTxnPhrase)return false;
   const hasReceiptKeyword=RECEIPT_KEYWORDS.some(k=>text.includes(k)||attachmentNameText.includes(k));
   const hasTxnAlertKeyword=TRANSACTION_ALERT_KEYWORDS.some(k=>text.includes(k));
   const senderLooksFinancial=/\b(bank|card|wallet|upi|finance|payments?)\b/.test((from||"").toLowerCase());
@@ -275,6 +283,9 @@ function sanitizeEmailTransactions(items=[],ctx={}){
   const evidenceText=`${ctx.subject||""}\n${ctx.from||""}\n${ctx.body||""}\n${(ctx.attachmentNames||[]).join(" ")}\n${ctx.attachmentText||""}`;
   if(isMarketSignalAlert(ctx))return[];
   const lowerEvidence=evidenceText.toLowerCase();
+  const hasPromoKeyword=PROMOTIONAL_EMAIL_KEYWORDS.some(k=>lowerEvidence.includes(k));
+  const strongTxnPhrase=/\b(amount debited|amount credited|debited from|credited to|payment successful|payment received|receipt attached|tax invoice|transaction id|utr|rrn|invoice number)\b/.test(lowerEvidence);
+  if(hasPromoKeyword&&!strongTxnPhrase)return[];
   const strongReceipt=isReceiptLikeEmail(ctx);
   const hasMoney=hasMoneyEvidence(evidenceText);
   const hasTxnAlert=TRANSACTION_ALERT_KEYWORDS.some(k=>lowerEvidence.includes(k));
@@ -548,6 +559,8 @@ Rules:
 - Bank alerts with debited/credited + amount are valid transactions.
 - Ignore newsletters, OTP, login/security notifications unless they clearly include a transaction.
 - Ignore TradingView/Kite/KiteAlgo market signal alerts (entry/target/SL/buy/sell) unless there is explicit payment/receipt/debit/credit evidence.
+- Ignore promotional/marketing/coupon/product-launch emails (e.g., "introducing", "offer", "coupon", "save", "discount"), even when they include prices/amounts.
+- Treat amount mentions as transactions ONLY when there is explicit payment evidence (debited/credited/paid/charged/receipt/invoice/transaction reference).
 - Do not use years/IDs/OTP/order IDs as amounts.
 - If no valid transaction evidence, return isCashFlow=false and transactions=[].
 
@@ -952,6 +965,47 @@ async function msListMessages(token,max=100,fromDate=""){
 async function msGetMessage(token,id){
   const url=`${GRAPH}/me/messages/${id}?$select=id,subject,from,receivedDateTime,body,bodyPreview,hasAttachments`;
   return msGraphFetch(url,token,{Prefer:'outlook.body-content-type="text"'});
+}
+
+async function msListAttachments(token,msgId){
+  const url=`${GRAPH}/me/messages/${msgId}/attachments?$top=25&$select=id,name,contentType,size,isInline,@odata.type`;
+  const d=await msGraphFetch(url,token);
+  return Array.isArray(d?.value)?d.value:[];
+}
+
+async function msGetAttachment(token,msgId,attachmentId){
+  return msGraphFetch(`${GRAPH}/me/messages/${msgId}/attachments/${attachmentId}`,token);
+}
+
+async function msAttachmentEvidenceText(token,msgId,attachments=[]){
+  if(!Array.isArray(attachments)||!attachments.length)return "";
+  let totalBytes=0;
+  const keep=attachments
+    .filter(a=>a?.id&&a?.isInline!==true)
+    .filter(a=>(Number(a?.size)||0)<=8_000_000)
+    .filter(a=>{
+      if(totalBytes>12_000_000)return false;
+      totalBytes+=(Number(a?.size)||0);
+      return true;
+    })
+    .slice(0,8);
+  if(!keep.length)return "";
+  const chunks=[];
+  for(const a of keep){
+    try{
+      const full=await withTimeout(msGetAttachment(token,msgId,a.id),18000,`Outlook attachment ${a.name||a.id}`);
+      const kind=(full?.["@odata.type"]||"").toLowerCase();
+      if(!kind.includes("fileattachment"))continue;
+      const binary=decodeB64Binary(full?.contentBytes||"");
+      const compact=extractAttachmentTextByType(binary,full?.contentType||a?.contentType||"",full?.name||a?.name||"");
+      const hints=extractAttachmentMoneyHints(compact);
+      const sample=clipTextForAI(compact,9000);
+      if(sample)chunks.push(`[${full?.name||a?.name||"attachment"}] ${hints?`Amount hints: ${hints}. `:""}${sample}`);
+    }catch(e){
+      console.warn("Outlook attachment read skipped",a?.name||a?.id,e);
+    }
+  }
+  return chunks.join("\n");
 }
 
 function msExtractBody(msg){
@@ -2050,6 +2104,9 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClient
     const provider=providerOf(acc);
     const interactive=opts.interactive!==false;
     const silent=opts.silent===true;
+    const aiCfg=LS.get("ledger_ai_cfg",{endpoint:"",secret:"",model:DEFAULT_AI_MODEL});
+    const aiEndpointConfigured=Boolean((aiCfg?.endpoint||"").trim());
+    const aiStrictMode=aiEndpointConfigured;
     const msClient=sanitizeMsClientId((acc?.msClientId||microsoftClientId||"").trim());
     if(provider==="microsoft"&&!msClient){
       if(!silent)alert("Outlook connector is not configured with your Azure app Client ID yet. Open Cloud tab and set your own Azure Application (client) ID once.");
@@ -2133,6 +2190,14 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClient
             rawDate=full.receivedDateTime||msg.receivedDateTime||"";
             body=msExtractBody(full);
             hasAttachment=Boolean(full.hasAttachments||msg.hasAttachments);
+            if(hasAttachment){
+              const attachmentMeta=await withTimeout(msListAttachments(token,msg.id),18000,"Outlook attachment list");
+              attachmentNames=attachmentMeta.map(a=>a?.name).filter(Boolean);
+              hasAttachment=attachmentNames.length>0;
+              if(hasAttachment){
+                attachmentText=await msAttachmentEvidenceText(token,msg.id,attachmentMeta);
+              }
+            }
           }else{
             const full=await withTimeout(gmailGetMessage(token,msg.id),20000,"Gmail message fetch");
             const H=full.payload?.headers||[];
@@ -2154,7 +2219,9 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClient
           const eDate=parsedDate&&!Number.isNaN(parsedDate.getTime())?parsedDate.toISOString().slice(0,10):today();
           let items=[];
           let aiResult={isCashFlow:false,confidence:0,reason:"",transactions:[]};
+          let aiRan=false;
           try{
+            aiRan=true;
             aiResult=await withTimeout(
               aiAnalyzeEmail(subject,from,body,acts,cats,{attachmentNames,attachmentText,hasAttachment}),
               35000,
@@ -2162,13 +2229,29 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClient
             );
             items=Array.isArray(aiResult.transactions)?aiResult.transactions:[];
           }catch(aiErr){
-            console.error(aiErr);
+            aiRan=false;
+            if(aiStrictMode){
+              failed++;
+              const reason=classifySyncError(aiErr);
+              failureReasons[reason]=(failureReasons[reason]||0)+1;
+              processed.add(msg.id);
+              return;
+            }
+            console.error("AI analysis failed, using fallback extractor",aiErr);
           }
-          if(!items.length){
+          if(aiRan){
+            items=sanitizeEmailTransactions(items,{...emailContext,aiCashFlow:Boolean(aiResult?.isCashFlow)});
+            const aiApproved=Boolean(aiResult?.isCashFlow)&&Array.isArray(items)&&items.length>0;
+            if(!aiApproved){
+              skipped++;
+              processed.add(msg.id);
+              return;
+            }
+          }else{
             const fb=fallbackExtractEmail(subject,from,body,{attachmentNames,attachmentText,hasAttachment}).map(item=>({...item,date:item.date||eDate}));
             if(fb.length){fallbackUsed++;items=fb;}
+            items=sanitizeEmailTransactions(items,{...emailContext,aiCashFlow:false});
           }
-          items=sanitizeEmailTransactions(items,{...emailContext,aiCashFlow:Boolean(aiResult?.isCashFlow)});
           if(!items.length){
             skipped++;
             processed.add(msg.id);
