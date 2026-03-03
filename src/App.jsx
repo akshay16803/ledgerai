@@ -68,6 +68,8 @@ const DEFAULT_GOOGLE_CLIENT_ID = "975238186836-47bvtn56uhrlcbe11n1pe1h26qbor5s1.
 const DEFAULT_MICROSOFT_CLIENT_ID = (import.meta.env.VITE_MICROSOFT_CLIENT_ID || "").trim();
 const DEFAULT_AI_MODEL = "claude-sonnet-4-20250514";
 const EMAIL_SYNC_CACHE_VERSION = "v5";
+const BACKUP_KEY = "ledger_backups";
+const MAX_BACKUPS = 50;
 
 function defaultCloudCfg(){
   return{
@@ -79,6 +81,19 @@ function defaultCloudCfg(){
     key:"",
     needsReconnect:false,
   };
+}
+
+function quickHash(str=""){
+  let h=2166136261;
+  for(let i=0;i<str.length;i++){
+    h^=str.charCodeAt(i);
+    h=Math.imul(h,16777619);
+  }
+  return (h>>>0).toString(36);
+}
+
+function sanitizeEmailsForStorage(list=[]){
+  return (list||[]).map(a=>({...a,token:undefined}));
 }
 
 if(typeof window!=="undefined"){
@@ -958,9 +973,72 @@ export default function App(){
   const[sumLoad,setSumLoad]=useState(false);
   const[filter,setFilter]=useState({activity:"All",type:"All",from:"",to:""});
   const bypassActive=Boolean(authCfg.enabled&&authBypass);
+  const[backups,setBackups]=useState(()=>LS.get(BACKUP_KEY,[]));
+
+  const buildBackupSnapshot=useCallback((reason="auto")=>{
+    const payload={
+      txns,
+      inbox,
+      accs,
+      acts,
+      cats,
+      smsNums,
+      emails:sanitizeEmailsForStorage(emails),
+    };
+    const raw=JSON.stringify(payload);
+    return{
+      id:gid(),
+      ts:new Date().toISOString(),
+      reason,
+      hash:quickHash(raw),
+      meta:{
+        txns:txns.length,
+        inbox:inbox.length,
+        accounts:accs.length,
+        emails:emails.length,
+        totalItems:txns.length+inbox.length+accs.length+emails.length+smsNums.length,
+      },
+      data:payload,
+    };
+  },[txns,inbox,accs,acts,cats,smsNums,emails]);
+
+  const pushBackupSnapshot=useCallback((reason="auto")=>{
+    const snap=buildBackupSnapshot(reason);
+    const prev=LS.get(BACKUP_KEY,[]);
+    const last=prev[prev.length-1];
+    if(last?.hash===snap.hash)return false;
+    if(reason==="auto"&&snap.meta.totalItems===0&&Number(last?.meta?.totalItems||0)>0)return false;
+    const next=[...prev,snap].slice(-MAX_BACKUPS);
+    LS.set(BACKUP_KEY,next);
+    setBackups(next);
+    return true;
+  },[buildBackupSnapshot]);
+
+  const restoreBackupSnapshot=useCallback((id)=>{
+    const list=LS.get(BACKUP_KEY,[]);
+    const snap=list.find(s=>s.id===id);
+    if(!snap?.data)return false;
+    const d=snap.data;
+    setTxns(Array.isArray(d.txns)?d.txns:[]);
+    setInbox(Array.isArray(d.inbox)?d.inbox:[]);
+    setAccs(Array.isArray(d.accs)?d.accs:[]);
+    setActs(Array.isArray(d.acts)&&d.acts.length?d.acts:[...DEF_ACTS]);
+    setCats(d.cats&&typeof d.cats==="object"?d.cats:JSON.parse(JSON.stringify(DEF_CATS)));
+    setSmsNums(Array.isArray(d.smsNums)?d.smsNums:[]);
+    setEmails(Array.isArray(d.emails)?d.emails.map(a=>({...hydrateEmailAccount(a),token:undefined})):[]);
+    setSyncStatus("idle");
+    setLastSync("");
+    setSummary("");
+    setSumLoad(false);
+    setTab("dashboard");
+    return true;
+  },[]);
 
   const factoryReset=useCallback(()=>{
     try{
+      const preReset=buildBackupSnapshot("factory-reset-before-clear");
+      LS.set("ledger_last_reset_backup",preReset);
+      pushBackupSnapshot("factory-reset-before-clear");
       [
         "ledger_txns","ledger_acts","ledger_cats","ledger_accs","ledger_inbox",
         "ledger_emails","ledger_sms","ledger_odcfg","ledger_lastsync",
@@ -991,8 +1069,9 @@ export default function App(){
     setAddType("expense");
     setTab("dashboard");
     setAuthBypass(false);
+    setBackups(LS.get(BACKUP_KEY,[]));
     alert("Reset complete. LedgerAI is now fresh.");
-  },[]);
+  },[buildBackupSnapshot,pushBackupSnapshot]);
 
   const onGoogleCredential=useCallback((resp)=>{
     const payload=decodeGoogleCredential(resp?.credential||"");
@@ -1025,10 +1104,15 @@ export default function App(){
   useEffect(()=>LS.set("ledger_cats",cats),[cats]);
   useEffect(()=>LS.set("ledger_accs",accs),[accs]);
   useEffect(()=>LS.set("ledger_inbox",inbox),[inbox]);
-  useEffect(()=>LS.set("ledger_emails",emails.map(a=>({...a,token:undefined}))),[emails]);
+  useEffect(()=>LS.set("ledger_emails",sanitizeEmailsForStorage(emails)),[emails]);
   useEffect(()=>LS.set("ledger_sms",smsNums),[smsNums]);
   useEffect(()=>LS.set("ledger_odcfg",sbCfg),[sbCfg]);
   useEffect(()=>LS.set("ledger_lastsync",lastSync),[lastSync]);
+
+  useEffect(()=>{
+    const t=setTimeout(()=>{pushBackupSnapshot("auto");},1200);
+    return()=>clearTimeout(t);
+  },[txns,inbox,accs,acts,cats,smsNums,emails,pushBackupSnapshot]);
 
   useEffect(()=>{
     const owner=LOCKED_OWNER_EMAIL.toLowerCase();
@@ -1189,7 +1273,7 @@ export default function App(){
         {tab==="journal"&&<JournalTab txns={txns}/>}
         {tab==="accounts"&&<AccountsTab accs={accs} setAccs={setAccs} txns={txns} addInbox={addInbox} acts={acts} cats={cats}/>}
         {tab==="reports"&&<ReportsTab txns={txns} acts={acts} totInc={totInc} totExp={totExp}/>}
-        {tab==="settings"&&<SettingsTab acts={acts} setActs={setActs} cats={cats} setCats={setCats} onFactoryReset={factoryReset}/>}
+        {tab==="settings"&&<SettingsTab acts={acts} setActs={setActs} cats={cats} setCats={setCats} backups={backups} onBackupNow={()=>pushBackupSnapshot("manual")} onRestoreBackup={restoreBackupSnapshot} onFactoryReset={factoryReset}/>}
         {tab==="cloud"&&<CloudTab sbCfg={sbCfg} setSbCfg={setSbCfg} syncStatus={syncStatus} lastSync={lastSync} onSync={pushToCloud} onLoad={loadFromCloud} txns={txns} setTxns={setTxns} inbox={inbox} setInbox={setInbox} accs={accs} setAccs={setAccs} acts={acts} setActs={setActs} cats={cats} setCats={setCats} smsNums={smsNums} setSmsNums={setSmsNums} emails={emails} setEmails={setEmails}/>}
         {tab==="daily"&&<DailyTab todayTxns={todayTxns} todInc={todInc} todExp={todExp} summary={summary} sumLoad={sumLoad} getSummary={async()=>{setSumLoad(true);setSummary(await aiSummarize(todayTxns));setSumLoad(false);}} onEdit={tx=>{setEditTx(tx);setAddType(tx.type);setShowAdd(true);}} onDelete={delTx} inbox={inbox} onApprove={approveInbox} onDiscard={discardInbox} onEditPending={editInbox}/>}
       </div>
@@ -2815,12 +2899,14 @@ function AzureGuideModal({onClose}){
   );
 }
 // ── SETTINGS ──────────────────────────────────────────────────────────────────
-function SettingsTab({acts,setActs,cats,setCats,onFactoryReset}){
+function SettingsTab({acts,setActs,cats,setCats,backups,onBackupNow,onRestoreBackup,onFactoryReset}){
   const[newAct,setNewAct]=useState("");const[selAct,setSelAct]=useState(acts[0]||"");
   const[newCN,setNewCN]=useState("");const[newCD,setNewCD]=useState("");
   const[aiLoad,setAiLoad]=useState(false);const[aiSug,setAiSug]=useState(null);
   const[resetOpen,setResetOpen]=useState(false);
   const[resetText,setResetText]=useState("");
+  const[safetyStatus,setSafetyStatus]=useState("");
+  const[restoreId,setRestoreId]=useState("");
   const savedAICfg=LS.get("ledger_ai_cfg",{endpoint:"",secret:"",model:DEFAULT_AI_MODEL});
   const[aiEndpoint,setAiEndpoint]=useState(savedAICfg.endpoint||"");
   const[aiSecret,setAiSecret]=useState(savedAICfg.secret||"");
@@ -2861,6 +2947,16 @@ function SettingsTab({acts,setActs,cats,setCats,onFactoryReset}){
     onFactoryReset?.();
     setResetText("");
     setResetOpen(false);
+  };
+  const latestBackups=[...(backups||[])].slice(-12).reverse();
+  useEffect(()=>{
+    if(!restoreId&&latestBackups[0]?.id)setRestoreId(latestBackups[0].id);
+  },[latestBackups,restoreId]);
+  const restoreSelected=()=>{
+    if(!restoreId){setSafetyStatus("Select a backup snapshot first.");return;}
+    if(!window.confirm("Restore selected snapshot? Current data will be replaced."))return;
+    const ok=onRestoreBackup?.(restoreId);
+    setSafetyStatus(ok?"Backup restored successfully.":"Backup restore failed.");
   };
   return(<div>
     <h2 className="h2" style={{marginBottom:18}}>Settings</h2>
@@ -2914,6 +3010,29 @@ function SettingsTab({acts,setActs,cats,setCats,onFactoryReset}){
           <div style={{display:"flex",flexWrap:"wrap",gap:6}}>{(cats[selAct]||[]).map(cat=><span key={cat} style={{background:"#1e293b",color:"#94a3b8",padding:"3px 10px",borderRadius:12,fontSize:12,display:"flex",alignItems:"center",gap:5}}>{cat}<span style={{cursor:"pointer",color:"#475569"}} onClick={()=>setCats(p=>({...p,[selAct]:(p[selAct]||[]).filter(c=>c!==cat)}))}>✕</span></span>)}</div>
         </div>}
       </div>
+    </div>
+    <div className="card" style={{marginTop:18}}>
+      <div style={{fontWeight:700,fontSize:14,color:"#94a3b8",marginBottom:8}}>Data Protection</div>
+      <div style={{fontSize:12,color:"#64748b",lineHeight:1.8,marginBottom:12}}>
+        LedgerAI now creates automatic local snapshots so app updates do not erase your working data.
+      </div>
+      <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10}}>
+        <button className="btn ghost" onClick={()=>{
+          const ok=onBackupNow?.();
+          setSafetyStatus(ok?"Backup created.":"No data change since last snapshot.");
+        }}>Create Backup Now</button>
+      </div>
+      {latestBackups.length>0?(
+        <>
+          <label>Restore Snapshot</label>
+          <select value={restoreId} onChange={e=>setRestoreId(e.target.value)}>
+            <option value="">Select snapshot</option>
+            {latestBackups.map(s=><option key={s.id} value={s.id}>{`${fmtDT(s.ts)} · ${s.reason||"auto"} · txns ${s?.meta?.txns||0} · inbox ${s?.meta?.inbox||0}`}</option>)}
+          </select>
+          <button className="btn sm dan" style={{marginTop:8}} onClick={restoreSelected}>Restore Selected Snapshot</button>
+        </>
+      ):<div style={{fontSize:12,color:"#475569"}}>No snapshots yet. A snapshot is created automatically after edits.</div>}
+      {safetyStatus&&<div style={{fontSize:12,color:"#c7d2fe",marginTop:8}}>{safetyStatus}</div>}
     </div>
     <div className="card" style={{marginTop:18,border:"1px solid #7f1d1d",background:"#22090b"}}>
       <div style={{fontWeight:700,fontSize:14,color:"#fca5a5",marginBottom:8}}>Danger Zone</div>
