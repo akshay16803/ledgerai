@@ -1095,7 +1095,14 @@ export default function App(){
   },[buildBackupSnapshot,pushBackupSnapshot]);
 
   const onGoogleCredential=useCallback((resp)=>{
-    const payload=decodeGoogleCredential(resp?.credential||"");
+    let payload=decodeGoogleCredential(resp?.credential||"");
+    if(!payload?.email&&resp?.email){
+      payload={
+        email:String(resp.email||""),
+        name:String(resp.name||resp.email||""),
+        picture:String(resp.picture||""),
+      };
+    }
     if(!payload?.email){setAuthMsg("Google login failed. Please try again.");return;}
     const email=(payload.email||"").toLowerCase();
     const owner=LOCKED_OWNER_EMAIL.toLowerCase();
@@ -1339,12 +1346,61 @@ function AuthLoginScreen({clientId,ownerEmail,onCredential,authMsg,allowTemporar
   const btnRef=useRef(null);
   const[loading,setLoading]=useState(true);
   const[loginErr,setLoginErr]=useState("");
+  const[manualBusy,setManualBusy]=useState(false);
+  const[buttonRendered,setButtonRendered]=useState(false);
+
+  const startFallbackLogin=useCallback(async()=>{
+    if(!clientId)return;
+    setLoginErr("");
+    setManualBusy(true);
+    try{
+      await loadGoogleIdentityScript();
+      if(!window.google?.accounts?.oauth2)throw new Error("Google OAuth not available in browser.");
+      const token=await new Promise((resolve,reject)=>{
+        const tc=window.google.accounts.oauth2.initTokenClient({
+          client_id:clientId,
+          scope:"openid email profile",
+          callback:(resp)=>{
+            if(resp?.error)return reject(new Error(resp.error));
+            if(!resp?.access_token)return reject(new Error("No access token returned by Google."));
+            resolve(resp.access_token);
+          },
+          error_callback:(err)=>reject(new Error(err?.type||err?.error||"oauth_error")),
+        });
+        tc.requestAccessToken({
+          prompt:"select_account",
+          login_hint:ownerEmail||LOCKED_OWNER_EMAIL,
+        });
+      });
+      const r=await fetch("https://openidconnect.googleapis.com/v1/userinfo",{
+        headers:{Authorization:`Bearer ${token}`},
+      });
+      if(!r.ok){
+        const txt=await r.text();
+        throw new Error(`Google profile fetch failed: ${r.status} ${txt?.slice?.(0,120)||""}`);
+      }
+      const profile=await r.json();
+      if(!profile?.email)throw new Error("Google did not return account email.");
+      onCredential({
+        email:profile.email,
+        name:profile.name||profile.email,
+        picture:profile.picture||"",
+      });
+    }catch(e){
+      const msg=String(e?.message||"Unable to sign in with Google.");
+      if(msg.includes("popup_closed"))setLoginErr("Google sign-in popup was closed. Please try again.");
+      else setLoginErr(msg);
+    }finally{
+      setManualBusy(false);
+    }
+  },[clientId,onCredential,ownerEmail]);
 
   useEffect(()=>{
     let alive=true;
     const mount=async()=>{
       if(!alive)return;
       setLoginErr("");
+      setButtonRendered(false);
       if(!clientId){
         setLoginErr("Google Client ID is missing.");
         setLoading(false);
@@ -1376,6 +1432,14 @@ function AuthLoginScreen({clientId,ownerEmail,onCredential,authMsg,allowTemporar
             text:"continue_with",
             width:320,
           });
+          setTimeout(()=>{
+            if(!alive)return;
+            const rendered=Boolean(btnRef.current&&btnRef.current.childElementCount>0);
+            setButtonRendered(rendered);
+            if(!rendered){
+              setLoginErr("Google button did not load in this browser. Use the fallback sign-in button below.");
+            }
+          },250);
         }
         window.google.accounts.id.prompt();
       }catch(e){
@@ -1398,6 +1462,16 @@ function AuthLoginScreen({clientId,ownerEmail,onCredential,authMsg,allowTemporar
         <div style={{display:"flex",justifyContent:"center",padding:"10px 0 14px"}}>
           {loading?<div style={{fontSize:12,color:"#64748b"}}>Loading Google sign-in…</div>:<div ref={btnRef}/>}
         </div>
+        {!loading&&(
+          <button className="btn pri" style={{width:"100%",marginBottom:10}} disabled={manualBusy} onClick={startFallbackLogin}>
+            {manualBusy?"Opening Google…":"Continue with Google"}
+          </button>
+        )}
+        {!loading&&!buttonRendered&&(
+          <div style={{fontSize:11,color:"#64748b",marginBottom:8}}>
+            If popup does not open, allow popups for this site and disable strict content blockers for Google sign-in.
+          </div>
+        )}
         {authMsg&&<div style={{background:"#450a0a",border:"1px solid #f87171",borderRadius:8,padding:"8px 10px",fontSize:12,color:"#fca5a5",marginBottom:10}}>{authMsg}</div>}
         {loginErr&&<div style={{background:"#1a1a2e",border:"1px solid #818cf8",borderRadius:8,padding:"10px 12px",fontSize:12,color:"#c7d2fe"}}>{loginErr}</div>}
         {allowTemporaryBypass&&(
