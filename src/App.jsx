@@ -69,6 +69,18 @@ const DEFAULT_MICROSOFT_CLIENT_ID = (import.meta.env.VITE_MICROSOFT_CLIENT_ID ||
 const DEFAULT_AI_MODEL = "claude-sonnet-4-20250514";
 const EMAIL_SYNC_CACHE_VERSION = "v5";
 
+function defaultCloudCfg(){
+  return{
+    clientId:(DEFAULT_MICROSOFT_CLIENT_ID||"").trim(),
+    email:"",
+    name:"",
+    enabled:false,
+    url:"",
+    key:"",
+    needsReconnect:false,
+  };
+}
+
 if(typeof window!=="undefined"){
   const h=window.location.hostname;
   const isLocal=h==="localhost"||h==="127.0.0.1";
@@ -931,8 +943,9 @@ export default function App(){
   const[emails,setEmails]=useState(()=>LS.get("ledger_emails",[]).map(a=>({...hydrateEmailAccount(a),token:undefined})));
   const[smsNums,setSmsNums]=useState(()=>LS.get("ledger_sms",[]));
   const[sbCfg,setSbCfg]=useState(()=>{
-    const saved=LS.get("ledger_odcfg",{clientId:"",email:"",name:"",enabled:false}); // reusing name for compat
-    return{...saved,clientId:(saved.clientId||DEFAULT_MICROSOFT_CLIENT_ID||"").trim()};
+    const base=defaultCloudCfg();
+    const saved=LS.get("ledger_odcfg",base); // reusing name for compat
+    return{...base,...saved,clientId:(saved.clientId||base.clientId||"").trim()};
   });
   const setSbCfgAlias=v=>setSbCfg(typeof v==="function"?v:v);
   const[syncStatus,setSyncStatus]=useState("idle"); // idle|syncing|ok|error
@@ -945,6 +958,41 @@ export default function App(){
   const[sumLoad,setSumLoad]=useState(false);
   const[filter,setFilter]=useState({activity:"All",type:"All",from:"",to:""});
   const bypassActive=Boolean(authCfg.enabled&&authBypass);
+
+  const factoryReset=useCallback(()=>{
+    try{
+      [
+        "ledger_txns","ledger_acts","ledger_cats","ledger_accs","ledger_inbox",
+        "ledger_emails","ledger_sms","ledger_odcfg","ledger_lastsync",
+      ].forEach(k=>localStorage.removeItem(k));
+      const purge=[];
+      for(let i=0;i<localStorage.length;i++){
+        const k=localStorage.key(i);
+        if(!k)continue;
+        if(k.startsWith(`proc_${EMAIL_SYNC_CACHE_VERSION}_`))purge.push(k);
+      }
+      purge.forEach(k=>localStorage.removeItem(k));
+    }catch{}
+    setTxns([]);
+    setActs([...DEF_ACTS]);
+    setCats(JSON.parse(JSON.stringify(DEF_CATS)));
+    setAccs([]);
+    setInbox([]);
+    setEmails([]);
+    setSmsNums([]);
+    setSbCfg(defaultCloudCfg());
+    setSyncStatus("idle");
+    setLastSync("");
+    setSummary("");
+    setSumLoad(false);
+    setFilter({activity:"All",type:"All",from:"",to:""});
+    setShowAdd(false);
+    setEditTx(null);
+    setAddType("expense");
+    setTab("dashboard");
+    setAuthBypass(false);
+    alert("Reset complete. LedgerAI is now fresh.");
+  },[]);
 
   const onGoogleCredential=useCallback((resp)=>{
     const payload=decodeGoogleCredential(resp?.credential||"");
@@ -1141,7 +1189,7 @@ export default function App(){
         {tab==="journal"&&<JournalTab txns={txns}/>}
         {tab==="accounts"&&<AccountsTab accs={accs} setAccs={setAccs} txns={txns} addInbox={addInbox} acts={acts} cats={cats}/>}
         {tab==="reports"&&<ReportsTab txns={txns} acts={acts} totInc={totInc} totExp={totExp}/>}
-        {tab==="settings"&&<SettingsTab acts={acts} setActs={setActs} cats={cats} setCats={setCats}/>}
+        {tab==="settings"&&<SettingsTab acts={acts} setActs={setActs} cats={cats} setCats={setCats} onFactoryReset={factoryReset}/>}
         {tab==="cloud"&&<CloudTab sbCfg={sbCfg} setSbCfg={setSbCfg} syncStatus={syncStatus} lastSync={lastSync} onSync={pushToCloud} onLoad={loadFromCloud} txns={txns} setTxns={setTxns} inbox={inbox} setInbox={setInbox} accs={accs} setAccs={setAccs} acts={acts} setActs={setActs} cats={cats} setCats={setCats} smsNums={smsNums} setSmsNums={setSmsNums} emails={emails} setEmails={setEmails}/>}
         {tab==="daily"&&<DailyTab todayTxns={todayTxns} todInc={todInc} todExp={todExp} summary={summary} sumLoad={sumLoad} getSummary={async()=>{setSumLoad(true);setSummary(await aiSummarize(todayTxns));setSumLoad(false);}} onEdit={tx=>{setEditTx(tx);setAddType(tx.type);setShowAdd(true);}} onDelete={delTx} inbox={inbox} onApprove={approveInbox} onDiscard={discardInbox} onEditPending={editInbox}/>}
       </div>
@@ -2767,10 +2815,12 @@ function AzureGuideModal({onClose}){
   );
 }
 // ── SETTINGS ──────────────────────────────────────────────────────────────────
-function SettingsTab({acts,setActs,cats,setCats}){
+function SettingsTab({acts,setActs,cats,setCats,onFactoryReset}){
   const[newAct,setNewAct]=useState("");const[selAct,setSelAct]=useState(acts[0]||"");
   const[newCN,setNewCN]=useState("");const[newCD,setNewCD]=useState("");
   const[aiLoad,setAiLoad]=useState(false);const[aiSug,setAiSug]=useState(null);
+  const[resetOpen,setResetOpen]=useState(false);
+  const[resetText,setResetText]=useState("");
   const savedAICfg=LS.get("ledger_ai_cfg",{endpoint:"",secret:"",model:DEFAULT_AI_MODEL});
   const[aiEndpoint,setAiEndpoint]=useState(savedAICfg.endpoint||"");
   const[aiSecret,setAiSecret]=useState(savedAICfg.secret||"");
@@ -2804,6 +2854,13 @@ function SettingsTab({acts,setActs,cats,setCats}){
     }catch(e){
       setAiStatus(`AI backend error: ${e.message||"unknown error"}`);
     }
+  };
+  const canReset=resetText.trim().toLowerCase()==="reset";
+  const doReset=()=>{
+    if(!canReset)return;
+    onFactoryReset?.();
+    setResetText("");
+    setResetOpen(false);
   };
   return(<div>
     <h2 className="h2" style={{marginBottom:18}}>Settings</h2>
@@ -2858,6 +2915,37 @@ function SettingsTab({acts,setActs,cats,setCats}){
         </div>}
       </div>
     </div>
+    <div className="card" style={{marginTop:18,border:"1px solid #7f1d1d",background:"#22090b"}}>
+      <div style={{fontWeight:700,fontSize:14,color:"#fca5a5",marginBottom:8}}>Danger Zone</div>
+      <div style={{fontSize:12,color:"#fda4af",lineHeight:1.8,marginBottom:12}}>
+        Factory Reset clears all transactions, inbox queue, accounts, email connections, and sync caches.
+      </div>
+      <button className="btn dan" onClick={()=>setResetOpen(true)}>Reset Dashboard</button>
+    </div>
+    {resetOpen&&(
+      <div className="overlay">
+        <div className="modal" style={{maxWidth:520}}>
+          <MH title="Factory Reset" onClose={()=>{setResetOpen(false);setResetText("");}}/>
+          <div style={{fontSize:13,color:"#fca5a5",lineHeight:1.8,marginBottom:10}}>
+            This will permanently remove all current LedgerAI data and disconnect all connected accounts.
+          </div>
+          <div style={{fontSize:12,color:"#94a3b8",marginBottom:8}}>
+            Type <code style={{background:"#0a0c12",padding:"2px 6px",borderRadius:4}}>reset</code> and press <b>Enter</b> to confirm.
+          </div>
+          <input
+            autoFocus
+            value={resetText}
+            onChange={e=>setResetText(e.target.value)}
+            placeholder="type reset"
+            onKeyDown={e=>{if(e.key==="Enter"){e.preventDefault();doReset();}}}
+          />
+          <div style={{display:"flex",gap:10,marginTop:14}}>
+            <button className="btn ghost" style={{flex:1}} onClick={()=>{setResetOpen(false);setResetText("");}}>Cancel</button>
+            <button className="btn dan" style={{flex:2,opacity:canReset?1:0.55}} disabled={!canReset} onClick={doReset}>Reset Now</button>
+          </div>
+        </div>
+      </div>
+    )}
   </div>);
 }
 
