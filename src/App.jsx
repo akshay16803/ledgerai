@@ -101,17 +101,39 @@ function loadGoogleIdentityScript(){
 
 function decodeB64(s){try{return decodeURIComponent(escape(atob(s.replace(/-/g,'+').replace(/_/g,'/'))));}catch{return "";}}
 function decodeB64Binary(s){try{return atob((s||"").replace(/-/g,"+").replace(/_/g,"/"));}catch{return"";}}
-function extractEmailText(payload,d=0){
-  if(d>5||!payload)return"";
-  if(payload.body?.data)return decodeB64(payload.body.data);
-  if(payload.parts){
-    const plain=payload.parts.find(p=>p.mimeType==="text/plain");
-    if(plain?.body?.data)return decodeB64(plain.body.data);
-    const html=payload.parts.find(p=>p.mimeType==="text/html");
-    if(html?.body?.data)return decodeB64(html.body.data).replace(/<[^>]*>/g," ").replace(/\s+/g," ");
-    for(const p of payload.parts){const t=extractEmailText(p,d+1);if(t.trim())return t;}
+function htmlToText(html=""){
+  return (html||"")
+    .replace(/<style[\s\S]*?<\/style>/gi," ")
+    .replace(/<script[\s\S]*?<\/script>/gi," ")
+    .replace(/<[^>]*>/g," ")
+    .replace(/&nbsp;/gi," ")
+    .replace(/&amp;/gi,"&")
+    .replace(/&lt;/gi,"<")
+    .replace(/&gt;/gi,">")
+    .replace(/\s+/g," ")
+    .trim();
+}
+function extractEmailTextAll(payload,d=0,out=[]){
+  if(d>8||!payload)return out;
+  const mime=(payload.mimeType||"").toLowerCase();
+  const data=payload.body?.data?decodeB64(payload.body.data):"";
+  if(data){
+    if(mime.includes("html"))out.push(htmlToText(data));
+    else out.push(data.replace(/\s+/g," ").trim());
   }
-  return"";
+  if(Array.isArray(payload.parts))payload.parts.forEach(p=>extractEmailTextAll(p,d+1,out));
+  return out;
+}
+function collapseTextParts(parts=[]){
+  const seen=new Set();
+  const merged=[];
+  for(const p of parts){
+    const t=(p||"").replace(/\s+/g," ").trim();
+    if(!t||seen.has(t))continue;
+    seen.add(t);
+    merged.push(t);
+  }
+  return merged.join("\n");
 }
 
 function collectGmailAttachmentMeta(payload,out=[]){
@@ -364,12 +386,14 @@ async function aiExtractBatch(text,acts,cats){
 async function aiExtractEmail(subject,from,body,acts,cats,meta={}){
   const c=Object.entries(cats).map(([a,cs])=>`${a}: ${cs.join(", ")}`).join("\n");
   const attachmentNames=(meta.attachmentNames||[]).slice(0,10).join(", ");
-  const attachmentText=((meta.attachmentText||"")+"").slice(0,2500);
+  const attachmentText=clipTextForAI((meta.attachmentText||"")+"",14000);
+  const emailBody=clipTextForAI((body||"")+"",14000);
   const hasAttachment=meta.hasAttachment?"yes":"no";
   try{
     const raw=await callAI([{role:"user",content:`Extract ONLY real completed financial transactions from this email (Indian context).
 Strict rules:
-1) Return [] unless there is clear receipt/invoice/payment proof in subject/body, or clear receipt-like attachment metadata.
+1) Read COMPLETE provided email body and COMPLETE provided attachment text and detect transactions from either source.
+2) Return [] unless there is clear receipt/invoice/payment/debit/credit evidence.
 2) Ignore security/login/OTP/verification/newsletter alerts.
 3) Do NOT guess amounts from years, OTPs, IDs, order numbers, or ticket numbers.
 4) If amount is not clearly present, return [].
@@ -379,7 +403,7 @@ From: "${from}"
 Has attachment: ${hasAttachment}
 Attachment names: "${attachmentNames}"
 Body:
-${body.slice(0,2500)}
+${emailBody}
 Attachment extracted text (if any):
 ${attachmentText}
 
@@ -388,7 +412,7 @@ Categories:
 ${c}
 
 Return ONLY JSON array:
-[{"type":"expense|income","businessActivity":"","category":"","isNewCategory":false,"description":"","amount":0,"date":"YYYY-MM-DD","vendor":"","paymentMethod":""}]`}],1000);
+[{"type":"expense|income","businessActivity":"","category":"","isNewCategory":false,"description":"","amount":0,"date":"YYYY-MM-DD","vendor":"","paymentMethod":""}]`}],1300);
     try{const a=JSON.parse(raw.replace(/```json|```/g,"").trim());return Array.isArray(a)?a:[];}catch{return[];}
   }catch{return[];}
 }
@@ -594,19 +618,67 @@ function extractAttachmentMoneyHints(text=""){
   }
   return out.join(", ");
 }
+function extractPdfLikeText(binary=""){
+  const ascii=extractReadableAttachmentText(binary);
+  // Pull likely string literals from PDF streams: ( ... )
+  const literals=[];
+  const re=/\(([^()]{2,240})\)/g;
+  let m;
+  while((m=re.exec(binary))&&literals.length<400){
+    const t=(m[1]||"").replace(/\\[nrtbf()\\]/g," ").replace(/\s+/g," ").trim();
+    if(t)literals.push(t);
+  }
+  const joined=[ascii,...literals].join(" ");
+  return joined.replace(/\s+/g," ").trim();
+}
+function extractAttachmentTextByType(binary="",mimeType="",name=""){
+  const mt=(mimeType||"").toLowerCase();
+  const nm=(name||"").toLowerCase();
+  if(mt.startsWith("text/")||mt.includes("json")||mt.includes("xml")||mt.includes("csv")||mt.includes("html")||/\.(txt|csv|json|xml|html?|md|log)$/i.test(nm)){
+    return extractReadableAttachmentText(binary).replace(/\s+/g," ").trim();
+  }
+  if(mt.includes("pdf")||nm.endsWith(".pdf")){
+    return extractPdfLikeText(binary);
+  }
+  return extractReadableAttachmentText(binary).replace(/\s+/g," ").trim();
+}
+function clipTextForAI(text="",max=12000){
+  const src=(text||"").replace(/\s+/g," ").trim();
+  if(src.length<=max)return src;
+  const keyRe=/(₹|rs\.?|inr|\$|usd|eur|gbp|invoice|receipt|debited|credited|payment|amount|total|refund|payout|settlement|upi|card|account)/ig;
+  const windows=[];let m;
+  while((m=keyRe.exec(src))&&windows.length<16){
+    const i=m.index||0;
+    const from=Math.max(0,i-120);
+    const to=Math.min(src.length,i+240);
+    windows.push(src.slice(from,to));
+  }
+  const focused=windows.join(" ... ").replace(/\s+/g," ").trim();
+  if(focused.length>=Math.min(max,4000))return focused.slice(0,max);
+  const head=src.slice(0,Math.floor(max*0.45));
+  const tail=src.slice(-Math.floor(max*0.45));
+  return `${head} ... ${focused} ... ${tail}`.slice(0,max);
+}
 async function gmailAttachmentEvidenceText(token,msgId,attachments=[]){
   if(!Array.isArray(attachments)||!attachments.length)return "";
-  const keep=attachments.filter(a=>a?.attachmentId&&(a.size||0)<=2_000_000).slice(0,3);
+  let totalBytes=0;
+  const keep=attachments
+    .filter(a=>a?.attachmentId&&(a.size||0)<=8_000_000)
+    .filter(a=>{
+      if(totalBytes>12_000_000)return false;
+      totalBytes+=(a.size||0);
+      return true;
+    })
+    .slice(0,8);
   if(!keep.length)return "";
   const chunks=[];
   for(const a of keep){
     try{
       const payload=await withTimeout(gmailGetAttachment(token,msgId,a.attachmentId),18000,`Attachment ${a.name||a.attachmentId}`);
       const binary=decodeB64Binary(payload?.data||"");
-      const text=extractReadableAttachmentText(binary);
-      const compact=text.replace(/\s+/g," ").trim();
+      const compact=extractAttachmentTextByType(binary,a.mimeType,a.name);
       const hints=extractAttachmentMoneyHints(compact);
-      const sample=compact.length>7000?`${compact.slice(0,3500)} ... ${compact.slice(-3500)}`:compact;
+      const sample=clipTextForAI(compact,9000);
       if(sample)chunks.push(`[${a.name}] ${hints?`Amount hints: ${hints}. `:""}${sample}`);
     }catch(e){
       console.warn("Attachment read skipped",a?.name||a?.attachmentId,e);
@@ -1598,7 +1670,9 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
             subject=H.find(h=>h.name==="Subject")?.value||"";
             from=H.find(h=>h.name==="From")?.value||"";
             rawDate=H.find(h=>h.name==="Date")?.value||"";
-            body=extractEmailText(full.payload)||full.snippet||"";
+            const bodyParts=extractEmailTextAll(full.payload,0,[]);
+            if(full.snippet)bodyParts.push(full.snippet);
+            body=collapseTextParts(bodyParts);
             const attachmentMeta=collectGmailAttachmentMeta(full.payload,[]);
             attachmentNames=attachmentMeta.map(a=>a.name).filter(Boolean);
             hasAttachment=attachmentNames.length>0;
@@ -1607,11 +1681,6 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
             }
           }
           const emailContext={subject,from,body,attachmentNames,attachmentText,hasAttachment};
-          if(!isReceiptLikeEmail(emailContext)){
-            skipped++;
-            processed.add(msg.id);
-            continue;
-          }
           const parsedDate=rawDate?new Date(rawDate):null;
           const eDate=parsedDate&&!Number.isNaN(parsedDate.getTime())?parsedDate.toISOString().slice(0,10):today();
           let items=[];
@@ -1619,11 +1688,10 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
             items=await withTimeout(aiExtractEmail(subject,from,body,acts,cats,{attachmentNames,attachmentText,hasAttachment}),30000,"AI extraction");
           }catch(aiErr){
             console.error(aiErr);
+          }
+          if(!items.length){
             const fb=fallbackExtractEmail(subject,from,body,{attachmentNames,attachmentText,hasAttachment}).map(item=>({...item,date:item.date||eDate}));
-            if(fb.length){
-              fallbackUsed++;
-              items=fb;
-            }
+            if(fb.length){fallbackUsed++;items=fb;}
           }
           items=sanitizeEmailTransactions(items,emailContext);
           if(!items.length){
