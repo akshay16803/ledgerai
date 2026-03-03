@@ -198,6 +198,7 @@ const MARKET_SIGNAL_KEYWORDS = [
   "entry","target","stop loss","stop-loss","sl hit","tp hit","take profit","call option","put option",
   "ce "," pe ","banknifty","nifty","breakout alert","indicator alert","strategy alert","webhook alert",
 ];
+const HARD_SIGNAL_BRANDS = ["tradingview","kitealgo","tv signal"];
 const CASH_CONFIRMATION_KEYWORDS = [
   "debited","credited","paid","payment successful","payment received","charged","purchase","withdrawn",
   "deposit","refund processed","salary credited","settlement","payout","invoice","receipt","bill paid",
@@ -223,7 +224,14 @@ function isMarketSignalAlert({subject="",from="",body="",attachmentNames=[],atta
   const text=`${subject}\n${from}\n${body}\n${attachmentText}`.toLowerCase();
   const attachmentNameText=(attachmentNames||[]).join(" ").toLowerCase();
   const hasSignal=MARKET_SIGNAL_KEYWORDS.some(k=>text.includes(k)||attachmentNameText.includes(k));
-  if(!hasSignal)return false;
+  const hasSignalBrand=HARD_SIGNAL_BRANDS.some(k=>text.includes(k)||attachmentNameText.includes(k));
+  const hasSignalPattern=/\b(signal|entry|target|stop[- ]?loss|sl|tp|buy|sell|banknifty|nifty)\b/.test(text);
+  const hasSignalSender=/\b(tradingview|kitealgo)\b/.test((from||"").toLowerCase());
+  const inferredSignal=hasSignal||(hasSignalBrand&&(hasSignalPattern||hasSignalSender));
+  const subjectLooksSignal=/\b(signal|entry|target|stop[- ]?loss|sl|tp|buy|sell)\b/.test((subject||"").toLowerCase());
+  const senderLooksSignal=/\b(tradingview|kitealgo)\b/.test((from||"").toLowerCase());
+  const hardSignal=inferredSignal||(senderLooksSignal&&subjectLooksSignal);
+  if(!hardSignal)return false;
   // Allow only when there is explicit payment/receipt evidence.
   return !hasCashEvidenceForBooking(text,attachmentNameText);
 }
@@ -916,6 +924,16 @@ function msExtractBody(msg){
 function hydrateEmailAccount(acc={}){
   const query=((acc.syncQuery||"")+"").trim();
   const provider=((acc.provider||"google")+"").toLowerCase()==="microsoft"?"microsoft":"google";
+  const userDisconnected=Boolean(acc.userDisconnected);
+  const inferredConnected=Boolean(
+    acc.connected
+    || (!userDisconnected && (
+      acc.email
+      || acc.firstSyncCompleted
+      || acc.lastSync
+      || acc.lastAuthAt
+    ))
+  );
   return{
     ...acc,
     provider,
@@ -923,12 +941,14 @@ function hydrateEmailAccount(acc={}){
     maxEmails:Math.max(1,Math.min(Number(acc.maxEmails)||100,5000)),
     autoPost:acc.autoPost!==false,
     autoSyncHourly:acc.autoSyncHourly!==false,
-    connected:Boolean(acc.connected),
+    connected:inferredConnected,
+    userDisconnected,
     firstSyncCompleted:Boolean(acc.firstSyncCompleted),
     syncFromDate:(acc.syncFromDate||"")+"",
     tokenExpiresAt:(acc.tokenExpiresAt||"")+"",
     lastAutoSyncAt:(acc.lastAutoSyncAt||"")+"",
     lastAuthAt:(acc.lastAuthAt||"")+"",
+    reauthRequired:Boolean(acc.reauthRequired),
     msClientId:(acc.msClientId||"")+"",
     msAccountId:(acc.msAccountId||"")+"",
     msUsername:(acc.msUsername||"")+"",
@@ -1762,13 +1782,14 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClient
   const microsoftClientId=(defaultMicrosoftClientId||DEFAULT_MICROSOFT_CLIENT_ID||"").trim();
   const providerOf=acc=>(((acc?.provider||"google")+"").toLowerCase()==="microsoft"?"microsoft":"google");
   const isSyncReady=(acc)=>{
-    if(!acc?.connected)return false;
+    if(!acc?.connected||acc?.userDisconnected)return false;
     const provider=providerOf(acc);
     if(provider==="microsoft")return Boolean((acc.msClientId||microsoftClientId||"").trim());
     return Boolean((acc.clientId||googleClientId||"").trim());
   };
   const emailInbox=inbox.filter(i=>i.source==="email").length;
   const connected=emails.filter(a=>{
+    if(a?.userDisconnected)return false;
     const provider=providerOf(a);
     if(provider==="microsoft")return Boolean(a.connected);
     return Boolean(a.connected);
@@ -1801,7 +1822,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClient
       const silentResp=await requestGoogleToken(resolvedClientId,{prompt:"",loginHint});
       const token=silentResp?.access_token||"";
       if(token){
-        setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,token,connected:true,clientId:resolvedClientId,lastAuthAt:new Date().toISOString()}:a));
+        setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,token,connected:true,userDisconnected:false,reauthRequired:false,clientId:resolvedClientId,lastAuthAt:new Date().toISOString()}:a));
         return token;
       }
     }catch(_err){
@@ -1812,7 +1833,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClient
     const consentResp=await requestGoogleToken(resolvedClientId,{prompt:"consent",loginHint});
     const token=consentResp?.access_token||"";
     if(!token)throw new Error("google_token_missing");
-    setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,token,connected:true,clientId:resolvedClientId,lastAuthAt:new Date().toISOString()}:a));
+    setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,token,connected:true,userDisconnected:false,reauthRequired:false,clientId:resolvedClientId,lastAuthAt:new Date().toISOString()}:a));
     return token;
   };
 
@@ -1834,9 +1855,9 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClient
         const base=hydrateEmailAccount({id:gid(),provider:"google",label:mail.split("@")[0],email:mail,syncQuery:GMAIL_QUERY,maxEmails:100,autoPost:false,enabled:true,firstSyncCompleted:false,syncFromDate:"",autoSyncHourly:true});
         if(ix>=0){
           const cur=hydrateEmailAccount(next[ix]);
-          next[ix]={...cur,provider:"google",email:mail,token,connected:true,enabled:true,clientId:googleClientId,autoSyncHourly:cur.autoSyncHourly!==false,lastAuthAt:new Date().toISOString()};
+          next[ix]={...cur,provider:"google",email:mail,token,connected:true,userDisconnected:false,reauthRequired:false,enabled:true,clientId:googleClientId,autoSyncHourly:cur.autoSyncHourly!==false,lastAuthAt:new Date().toISOString()};
         }else{
-          next.unshift({...base,token,connected:true,clientId:googleClientId,lastAuthAt:new Date().toISOString()});
+          next.unshift({...base,token,connected:true,userDisconnected:false,reauthRequired:false,clientId:googleClientId,lastAuthAt:new Date().toISOString()});
         }
         return next;
       });
@@ -1873,9 +1894,9 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClient
         const base=hydrateEmailAccount({id:gid(),provider:"microsoft",label:mail.split("@")[0],email:mail,syncQuery:"",maxEmails:100,autoPost:false,autoSyncHourly:true,enabled:true,firstSyncCompleted:false,syncFromDate:"",msClientId:msClient,msAccountId:account.homeAccountId||"",msUsername:account.username||mail});
         if(ix>=0){
           const cur=hydrateEmailAccount(next[ix]);
-          next[ix]={...cur,provider:"microsoft",email:mail,token:login.accessToken,connected:true,enabled:true,autoSyncHourly:cur.autoSyncHourly!==false,msClientId:msClient,msAccountId:account.homeAccountId||cur.msAccountId||"",msUsername:account.username||cur.msUsername||mail,lastAuthAt:new Date().toISOString()};
+          next[ix]={...cur,provider:"microsoft",email:mail,token:login.accessToken,connected:true,userDisconnected:false,reauthRequired:false,enabled:true,autoSyncHourly:cur.autoSyncHourly!==false,msClientId:msClient,msAccountId:account.homeAccountId||cur.msAccountId||"",msUsername:account.username||cur.msUsername||mail,lastAuthAt:new Date().toISOString()};
         }else{
-          next.unshift({...base,token:login.accessToken,connected:true,lastAuthAt:new Date().toISOString()});
+          next.unshift({...base,token:login.accessToken,connected:true,userDisconnected:false,reauthRequired:false,lastAuthAt:new Date().toISOString()});
         }
         return next;
       });
@@ -1894,7 +1915,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClient
 
   const disconnectAccount=(acc)=>{
     const provider=providerOf(acc);
-    setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,token:null,connected:false}:a));
+    setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,token:null,connected:false,userDisconnected:true,reauthRequired:false}:a));
     setToast(`${provider==="microsoft"?"Outlook":"Gmail"} disconnected: ${acc.email||acc.label||"account"}`);
   };
 
@@ -1922,10 +1943,17 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClient
       let token=acc.token||"";
       let messages=[];
       if(provider==="microsoft"){
-        const auth=await msGetMailToken(msClient,{homeAccountId:acc.msAccountId,username:acc.msUsername||acc.email});
+        let auth;
+        try{
+          auth=await msGetMailToken(msClient,{homeAccountId:acc.msAccountId,username:acc.msUsername||acc.email});
+        }catch(msAuthErr){
+          if(!interactive)throw msAuthErr;
+          const login=await msLoginMail(msClient);
+          auth={account:login.account||{},accessToken:login.accessToken};
+        }
         token=auth.accessToken;
         const msAcc=auth.account||{};
-        setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,token,connected:true,msClientId:msClient,msAccountId:msAcc.homeAccountId||a.msAccountId||"",msUsername:msAcc.username||a.msUsername||a.email||""}:a));
+        setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,token,connected:true,userDisconnected:false,reauthRequired:false,msClientId:msClient,msAccountId:msAcc.homeAccountId||a.msAccountId||"",msUsername:msAcc.username||a.msUsername||a.email||""}:a));
         log(acc.id,scanAll?`Scanning Outlook mailbox from ${fromDate||"beginning"}…`:"Fetching Outlook email list…");
         messages=await msListMessages(token,requestedMax,fromDate);
       }else{
@@ -2060,6 +2088,9 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClient
       const syncStamp=new Date().toISOString();
       setEmails(prev=>prev.map(a=>a.id===acc.id?{
         ...a,
+        connected:true,
+        userDisconnected:false,
+        reauthRequired:false,
         lastSync:syncStamp,
         lastCount:valid.length,
         firstSyncCompleted:a.firstSyncCompleted||markFirst,
@@ -2088,11 +2119,11 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClient
       const msg=String(e.message||"");
       if(provider==="google"&&(msg.includes("google_reauth_required")||msg.includes("401"))){
         log(acc.id,"⚠ Google session needs refresh. Click Connect Gmail once to re-authorize if sync keeps failing.");
-        setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,token:null,connected:true}:a));
+        setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,token:null,connected:true,userDisconnected:false,reauthRequired:true}:a));
         if(interactive&&!silent)alert("Google session needs refresh. Click Connect Gmail once, then sync will continue automatically.");
       }else if(msg.includes("401")||msg.includes("Not signed in to Microsoft")){
         log(acc.id,provider==="microsoft"?"⚠ Microsoft session expired — reconnect required.":"⚠ Token expired — reconnect required.");
-        setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,token:null,connected:false}:a));
+        setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,token:null,connected:true,userDisconnected:false,reauthRequired:true}:a));
       }else{
         log(acc.id,"Error: "+msg);
       }
@@ -2133,9 +2164,21 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClient
         runSync(acc,{scanAll:false,auto:true,interactive:false,silent:true});
       });
     };
+    const onVisible=()=>{
+      if(document.visibilityState==="visible")runAutoSync();
+    };
     const t=setInterval(runAutoSync,60*1000);
     const kick=setTimeout(runAutoSync,3000);
-    return()=>{clearInterval(t);clearTimeout(kick);};
+    window.addEventListener("focus",runAutoSync);
+    window.addEventListener("online",runAutoSync);
+    document.addEventListener("visibilitychange",onVisible);
+    return()=>{
+      clearInterval(t);
+      clearTimeout(kick);
+      window.removeEventListener("focus",runAutoSync);
+      window.removeEventListener("online",runAutoSync);
+      document.removeEventListener("visibilitychange",onVisible);
+    };
   },[emails,syncingIds]);
 
   return(
@@ -2176,7 +2219,8 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClient
         const acc=hydrateEmailAccount(rawAcc);
         const provider=providerOf(acc);
         const providerLabel=provider==="microsoft"?"Outlook":"Gmail";
-        const linked=Boolean(acc.connected);
+        const linked=Boolean(acc.connected)&&!acc.userDisconnected;
+        const needsReauth=Boolean(acc.reauthRequired)&&linked;
         return(
         <div key={acc.id} className="card" style={{marginBottom:12,background:linked?"linear-gradient(135deg,#0f1c36,#0b1530)":"#0f1624"}}>
           <R style={{marginBottom:8}}>
@@ -2186,14 +2230,16 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClient
                 <div style={{fontWeight:700,fontSize:15,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{acc.email||acc.label||"Email account"}</div>
                 <div style={{fontSize:12,color:"#64748b"}}>
                   <span>{providerLabel} · </span>
-                  {linked?<span style={{color:"#34d399"}}>Connected</span>:<span style={{color:"#f87171"}}>Disconnected</span>}
+                  {linked&&!needsReauth&&<span style={{color:"#34d399"}}>Connected</span>}
+                  {linked&&needsReauth&&<span style={{color:"#f59e0b"}}>Connected · re-auth needed</span>}
+                  {!linked&&<span style={{color:"#f87171"}}>Disconnected</span>}
                   {acc.firstSyncCompleted&&acc.syncFromDate&&<span> · first synced from {fmtD(acc.syncFromDate)}</span>}
                   {acc.lastSync&&<span> · last sync {fmtDT(acc.lastSync)}</span>}
                 </div>
               </div>
             </div>
             <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-              {!linked&&<button className="btn sm pri" onClick={()=>connectAccount(provider,acc)}>Connect {providerLabel}</button>}
+              {(!linked||needsReauth)&&<button className="btn sm pri" onClick={()=>connectAccount(provider,acc)}>{needsReauth?`Reconnect ${providerLabel}`:`Connect ${providerLabel}`}</button>}
               {linked&&<button className="btn sm" style={{background:"#1a2234",color:"#818cf8"}} disabled={Boolean(syncingIds[acc.id])} onClick={()=>startSync(acc,false)}>{syncingIds[acc.id]?"⏳ Syncing…":"🔄 Sync"}</button>}
               {linked&&<button className="btn sm ghost" disabled={Boolean(syncingIds[acc.id])} onClick={()=>setFirstSyncPrompt({accId:acc.id,fromDate:acc.syncFromDate||new Date(Date.now()-180*24*60*60*1000).toISOString().slice(0,10),scanAll:true})}>🧠 Scan From Date</button>}
               {linked&&<button className="btn sm dan" onClick={()=>disconnectAccount(acc)}>Disconnect {providerLabel}</button>}
