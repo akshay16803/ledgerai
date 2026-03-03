@@ -65,6 +65,7 @@ const amtClose=(a,b)=>Math.abs(a-b)<2;
 const strSim=(a,b)=>{a=(a||"").toLowerCase();b=(b||"").toLowerCase();let m=0;for(let c of a)if(b.includes(c))m++;return m/Math.max(a.length,b.length,1);};
 const LOCKED_OWNER_EMAIL = "akshaychouhan16803@gmail.com";
 const DEFAULT_GOOGLE_CLIENT_ID = "975238186836-47bvtn56uhrlcbe11n1pe1h26qbor5s1.apps.googleusercontent.com";
+const DEFAULT_MICROSOFT_CLIENT_ID = (import.meta.env.VITE_MICROSOFT_CLIENT_ID || "").trim();
 const DEFAULT_AI_MODEL = "claude-sonnet-4-20250514";
 const EMAIL_SYNC_CACHE_VERSION = "v5";
 
@@ -826,7 +827,10 @@ export default function App(){
   const[inbox,setInbox]=useState(()=>LS.get("ledger_inbox",[]));
   const[emails,setEmails]=useState(()=>LS.get("ledger_emails",[]).map(a=>({...hydrateEmailAccount(a),token:undefined})));
   const[smsNums,setSmsNums]=useState(()=>LS.get("ledger_sms",[]));
-  const[sbCfg,setSbCfg]=useState(()=>LS.get("ledger_odcfg",{clientId:"",email:"",name:"",enabled:false})); // reusing name for compat
+  const[sbCfg,setSbCfg]=useState(()=>{
+    const saved=LS.get("ledger_odcfg",{clientId:"",email:"",name:"",enabled:false}); // reusing name for compat
+    return{...saved,clientId:(saved.clientId||DEFAULT_MICROSOFT_CLIENT_ID||"").trim()};
+  });
   const setSbCfgAlias=v=>setSbCfg(typeof v==="function"?v:v);
   const[syncStatus,setSyncStatus]=useState("idle"); // idle|syncing|ok|error
   const[lastSync,setLastSync]=useState(()=>LS.get("ledger_lastsync",""));
@@ -1058,7 +1062,7 @@ export default function App(){
         {tab==="transactions"&&<LedgerTab txns={filtered} filter={filter} setFilter={setFilter} acts={acts} onEdit={tx=>{setEditTx(tx);setAddType(tx.type);setShowAdd(true);}} onDelete={delTx}/>}
         {tab==="inbox"&&<InboxTab inbox={inbox} addInbox={addInbox} acts={acts} cats={cats} onApprove={approveInbox} onEdit={editInbox} onDiscard={discardInbox}/>}
         <div style={{display:tab==="email"?"block":"none"}} aria-hidden={tab!=="email"}>
-          <EmailTab emails={emails} setEmails={setEmails} inbox={inbox} addInbox={addInbox} autoPostTxns={autoPostTxns} acts={acts} cats={cats} defaultGoogleClientId={authCfg.googleClientId||DEFAULT_GOOGLE_CLIENT_ID} defaultMicrosoftClientId={sbCfg.clientId||""}/>
+          <EmailTab emails={emails} setEmails={setEmails} inbox={inbox} addInbox={addInbox} autoPostTxns={autoPostTxns} acts={acts} cats={cats} defaultGoogleClientId={authCfg.googleClientId||DEFAULT_GOOGLE_CLIENT_ID} defaultMicrosoftClientId={sbCfg.clientId||DEFAULT_MICROSOFT_CLIENT_ID||""}/>
         </div>
         {tab==="messages"&&<MessagesTab smsNums={smsNums} setSmsNums={setSmsNums} emails={emails} inbox={inbox} addInbox={addInbox} acts={acts} cats={cats}/>}
         {tab==="journal"&&<JournalTab txns={txns}/>}
@@ -1547,7 +1551,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
   const[reviewState,setReviewState]=useState(null); // {accId,items}
   const log=(id,msg)=>setLogs(p=>({...p,[id]:msg}));
   const googleClientId=(defaultGoogleClientId||DEFAULT_GOOGLE_CLIENT_ID||"").trim();
-  const microsoftClientId=(defaultMicrosoftClientId||"").trim();
+  const microsoftClientId=(defaultMicrosoftClientId||DEFAULT_MICROSOFT_CLIENT_ID||"").trim();
   const providerOf=acc=>(((acc?.provider||"google")+"").toLowerCase()==="microsoft"?"microsoft":"google");
   const isSyncReady=(acc)=>{
     if(!acc?.connected)return false;
@@ -1616,9 +1620,9 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
   };
 
   const connectMicrosoftAccount=async(existing=null)=>{
-    const msClient=(existing?.msClientId||microsoftClientId||"").trim();
+    const msClient=(existing?.msClientId||microsoftClientId||DEFAULT_MICROSOFT_CLIENT_ID||"").trim();
     if(!msClient){
-      alert("Microsoft client ID is missing. Set it in Cloud tab (OneDrive section) first, then try Connect Outlook.");
+      alert("Outlook connector is not configured for this deployment. Admin needs to set VITE_MICROSOFT_CLIENT_ID once.");
       return;
     }
     try{
@@ -1669,7 +1673,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
     const provider=providerOf(acc);
     if(provider==="google"&&!acc?.token){alert("Connect this Gmail account first.");return;}
     const msClient=(acc?.msClientId||microsoftClientId||"").trim();
-    if(provider==="microsoft"&&!msClient){alert("Microsoft client ID is missing. Configure Cloud tab first, then connect Outlook.");return;}
+    if(provider==="microsoft"&&!msClient){alert("Outlook connector is not configured for this deployment. Admin needs to set VITE_MICROSOFT_CLIENT_ID once.");return;}
     const scanAll=opts.scanAll===true;
     const fromDate=(opts.fromDate||acc.syncFromDate||"").trim();
     const markFirst=opts.markFirstSync===true;
@@ -2351,12 +2355,17 @@ function CloudTab({sbCfg,setSbCfg,syncStatus,lastSync,onSync,onLoad,txns,setTxns
   const dataSize=()=>(JSON.stringify({txns,inbox,accs,acts,cats,smsNums}).length/1024).toFixed(1)+"KB";
 
   const connect=async()=>{
-    if(!clientId.trim()){alert("Enter your Azure Application (Client) ID first.");return;}
+    const resolvedClientId=(clientId||sbCfg.clientId||DEFAULT_MICROSOFT_CLIENT_ID||"").trim();
+    if(!resolvedClientId){
+      alert("Microsoft connector is not configured. Admin: set VITE_MICROSOFT_CLIENT_ID or enter Azure Application (Client) ID here.");
+      return;
+    }
     setConnecting(true);
     try{
-      const account=await odLogin(clientId.trim());
-      const profile=await odGetProfile(clientId.trim());
-      setSbCfg({clientId:clientId.trim(),email:profile.mail||profile.userPrincipalName,name:profile.displayName,enabled:true,needsReconnect:false});
+      const account=await odLogin(resolvedClientId);
+      const profile=await odGetProfile(resolvedClientId);
+      setClientId(resolvedClientId);
+      setSbCfg({clientId:resolvedClientId,email:profile.mail||profile.userPrincipalName,name:profile.displayName,enabled:true,needsReconnect:false});
       // Attempt first sync
       await onSync({});
     }catch(e){
@@ -2474,13 +2483,17 @@ function CloudTab({sbCfg,setSbCfg,syncStatus,lastSync,onSync,onLoad,txns,setTxns
             <button className="btn sm ghost" onClick={()=>setShowGuide(true)}>📖 Setup Guide (5 min)</button>
           </div>
           <div style={{background:"#0d1a2e",border:"1px solid #1e3a5f",borderRadius:8,padding:12,marginBottom:14,fontSize:13,color:"#93c5fd"}}>
-            You need a free <b>Azure App Registration</b> to authenticate. It takes 5 minutes and is free — no billing required.
+            End users only need to click Sign in. App owner sets Microsoft connector once.
           </div>
-          <label>Azure Application (Client) ID</label>
-          <input value={clientId} onChange={e=>setClientId(e.target.value)} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"/>
-          <div style={{fontSize:11,color:"#475569",marginTop:4}}>Found in Azure Portal → App registrations → your app → Overview</div>
+          <label>Azure Application (Client) ID (admin only)</label>
+          <input value={clientId} onChange={e=>setClientId(e.target.value)} placeholder={DEFAULT_MICROSOFT_CLIENT_ID?"Using deployment default. Optional override.":"xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"}/>
+          <div style={{fontSize:11,color:"#475569",marginTop:4}}>
+            {DEFAULT_MICROSOFT_CLIENT_ID
+              ?"Deployment default is configured. You can leave this blank."
+              :"Optional if deployment default is set via VITE_MICROSOFT_CLIENT_ID. Otherwise paste from Azure Portal → App registrations → your app → Overview."}
+          </div>
           {sbCfg.needsReconnect&&<div style={{fontSize:12,color:"#f59e0b",marginTop:8}}>⚠ Token expired — sign in again to restore sync.</div>}
-          <button className="btn pri" style={{marginTop:14,width:"100%"}} onClick={connect} disabled={connecting||!clientId.trim()}>
+          <button className="btn pri" style={{marginTop:14,width:"100%"}} onClick={connect} disabled={connecting||!(clientId||sbCfg.clientId||DEFAULT_MICROSOFT_CLIENT_ID||"").trim()}>
             {connecting?"🔗 Signing in to Microsoft…":"🔷 Sign in with Microsoft & Connect OneDrive"}
           </button>
           <div style={{fontSize:11,color:"#475569",marginTop:8,textAlign:"center"}}>

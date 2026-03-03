@@ -36,3 +36,11 @@ Use the included Cloudflare Worker:
 7. Click **Save AI Config** then **Test AI Backend**.
 
 If AI backend is not configured, LedgerAI falls back to heuristic parsing with lower accuracy.
+
+## Outlook One-Click OAuth (Owner Setup Once)
+
+To make `+ Connect Outlook Account` one-click for end users, set a deploy-time env var:
+
+- `VITE_MICROSOFT_CLIENT_ID=<your Azure App Registration Client ID>`
+
+After this is set and deployed, users only click Connect Outlook -> Microsoft sign-in -> consent.
