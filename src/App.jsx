@@ -2012,6 +2012,13 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClient
     map[row.accountId]=(map[row.accountId]||0)+1;
     return map;
   },{});
+  const duePendingByAccount=aiPending.reduce((map,row)=>{
+    const nextAt=Date.parse(row.nextRetryAt||"");
+    if(!Number.isFinite(nextAt)||nextAt<=Date.now()){
+      map[row.accountId]=(map[row.accountId]||0)+1;
+    }
+    return map;
+  },{});
 
   useEffect(()=>{
     LS.set(AI_PENDING_EMAIL_KEY,aiPending.map(normalizeAiPendingEntry));
@@ -2653,7 +2660,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClient
                   {!linked&&<span style={{color:"#f87171"}}>Disconnected</span>}
                   {acc.firstSyncCompleted&&acc.syncFromDate&&<span> · first synced from {fmtD(acc.syncFromDate)}</span>}
                   {acc.lastSync&&<span> · last sync {fmtDT(acc.lastSync)}</span>}
-                  {pendingByAccount[acc.id]>0&&<span style={{color:"#c4b5fd"}}> · AI retry pending {pendingByAccount[acc.id]}</span>}
+                  {pendingByAccount[acc.id]>0&&<span style={{color:"#c4b5fd"}}> · AI retry pending {pendingByAccount[acc.id]}{duePendingByAccount[acc.id]?` (due ${duePendingByAccount[acc.id]})`:""}</span>}
                 </div>
               </div>
             </div>
@@ -2674,9 +2681,9 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClient
                 <span>
                   {syncProgress[acc.id].phase==="fetching"&&"Fetching emails…"}
                   {syncProgress[acc.id].phase==="processing"&&`Processed ${syncProgress[acc.id].processed||0}/${syncProgress[acc.id].total||0}${syncProgress[acc.id].failed?` · failed ${syncProgress[acc.id].failed}`:""}${syncProgress[acc.id].skipped?` · skipped ${syncProgress[acc.id].skipped}`:""}${syncProgress[acc.id].pending?` · pending AI ${syncProgress[acc.id].pending}`:""}`}
-                  {syncProgress[acc.id].phase==="review"&&`Scan complete. ${syncProgress[acc.id].found||0} item(s) awaiting review.`}
-                  {syncProgress[acc.id].phase==="done"&&`Sync completed.${Number(syncProgress[acc.id].found)>0?` ${syncProgress[acc.id].found} item(s) in review queue.`:""}`}
-                  {syncProgress[acc.id].phase==="error"&&"Sync failed."}
+                  {syncProgress[acc.id].phase==="review"&&`Scan complete. ${syncProgress[acc.id].found||0} item(s) awaiting review.${syncProgress[acc.id].pending?` Pending AI retry: ${syncProgress[acc.id].pending}.`:""}`}
+                  {syncProgress[acc.id].phase==="done"&&`Sync completed.${Number(syncProgress[acc.id].found)>0?` ${syncProgress[acc.id].found} item(s) in review queue.`:""}${syncProgress[acc.id].pending?` Pending AI retry: ${syncProgress[acc.id].pending}.`:""}`}
+                  {syncProgress[acc.id].phase==="error"&&`Sync failed.${syncProgress[acc.id].pending?` Pending AI retry: ${syncProgress[acc.id].pending}.`:""}`}
                 </span>
                 <span style={{color:"#94a3b8"}}>
                   {(syncProgress[acc.id].phase==="processing"||syncProgress[acc.id].phase==="review"||syncProgress[acc.id].phase==="done")&&`Left ${Math.max(0,syncProgress[acc.id].remaining||0)}`}
