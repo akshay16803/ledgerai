@@ -192,8 +192,9 @@ const RECEIPT_KEYWORDS = [
 ];
 const TRANSACTION_ALERT_KEYWORDS = [
   "debited","credited","debit","credit","charges","charged","card","upi","imps",
-  "neft","rtgs","transaction","spent","purchase","paid","received","withdrawn",
-  "salary","refund",
+  "neft","rtgs","transaction","spent","purchase","paid","withdrawn",
+  "salary credited","refund","payment received","amount received",
+  "amount debited","amount credited","payout","settlement",
 ];
 const NON_FINANCIAL_EMAIL_KEYWORDS = [
   "security alert","security notice","verification code","otp","one-time password",
@@ -208,8 +209,10 @@ const MARKET_SIGNAL_KEYWORDS = [
 ];
 const HARD_SIGNAL_BRANDS = ["tradingview","kitealgo","tv signal"];
 const CASH_CONFIRMATION_KEYWORDS = [
-  "debited","credited","paid","payment successful","payment received","charged","purchase","withdrawn",
-  "deposit","refund processed","salary credited","settlement","payout","invoice","receipt","bill paid",
+  "amount debited","amount credited","debited from","credited to","paid",
+  "payment successful","payment received","charged","purchase","withdrawn",
+  "deposit","refund processed","salary credited","settlement","payout",
+  "invoice","receipt","bill paid","order receipt","order invoice",
 ];
 
 function hasMoneyEvidence(text=""){
@@ -223,6 +226,9 @@ function hasCashEvidenceForBooking(text="",attachmentNameText=""){
   const hasReceiptKeyword=RECEIPT_KEYWORDS.some(k=>lower.includes(k)||attach.includes(k));
   const hasCashKeyword=CASH_CONFIRMATION_KEYWORDS.some(k=>lower.includes(k));
   const hasMoney=hasMoneyEvidence(text);
+  const hasSignalNoise=MARKET_SIGNAL_KEYWORDS.some(k=>lower.includes(k)||attach.includes(k));
+  const hasStrongTxnPhrase=/\b(amount debited|amount credited|debited from|credited to|transaction id|utr|rrn|payment successful|invoice|receipt)\b/.test(lower);
+  if(hasSignalNoise&&!hasStrongTxnPhrase)return false;
   if(hasReceiptKeyword&&(hasMoney||/\b(invoice|receipt)\b/.test(lower)))return true;
   if(hasCashKeyword&&hasMoney)return true;
   return false;
@@ -268,9 +274,11 @@ function sanitizeEmailTransactions(items=[],ctx={}){
   if(!Array.isArray(items)||!items.length)return[];
   const evidenceText=`${ctx.subject||""}\n${ctx.from||""}\n${ctx.body||""}\n${(ctx.attachmentNames||[]).join(" ")}\n${ctx.attachmentText||""}`;
   if(isMarketSignalAlert(ctx))return[];
+  const lowerEvidence=evidenceText.toLowerCase();
   const strongReceipt=isReceiptLikeEmail(ctx);
   const hasMoney=hasMoneyEvidence(evidenceText);
-  const hasTxnAlert=TRANSACTION_ALERT_KEYWORDS.some(k=>evidenceText.toLowerCase().includes(k));
+  const hasTxnAlert=TRANSACTION_ALERT_KEYWORDS.some(k=>lowerEvidence.includes(k));
+  const hasStrongTxnPhrase=/\b(amount debited|amount credited|debited|credited|payment successful|payment received|paid|charged|purchase|refund|payout|settlement|invoice|receipt)\b/.test(lowerEvidence);
   const normalized=items.map(x=>({
     ...x,
     type:x?.type==="income"?"income":"expense",
@@ -281,9 +289,9 @@ function sanitizeEmailTransactions(items=[],ctx={}){
     return x.type==="income"||x.type==="expense";
   });
   if(!normalized.length)return[];
-  if(ctx.aiCashFlow===true&&(strongReceipt||(hasTxnAlert&&hasMoney)))return normalized;
-  if(!(strongReceipt||(hasTxnAlert&&hasMoney)))return[];
-  const hasReceiptContext=RECEIPT_KEYWORDS.some(k=>evidenceText.toLowerCase().includes(k));
+  if(ctx.aiCashFlow===true&&(strongReceipt||(hasTxnAlert&&hasMoney&&hasStrongTxnPhrase)))return normalized;
+  if(!(strongReceipt||(hasTxnAlert&&hasMoney&&hasStrongTxnPhrase)))return[];
+  const hasReceiptContext=RECEIPT_KEYWORDS.some(k=>lowerEvidence.includes(k));
   if(!hasMoney&&!(ctx.hasAttachment&&hasReceiptContext)&&!hasTxnAlert)return[];
   return normalized;
 }
@@ -338,6 +346,27 @@ function formatFailureSummary(reasons={}){
   return top.map(([k,v])=>`${labels[k]||k}: ${v}`).join(", ");
 }
 
+function friendlyMicrosoftAuthError(err){
+  const raw=String(err?.message||err?.errorCode||err||"Microsoft OAuth failed.");
+  const msg=raw.toLowerCase();
+  if(msg.includes("interaction_in_progress")){
+    return "Microsoft sign-in is already open in another popup/tab. Close Microsoft login popups, then try Connect Outlook once.";
+  }
+  if(msg.includes("redirect_uri_mismatch")||msg.includes("aadsts50011")){
+    return `Microsoft redirect URI mismatch. Add SPA redirect URI in Azure app: ${window.location.origin}`;
+  }
+  if(msg.includes("personal account")||msg.includes("work or school account")){
+    return "This Azure app currently blocks personal Outlook accounts. In Azure App Registration → Authentication, set Supported account types to include Personal Microsoft accounts.";
+  }
+  if(msg.includes("aadsts700016")||msg.includes("invalid_client")){
+    return "Azure client ID is invalid for this app or tenant. Recheck VITE_MICROSOFT_CLIENT_ID / Cloud connector client ID.";
+  }
+  if(msg.includes("user_cancelled")||msg.includes("popup_closed")||msg.includes("popup_window_error")){
+    return "Microsoft sign-in was cancelled.";
+  }
+  return raw;
+}
+
 async function fetchJsonWithRetry(url,options={},label="Request",maxAttempts=4){
   let lastErr=null;
   for(let attempt=1;attempt<=maxAttempts;attempt++){
@@ -389,11 +418,11 @@ function fallbackExtractEmail(subject="",from="",body="",meta={}){
   if(amount<=0)return[];
   if(amount>1e7)return[];
   const explicitExpense=/\b(debited|charged|spent|withdrawn|purchase|paid|payment)\b/.test(lower);
-  const explicitIncome=/\b(credited|received|refund|salary|payout|settlement|deposit)\b/.test(lower);
+  const explicitIncome=/\b(credited|payment received|refund|salary|payout|settlement|deposit)\b/.test(lower);
   if(!explicitExpense&&!explicitIncome&&!isReceiptLikeEmail({subject,from,body,attachmentText,attachmentNames,hasAttachment}))return[];
   if(!hasMoneyEvidence(text)&&!explicitExpense&&!explicitIncome)return[];
   const expenseHints=["debited","paid","payment","purchase","invoice","receipt","order","bill","spent","charged","upi"];
-  const incomeHints=["credited","received","refund","salary","payout","settlement","deposit"];
+  const incomeHints=["credited","payment received","refund","salary","payout","settlement","deposit"];
   const hasExp=expenseHints.some(k=>lower.includes(k));
   const hasInc=incomeHints.some(k=>lower.includes(k));
   if(!hasExp&&!hasInc&&!explicitExpense&&!explicitIncome)return[];
@@ -577,6 +606,7 @@ const OD_FILE = "LedgerAI/ledgerai-data.json";         // saved at OneDrive root
 const OD_SCOPES = ["Files.ReadWrite", "User.Read"];
 const MS_MAIL_SCOPES = ["Mail.Read", "User.Read"];
 const MSAL_CDN = "https://alcdn.msauth.net/browser/2.38.2/js/msal-browser.min.js";
+const MS_AUTHORITY = "https://login.microsoftonline.com/consumers";
 
 let _msalApp = null;
 let _msalClientId = null;
@@ -639,7 +669,7 @@ async function getMsal(clientId) {
   await loadMsal();
   if (!_msalApp || _msalClientId !== clientId) {
     _msalApp = new window.msal.PublicClientApplication({
-      auth: { clientId, authority: "https://login.microsoftonline.com/common", redirectUri: window.location.origin },
+      auth: { clientId, authority: MS_AUTHORITY, redirectUri: window.location.origin },
       cache: { cacheLocation: "localStorage", storeAuthStateInCookie: false },
     });
     await _msalApp.initialize();
@@ -1858,6 +1888,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClient
   const[syncProgress,setSyncProgress]=useState({});
   const[logs,setLogs]=useState({});
   const[toast,setToast]=useState("");
+  const[connectBusy,setConnectBusy]=useState("");
   const[firstSyncPrompt,setFirstSyncPrompt]=useState(null); // {accId,fromDate,scanAll}
   const log=(id,msg)=>setLogs(p=>({...p,[id]:msg}));
   const googleClientId=(defaultGoogleClientId||DEFAULT_GOOGLE_CLIENT_ID||"").trim();
@@ -1878,6 +1909,8 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClient
   }).length;
   const syncableAccounts=emails.filter(isSyncReady);
   const anySyncing=Object.values(syncingIds).some(Boolean);
+  const connectingGoogle=connectBusy==="google";
+  const connectingMicrosoft=connectBusy==="microsoft";
   const setSyncing=(id,val)=>setSyncingIds(p=>({...p,[id]:val}));
   const setProgress=(id,patch)=>setSyncProgress(p=>({...p,[id]:{...(p[id]||{}),...patch}}));
 
@@ -1920,8 +1953,10 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClient
   };
 
   const connectGoogleAccount=async(existing=null)=>{
+    if(connectBusy)return;
     if(!googleClientId){alert("Google OAuth is not configured for this app yet.");return;}
     if(!window.google?.accounts?.oauth2){alert("Google Identity Services loading… please wait a moment and try again.");return;}
+    setConnectBusy("google");
     try{
       const authResp=await requestGoogleToken(googleClientId,{prompt:"consent"});
       const token=authResp?.access_token||"";
@@ -1953,15 +1988,19 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClient
       }else if(msg.includes("popup_window_error")||msg.includes("popup_closed")){
         alert("Google sign-in was cancelled.");
       }else alert(`OAuth error: ${msg}`);
+    }finally{
+      setConnectBusy("");
     }
   };
 
   const connectMicrosoftAccount=async(existing=null)=>{
+    if(connectBusy)return;
     const msClient=sanitizeMsClientId((existing?.msClientId||microsoftClientId||DEFAULT_MICROSOFT_CLIENT_ID||"").trim());
     if(!msClient){
       alert("Outlook connector is not configured with your Azure app Client ID yet. Open Cloud tab and set your own Azure Application (client) ID once.");
       return;
     }
+    setConnectBusy("microsoft");
     try{
       const login=await msLoginMail(msClient);
       const account=login.account||{};
@@ -1984,13 +2023,14 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClient
       });
       setToast(`✅ Outlook connected: ${mail}`);
     }catch(e){
-      const msg=String(e.message||"Microsoft OAuth failed.");
-      if(msg.includes("popup_window_error")||msg.includes("user_cancelled"))alert("Microsoft sign-in was cancelled.");
-      else alert(`Microsoft OAuth error: ${msg}`);
+      alert(`Microsoft OAuth error: ${friendlyMicrosoftAuthError(e)}`);
+    }finally{
+      setConnectBusy("");
     }
   };
 
   const connectAccount=(provider,existing=null)=>{
+    if(connectBusy)return;
     if(provider==="microsoft"){connectMicrosoftAccount(existing);return;}
     connectGoogleAccount(existing);
   };
@@ -2146,7 +2186,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClient
           flushProgress();
         }
       };
-      const maxParallel=Math.max(1,Math.min(provider==="microsoft"?4:3,toProcess.length));
+      const maxParallel=Math.max(1,Math.min(provider==="microsoft"?6:5,toProcess.length));
       let nextIndex=0;
       const worker=async()=>{
         while(true){
@@ -2268,8 +2308,12 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClient
       <R style={{marginBottom:10}}>
         <h2 className="h2" style={{flex:1}}>Email Integration</h2>
         <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-          <button className="btn sm suc" onClick={()=>connectAccount("google",null)}>+ Connect Gmail Account</button>
-          <button className="btn sm pri" onClick={()=>connectAccount("microsoft",null)}>+ Connect Outlook Account</button>
+          <button className="btn sm suc" disabled={Boolean(connectBusy)} onClick={()=>connectAccount("google",null)}>
+            {connectingGoogle?"⏳ Connecting Gmail…":"+ Connect Gmail Account"}
+          </button>
+          <button className="btn sm pri" disabled={Boolean(connectBusy)} onClick={()=>connectAccount("microsoft",null)}>
+            {connectingMicrosoft?"⏳ Connecting Outlook…":"+ Connect Outlook Account"}
+          </button>
         </div>
       </R>
 
@@ -2281,20 +2325,20 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClient
             Connected accounts: <b style={{color:"#e2e8f0"}}>{connected}</b> / {emails.length}
             {emailInbox>0&&<span style={{marginLeft:10,color:"#f59e0b"}}>· {emailInbox} items pending in Inbox</span>}
           </div>
-          {syncableAccounts.length>0&&<button className="btn sm pri" disabled={anySyncing} onClick={()=>syncableAccounts.forEach(a=>startSync(a,false))}>{anySyncing?"⏳ Syncing…":"🔄 Sync All Accounts"}</button>}
+          {syncableAccounts.length>0&&<button className="btn sm pri" disabled={anySyncing||Boolean(connectBusy)} onClick={()=>syncableAccounts.forEach(a=>startSync(a,false))}>{anySyncing?"⏳ Syncing…":"🔄 Sync All Accounts"}</button>}
         </R>
       </div>
 
       {emails.length===0&&(
-        <div className="card" style={{textAlign:"center",padding:56,background:"linear-gradient(135deg,#0f1624,#081122)"}}>
-          <div style={{fontSize:42,marginBottom:12}}>📬</div>
-          <div style={{fontSize:20,fontWeight:700,marginBottom:8}}>Connect your first email account</div>
-          <div style={{fontSize:13,color:"#64748b",marginBottom:20}}>Choose Gmail or Outlook, sign in, grant permissions, then sync from a start date.</div>
-          <div style={{display:"flex",justifyContent:"center",gap:10}}>
-            <button className="btn suc" onClick={()=>connectAccount("google",null)}>+ Connect Gmail Account</button>
-            <button className="btn pri" onClick={()=>connectAccount("microsoft",null)}>+ Connect Outlook Account</button>
+          <div className="card" style={{textAlign:"center",padding:56,background:"linear-gradient(135deg,#0f1624,#081122)"}}>
+            <div style={{fontSize:42,marginBottom:12}}>📬</div>
+            <div style={{fontSize:20,fontWeight:700,marginBottom:8}}>Connect your first email account</div>
+            <div style={{fontSize:13,color:"#64748b",marginBottom:20}}>Choose Gmail or Outlook, sign in, grant permissions, then sync from a start date.</div>
+            <div style={{display:"flex",justifyContent:"center",gap:10}}>
+            <button className="btn suc" disabled={Boolean(connectBusy)} onClick={()=>connectAccount("google",null)}>{connectingGoogle?"⏳ Connecting Gmail…":"+ Connect Gmail Account"}</button>
+            <button className="btn pri" disabled={Boolean(connectBusy)} onClick={()=>connectAccount("microsoft",null)}>{connectingMicrosoft?"⏳ Connecting Outlook…":"+ Connect Outlook Account"}</button>
+            </div>
           </div>
-        </div>
       )}
 
       {emails.map(rawAcc=>{
@@ -2321,7 +2365,9 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClient
               </div>
             </div>
             <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-              {(!linked||needsReauth)&&<button className="btn sm pri" onClick={()=>connectAccount(provider,acc)}>{needsReauth?`Reconnect ${providerLabel}`:`Connect ${providerLabel}`}</button>}
+              {(!linked||needsReauth)&&<button className="btn sm pri" disabled={Boolean(connectBusy)} onClick={()=>connectAccount(provider,acc)}>
+                {provider==="google"&&connectingGoogle?"⏳ Connecting Gmail…":provider==="microsoft"&&connectingMicrosoft?"⏳ Connecting Outlook…":needsReauth?`Reconnect ${providerLabel}`:`Connect ${providerLabel}`}
+              </button>}
               {linked&&<button className="btn sm" style={{background:"#1a2234",color:"#818cf8"}} disabled={Boolean(syncingIds[acc.id])} onClick={()=>startSync(acc,false)}>{syncingIds[acc.id]?"⏳ Syncing…":"🔄 Sync"}</button>}
               {linked&&<button className="btn sm ghost" disabled={Boolean(syncingIds[acc.id])} onClick={()=>setFirstSyncPrompt({accId:acc.id,fromDate:acc.syncFromDate||new Date(Date.now()-180*24*60*60*1000).toISOString().slice(0,10),scanAll:true})}>🧠 Scan From Date</button>}
               {linked&&<button className="btn sm dan" onClick={()=>disconnectAccount(acc)}>Disconnect {providerLabel}</button>}
