@@ -195,7 +195,8 @@ function sanitizeEmailTransactions(items=[],ctx={}){
   const evidenceText=`${ctx.subject||""}\n${ctx.from||""}\n${ctx.body||""}\n${(ctx.attachmentNames||[]).join(" ")}\n${ctx.attachmentText||""}`;
   const strongReceipt=isReceiptLikeEmail(ctx);
   const hasMoney=hasMoneyEvidence(evidenceText);
-  if(!strongReceipt)return[];
+  const hasTxnAlert=TRANSACTION_ALERT_KEYWORDS.some(k=>evidenceText.toLowerCase().includes(k));
+  if(!(strongReceipt||(hasTxnAlert&&hasMoney)))return[];
   const normalized=items.map(x=>({
     ...x,
     type:x?.type==="income"?"income":"expense",
@@ -207,7 +208,7 @@ function sanitizeEmailTransactions(items=[],ctx={}){
   });
   if(!normalized.length)return[];
   const hasReceiptContext=RECEIPT_KEYWORDS.some(k=>evidenceText.toLowerCase().includes(k));
-  if(!hasMoney&&!(ctx.hasAttachment&&hasReceiptContext))return[];
+  if(!hasMoney&&!(ctx.hasAttachment&&hasReceiptContext)&&!hasTxnAlert)return[];
   return normalized;
 }
 
@@ -309,14 +310,17 @@ function fallbackExtractEmail(subject="",from="",body="",meta={}){
   const lower=text.toLowerCase();
   const amount=parseAmountFromText(text);
   if(amount<=0)return[];
-  if(!isReceiptLikeEmail({subject,from,body,attachmentText,attachmentNames,hasAttachment}))return[];
-  if(!hasMoneyEvidence(text))return[];
+  if(amount>1e7)return[];
+  const explicitExpense=/\b(debited|charged|spent|withdrawn|purchase|paid|payment)\b/.test(lower);
+  const explicitIncome=/\b(credited|received|refund|salary|payout|settlement|deposit)\b/.test(lower);
+  if(!explicitExpense&&!explicitIncome&&!isReceiptLikeEmail({subject,from,body,attachmentText,attachmentNames,hasAttachment}))return[];
+  if(!hasMoneyEvidence(text)&&!explicitExpense&&!explicitIncome)return[];
   const expenseHints=["debited","paid","payment","purchase","invoice","receipt","order","bill","spent","charged","upi"];
   const incomeHints=["credited","received","refund","salary","payout","settlement","deposit"];
   const hasExp=expenseHints.some(k=>lower.includes(k));
   const hasInc=incomeHints.some(k=>lower.includes(k));
-  if(!hasExp&&!hasInc)return[];
-  const type=hasInc&&!hasExp?"income":"expense";
+  if(!hasExp&&!hasInc&&!explicitExpense&&!explicitIncome)return[];
+  const type=(hasInc||explicitIncome)&&!(hasExp||explicitExpense)?"income":"expense";
   const em=(from.match(/([a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,})/i)?.[1]||"").toLowerCase();
   const vendor=(from||em||"email").replace(/\s+/g," ").trim().slice(0,120);
   return[{
