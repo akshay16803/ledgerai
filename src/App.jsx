@@ -504,6 +504,7 @@ const MSAL_CDN = "https://alcdn.msauth.net/browser/2.38.2/js/msal-browser.min.js
 let _msalApp = null;
 let _msalClientId = null;
 let _msalInteractionQueue = Promise.resolve();
+let _msalRedirectHandled = false;
 
 function queueMsalInteraction(task){
   const run = () => Promise.resolve().then(task);
@@ -511,6 +512,41 @@ function queueMsalInteraction(task){
   // Keep queue alive even when one interactive auth step fails.
   _msalInteractionQueue = next.catch(() => {});
   return next;
+}
+
+function isMsalInteractionInProgressError(err){
+  const msg = String(err?.errorCode || err?.message || err || "");
+  return msg.toLowerCase().includes("interaction_in_progress");
+}
+
+function clearStaleMsalInteractionState(clientId){
+  const stores = [window.localStorage, window.sessionStorage].filter(Boolean);
+  const lowerClient = String(clientId || "").toLowerCase();
+  for (const store of stores) {
+    const keysToDelete = [];
+    for (let i = 0; i < store.length; i++) {
+      const k = store.key(i);
+      if (!k) continue;
+      const lk = k.toLowerCase();
+      if (!lk.includes("msal")) continue;
+      if (!lk.includes("interaction.status")) continue;
+      if (lowerClient && !lk.includes(lowerClient)) continue;
+      keysToDelete.push(k);
+    }
+    keysToDelete.forEach((k) => store.removeItem(k));
+  }
+}
+
+async function runMsalInteractive(msal, clientId, task){
+  try{
+    return await queueMsalInteraction(task);
+  }catch(err){
+    if(!isMsalInteractionInProgressError(err)) throw err;
+    // Recover from stale interaction lock left in storage by interrupted auth popups.
+    clearStaleMsalInteractionState(clientId);
+    await new Promise((res)=>setTimeout(res,120));
+    return queueMsalInteraction(task);
+  }
 }
 
 async function loadMsal() {
@@ -530,14 +566,19 @@ async function getMsal(clientId) {
       cache: { cacheLocation: "localStorage", storeAuthStateInCookie: false },
     });
     await _msalApp.initialize();
+    _msalRedirectHandled = false;
     _msalClientId = clientId;
+  }
+  if(!_msalRedirectHandled){
+    try{ await _msalApp.handleRedirectPromise(); }catch{}
+    _msalRedirectHandled = true;
   }
   return _msalApp;
 }
 
 async function odLogin(clientId) {
   const msal = await getMsal(clientId);
-  const result = await queueMsalInteraction(() => msal.loginPopup({ scopes: OD_SCOPES }));
+  const result = await runMsalInteractive(msal, clientId, () => msal.loginPopup({ scopes: OD_SCOPES }));
   return result.account;
 }
 
@@ -549,7 +590,7 @@ async function odGetToken(clientId) {
     const r = await msal.acquireTokenSilent({ scopes: OD_SCOPES, account: accounts[0] });
     return r.accessToken;
   } catch {
-    const r = await queueMsalInteraction(() => msal.acquireTokenPopup({ scopes: OD_SCOPES, account: accounts[0] }));
+    const r = await runMsalInteractive(msal, clientId, () => msal.acquireTokenPopup({ scopes: OD_SCOPES, account: accounts[0] }));
     return r.accessToken;
   }
 }
@@ -582,14 +623,14 @@ function pickMsAccount(msal,accountHint){
 
 async function msLoginMail(clientId){
   const msal=await getMsal(clientId);
-  const login=await queueMsalInteraction(() => msal.loginPopup({scopes:MS_MAIL_SCOPES,prompt:"select_account"}));
+  const login=await runMsalInteractive(msal, clientId, () => msal.loginPopup({scopes:MS_MAIL_SCOPES,prompt:"select_account"}));
   const account=login.account||pickMsAccount(msal,{});
   if(!account)throw new Error("Microsoft account not found after login");
   try{
     const tok=await msal.acquireTokenSilent({scopes:MS_MAIL_SCOPES,account});
     return{account,accessToken:tok.accessToken};
   }catch{
-    const tok=await queueMsalInteraction(() => msal.acquireTokenPopup({scopes:MS_MAIL_SCOPES,account}));
+    const tok=await runMsalInteractive(msal, clientId, () => msal.acquireTokenPopup({scopes:MS_MAIL_SCOPES,account}));
     return{account,accessToken:tok.accessToken};
   }
 }
@@ -602,7 +643,7 @@ async function msGetMailToken(clientId,accountHint){
     const tok=await msal.acquireTokenSilent({scopes:MS_MAIL_SCOPES,account});
     return{account,accessToken:tok.accessToken};
   }catch{
-    const tok=await queueMsalInteraction(() => msal.acquireTokenPopup({scopes:MS_MAIL_SCOPES,account,prompt:"select_account"}));
+    const tok=await runMsalInteractive(msal, clientId, () => msal.acquireTokenPopup({scopes:MS_MAIL_SCOPES,account,prompt:"select_account"}));
     return{account,accessToken:tok.accessToken};
   }
 }
