@@ -1710,11 +1710,24 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
         return;
       }
       const toProcess=scanAll?fresh:fresh.slice(0,Math.max(1,Math.min(Number(acc.maxEmails)||100,5000)));
-      log(acc.id,`Matched ${messages.length} email(s), ${fresh.length} new. Reading ${toProcess.length} now…`);
       setProgress(acc.id,{phase:"processing",processed:0,total:toProcess.length,remaining:toProcess.length,matched:messages.length,newCount:fresh.length,found:0,failed:0,skipped:0,failureReasons:{}});
       const found=[];let done=0;let failed=0;let skipped=0;let fallbackUsed=0;
       const failureReasons={};
-      for(const msg of toProcess){
+      let lastProgressTs=0;
+      const flushProgress=(force=false)=>{
+        const now=Date.now();
+        if(!force&&now-lastProgressTs<250&&done<toProcess.length)return;
+        lastProgressTs=now;
+        const statusParts=[`Processed ${done}/${toProcess.length} emails`,`found ${found.length}`];
+        if(failed>0)statusParts.push(`failed ${failed}`);
+        if(skipped>0)statusParts.push(`skipped ${skipped}`);
+        if(fallbackUsed>0)statusParts.push(`fallback ${fallbackUsed}`);
+        const failureSummary=formatFailureSummary(failureReasons);
+        if(failureSummary)statusParts.push(failureSummary);
+        log(acc.id,`${statusParts.join(" · ")}…`);
+        setProgress(acc.id,{phase:"processing",processed:done,total:toProcess.length,remaining:Math.max(0,toProcess.length-done),matched:messages.length,newCount:fresh.length,found:found.length,failed,skipped,failureReasons:{...failureReasons}});
+      };
+      const processMessage=async(msg)=>{
         try{
           let subject="";let from="";let rawDate="";let body="";
           let hasAttachment=false;let attachmentNames=[];let attachmentText="";
@@ -1766,10 +1779,10 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
           if(!items.length){
             skipped++;
             processed.add(msg.id);
-            continue;
+            return;
           }
           items.forEach(item=>found.push({...item,date:item.date||eDate,source:"email",emailProvider:provider,emailSubject:subject,emailFrom:from,emailAccountId:acc.id,emailMsgId:msg.id}));
-          if(items.length)processed.add(msg.id);
+          processed.add(msg.id);
         }catch(e){
           failed++;
           const reason=classifySyncError(e);
@@ -1777,16 +1790,21 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
           console.error(e);
         }finally{
           done++;
-          const statusParts=[`Processed ${done}/${toProcess.length} emails`,`found ${found.length}`];
-          if(failed>0)statusParts.push(`failed ${failed}`);
-          if(skipped>0)statusParts.push(`skipped ${skipped}`);
-          if(fallbackUsed>0)statusParts.push(`fallback ${fallbackUsed}`);
-          const failureSummary=formatFailureSummary(failureReasons);
-          if(failureSummary)statusParts.push(failureSummary);
-          log(acc.id,`${statusParts.join(" · ")}…`);
-          setProgress(acc.id,{phase:"processing",processed:done,total:toProcess.length,remaining:Math.max(0,toProcess.length-done),matched:messages.length,newCount:fresh.length,found:found.length,failed,skipped,failureReasons:{...failureReasons}});
+          flushProgress();
         }
-      }
+      };
+      const maxParallel=Math.max(1,Math.min(provider==="microsoft"?4:3,toProcess.length));
+      let nextIndex=0;
+      const worker=async()=>{
+        while(true){
+          const current=nextIndex++;
+          if(current>=toProcess.length)break;
+          await processMessage(toProcess[current]);
+        }
+      };
+      log(acc.id,`Matched ${messages.length} email(s), ${fresh.length} new. Reading ${toProcess.length} now with ${maxParallel} parallel workers…`);
+      await Promise.all(Array.from({length:maxParallel},()=>worker()));
+      flushProgress(true);
       LS.set(processedKey,[...processed].slice(-50000));
       const deduped=[];const seen=new Set();
       for(const i of found){
