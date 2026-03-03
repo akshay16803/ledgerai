@@ -800,9 +800,24 @@ async function gmailAttachmentEvidenceText(token,msgId,attachments=[]){
   }
   return chunks.join("\n");
 }
-function initOAuth(clientId,cb){
+function initOAuth(clientId,cb,opts={}){
   if(!window.google?.accounts?.oauth2){cb(new Error("Google Identity Services not loaded"),null);return;}
-  window.google.accounts.oauth2.initTokenClient({client_id:clientId,scope:"https://www.googleapis.com/auth/gmail.readonly",callback:(r)=>{if(r.error)cb(new Error(r.error),null);else cb(null,r.access_token);}}).requestAccessToken({prompt:"consent"});
+  const prompt=(opts?.prompt ?? "consent");
+  const loginHint=(opts?.loginHint || "").trim();
+  const req={prompt};
+  if(loginHint)req.login_hint=loginHint;
+  window.google.accounts.oauth2.initTokenClient({
+    client_id:clientId,
+    scope:"https://www.googleapis.com/auth/gmail.readonly",
+    callback:(r)=>{
+      if(r?.error)cb(new Error(r.error),null);
+      else cb(null,r);
+    },
+    error_callback:(e)=>{
+      const code=e?.type||e?.error||"oauth_error";
+      cb(new Error(code),null);
+    },
+  }).requestAccessToken(req);
 }
 
 async function msGraphFetch(url,token,extraHeaders={}){
@@ -846,9 +861,13 @@ function hydrateEmailAccount(acc={}){
     syncQuery:provider==="google"?(!query||query===LEGACY_GMAIL_QUERY?GMAIL_QUERY:query):query,
     maxEmails:Math.max(1,Math.min(Number(acc.maxEmails)||100,5000)),
     autoPost:acc.autoPost!==false,
+    autoSyncHourly:acc.autoSyncHourly!==false,
     connected:Boolean(acc.connected),
     firstSyncCompleted:Boolean(acc.firstSyncCompleted),
     syncFromDate:(acc.syncFromDate||"")+"",
+    tokenExpiresAt:(acc.tokenExpiresAt||"")+"",
+    lastAutoSyncAt:(acc.lastAutoSyncAt||"")+"",
+    lastAuthAt:(acc.lastAuthAt||"")+"",
     msClientId:(acc.msClientId||"")+"",
     msAccountId:(acc.msAccountId||"")+"",
     msUsername:(acc.msUsername||"")+"",
@@ -1016,36 +1035,6 @@ export default function App(){
   },[txns,accs]);
   const delTx=id=>setTxns(p=>p.filter(t=>t.id!==id));
   const addInbox=items=>setInbox(p=>[...items.map(i=>({...i,_iid:gid(),_ts:Date.now()})),...p]);
-  const autoPostTxns=useCallback((items=[])=>{
-    const valid=items.filter(i=>i?.amount>0&&(i.type==="expense"||i.type==="income"));
-    if(!valid.length)return 0;
-    const addByAct={};
-    valid.forEach(i=>{
-      if(i.isNewCategory&&i.businessActivity&&i.category){
-        if(!addByAct[i.businessActivity])addByAct[i.businessActivity]=new Set();
-        addByAct[i.businessActivity].add(i.category);
-      }
-    });
-    if(Object.keys(addByAct).length){
-      setCats(prev=>{
-        const next={...prev};
-        Object.entries(addByAct).forEach(([act,set])=>{
-          const existing=new Set(next[act]||[]);
-          set.forEach(c=>existing.add(c));
-          next[act]=[...existing];
-        });
-        return next;
-      });
-    }
-    const prepared=valid.map(item=>{
-      const tx={...item,id:gid(),createdAt:new Date().toISOString(),source:item.source||"email"};
-      const accName=tx.accountId?accs.find(a=>a.id===tx.accountId)?.name||"":tx.accountName||"";
-      const liabName=tx.liabilityAccountId?accs.find(a=>a.id===tx.liabilityAccountId)?.name||"":tx.liabilityAccountName||"";
-      return {...tx,accountName:accName,liabilityAccountName:liabName,journalEntries:buildJE(tx,accs)};
-    });
-    setTxns(prev=>[...prepared,...prev]);
-    return prepared.length;
-  },[accs]);
   const approveInbox=item=>{
     if(item.isNewCategory)ensureCat(item.businessActivity,item.category);
     const tx={...item,id:gid(),createdAt:new Date().toISOString(),source:item.source||"auto"};
@@ -1070,7 +1059,7 @@ export default function App(){
     if(filter.to&&t.date>filter.to)return false;
     return true;
   });
-  const TABS=[["dashboard","Dashboard"],["transactions","Ledger"],["inbox",`Inbox${inbox.length?` (${inbox.length})`:""}`],["email",`Email${emails.length?` (${emails.length})`:""}`],["messages",`Messages${smsNums.length?` (${smsNums.filter(s=>s.active).length}✓)`:""}`],["journal","Journal"],["accounts","Accounts"],["reports","Reports"],["settings","Settings"],["daily","Day Review"]];
+  const TABS=[["dashboard","Dashboard"],["transactions","Ledger"],["inbox",`Inbox${inbox.length?` (${inbox.length})`:""}`],["email",`Email${emails.length?` (${emails.length})`:""}`],["messages",`Messages${smsNums.length?` (${smsNums.filter(s=>s.active).length}✓)`:""}`],["journal","Journal"],["accounts","Accounts"],["reports","Reports"],["settings","Settings"],["daily",`Day Review${inbox.length?` (${inbox.length})`:""}`]];
 
   if(authCfg.enabled&&!authCfg.googleClientId){
     return <AuthSetupScreen authCfg={authCfg} setAuthCfg={setAuthCfg}/>;
@@ -1112,7 +1101,7 @@ export default function App(){
         {tab==="transactions"&&<LedgerTab txns={filtered} filter={filter} setFilter={setFilter} acts={acts} onEdit={tx=>{setEditTx(tx);setAddType(tx.type);setShowAdd(true);}} onDelete={delTx}/>}
         {tab==="inbox"&&<InboxTab inbox={inbox} addInbox={addInbox} acts={acts} cats={cats} onApprove={approveInbox} onEdit={editInbox} onDiscard={discardInbox}/>}
         <div style={{display:tab==="email"?"block":"none"}} aria-hidden={tab!=="email"}>
-          <EmailTab emails={emails} setEmails={setEmails} inbox={inbox} addInbox={addInbox} autoPostTxns={autoPostTxns} acts={acts} cats={cats} defaultGoogleClientId={authCfg.googleClientId||DEFAULT_GOOGLE_CLIENT_ID} defaultMicrosoftClientId={sbCfg.clientId||DEFAULT_MICROSOFT_CLIENT_ID||""}/>
+          <EmailTab emails={emails} setEmails={setEmails} inbox={inbox} addInbox={addInbox} acts={acts} cats={cats} defaultGoogleClientId={authCfg.googleClientId||DEFAULT_GOOGLE_CLIENT_ID} defaultMicrosoftClientId={sbCfg.clientId||DEFAULT_MICROSOFT_CLIENT_ID||""}/>
         </div>
         {tab==="messages"&&<MessagesTab smsNums={smsNums} setSmsNums={setSmsNums} emails={emails} inbox={inbox} addInbox={addInbox} acts={acts} cats={cats}/>}
         {tab==="journal"&&<JournalTab txns={txns}/>}
@@ -1120,7 +1109,7 @@ export default function App(){
         {tab==="reports"&&<ReportsTab txns={txns} acts={acts} totInc={totInc} totExp={totExp}/>}
         {tab==="settings"&&<SettingsTab acts={acts} setActs={setActs} cats={cats} setCats={setCats}/>}
         {tab==="cloud"&&<CloudTab sbCfg={sbCfg} setSbCfg={setSbCfg} syncStatus={syncStatus} lastSync={lastSync} onSync={pushToCloud} onLoad={loadFromCloud} txns={txns} setTxns={setTxns} inbox={inbox} setInbox={setInbox} accs={accs} setAccs={setAccs} acts={acts} setActs={setActs} cats={cats} setCats={setCats} smsNums={smsNums} setSmsNums={setSmsNums} emails={emails} setEmails={setEmails}/>}
-        {tab==="daily"&&<DailyTab todayTxns={todayTxns} todInc={todInc} todExp={todExp} summary={summary} sumLoad={sumLoad} getSummary={async()=>{setSumLoad(true);setSummary(await aiSummarize(todayTxns));setSumLoad(false);}} onEdit={tx=>{setEditTx(tx);setAddType(tx.type);setShowAdd(true);}} onDelete={delTx} inbox={inbox}/>}
+        {tab==="daily"&&<DailyTab todayTxns={todayTxns} todInc={todInc} todExp={todExp} summary={summary} sumLoad={sumLoad} getSummary={async()=>{setSumLoad(true);setSummary(await aiSummarize(todayTxns));setSumLoad(false);}} onEdit={tx=>{setEditTx(tx);setAddType(tx.type);setShowAdd(true);}} onDelete={delTx} inbox={inbox} onApprove={approveInbox} onDiscard={discardInbox} onEditPending={editInbox}/>}
       </div>
       {showAdd&&<AddModal type={addType} existing={editTx} acts={acts} cats={cats} accs={accs} onSave={saveTx} onClose={()=>{setShowAdd(false);setEditTx(null);}}/>}
     </div>
@@ -1592,13 +1581,12 @@ function SmsOverviewModal({onClose}){
 }
 
 // ── EMAIL TAB ─────────────────────────────────────────────────────────────────
-function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaultGoogleClientId,defaultMicrosoftClientId}){
+function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClientId,defaultMicrosoftClientId}){
   const[syncingIds,setSyncingIds]=useState({});
   const[syncProgress,setSyncProgress]=useState({});
   const[logs,setLogs]=useState({});
   const[toast,setToast]=useState("");
   const[firstSyncPrompt,setFirstSyncPrompt]=useState(null); // {accId,fromDate,scanAll}
-  const[reviewState,setReviewState]=useState(null); // {accId,items}
   const log=(id,msg)=>setLogs(p=>({...p,[id]:msg}));
   const googleClientId=(defaultGoogleClientId||DEFAULT_GOOGLE_CLIENT_ID||"").trim();
   const microsoftClientId=(defaultMicrosoftClientId||DEFAULT_MICROSOFT_CLIENT_ID||"").trim();
@@ -1607,13 +1595,13 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
     if(!acc?.connected)return false;
     const provider=providerOf(acc);
     if(provider==="microsoft")return Boolean((acc.msClientId||microsoftClientId||"").trim());
-    return Boolean(acc.token);
+    return Boolean((acc.clientId||googleClientId||"").trim());
   };
   const emailInbox=inbox.filter(i=>i.source==="email").length;
   const connected=emails.filter(a=>{
     const provider=providerOf(a);
     if(provider==="microsoft")return Boolean(a.connected);
-    return Boolean(a.connected&&a.token);
+    return Boolean(a.connected);
   }).length;
   const syncableAccounts=emails.filter(isSyncReady);
   const anySyncing=Object.values(syncingIds).some(Boolean);
@@ -1631,42 +1619,68 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
     try{return new Date(d).toISOString().slice(0,10).replace(/-/g,"/");}catch{return"";}
   };
 
-  const connectGoogleAccount=(existing=null)=>{
+  const requestGoogleToken=(clientId,opts={})=>new Promise((resolve,reject)=>{
+    initOAuth(clientId,(err,res)=>err?reject(err):resolve(res),opts);
+  });
+
+  const ensureGoogleToken=async(acc,{interactive=false}={})=>{
+    const resolvedClientId=(acc?.clientId||googleClientId||"").trim();
+    if(!resolvedClientId)throw new Error("Google OAuth is not configured for this app yet.");
+    const loginHint=(acc?.email||"").trim();
+    try{
+      const silentResp=await requestGoogleToken(resolvedClientId,{prompt:"",loginHint});
+      const token=silentResp?.access_token||"";
+      if(token){
+        setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,token,connected:true,clientId:resolvedClientId,lastAuthAt:new Date().toISOString()}:a));
+        return token;
+      }
+    }catch(_err){
+      // Silent refresh can fail when Google needs user interaction. We'll fall back below.
+    }
+    if(acc?.token)return acc.token;
+    if(!interactive)throw new Error("google_reauth_required");
+    const consentResp=await requestGoogleToken(resolvedClientId,{prompt:"consent",loginHint});
+    const token=consentResp?.access_token||"";
+    if(!token)throw new Error("google_token_missing");
+    setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,token,connected:true,clientId:resolvedClientId,lastAuthAt:new Date().toISOString()}:a));
+    return token;
+  };
+
+  const connectGoogleAccount=async(existing=null)=>{
     if(!googleClientId){alert("Google OAuth is not configured for this app yet.");return;}
     if(!window.google?.accounts?.oauth2){alert("Google Identity Services loading… please wait a moment and try again.");return;}
-    initOAuth(googleClientId,async(err,token)=>{
-      if(err){
-        const msg=String(err.message||"");
-        if(msg.includes("access_denied")){
-          alert("Access denied by Google OAuth. Add your email as a Test User in Google Auth Platform, or publish the OAuth app to production.");
-        }else if(msg.includes("redirect_uri_mismatch")){
-          alert(`OAuth error: redirect_uri_mismatch\n\nAdd this in Google OAuth:\nOrigin: ${window.location.origin}\nRedirect URIs: ${window.location.origin} and ${window.location.origin}/`);
-        }else alert(`OAuth error: ${msg}`);
-        return;
-      }
-      try{
-        const profile=await gmailGetProfile(token);
-        const mail=(profile.emailAddress||"").trim();
-        if(!mail)throw new Error("Google did not return email address.");
-        setEmails(prev=>{
-          const next=[...prev];
-          const ix=existing
-            ?next.findIndex(a=>a.id===existing.id)
-            :next.findIndex(a=>providerOf(a)==="google"&&(a.email||"").toLowerCase()===mail.toLowerCase());
-          const base=hydrateEmailAccount({id:gid(),provider:"google",label:mail.split("@")[0],email:mail,syncQuery:GMAIL_QUERY,maxEmails:100,autoPost:false,enabled:true,firstSyncCompleted:false,syncFromDate:""});
-          if(ix>=0){
-            const cur=hydrateEmailAccount(next[ix]);
-            next[ix]={...cur,provider:"google",email:mail,token,connected:true,enabled:true,clientId:googleClientId};
-          }else{
-            next.unshift({...base,token,connected:true,clientId:googleClientId});
-          }
-          return next;
-        });
-        setToast(`✅ Gmail connected: ${mail}`);
-      }catch(e){
-        alert("Profile fetch error: "+e.message);
-      }
-    });
+    try{
+      const authResp=await requestGoogleToken(googleClientId,{prompt:"consent"});
+      const token=authResp?.access_token||"";
+      if(!token)throw new Error("google_token_missing");
+      const profile=await gmailGetProfile(token);
+      const mail=(profile.emailAddress||"").trim();
+      if(!mail)throw new Error("Google did not return email address.");
+      setEmails(prev=>{
+        const next=[...prev];
+        const ix=existing
+          ?next.findIndex(a=>a.id===existing.id)
+          :next.findIndex(a=>providerOf(a)==="google"&&(a.email||"").toLowerCase()===mail.toLowerCase());
+        const base=hydrateEmailAccount({id:gid(),provider:"google",label:mail.split("@")[0],email:mail,syncQuery:GMAIL_QUERY,maxEmails:100,autoPost:false,enabled:true,firstSyncCompleted:false,syncFromDate:"",autoSyncHourly:true});
+        if(ix>=0){
+          const cur=hydrateEmailAccount(next[ix]);
+          next[ix]={...cur,provider:"google",email:mail,token,connected:true,enabled:true,clientId:googleClientId,autoSyncHourly:cur.autoSyncHourly!==false,lastAuthAt:new Date().toISOString()};
+        }else{
+          next.unshift({...base,token,connected:true,clientId:googleClientId,lastAuthAt:new Date().toISOString()});
+        }
+        return next;
+      });
+      setToast(`✅ Gmail connected: ${mail}`);
+    }catch(err){
+      const msg=String(err?.message||"");
+      if(msg.includes("access_denied")){
+        alert("Access denied by Google OAuth. Add your email as a Test User in Google Auth Platform, or publish the OAuth app to production.");
+      }else if(msg.includes("redirect_uri_mismatch")){
+        alert(`OAuth error: redirect_uri_mismatch\n\nAdd this in Google OAuth:\nOrigin: ${window.location.origin}\nRedirect URIs: ${window.location.origin} and ${window.location.origin}/`);
+      }else if(msg.includes("popup_window_error")||msg.includes("popup_closed")){
+        alert("Google sign-in was cancelled.");
+      }else alert(`OAuth error: ${msg}`);
+    }
   };
 
   const connectMicrosoftAccount=async(existing=null)=>{
@@ -1686,12 +1700,12 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
         const ix=existing
           ?next.findIndex(a=>a.id===existing.id)
           :next.findIndex(a=>providerOf(a)==="microsoft"&&(a.email||"").toLowerCase()===mail.toLowerCase());
-        const base=hydrateEmailAccount({id:gid(),provider:"microsoft",label:mail.split("@")[0],email:mail,syncQuery:"",maxEmails:100,autoPost:false,enabled:true,firstSyncCompleted:false,syncFromDate:"",msClientId:msClient,msAccountId:account.homeAccountId||"",msUsername:account.username||mail});
+        const base=hydrateEmailAccount({id:gid(),provider:"microsoft",label:mail.split("@")[0],email:mail,syncQuery:"",maxEmails:100,autoPost:false,autoSyncHourly:true,enabled:true,firstSyncCompleted:false,syncFromDate:"",msClientId:msClient,msAccountId:account.homeAccountId||"",msUsername:account.username||mail});
         if(ix>=0){
           const cur=hydrateEmailAccount(next[ix]);
-          next[ix]={...cur,provider:"microsoft",email:mail,token:login.accessToken,connected:true,enabled:true,msClientId:msClient,msAccountId:account.homeAccountId||cur.msAccountId||"",msUsername:account.username||cur.msUsername||mail};
+          next[ix]={...cur,provider:"microsoft",email:mail,token:login.accessToken,connected:true,enabled:true,autoSyncHourly:cur.autoSyncHourly!==false,msClientId:msClient,msAccountId:account.homeAccountId||cur.msAccountId||"",msUsername:account.username||cur.msUsername||mail,lastAuthAt:new Date().toISOString()};
         }else{
-          next.unshift({...base,token:login.accessToken,connected:true});
+          next.unshift({...base,token:login.accessToken,connected:true,lastAuthAt:new Date().toISOString()});
         }
         return next;
       });
@@ -1721,9 +1735,13 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
 
   const runSync=async(acc,opts={})=>{
     const provider=providerOf(acc);
-    if(provider==="google"&&!acc?.token){alert("Connect this Gmail account first.");return;}
+    const interactive=opts.interactive!==false;
+    const silent=opts.silent===true;
     const msClient=(acc?.msClientId||microsoftClientId||"").trim();
-    if(provider==="microsoft"&&!msClient){alert("Outlook connector is not configured for this deployment. Admin needs to set VITE_MICROSOFT_CLIENT_ID once.");return;}
+    if(provider==="microsoft"&&!msClient){
+      if(!silent)alert("Outlook connector is not configured for this deployment. Admin needs to set VITE_MICROSOFT_CLIENT_ID once.");
+      return;
+    }
     const scanAll=opts.scanAll===true;
     const fromDate=(opts.fromDate||acc.syncFromDate||"").trim();
     const markFirst=opts.markFirstSync===true;
@@ -1741,6 +1759,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
         log(acc.id,scanAll?`Scanning Outlook mailbox from ${fromDate||"beginning"}…`:"Fetching Outlook email list…");
         messages=await msListMessages(token,requestedMax,fromDate);
       }else{
+        token=await ensureGoogleToken(acc,{interactive});
         const baseQuery=(acc.syncQuery||GMAIL_QUERY||"in:anywhere").trim();
         const qParts=[baseQuery];
         if(fromDate&&gmailDate(fromDate))qParts.push(`after:${gmailDate(fromDate)}`);
@@ -1868,7 +1887,16 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
         deduped.push(i);
       }
       const valid=deduped.filter(i=>i.amount>0&&(i.type==="income"||i.type==="expense"));
-      setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,lastSync:new Date().toISOString(),lastCount:valid.length,firstSyncCompleted:a.firstSyncCompleted||markFirst,syncFromDate:fromDate||a.syncFromDate||"",msClientId:provider==="microsoft"?(a.msClientId||msClient):a.msClientId}:a));
+      const syncStamp=new Date().toISOString();
+      setEmails(prev=>prev.map(a=>a.id===acc.id?{
+        ...a,
+        lastSync:syncStamp,
+        lastCount:valid.length,
+        firstSyncCompleted:a.firstSyncCompleted||markFirst,
+        syncFromDate:fromDate||a.syncFromDate||"",
+        lastAutoSyncAt:opts.auto===true?syncStamp:(a.lastAutoSyncAt||""),
+        msClientId:provider==="microsoft"?(a.msClientId||msClient):a.msClientId,
+      }:a));
       if(!valid.length){
         if(failed===toProcess.length){
           log(acc.id,"⚠ Sync finished, but all emails failed extraction. Check network/auth and retry.");
@@ -1881,15 +1909,23 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
         setSyncing(acc.id,false);
         return;
       }
-      log(acc.id,`AI found ${valid.length} income/expense item(s). Review before posting.`);
-      setProgress(acc.id,{phase:"review",processed:toProcess.length,total:toProcess.length,remaining:0,matched:messages.length,newCount:fresh.length,found:valid.length,failed,skipped,failureReasons:{...failureReasons}});
-      setReviewState({accId:acc.id,items:valid});
+      const queued=valid.map(i=>({...i,source:"email",reviewStatus:"pending"}));
+      addInbox(queued);
+      log(acc.id,`AI found ${valid.length} income/expense item(s). Added to Review queue.`);
+      setProgress(acc.id,{phase:"done",processed:toProcess.length,total:toProcess.length,remaining:0,matched:messages.length,newCount:fresh.length,found:valid.length,failed,skipped,failureReasons:{...failureReasons}});
+      setToast(`📥 ${valid.length} item(s) queued for review.`);
     }catch(e){
       const msg=String(e.message||"");
-      if(msg.includes("401")||msg.includes("Not signed in to Microsoft")){
+      if(provider==="google"&&(msg.includes("google_reauth_required")||msg.includes("401"))){
+        log(acc.id,"⚠ Google session needs refresh. Click Connect Gmail once to re-authorize if sync keeps failing.");
+        setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,token:null,connected:true}:a));
+        if(interactive&&!silent)alert("Google session needs refresh. Click Connect Gmail once, then sync will continue automatically.");
+      }else if(msg.includes("401")||msg.includes("Not signed in to Microsoft")){
         log(acc.id,provider==="microsoft"?"⚠ Microsoft session expired — reconnect required.":"⚠ Token expired — reconnect required.");
         setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,token:null,connected:false}:a));
-      }else log(acc.id,"Error: "+msg);
+      }else{
+        log(acc.id,"Error: "+msg);
+      }
       setProgress(acc.id,{phase:"error"});
     }
     setSyncing(acc.id,false);
@@ -1905,33 +1941,32 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
     runSync(acc,{scanAll});
   };
 
-  const submitReview=(rows,mode="dashboard")=>{
-    const reviewAccId=reviewState?.accId;
-    const normalized=rows.map(r=>{
-      const activity=r.businessActivity||acts[0]||"Personal";
-      const category=r.category||cats[activity]?.[0]||"Other";
-      const known=(cats[activity]||[]).includes(category);
-      return{
-        ...r,
-        type:r.type==="income"?"income":"expense",
-        amount:Number(r.amount)||0,
-        date:r.date||today(),
-        businessActivity:activity,
-        category,
-        isNewCategory:!known,
-      };
-    }).filter(r=>r.amount>0);
-    if(!normalized.length){setReviewState(null);return;}
-    if(mode==="inbox"){
-      addInbox(normalized.map(i=>({...i,source:"email"})));
-      setToast(`Queued ${normalized.length} item(s) to Inbox for review.`);
-    }else{
-      const posted=autoPostTxns?autoPostTxns(normalized.map(i=>({...i,source:"email"}))):0;
-      setToast(`Added ${posted||normalized.length} transaction(s) to Dashboard.`);
-    }
-    if(reviewAccId)setProgress(reviewAccId,{phase:"done",remaining:0});
-    setReviewState(null);
-  };
+  useEffect(()=>{
+    if(!emails.length)return;
+    const runAutoSync=()=>{
+      if(Object.values(syncingIds).some(Boolean))return;
+      const now=Date.now();
+      const due=emails
+        .map(hydrateEmailAccount)
+        .filter(acc=>isSyncReady(acc))
+        .filter(acc=>acc.firstSyncCompleted)
+        .filter(acc=>acc.autoSyncHourly!==false)
+        .filter(acc=>{
+          const last=Date.parse(acc.lastAutoSyncAt||acc.lastSync||"");
+          if(!Number.isFinite(last))return true;
+          return (now-last)>=60*60*1000;
+        });
+      if(!due.length)return;
+      due.forEach(acc=>{
+        log(acc.id,"⏱ Hourly auto-sync started (new emails only)...");
+        setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,lastAutoSyncAt:new Date().toISOString()}:a));
+        runSync(acc,{scanAll:false,auto:true,interactive:false,silent:true});
+      });
+    };
+    const t=setInterval(runAutoSync,60*1000);
+    const kick=setTimeout(runAutoSync,3000);
+    return()=>{clearInterval(t);clearTimeout(kick);};
+  },[emails,syncingIds]);
 
   return(
     <div>
@@ -1971,7 +2006,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
         const acc=hydrateEmailAccount(rawAcc);
         const provider=providerOf(acc);
         const providerLabel=provider==="microsoft"?"Outlook":"Gmail";
-        const linked=provider==="microsoft"?Boolean(acc.connected):Boolean(acc.connected&&acc.token);
+        const linked=Boolean(acc.connected);
         return(
         <div key={acc.id} className="card" style={{marginBottom:12,background:linked?"linear-gradient(135deg,#0f1c36,#0b1530)":"#0f1624"}}>
           <R style={{marginBottom:8}}>
@@ -2003,7 +2038,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
                   {syncProgress[acc.id].phase==="fetching"&&"Fetching emails…"}
                   {syncProgress[acc.id].phase==="processing"&&`Processed ${syncProgress[acc.id].processed||0}/${syncProgress[acc.id].total||0}${syncProgress[acc.id].failed?` · failed ${syncProgress[acc.id].failed}`:""}${syncProgress[acc.id].skipped?` · skipped ${syncProgress[acc.id].skipped}`:""}`}
                   {syncProgress[acc.id].phase==="review"&&`Scan complete. ${syncProgress[acc.id].found||0} item(s) awaiting review.`}
-                  {syncProgress[acc.id].phase==="done"&&"Sync completed."}
+                  {syncProgress[acc.id].phase==="done"&&`Sync completed.${Number(syncProgress[acc.id].found)>0?` ${syncProgress[acc.id].found} item(s) in review queue.`:""}`}
                   {syncProgress[acc.id].phase==="error"&&"Sync failed."}
                 </span>
                 <span style={{color:"#94a3b8"}}>
@@ -2031,10 +2066,16 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
                 <div><label>Account Label</label><input value={acc.label||""} onChange={e=>setEmails(p=>p.map(a=>a.id===acc.id?{...a,label:e.target.value}:a))} placeholder="Business email account"/></div>
                 <div><label>Max emails per sync</label><input type="number" min="1" max="5000" value={acc.maxEmails||100} onChange={e=>setEmails(p=>p.map(a=>a.id===acc.id?{...a,maxEmails:Number(e.target.value)}:a))}/></div>
                 {provider==="google"&&<div><label>Search Query</label><input value={acc.syncQuery||GMAIL_QUERY} onChange={e=>setEmails(p=>p.map(a=>a.id===acc.id?{...a,syncQuery:e.target.value}:a))}/></div>}
-                <div><label>Post destination</label><select value={acc.autoPost===false?"inbox":"dashboard"} onChange={e=>setEmails(p=>p.map(a=>a.id===acc.id?{...a,autoPost:e.target.value==="dashboard"}:a))}><option value="dashboard">Dashboard (after review modal)</option><option value="inbox">Inbox (after review modal)</option></select></div>
+                <div>
+                  <label style={{display:"block",marginBottom:8}}>Auto sync</label>
+                  <label style={{display:"flex",gap:8,alignItems:"center",fontSize:13,color:"#94a3b8"}}>
+                    <input type="checkbox" checked={acc.autoSyncHourly!==false} onChange={e=>setEmails(p=>p.map(a=>a.id===acc.id?{...a,autoSyncHourly:e.target.checked}:a))}/>
+                    Run every hour (new emails only)
+                  </label>
+                </div>
               </div>
               {provider==="microsoft"&&<div style={{fontSize:11,color:"#64748b",marginTop:8}}>Outlook sync scans inbox messages from selected date. Search query is only for Gmail.</div>}
-              <div style={{fontSize:11,color:"#64748b",marginTop:8}}>First sync asks for a start date. AI scans emails from that date and pre-fills income/expense fields for your review.</div>
+              <div style={{fontSize:11,color:"#64748b",marginTop:8}}>All extracted transactions go to Inbox review queue. Approve/Reject/Edit from Inbox or Day Review.</div>
             </div>
           )}
         </div>
@@ -2045,7 +2086,6 @@ function EmailTab({emails,setEmails,inbox,addInbox,autoPostTxns,acts,cats,defaul
         if(acc)runSync(acc,{scanAll:firstSyncPrompt.scanAll,fromDate,markFirstSync:!acc.firstSyncCompleted});
         setFirstSyncPrompt(null);
       }}/>}
-      {reviewState&&<EmailReviewModal acts={acts} cats={cats} initialItems={reviewState.items} onClose={()=>setReviewState(null)} onSubmit={submitReview}/>}
     </div>
   );
 }
@@ -2179,6 +2219,12 @@ function InboxTab({inbox,addInbox,acts,cats,onApprove,onEdit,onDiscard}){
   const todItems=inbox.filter(i=>i.date===today());
   const oldItems=inbox.filter(i=>i.date!==today());
   const emailItems=inbox.filter(i=>i.source==="email");
+  const approveAll=(items=[])=>items.forEach(onApprove);
+  const rejectAll=(items=[])=>{
+    if(!items.length)return;
+    if(!window.confirm(`Reject ${items.length} queued item(s)?`))return;
+    items.forEach(i=>onDiscard(i._iid));
+  };
   return(<div>
     <h2 className="h2" style={{marginBottom:4}}>Inbox — Review & Approve</h2>
     <p style={{fontSize:13,color:"#64748b",marginBottom:18}}>Transactions from email auto-import, SMS paste, or statement reconciliation appear here before entering the ledger.</p>
@@ -2188,8 +2234,17 @@ function InboxTab({inbox,addInbox,acts,cats,onApprove,onEdit,onDiscard}){
       <textarea rows={4} value={bulk} onChange={e=>setBulk(e.target.value)} placeholder="Paste bank SMS, UPI alerts, Kite messages…"/>
       <button className="btn pri" style={{marginTop:10,width:"100%"}} onClick={runBatch} disabled={loading||!bulk.trim()}>{loading?"🤖 Extracting…":"🤖 Extract & Queue for Review"}</button>
     </div>
+    {inbox.length>0&&(
+      <R style={{marginBottom:10}}>
+        <div className="sh" style={{margin:0}}>Pending Queue ({inbox.length})</div>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          <button className="btn sm suc" onClick={()=>approveAll(inbox)}>✓ Accept All</button>
+          <button className="btn sm dan" onClick={()=>rejectAll(inbox)}>✕ Reject All</button>
+        </div>
+      </R>
+    )}
     {inbox.length===0&&<div className="card" style={{textAlign:"center",color:"#475569",padding:40}}>No pending items. Sync email accounts or paste messages above.</div>}
-    {todItems.length>0&&<><R style={{marginBottom:10}}><div className="sh">Today ({todItems.length})</div><button className="btn sm suc" onClick={()=>todItems.forEach(onApprove)}>✓ Approve All Today</button></R>{todItems.map(item=><ICard key={item._iid} item={item} onApprove={onApprove} onEdit={onEdit} onDiscard={onDiscard}/>)}</>}
+    {todItems.length>0&&<><R style={{marginBottom:10}}><div className="sh">Today ({todItems.length})</div><div style={{display:"flex",gap:8}}><button className="btn sm suc" onClick={()=>approveAll(todItems)}>✓ Accept All Today</button><button className="btn sm dan" onClick={()=>rejectAll(todItems)}>✕ Reject All Today</button></div></R>{todItems.map(item=><ICard key={item._iid} item={item} onApprove={onApprove} onEdit={onEdit} onDiscard={onDiscard}/>)}</>}
     {oldItems.length>0&&<><div className="sh" style={{marginTop:20,marginBottom:10}}>Older ({oldItems.length})</div>{oldItems.map(item=><ICard key={item._iid} item={item} onApprove={onApprove} onEdit={onEdit} onDiscard={onDiscard}/>)}</>}
   </div>);
 }
@@ -2773,14 +2828,36 @@ function SettingsTab({acts,setActs,cats,setCats}){
 }
 
 // ── DAILY REVIEW ──────────────────────────────────────────────────────────────
-function DailyTab({todayTxns,todInc,todExp,summary,sumLoad,getSummary,onEdit,onDelete,inbox}){
+function DailyTab({todayTxns,todInc,todExp,summary,sumLoad,getSummary,onEdit,onDelete,inbox,onApprove,onDiscard,onEditPending}){
   const todInbox=inbox.filter(i=>i.date===today());
+  const pendingEmail=inbox.filter(i=>i.source==="email");
+  const approveAll=()=>pendingEmail.forEach(onApprove);
+  const rejectAll=()=>{
+    if(!pendingEmail.length)return;
+    if(!window.confirm(`Reject ${pendingEmail.length} pending email transaction(s)?`))return;
+    pendingEmail.forEach(i=>onDiscard(i._iid));
+  };
   return(<div>
     <R style={{marginBottom:18,gap:10}}>
       <h2 className="h2" style={{flex:1}}>Day Review — {fmtD(today())}</h2>
       <button className="btn sm pri" onClick={getSummary} disabled={sumLoad}>{sumLoad?"🤖 Generating…":"🤖 AI Summary"}</button>
     </R>
-    {todInbox.length>0&&<div style={{background:"#0d0d2b",border:"1px solid #818cf8",borderRadius:10,padding:"12px 16px",marginBottom:18,fontSize:13,color:"#c7d2fe"}}>⏳ <b>{todInbox.length}</b> item(s) still in Inbox — approve or discard to complete today's review.</div>}
+    {todInbox.length>0&&<div style={{background:"#0d0d2b",border:"1px solid #818cf8",borderRadius:10,padding:"12px 16px",marginBottom:18,fontSize:13,color:"#c7d2fe"}}>⏳ <b>{todInbox.length}</b> item(s) still in Inbox — approve or reject to complete today's review.</div>}
+    {pendingEmail.length>0&&(
+      <div className="card" style={{marginBottom:18}}>
+        <R style={{marginBottom:10}}>
+          <div className="sh" style={{margin:0}}>Email Review Queue ({pendingEmail.length})</div>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            <button className="btn sm suc" onClick={approveAll}>✓ Accept All</button>
+            <button className="btn sm dan" onClick={rejectAll}>✕ Reject All</button>
+          </div>
+        </R>
+        <div style={{fontSize:12,color:"#64748b",marginBottom:10}}>Only unreviewed items appear here. Accepted items move to Ledger. Rejected items are removed.</div>
+        <div style={{maxHeight:360,overflowY:"auto",paddingRight:2}}>
+          {pendingEmail.map(item=><ICard key={item._iid} item={item} onApprove={onApprove} onEdit={onEditPending} onDiscard={onDiscard}/>)}
+        </div>
+      </div>
+    )}
     {summary&&<div style={{background:"#0a0c1e",border:"1px solid #6366f1",borderRadius:12,padding:18,marginBottom:18}}><div style={{fontSize:10,color:"#818cf8",fontWeight:700,letterSpacing:".5px",marginBottom:8}}>✦ AI INSIGHT</div><div style={{fontSize:13,color:"#c7d2fe",lineHeight:1.8,whiteSpace:"pre-wrap"}}>{summary}</div></div>}
     <div className="g4" style={{marginBottom:18}}>
       {[{l:"Today Income",v:todInc,c:"#34d399"},{l:"Today Expense",v:todExp,c:"#f87171"},{l:"Net Today",v:todInc-todExp,c:todInc-todExp>=0?"#34d399":"#f87171"},{l:"Entries",v:todayTxns.length,c:"#818cf8",nf:true}].map(s=>(
