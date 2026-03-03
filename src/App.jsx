@@ -78,6 +78,27 @@ const DEFAULT_AI_MODEL = "claude-sonnet-4-20250514";
 const EMAIL_SYNC_CACHE_VERSION = "v5";
 const BACKUP_KEY = "ledger_backups";
 const MAX_BACKUPS = 50;
+const AI_PENDING_EMAIL_KEY = "ledger_ai_pending_email";
+const AI_RETRY_INTERVAL_MS = 30 * 60 * 1000;
+const AI_RETRY_BATCH_SIZE = 20;
+
+function aiPendingId(accountId="",msgId=""){
+  return `${String(accountId||"").trim()}::${String(msgId||"").trim()}`;
+}
+
+function normalizeAiPendingEntry(entry={}){
+  const id = String(entry.id || aiPendingId(entry.accountId, entry.msgId) || gid());
+  return {
+    id,
+    accountId: String(entry.accountId || ""),
+    provider: String(entry.provider || "google").toLowerCase() === "microsoft" ? "microsoft" : "google",
+    msgId: String(entry.msgId || ""),
+    queuedAt: String(entry.queuedAt || new Date().toISOString()),
+    attempts: Math.max(0, Number(entry.attempts) || 0),
+    nextRetryAt: String(entry.nextRetryAt || new Date(Date.now() + AI_RETRY_INTERVAL_MS).toISOString()),
+    lastError: String(entry.lastError || ""),
+  };
+}
 
 function defaultCloudCfg(){
   return{
@@ -1155,6 +1176,7 @@ export default function App(){
       [
         "ledger_txns","ledger_acts","ledger_cats","ledger_accs","ledger_inbox",
         "ledger_emails","ledger_sms","ledger_odcfg","ledger_lastsync",
+        AI_PENDING_EMAIL_KEY,
       ].forEach(k=>localStorage.removeItem(k));
       const purge=[];
       for(let i=0;i<localStorage.length;i++){
@@ -1944,6 +1966,10 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClient
   const[toast,setToast]=useState("");
   const[connectBusy,setConnectBusy]=useState("");
   const[firstSyncPrompt,setFirstSyncPrompt]=useState(null); // {accId,fromDate,scanAll}
+  const[aiPending,setAiPending]=useState(()=>((LS.get(AI_PENDING_EMAIL_KEY,[])||[]).map(normalizeAiPendingEntry)).filter(e=>e.accountId&&e.msgId));
+  const[retryBusy,setRetryBusy]=useState(false);
+  const retryBusyRef=useRef(false);
+  const retryLastRunRef=useRef(0);
   const log=(id,msg)=>setLogs(p=>({...p,[id]:msg}));
   const googleClientId=(defaultGoogleClientId||DEFAULT_GOOGLE_CLIENT_ID||"").trim();
   const microsoftClientId=(defaultMicrosoftClientId||DEFAULT_MICROSOFT_CLIENT_ID||"").trim();
@@ -1967,6 +1993,40 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClient
   const connectingMicrosoft=connectBusy==="microsoft";
   const setSyncing=(id,val)=>setSyncingIds(p=>({...p,[id]:val}));
   const setProgress=(id,patch)=>setSyncProgress(p=>({...p,[id]:{...(p[id]||{}),...patch}}));
+  const totalPendingAi=aiPending.length;
+  const duePendingAi=aiPending.filter(row=>{
+    const nextAt=Date.parse(row.nextRetryAt||"");
+    return !Number.isFinite(nextAt)||nextAt<=Date.now();
+  }).length;
+  const pendingByAccount=aiPending.reduce((map,row)=>{
+    map[row.accountId]=(map[row.accountId]||0)+1;
+    return map;
+  },{});
+
+  useEffect(()=>{
+    LS.set(AI_PENDING_EMAIL_KEY,aiPending.map(normalizeAiPendingEntry));
+  },[aiPending]);
+
+  const markProcessedMessage=(accountId,msgId)=>{
+    const key=`proc_${EMAIL_SYNC_CACHE_VERSION}_${accountId}`;
+    const processed=new Set(LS.get(key,[]));
+    processed.add(msgId);
+    LS.set(key,[...processed].slice(-50000));
+  };
+
+  const enqueueAiPending=(entry={})=>{
+    const normalized=normalizeAiPendingEntry(entry);
+    if(!normalized.accountId||!normalized.msgId)return;
+    setAiPending(prev=>{
+      const idx=prev.findIndex(p=>p.id===normalized.id);
+      if(idx>=0){
+        const next=[...prev];
+        next[idx]={...prev[idx],...normalized};
+        return next;
+      }
+      return [normalized,...prev];
+    });
+  };
 
   useEffect(()=>{
     if(!toast)return;
@@ -2098,15 +2158,94 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClient
   const removeAccount=(acc)=>{
     if(!window.confirm(`Remove ${acc.email||acc.label||"this account"} from Email Integration?`))return;
     setEmails(prev=>prev.filter(a=>a.id!==acc.id));
+    setAiPending(prev=>prev.filter(p=>p.accountId!==acc.id));
+  };
+
+  const fetchMessageEvidence=async(provider,token,msgId)=>{
+    let subject="";let from="";let rawDate="";let body="";
+    let hasAttachment=false;let attachmentNames=[];let attachmentText="";
+    if(provider==="microsoft"){
+      const full=await withTimeout(msGetMessage(token,msgId),20000,"Outlook message fetch");
+      subject=full.subject||"";
+      const addr=full.from?.emailAddress?.address||"";
+      const name=full.from?.emailAddress?.name||"";
+      from=name&&addr?`${name} <${addr}>`:(addr||name||"");
+      rawDate=full.receivedDateTime||"";
+      body=msExtractBody(full);
+      hasAttachment=Boolean(full.hasAttachments);
+      if(hasAttachment){
+        const attachmentMeta=await withTimeout(msListAttachments(token,msgId),18000,"Outlook attachment list");
+        attachmentNames=attachmentMeta.map(a=>a?.name).filter(Boolean);
+        hasAttachment=attachmentNames.length>0;
+        if(hasAttachment){
+          attachmentText=await msAttachmentEvidenceText(token,msgId,attachmentMeta);
+        }
+      }
+    }else{
+      const full=await withTimeout(gmailGetMessage(token,msgId),20000,"Gmail message fetch");
+      const H=full.payload?.headers||[];
+      subject=H.find(h=>h.name==="Subject")?.value||"";
+      from=H.find(h=>h.name==="From")?.value||"";
+      rawDate=H.find(h=>h.name==="Date")?.value||"";
+      const bodyParts=extractEmailTextAll(full.payload,0,[]);
+      if(full.snippet)bodyParts.push(full.snippet);
+      body=collapseTextParts(bodyParts);
+      const attachmentMeta=collectGmailAttachmentMeta(full.payload,[]);
+      attachmentNames=attachmentMeta.map(a=>a.name).filter(Boolean);
+      hasAttachment=attachmentNames.length>0;
+      if(hasAttachment){
+        attachmentText=await gmailAttachmentEvidenceText(token,msgId,attachmentMeta);
+      }
+    }
+    const parsedDate=rawDate?new Date(rawDate):null;
+    const eDate=parsedDate&&!Number.isNaN(parsedDate.getTime())?parsedDate.toISOString().slice(0,10):today();
+    return{
+      subject,
+      from,
+      rawDate,
+      body,
+      hasAttachment,
+      attachmentNames,
+      attachmentText,
+      eDate,
+    };
+  };
+
+  const analyzeMessageEvidence=async(evidence)=>{
+    const aiResult=await withTimeout(
+      aiAnalyzeEmail(
+        evidence.subject||"",
+        evidence.from||"",
+        evidence.body||"",
+        acts,
+        cats,
+        {
+          attachmentNames:evidence.attachmentNames||[],
+          attachmentText:evidence.attachmentText||"",
+          hasAttachment:Boolean(evidence.hasAttachment),
+        },
+      ),
+      35000,
+      "AI mail analysis",
+    );
+    let items=Array.isArray(aiResult.transactions)?aiResult.transactions:[];
+    items=sanitizeEmailTransactions(items,{
+      subject:evidence.subject||"",
+      from:evidence.from||"",
+      body:evidence.body||"",
+      attachmentNames:evidence.attachmentNames||[],
+      attachmentText:evidence.attachmentText||"",
+      hasAttachment:Boolean(evidence.hasAttachment),
+      aiCashFlow:Boolean(aiResult?.isCashFlow),
+    });
+    if(!(Boolean(aiResult?.isCashFlow)&&Array.isArray(items)&&items.length>0))return[];
+    return items;
   };
 
   const runSync=async(acc,opts={})=>{
     const provider=providerOf(acc);
     const interactive=opts.interactive!==false;
     const silent=opts.silent===true;
-    const aiCfg=LS.get("ledger_ai_cfg",{endpoint:"",secret:"",model:DEFAULT_AI_MODEL});
-    const aiEndpointConfigured=Boolean((aiCfg?.endpoint||"").trim());
-    const aiStrictMode=aiEndpointConfigured;
     const msClient=sanitizeMsClientId((acc?.msClientId||microsoftClientId||"").trim());
     if(provider==="microsoft"&&!msClient){
       if(!silent)alert("Outlook connector is not configured with your Azure app Client ID yet. Open Cloud tab and set your own Azure Application (client) ID once.");
@@ -2116,7 +2255,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClient
     const fromDate=(opts.fromDate||acc.syncFromDate||"").trim();
     const markFirst=opts.markFirstSync===true;
     setSyncing(acc.id,true);
-    setProgress(acc.id,{phase:"fetching",processed:0,total:0,remaining:0,matched:0,newCount:0,found:0});
+    setProgress(acc.id,{phase:"fetching",processed:0,total:0,remaining:0,matched:0,newCount:0,found:0,pending:0});
     try{
       const requestedMax=scanAll?50000:Math.max(1,Math.min(Number(acc.maxEmails)||100,5000));
       let token=acc.token||"";
@@ -2146,7 +2285,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClient
       }
       if(!messages.length){
         log(acc.id,"✓ No matching emails found.");
-        setProgress(acc.id,{phase:"done",processed:0,total:0,remaining:0,matched:0,newCount:0,found:0});
+        setProgress(acc.id,{phase:"done",processed:0,total:0,remaining:0,matched:0,newCount:0,found:0,pending:0});
         setSyncing(acc.id,false);
         return;
       }
@@ -2155,13 +2294,13 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClient
       const fresh=messages.filter(m=>!processed.has(m.id));
       if(!fresh.length){
         log(acc.id,"✓ All emails already processed.");
-        setProgress(acc.id,{phase:"done",processed:0,total:0,remaining:0,matched:messages.length,newCount:0,found:0});
+        setProgress(acc.id,{phase:"done",processed:0,total:0,remaining:0,matched:messages.length,newCount:0,found:0,pending:0});
         setSyncing(acc.id,false);
         return;
       }
       const toProcess=scanAll?fresh:fresh.slice(0,Math.max(1,Math.min(Number(acc.maxEmails)||100,5000)));
-      setProgress(acc.id,{phase:"processing",processed:0,total:toProcess.length,remaining:toProcess.length,matched:messages.length,newCount:fresh.length,found:0,failed:0,skipped:0,failureReasons:{}});
-      const found=[];let done=0;let failed=0;let skipped=0;let fallbackUsed=0;
+      setProgress(acc.id,{phase:"processing",processed:0,total:toProcess.length,remaining:toProcess.length,matched:messages.length,newCount:fresh.length,found:0,failed:0,skipped:0,pending:0,failureReasons:{}});
+      const found=[];let done=0;let failed=0;let skipped=0;let pendingQueued=0;
       const failureReasons={};
       let lastProgressTs=0;
       const flushProgress=(force=false)=>{
@@ -2171,93 +2310,43 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClient
         const statusParts=[`Processed ${done}/${toProcess.length} emails`,`found ${found.length}`];
         if(failed>0)statusParts.push(`failed ${failed}`);
         if(skipped>0)statusParts.push(`skipped ${skipped}`);
-        if(fallbackUsed>0)statusParts.push(`fallback ${fallbackUsed}`);
+        if(pendingQueued>0)statusParts.push(`pending AI retry ${pendingQueued}`);
         const failureSummary=formatFailureSummary(failureReasons);
         if(failureSummary)statusParts.push(failureSummary);
         log(acc.id,`${statusParts.join(" · ")}…`);
-        setProgress(acc.id,{phase:"processing",processed:done,total:toProcess.length,remaining:Math.max(0,toProcess.length-done),matched:messages.length,newCount:fresh.length,found:found.length,failed,skipped,failureReasons:{...failureReasons}});
+        setProgress(acc.id,{phase:"processing",processed:done,total:toProcess.length,remaining:Math.max(0,toProcess.length-done),matched:messages.length,newCount:fresh.length,found:found.length,failed,skipped,pending:pendingQueued,failureReasons:{...failureReasons}});
       };
       const processMessage=async(msg)=>{
         try{
-          let subject="";let from="";let rawDate="";let body="";
-          let hasAttachment=false;let attachmentNames=[];let attachmentText="";
-          if(provider==="microsoft"){
-            const full=await withTimeout(msGetMessage(token,msg.id),20000,"Outlook message fetch");
-            subject=full.subject||"";
-            const addr=full.from?.emailAddress?.address||"";
-            const name=full.from?.emailAddress?.name||"";
-            from=name&&addr?`${name} <${addr}>`:(addr||name||"");
-            rawDate=full.receivedDateTime||msg.receivedDateTime||"";
-            body=msExtractBody(full);
-            hasAttachment=Boolean(full.hasAttachments||msg.hasAttachments);
-            if(hasAttachment){
-              const attachmentMeta=await withTimeout(msListAttachments(token,msg.id),18000,"Outlook attachment list");
-              attachmentNames=attachmentMeta.map(a=>a?.name).filter(Boolean);
-              hasAttachment=attachmentNames.length>0;
-              if(hasAttachment){
-                attachmentText=await msAttachmentEvidenceText(token,msg.id,attachmentMeta);
-              }
-            }
-          }else{
-            const full=await withTimeout(gmailGetMessage(token,msg.id),20000,"Gmail message fetch");
-            const H=full.payload?.headers||[];
-            subject=H.find(h=>h.name==="Subject")?.value||"";
-            from=H.find(h=>h.name==="From")?.value||"";
-            rawDate=H.find(h=>h.name==="Date")?.value||"";
-            const bodyParts=extractEmailTextAll(full.payload,0,[]);
-            if(full.snippet)bodyParts.push(full.snippet);
-            body=collapseTextParts(bodyParts);
-            const attachmentMeta=collectGmailAttachmentMeta(full.payload,[]);
-            attachmentNames=attachmentMeta.map(a=>a.name).filter(Boolean);
-            hasAttachment=attachmentNames.length>0;
-            if(hasAttachment){
-              attachmentText=await gmailAttachmentEvidenceText(token,msg.id,attachmentMeta);
-            }
-          }
-          const emailContext={subject,from,body,attachmentNames,attachmentText,hasAttachment};
-          const parsedDate=rawDate?new Date(rawDate):null;
-          const eDate=parsedDate&&!Number.isNaN(parsedDate.getTime())?parsedDate.toISOString().slice(0,10):today();
+          const evidence=await fetchMessageEvidence(provider,token,msg.id);
           let items=[];
-          let aiResult={isCashFlow:false,confidence:0,reason:"",transactions:[]};
-          let aiRan=false;
           try{
-            aiRan=true;
-            aiResult=await withTimeout(
-              aiAnalyzeEmail(subject,from,body,acts,cats,{attachmentNames,attachmentText,hasAttachment}),
-              35000,
-              "AI mail analysis",
-            );
-            items=Array.isArray(aiResult.transactions)?aiResult.transactions:[];
+            items=await analyzeMessageEvidence(evidence);
           }catch(aiErr){
-            aiRan=false;
-            if(aiStrictMode){
-              failed++;
-              const reason=classifySyncError(aiErr);
-              failureReasons[reason]=(failureReasons[reason]||0)+1;
-              processed.add(msg.id);
-              return;
-            }
-            console.error("AI analysis failed, using fallback extractor",aiErr);
-          }
-          if(aiRan){
-            items=sanitizeEmailTransactions(items,{...emailContext,aiCashFlow:Boolean(aiResult?.isCashFlow)});
-            const aiApproved=Boolean(aiResult?.isCashFlow)&&Array.isArray(items)&&items.length>0;
-            if(!aiApproved){
-              skipped++;
-              processed.add(msg.id);
-              return;
-            }
-          }else{
-            const fb=fallbackExtractEmail(subject,from,body,{attachmentNames,attachmentText,hasAttachment}).map(item=>({...item,date:item.date||eDate}));
-            if(fb.length){fallbackUsed++;items=fb;}
-            items=sanitizeEmailTransactions(items,{...emailContext,aiCashFlow:false});
+            pendingQueued++;
+            failed++;
+            const reason=classifySyncError(aiErr);
+            failureReasons[reason]=(failureReasons[reason]||0)+1;
+            const nowIso=new Date().toISOString();
+            enqueueAiPending({
+              id:aiPendingId(acc.id,msg.id),
+              accountId:acc.id,
+              provider,
+              msgId:msg.id,
+              queuedAt:nowIso,
+              attempts:1,
+              nextRetryAt:new Date(Date.now()+AI_RETRY_INTERVAL_MS).toISOString(),
+              lastError:String(aiErr?.message||reason||"ai_failed"),
+            });
+            processed.add(msg.id);
+            return;
           }
           if(!items.length){
             skipped++;
             processed.add(msg.id);
             return;
           }
-          items.forEach(item=>found.push({...item,date:item.date||eDate,source:"email",emailProvider:provider,emailSubject:subject,emailFrom:from,emailAccountId:acc.id,emailMsgId:msg.id}));
+          items.forEach(item=>found.push({...item,date:item.date||evidence.eDate||today(),source:"email",emailProvider:provider,emailSubject:evidence.subject||"",emailFrom:evidence.from||"",emailAccountId:acc.id,emailMsgId:msg.id}));
           processed.add(msg.id);
         }catch(e){
           failed++;
@@ -2304,21 +2393,21 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClient
         msClientId:provider==="microsoft"?(a.msClientId||msClient):a.msClientId,
       }:a));
       if(!valid.length){
-        if(failed===toProcess.length){
+        if(failed===toProcess.length&&!pendingQueued){
           log(acc.id,"⚠ Sync finished, but all emails failed extraction. Check network/auth and retry.");
-          setProgress(acc.id,{phase:"error",processed:toProcess.length,total:toProcess.length,remaining:0,matched:messages.length,newCount:fresh.length,found:0,failed,skipped,failureReasons:{...failureReasons}});
+          setProgress(acc.id,{phase:"error",processed:toProcess.length,total:toProcess.length,remaining:0,matched:messages.length,newCount:fresh.length,found:0,failed,skipped,pending:pendingQueued,failureReasons:{...failureReasons}});
           setSyncing(acc.id,false);
           return;
         }
-        log(acc.id,`✓ Done — no income/expense found.${failed?` Failed: ${failed}.`:""}${skipped?` Skipped: ${skipped}.`:""}`);
-        setProgress(acc.id,{phase:"done",processed:toProcess.length,total:toProcess.length,remaining:0,matched:messages.length,newCount:fresh.length,found:0,failed,skipped,failureReasons:{...failureReasons}});
+        log(acc.id,`✓ Done — no income/expense found.${failed?` Failed: ${failed}.`:""}${skipped?` Skipped: ${skipped}.`:""}${pendingQueued?` Pending AI retry: ${pendingQueued}.`:""}`);
+        setProgress(acc.id,{phase:"done",processed:toProcess.length,total:toProcess.length,remaining:0,matched:messages.length,newCount:fresh.length,found:0,failed,skipped,pending:pendingQueued,failureReasons:{...failureReasons}});
         setSyncing(acc.id,false);
         return;
       }
       const queued=valid.map(i=>({...i,source:"email",reviewStatus:"pending"}));
       addInbox(queued);
-      log(acc.id,`AI found ${valid.length} income/expense item(s). Added to Review queue.`);
-      setProgress(acc.id,{phase:"done",processed:toProcess.length,total:toProcess.length,remaining:0,matched:messages.length,newCount:fresh.length,found:valid.length,failed,skipped,failureReasons:{...failureReasons}});
+      log(acc.id,`AI found ${valid.length} income/expense item(s). Added to Review queue.${pendingQueued?` Pending AI retry: ${pendingQueued}.`:""}`);
+      setProgress(acc.id,{phase:"done",processed:toProcess.length,total:toProcess.length,remaining:0,matched:messages.length,newCount:fresh.length,found:valid.length,failed,skipped,pending:pendingQueued,failureReasons:{...failureReasons}});
       setToast(`📥 ${valid.length} item(s) queued for review.`);
     }catch(e){
       const msg=String(e.message||"");
@@ -2332,7 +2421,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClient
       }else{
         log(acc.id,"Error: "+msg);
       }
-      setProgress(acc.id,{phase:"error"});
+      setProgress(acc.id,{phase:"error",pending:0});
     }
     setSyncing(acc.id,false);
   };
@@ -2347,9 +2436,115 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClient
     runSync(acc,{scanAll});
   };
 
+  const runPendingAiRetry=async({force=false}={})=>{
+    const now=Date.now();
+    if(retryBusyRef.current)return;
+    if(!force&&now-retryLastRunRef.current<15000)return;
+    const due=(aiPending||[])
+      .map(normalizeAiPendingEntry)
+      .filter(row=>row.accountId&&row.msgId)
+      .filter(row=>{
+        const nextAt=Date.parse(row.nextRetryAt||"");
+        return !Number.isFinite(nextAt)||nextAt<=Date.now();
+      })
+      .slice(0,AI_RETRY_BATCH_SIZE);
+    if(!due.length)return;
+    retryBusyRef.current=true;
+    setRetryBusy(true);
+    retryLastRunRef.current=now;
+    let recovered=0;
+    try{
+      for(const row of due){
+        const accRaw=emails.find(a=>a.id===row.accountId);
+        if(!accRaw){
+          setAiPending(prev=>prev.filter(p=>p.id!==row.id));
+          continue;
+        }
+        const acc=hydrateEmailAccount(accRaw);
+        const provider=providerOf(acc);
+        if(!isSyncReady(acc)){
+          setAiPending(prev=>prev.map(p=>p.id===row.id?{
+            ...p,
+            nextRetryAt:new Date(Date.now()+AI_RETRY_INTERVAL_MS).toISOString(),
+            lastError:"account_not_connected",
+          }:p));
+          continue;
+        }
+        try{
+          let token=acc.token||"";
+          if(provider==="microsoft"){
+            const msClient=sanitizeMsClientId((acc.msClientId||microsoftClientId||"").trim());
+            if(!msClient)throw new Error("microsoft_client_missing");
+            const auth=await msGetMailToken(msClient,{homeAccountId:acc.msAccountId,username:acc.msUsername||acc.email});
+            token=auth.accessToken;
+            const msAcc=auth.account||{};
+            setEmails(prev=>prev.map(a=>a.id===acc.id?{
+              ...a,
+              token,
+              connected:true,
+              userDisconnected:false,
+              reauthRequired:false,
+              msClientId:msClient,
+              msAccountId:msAcc.homeAccountId||a.msAccountId||"",
+              msUsername:msAcc.username||a.msUsername||a.email||"",
+            }:a));
+          }else{
+            token=await ensureGoogleToken(acc,{interactive:false});
+          }
+          const evidence=await fetchMessageEvidence(provider,token,row.msgId);
+          const items=await analyzeMessageEvidence(evidence);
+          markProcessedMessage(acc.id,row.msgId);
+          setAiPending(prev=>prev.filter(p=>p.id!==row.id));
+          if(!items.length)continue;
+          const queued=items.map(item=>({
+            ...item,
+            date:item.date||evidence.eDate||today(),
+            source:"email",
+            reviewStatus:"pending",
+            emailProvider:provider,
+            emailSubject:evidence.subject||"",
+            emailFrom:evidence.from||"",
+            emailAccountId:acc.id,
+            emailMsgId:row.msgId,
+          }));
+          if(queued.length){
+            recovered+=queued.length;
+            addInbox(queued);
+            log(acc.id,`🤖 AI retry recovered ${queued.length} item(s) from pending queue.`);
+          }
+        }catch(err){
+          const msg=String(err?.message||"unknown_error");
+          const lower=msg.toLowerCase();
+          const notFound=lower.includes("404")||lower.includes("not found");
+          if(notFound){
+            markProcessedMessage(acc.id,row.msgId);
+            setAiPending(prev=>prev.filter(p=>p.id!==row.id));
+            continue;
+          }
+          if(provider==="google"&&(lower.includes("google_reauth_required")||lower.includes("401"))){
+            setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,token:null,connected:true,userDisconnected:false,reauthRequired:true}:a));
+          }else if(lower.includes("401")||lower.includes("not signed in to microsoft")){
+            setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,token:null,connected:true,userDisconnected:false,reauthRequired:true}:a));
+          }
+          setAiPending(prev=>prev.map(p=>p.id===row.id?{
+            ...p,
+            attempts:(Number(p.attempts)||0)+1,
+            nextRetryAt:new Date(Date.now()+AI_RETRY_INTERVAL_MS).toISOString(),
+            lastError:msg.slice(0,180),
+          }:p));
+        }
+      }
+      if(recovered>0)setToast(`🤖 AI retry queued ${recovered} item(s) for review.`);
+    }finally{
+      retryBusyRef.current=false;
+      setRetryBusy(false);
+      retryLastRunRef.current=Date.now();
+    }
+  };
+
   useEffect(()=>{
-    if(!emails.length)return;
     const runAutoSync=()=>{
+      runPendingAiRetry({force:false}).catch(()=>{});
       if(Object.values(syncingIds).some(Boolean))return;
       const now=Date.now();
       const due=emails
@@ -2384,7 +2579,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClient
       window.removeEventListener("online",runAutoSync);
       document.removeEventListener("visibilitychange",onVisible);
     };
-  },[emails,syncingIds]);
+  },[emails,syncingIds,aiPending]);
 
   return(
     <div>
@@ -2407,8 +2602,12 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClient
           <div style={{fontSize:13,color:"#94a3b8"}}>
             Connected accounts: <b style={{color:"#e2e8f0"}}>{connected}</b> / {emails.length}
             {emailInbox>0&&<span style={{marginLeft:10,color:"#f59e0b"}}>· {emailInbox} items pending in Inbox</span>}
+            {totalPendingAi>0&&<span style={{marginLeft:10,color:"#c4b5fd"}}>· AI retry queue: {totalPendingAi}{duePendingAi>0?` (due ${duePendingAi})`:""}</span>}
           </div>
-          {syncableAccounts.length>0&&<button className="btn sm pri" disabled={anySyncing||Boolean(connectBusy)} onClick={()=>syncableAccounts.forEach(a=>startSync(a,false))}>{anySyncing?"⏳ Syncing…":"🔄 Sync All Accounts"}</button>}
+          <div style={{display:"flex",gap:8,flexWrap:"wrap",justifyContent:"flex-end"}}>
+            {totalPendingAi>0&&<button className="btn sm ghost" disabled={retryBusy||Boolean(connectBusy)} onClick={()=>runPendingAiRetry({force:true})}>{retryBusy?"⏳ Retrying AI…":"🤖 Retry AI Pending"}</button>}
+            {syncableAccounts.length>0&&<button className="btn sm pri" disabled={anySyncing||Boolean(connectBusy)} onClick={()=>syncableAccounts.forEach(a=>startSync(a,false))}>{anySyncing?"⏳ Syncing…":"🔄 Sync All Accounts"}</button>}
+          </div>
         </R>
       </div>
 
@@ -2444,6 +2643,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClient
                   {!linked&&<span style={{color:"#f87171"}}>Disconnected</span>}
                   {acc.firstSyncCompleted&&acc.syncFromDate&&<span> · first synced from {fmtD(acc.syncFromDate)}</span>}
                   {acc.lastSync&&<span> · last sync {fmtDT(acc.lastSync)}</span>}
+                  {pendingByAccount[acc.id]>0&&<span style={{color:"#c4b5fd"}}> · AI retry pending {pendingByAccount[acc.id]}</span>}
                 </div>
               </div>
             </div>
@@ -2463,7 +2663,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClient
               <div style={{display:"flex",justifyContent:"space-between",gap:10,marginBottom:6,flexWrap:"wrap"}}>
                 <span>
                   {syncProgress[acc.id].phase==="fetching"&&"Fetching emails…"}
-                  {syncProgress[acc.id].phase==="processing"&&`Processed ${syncProgress[acc.id].processed||0}/${syncProgress[acc.id].total||0}${syncProgress[acc.id].failed?` · failed ${syncProgress[acc.id].failed}`:""}${syncProgress[acc.id].skipped?` · skipped ${syncProgress[acc.id].skipped}`:""}`}
+                  {syncProgress[acc.id].phase==="processing"&&`Processed ${syncProgress[acc.id].processed||0}/${syncProgress[acc.id].total||0}${syncProgress[acc.id].failed?` · failed ${syncProgress[acc.id].failed}`:""}${syncProgress[acc.id].skipped?` · skipped ${syncProgress[acc.id].skipped}`:""}${syncProgress[acc.id].pending?` · pending AI ${syncProgress[acc.id].pending}`:""}`}
                   {syncProgress[acc.id].phase==="review"&&`Scan complete. ${syncProgress[acc.id].found||0} item(s) awaiting review.`}
                   {syncProgress[acc.id].phase==="done"&&`Sync completed.${Number(syncProgress[acc.id].found)>0?` ${syncProgress[acc.id].found} item(s) in review queue.`:""}`}
                   {syncProgress[acc.id].phase==="error"&&"Sync failed."}
@@ -2477,7 +2677,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClient
                   <div style={{height:"100%",background:"#6366f1",width:`${Math.min(100,Math.round(((syncProgress[acc.id].processed||0)/(syncProgress[acc.id].total||1))*100))}%`,transition:"width .15s linear"}}/>
                 </div>
               )}
-              {(Number(syncProgress[acc.id].failed)>0||Number(syncProgress[acc.id].skipped)>0)&&<div style={{marginTop:6,fontSize:11,color:"#64748b"}}>Failed = processing error/API issue. Skipped = no financial transaction extracted.</div>}
+              {(Number(syncProgress[acc.id].failed)>0||Number(syncProgress[acc.id].skipped)>0||Number(syncProgress[acc.id].pending)>0)&&<div style={{marginTop:6,fontSize:11,color:"#64748b"}}>Failed = processing/API error. Skipped = AI found no financial transaction. Pending AI = retry queue (next attempt in 30m).</div>}
               {Number(syncProgress[acc.id].failed)>0&&formatFailureSummary(syncProgress[acc.id].failureReasons||{})&&(
                 <div style={{marginTop:4,fontSize:11,color:"#94a3b8"}}>
                   Failure reasons: {formatFailureSummary(syncProgress[acc.id].failureReasons||{})}
