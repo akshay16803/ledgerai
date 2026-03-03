@@ -1370,7 +1370,7 @@ export default function App(){
     if(filter.to&&t.date>filter.to)return false;
     return true;
   });
-  const TABS=[["dashboard","Dashboard"],["transactions","Ledger"],["inbox",`Inbox${inbox.length?` (${inbox.length})`:""}`],["email",`Email${emails.length?` (${emails.length})`:""}`],["messages",`Messages${smsNums.length?` (${smsNums.filter(s=>s.active).length}✓)`:""}`],["journal","Journal"],["accounts","Accounts"],["reports","Reports"],["settings","Settings"],["daily",`Day Review${inbox.length?` (${inbox.length})`:""}`]];
+  const TABS=[["dashboard","Dashboard"],["transactions","Ledger"],["inbox",`Inbox${inbox.length?` (${inbox.length})`:""}`],["email",`Email${emails.length?` (${emails.length})`:""}`],["journal","Journal"],["accounts","Accounts"],["reports","Reports"],["settings","Settings"],["daily",`Day Review${inbox.length?` (${inbox.length})`:""}`]];
 
   if(authCfg.enabled&&!authCfg.googleClientId){
     return <AuthSetupScreen authCfg={authCfg} setAuthCfg={setAuthCfg}/>;
@@ -1414,7 +1414,6 @@ export default function App(){
         <div style={{display:tab==="email"?"block":"none"}} aria-hidden={tab!=="email"}>
           <EmailTab emails={emails} setEmails={setEmails} inbox={inbox} addInbox={addInbox} acts={acts} cats={cats} defaultGoogleClientId={authCfg.googleClientId||DEFAULT_GOOGLE_CLIENT_ID} defaultMicrosoftClientId={sbCfg.clientId||DEFAULT_MICROSOFT_CLIENT_ID||""}/>
         </div>
-        {tab==="messages"&&<MessagesTab smsNums={smsNums} setSmsNums={setSmsNums} emails={emails} inbox={inbox} addInbox={addInbox} acts={acts} cats={cats}/>}
         {tab==="journal"&&<JournalTab txns={txns}/>}
         {tab==="accounts"&&<AccountsTab accs={accs} setAccs={setAccs} txns={txns} addInbox={addInbox} acts={acts} cats={cats}/>}
         {tab==="reports"&&<ReportsTab txns={txns} acts={acts} totInc={totInc} totExp={totExp}/>}
@@ -2854,11 +2853,11 @@ function InboxTab({inbox,addInbox,acts,cats,onApprove,onEdit,onDiscard}){
   };
   return(<div>
     <h2 className="h2" style={{marginBottom:4}}>Inbox — Review & Approve</h2>
-    <p style={{fontSize:13,color:"#64748b",marginBottom:18}}>Transactions from email auto-import, SMS paste, or statement reconciliation appear here before entering the ledger.</p>
+    <p style={{fontSize:13,color:"#64748b",marginBottom:18}}>Transactions from email auto-import or statement reconciliation appear here before entering the ledger.</p>
     {emailItems.length>0&&<div style={{background:"#052e16",border:"1px solid #34d399",borderRadius:8,padding:"10px 14px",marginBottom:16,fontSize:13,color:"#86efac"}}>📧 <b>{emailItems.length}</b> transaction(s) auto-extracted from email — review below.</div>}
     <div className="card" style={{marginBottom:22}}>
-      <div style={{fontWeight:600,fontSize:14,marginBottom:10,color:"#94a3b8"}}>📥 Manual Paste (SMS / Bank Alerts)</div>
-      <textarea rows={4} value={bulk} onChange={e=>setBulk(e.target.value)} placeholder="Paste bank SMS, UPI alerts, Kite messages…"/>
+      <div style={{fontWeight:600,fontSize:14,marginBottom:10,color:"#94a3b8"}}>📥 Manual Paste (Email / Bank Alert Text)</div>
+      <textarea rows={4} value={bulk} onChange={e=>setBulk(e.target.value)} placeholder="Paste email body, invoice text, or bank alert text…"/>
       <button className="btn pri" style={{marginTop:10,width:"100%"}} onClick={runBatch} disabled={loading||!bulk.trim()}>{loading?"🤖 Extracting…":"🤖 Extract & Queue for Review"}</button>
     </div>
     {inbox.length>0&&(
