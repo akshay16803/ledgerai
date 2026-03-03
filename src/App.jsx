@@ -972,7 +972,8 @@ export default function App(){
   const[summary,setSummary]=useState("");
   const[sumLoad,setSumLoad]=useState(false);
   const[filter,setFilter]=useState({activity:"All",type:"All",from:"",to:""});
-  const bypassActive=Boolean(authCfg.enabled&&authBypass);
+  const canUseAuthBypass=typeof window!=="undefined"&&(window.location.hostname==="localhost"||window.location.hostname==="127.0.0.1");
+  const bypassActive=Boolean(authCfg.enabled&&authBypass&&canUseAuthBypass);
   const[backups,setBackups]=useState(()=>LS.get(BACKUP_KEY,[]));
 
   const buildBackupSnapshot=useCallback((reason="auto")=>{
@@ -1120,6 +1121,9 @@ export default function App(){
     if(owner&&current&&owner!==current)setAuthUser(null);
   },[authUser]);
   useEffect(()=>{
+    if(authBypass&&!canUseAuthBypass)setAuthBypass(false);
+  },[authBypass,canUseAuthBypass]);
+  useEffect(()=>{
     if(authCfg.ownerEmail!==LOCKED_OWNER_EMAIL)setAuthCfg(p=>({...p,ownerEmail:LOCKED_OWNER_EMAIL}));
   },[authCfg.ownerEmail]);
 
@@ -1231,7 +1235,7 @@ export default function App(){
     return <AuthSetupScreen authCfg={authCfg} setAuthCfg={setAuthCfg}/>;
   }
   if(authCfg.enabled&&!authUser&&!bypassActive){
-    return <AuthLoginScreen clientId={authCfg.googleClientId} ownerEmail={LOCKED_OWNER_EMAIL} onCredential={onGoogleCredential} authMsg={authMsg} allowTemporaryBypass onBypass={()=>setAuthBypass(true)}/>;
+    return <AuthLoginScreen clientId={authCfg.googleClientId} ownerEmail={LOCKED_OWNER_EMAIL} onCredential={onGoogleCredential} authMsg={authMsg} allowTemporaryBypass={canUseAuthBypass} onBypass={()=>setAuthBypass(true)}/>;
   }
 
   return(
