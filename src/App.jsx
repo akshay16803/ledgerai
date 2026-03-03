@@ -15,6 +15,7 @@ const DEF_CATS = {
   "Trial Business – Venture B":["Marketing","Operations","Salaries","Rent","Utilities","Miscellaneous"],
   "Trial Business – Venture C":["Marketing","Operations","Salaries","Rent","Utilities","Miscellaneous"],
 };
+const NEW_ACTIVITY_DEFAULT_CATS = ["General","Marketing","Operations","Other"];
 const ACC_TYPES = [
   {key:"savings",label:"Savings Account",cls:"asset"},{key:"current",label:"Current Account",cls:"asset"},
   {key:"trading",label:"Trading Account",cls:"asset"},{key:"wallet",label:"Digital Wallet",cls:"asset"},
@@ -93,7 +94,12 @@ function normalizeAiPendingEntry(entry={}){
     accountId: String(entry.accountId || ""),
     provider: String(entry.provider || "google").toLowerCase() === "microsoft" ? "microsoft" : "google",
     msgId: String(entry.msgId || ""),
+    subject: String(entry.subject || ""),
+    from: String(entry.from || ""),
+    emailDate: String(entry.emailDate || ""),
+    snippet: String(entry.snippet || ""),
     queuedAt: String(entry.queuedAt || new Date().toISOString()),
+    lastTriedAt: String(entry.lastTriedAt || ""),
     attempts: Math.max(0, Number(entry.attempts) || 0),
     nextRetryAt: String(entry.nextRetryAt || new Date(Date.now() + AI_RETRY_INTERVAL_MS).toISOString()),
     lastError: String(entry.lastError || ""),
@@ -206,126 +212,45 @@ function collectGmailAttachmentMeta(payload,out=[]){
   return out;
 }
 
-const RECEIPT_KEYWORDS = [
-  "invoice","tax invoice","receipt","payment receipt","payment confirmation",
-  "payment successful","amount debited","amount credited","bill","cash memo",
-  "order receipt","order invoice","refund","payout","settlement",
-];
-const TRANSACTION_ALERT_KEYWORDS = [
-  "debited","credited","debit","credit","charges","charged","card","upi","imps",
-  "neft","rtgs","transaction","spent","purchase","paid","withdrawn",
-  "salary credited","refund","payment received","amount received",
-  "amount debited","amount credited","payout","settlement",
-];
-const NON_FINANCIAL_EMAIL_KEYWORDS = [
-  "security alert","security notice","verification code","otp","one-time password",
-  "password","sign in","signin","login","2fa","two-factor","new device",
-  "recover account","reset your password","welcome to","newsletter","digest",
-  "policy update","privacy update",
-];
-const PROMOTIONAL_EMAIL_KEYWORDS = [
-  "introducing","exclusive","coupon","offer","offers","discount","sale","deal",
-  "limited time","buy now","shop now","new launch","launch","preorder","promo code",
-  "save up to","flat off","cashback offer","trending now",
-];
-const MARKET_SIGNAL_KEYWORDS = [
-  "tradingview","kitealgo","signal alert","signal received","trade signal","buy signal","sell signal",
-  "entry","target","stop loss","stop-loss","sl hit","tp hit","take profit","call option","put option",
-  "ce "," pe ","banknifty","nifty","breakout alert","indicator alert","strategy alert","webhook alert",
-];
-const HARD_SIGNAL_BRANDS = ["tradingview","kitealgo","tv signal"];
-const CASH_CONFIRMATION_KEYWORDS = [
-  "amount debited","amount credited","debited from","credited to","paid",
-  "payment successful","payment received","charged","purchase","withdrawn",
-  "deposit","refund processed","salary credited","settlement","payout",
-  "invoice","receipt","bill paid","order receipt","order invoice",
-];
-
-function hasMoneyEvidence(text=""){
-  const t=(text||"").replace(/[,]/g," ");
-  return /((?:₹|rs\.?|inr|\$|usd|eur|gbp)\s*\d|\d\s*(?:usd|inr|eur|gbp)|\b(?:amount|amt|total|paid|payment|debited|credited|refund|payout|settlement|invoice total|grand total)\b[^0-9]{0,24}\d)/i.test(t);
-}
-
-function hasCashEvidenceForBooking(text="",attachmentNameText=""){
-  const lower=(text||"").toLowerCase();
-  const attach=(attachmentNameText||"").toLowerCase();
-  const hasReceiptKeyword=RECEIPT_KEYWORDS.some(k=>lower.includes(k)||attach.includes(k));
-  const hasCashKeyword=CASH_CONFIRMATION_KEYWORDS.some(k=>lower.includes(k));
-  const hasMoney=hasMoneyEvidence(text);
-  const hasSignalNoise=MARKET_SIGNAL_KEYWORDS.some(k=>lower.includes(k)||attach.includes(k));
-  const hasStrongTxnPhrase=/\b(amount debited|amount credited|debited from|credited to|transaction id|utr|rrn|payment successful|invoice|receipt)\b/.test(lower);
-  if(hasSignalNoise&&!hasStrongTxnPhrase)return false;
-  if(hasReceiptKeyword&&(hasMoney||/\b(invoice|receipt)\b/.test(lower)))return true;
-  if(hasCashKeyword&&hasMoney)return true;
-  return false;
-}
-
-function isMarketSignalAlert({subject="",from="",body="",attachmentNames=[],attachmentText=""}={}){
-  const text=`${subject}\n${from}\n${body}\n${attachmentText}`.toLowerCase();
-  const attachmentNameText=(attachmentNames||[]).join(" ").toLowerCase();
-  const hasSignal=MARKET_SIGNAL_KEYWORDS.some(k=>text.includes(k)||attachmentNameText.includes(k));
-  const hasSignalBrand=HARD_SIGNAL_BRANDS.some(k=>text.includes(k)||attachmentNameText.includes(k));
-  const hasSignalPattern=/\b(signal|entry|target|stop[- ]?loss|sl|tp|buy|sell|banknifty|nifty)\b/.test(text);
-  const hasSignalSender=/\b(tradingview|kitealgo)\b/.test((from||"").toLowerCase());
-  const inferredSignal=hasSignal||(hasSignalBrand&&(hasSignalPattern||hasSignalSender));
-  const subjectLooksSignal=/\b(signal|entry|target|stop[- ]?loss|sl|tp|buy|sell)\b/.test((subject||"").toLowerCase());
-  const senderLooksSignal=/\b(tradingview|kitealgo)\b/.test((from||"").toLowerCase());
-  const hardSignal=inferredSignal||(senderLooksSignal&&subjectLooksSignal);
-  if(!hardSignal)return false;
-  // Allow only when there is explicit payment/receipt evidence.
-  return !hasCashEvidenceForBooking(text,attachmentNameText);
-}
-
-function isReceiptLikeEmail({subject="",from="",body="",attachmentNames=[],attachmentText="",hasAttachment=false}={}){
-  if(isMarketSignalAlert({subject,from,body,attachmentNames,attachmentText}))return false;
-  const text=`${subject}\n${from}\n${body}\n${attachmentText}`.toLowerCase();
-  const attachmentNameText=(attachmentNames||[]).join(" ").toLowerCase();
-  const hasPromoKeyword=PROMOTIONAL_EMAIL_KEYWORDS.some(k=>text.includes(k)||attachmentNameText.includes(k));
-  const strongTxnPhrase=/\b(amount debited|amount credited|debited from|credited to|payment successful|payment received|receipt attached|tax invoice|transaction id|utr|rrn|invoice number)\b/.test(text);
-  if(hasPromoKeyword&&!strongTxnPhrase)return false;
-  const hasReceiptKeyword=RECEIPT_KEYWORDS.some(k=>text.includes(k)||attachmentNameText.includes(k));
-  const hasTxnAlertKeyword=TRANSACTION_ALERT_KEYWORDS.some(k=>text.includes(k));
-  const senderLooksFinancial=/\b(bank|card|wallet|upi|finance|payments?)\b/.test((from||"").toLowerCase());
-  const hasMoney=hasMoneyEvidence(text);
-  const hasNonFinancialKeyword=NON_FINANCIAL_EMAIL_KEYWORDS.some(k=>text.includes(k));
-  // If transaction evidence is strong, do not reject only because body contains words like "login".
-  if(hasNonFinancialKeyword&&!hasReceiptKeyword&&!(hasTxnAlertKeyword&&hasMoney))return false;
-  if(hasReceiptKeyword)return true;
-  if(hasTxnAlertKeyword&&hasMoney&&(senderLooksFinancial||/\b(account|a\/c|acc|card)\b/.test(text)))return true;
-  if(hasAttachment){
-    // For mails with attachments, still require at least one transaction phrase in subject/body.
-    return /\b(payment|paid|debited|credited|refund|invoice|receipt|bill|order|transaction|charges?)\b/i.test(text);
-  }
-  return false;
-}
-
 function sanitizeEmailTransactions(items=[],ctx={}){
   if(!Array.isArray(items)||!items.length)return[];
-  const evidenceText=`${ctx.subject||""}\n${ctx.from||""}\n${ctx.body||""}\n${(ctx.attachmentNames||[]).join(" ")}\n${ctx.attachmentText||""}`;
-  if(isMarketSignalAlert(ctx))return[];
-  const lowerEvidence=evidenceText.toLowerCase();
-  const hasPromoKeyword=PROMOTIONAL_EMAIL_KEYWORDS.some(k=>lowerEvidence.includes(k));
-  const strongTxnPhrase=/\b(amount debited|amount credited|debited from|credited to|payment successful|payment received|receipt attached|tax invoice|transaction id|utr|rrn|invoice number)\b/.test(lowerEvidence);
-  if(hasPromoKeyword&&!strongTxnPhrase)return[];
-  const strongReceipt=isReceiptLikeEmail(ctx);
-  const hasMoney=hasMoneyEvidence(evidenceText);
-  const hasTxnAlert=TRANSACTION_ALERT_KEYWORDS.some(k=>lowerEvidence.includes(k));
-  const hasStrongTxnPhrase=/\b(amount debited|amount credited|debited|credited|payment successful|payment received|paid|charged|purchase|refund|payout|settlement|invoice|receipt)\b/.test(lowerEvidence);
-  const normalized=items.map(x=>({
-    ...x,
-    type:x?.type==="income"?"income":"expense",
-    amount:Number(x?.amount)||0,
-  })).filter(x=>{
-    if(!(x.amount>0))return false;
-    if(Number.isInteger(x.amount)&&x.amount>=1900&&x.amount<=2100&&!/(₹|inr|rs\.?)/i.test(evidenceText))return false;
-    return x.type==="income"||x.type==="expense";
-  });
-  if(!normalized.length)return[];
-  if(ctx.aiCashFlow===true&&(strongReceipt||(hasTxnAlert&&hasMoney&&hasStrongTxnPhrase)))return normalized;
-  if(!(strongReceipt||(hasTxnAlert&&hasMoney&&hasStrongTxnPhrase)))return[];
-  const hasReceiptContext=RECEIPT_KEYWORDS.some(k=>lowerEvidence.includes(k));
-  if(!hasMoney&&!(ctx.hasAttachment&&hasReceiptContext)&&!hasTxnAlert)return[];
-  return normalized;
+  const activities=Array.isArray(ctx.acts)?ctx.acts:[];
+  const categories=(ctx.cats&&typeof ctx.cats==="object")?ctx.cats:{};
+  const fallbackAct=activities.includes("Personal")?"Personal":(activities[0]||"Personal");
+  return items.map((x,idx)=>{
+    const rawType=String(x?.type||"").trim().toLowerCase();
+    if(!["income","expense","transfer"].includes(rawType))return null;
+    const amount=Number(x?.amount);
+    if(!(amount>0))return null;
+    const requestedAct=String(x?.businessActivity||fallbackAct).trim();
+    const businessActivity=activities.includes(requestedAct)?requestedAct:fallbackAct;
+    const catList=categories[businessActivity]||[];
+    const baseCategory=rawType==="transfer"?"Account Transfer":"Other";
+    const requestedCategory=String(x?.category||"").trim();
+    const category=requestedCategory||baseCategory;
+    const desc=String(x?.description||"").trim()||String(ctx.subject||`Email ${rawType}`).trim()||`${rawType} from email`;
+    const vendor=String(x?.vendor||"").trim()||String(ctx.from||"").trim();
+    const paymentMethod=String(x?.paymentMethod||"").trim()||(rawType==="transfer"?"Account Transfer":"");
+    const date=String(x?.date||ctx.eDate||today()).trim();
+    const accountName=String(x?.accountName||x?.fromAccountName||"").trim();
+    const targetAccountName=String(x?.targetAccountName||x?.toAccountName||"").trim();
+    const isNewCategory=rawType==="transfer"?false:(Boolean(x?.isNewCategory)||Boolean(category&&!catList.includes(category)));
+    return{
+      ...x,
+      _aiIndex:idx,
+      type:rawType,
+      amount,
+      businessActivity,
+      category,
+      isNewCategory,
+      description:desc.slice(0,180),
+      vendor:vendor.slice(0,140),
+      paymentMethod:paymentMethod.slice(0,80),
+      date:date||today(),
+      accountName:accountName.slice(0,120),
+      targetAccountName:targetAccountName.slice(0,120),
+    };
+  }).filter(Boolean);
 }
 
 async function withTimeout(promise,ms,label="request"){
@@ -363,6 +288,8 @@ function classifySyncError(err){
   const msg=String(err?.message||"").toLowerCase();
   const m=msg.match(/\b(4\d\d|5\d\d)\b/);
   const status=Number(err?.status||m?.[1]||0);
+  if(msg.includes("ai_retry_required"))return "ai-retry";
+  if(msg.includes("parse_failed"))return "parse";
   if(msg.includes("not configured")||msg.includes("missing openai_api_key")||msg.includes("missing anthropic_api_key"))return "config";
   if(msg.includes("unauthorized")||msg.includes("forbidden"))return "auth";
   if(msg.includes("replace is not a function")||msg.includes("invalid ai response")||msg.includes("ai response missing"))return "backend-format";
@@ -375,7 +302,7 @@ function classifySyncError(err){
 }
 
 function formatFailureSummary(reasons={}){
-  const labels={auth:"auth","rate-limit":"rate limit",server:"server",timeout:"timeout",network:"network",config:"config","backend-format":"backend format",other:"other"};
+  const labels={auth:"auth","rate-limit":"rate limit",server:"server",timeout:"timeout",network:"network",config:"config","backend-format":"backend format","ai-retry":"ai retry",parse:"parse",other:"other"};
   const top=Object.entries(reasons).sort((a,b)=>b[1]-a[1]).slice(0,3);
   if(!top.length)return "";
   return top.map(([k,v])=>`${labels[k]||k}: ${v}`).join(", ");
@@ -430,56 +357,14 @@ async function fetchJsonWithRetry(url,options={},label="Request",maxAttempts=4){
   throw lastErr||new Error(`${label} failed`);
 }
 
-function parseAmountFromText(text=""){
-  const t=(text||"").replace(/[,]/g,"");
-  const m1=t.match(/(?:inr|rs\.?|₹|\$|usd|eur|gbp)\s*([0-9]+(?:\.[0-9]{1,2})?)/i);
-  const m1b=t.match(/\b([0-9]+(?:\.[0-9]{1,2})?)\s*(?:usd|inr|eur|gbp)\b/i);
-  const m2=t.match(/\b(?:amount|amt|paid|payment|debited|credited|refund|total|payout|settlement)\b[^0-9]{0,20}([0-9]{2,9}(?:\.[0-9]{1,2})?)/i);
-  const m3=t.match(/\b([0-9]{1,6}\.[0-9]{2})\b/); // useful for receipt PDFs like 17.30
-  const m=m1||m1b||m2||m3;
-  if(!m)return 0;
-  const n=Number(m[1]);
-  return Number.isFinite(n)?n:0;
-}
-
-function fallbackExtractEmail(subject="",from="",body="",meta={}){
-  const attachmentText=(meta?.attachmentText||"")+"";
-  const attachmentNames=(meta?.attachmentNames||[]);
-  const hasAttachment=Boolean(meta?.hasAttachment);
-  if(isMarketSignalAlert({subject,from,body,attachmentNames,attachmentText}))return[];
-  const text=`${subject}\n${from}\n${body}\n${attachmentText}\n${attachmentNames.join(" ")}`.replace(/\s+/g," ").trim();
-  const lower=text.toLowerCase();
-  const amount=parseAmountFromText(text);
-  if(amount<=0)return[];
-  if(amount>1e7)return[];
-  const explicitExpense=/\b(debited|charged|spent|withdrawn|purchase|paid|payment)\b/.test(lower);
-  const explicitIncome=/\b(credited|payment received|refund|salary|payout|settlement|deposit)\b/.test(lower);
-  if(!explicitExpense&&!explicitIncome&&!isReceiptLikeEmail({subject,from,body,attachmentText,attachmentNames,hasAttachment}))return[];
-  if(!hasMoneyEvidence(text)&&!explicitExpense&&!explicitIncome)return[];
-  const expenseHints=["debited","paid","payment","purchase","invoice","receipt","order","bill","spent","charged","upi"];
-  const incomeHints=["credited","payment received","refund","salary","payout","settlement","deposit"];
-  const hasExp=expenseHints.some(k=>lower.includes(k));
-  const hasInc=incomeHints.some(k=>lower.includes(k));
-  if(!hasExp&&!hasInc&&!explicitExpense&&!explicitIncome)return[];
-  const type=(hasInc||explicitIncome)&&!(hasExp||explicitExpense)?"income":"expense";
-  const em=(from.match(/([a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,})/i)?.[1]||"").toLowerCase();
-  const vendor=(from||em||"email").replace(/\s+/g," ").trim().slice(0,120);
-  return[{
-    type,
-    businessActivity:"Personal",
-    category:"Other",
-    isNewCategory:false,
-    description:(subject||`${type==="income"?"Email income":"Email expense"}`).trim().slice(0,140),
-    amount,
-    date:today(),
-    vendor,
-    paymentMethod:"",
-  }];
-}
-
 function buildJE(tx,accs=[]){
   const accName=id=>{const a=accs.find(x=>x.id===id);return a?.name||"";};
   const payAcc=()=>{if(tx.accountId){const n=accName(tx.accountId);if(n)return n;}return tx.paymentMethod==="Credit Card"?"Credit Card Payable":"Bank Account – Savings";};
+  if(tx.type==="transfer"){
+    const fromAcc=accName(tx.accountId)||"From Account";
+    const toAcc=accName(tx.targetAccountId)||"To Account";
+    return[{account:toAcc,dr:tx.amount,cr:0},{account:fromAcc,dr:0,cr:tx.amount}];
+  }
   if(tx.type==="borrow"){
     const receivedIn=payAcc();
     const borrowedFrom=tx.liabilityAccountId?accName(tx.liabilityAccountId):(tx.borrowSource?`Borrowings – ${tx.borrowSource}`:"Borrowings – Other");
@@ -559,62 +444,29 @@ async function aiExtractBatch(text,acts,cats){
     try{const a=JSON.parse(raw.replace(/```json|```/g,"").trim());return Array.isArray(a)?a:[];}catch{return[];}
   }catch{return[];}
 }
-async function aiExtractEmail(subject,from,body,acts,cats,meta={}){
-  const c=Object.entries(cats).map(([a,cs])=>`${a}: ${cs.join(", ")}`).join("\n");
-  const attachmentNames=(meta.attachmentNames||[]).slice(0,10).join(", ");
-  const attachmentText=clipTextForAI((meta.attachmentText||"")+"",14000);
-  const emailBody=clipTextForAI((body||"")+"",14000);
-  const hasAttachment=meta.hasAttachment?"yes":"no";
-  try{
-    const raw=await callAI([{role:"user",content:`Extract ONLY real completed financial transactions from this email (Indian context).
-Strict rules:
-1) Read COMPLETE provided email body and COMPLETE provided attachment text and detect transactions from either source.
-2) Return [] unless there is clear receipt/invoice/payment/debit/credit evidence.
-2) Ignore security/login/OTP/verification/newsletter alerts.
-3) Ignore trading/investing signal alerts (TradingView/Kite/KiteAlgo entry-target-stoploss buy/sell calls) unless there is explicit debit/credit/receipt proof.
-3) Do NOT guess amounts from years, OTPs, IDs, order numbers, or ticket numbers.
-4) If amount is not clearly present, return [].
-
-Subject: "${subject}"
-From: "${from}"
-Has attachment: ${hasAttachment}
-Attachment names: "${attachmentNames}"
-Body:
-${emailBody}
-Attachment extracted text (if any):
-${attachmentText}
-
-Activities: ${acts.join(", ")}
-Categories:
-${c}
-
-Return ONLY JSON array:
-[{"type":"expense|income","businessActivity":"","category":"","isNewCategory":false,"description":"","amount":0,"date":"YYYY-MM-DD","vendor":"","paymentMethod":""}]`}],1300);
-    try{const a=JSON.parse(raw.replace(/```json|```/g,"").trim());return Array.isArray(a)?a:[];}catch{return[];}
-  }catch{return[];}
-}
-
 async function aiAnalyzeEmail(subject,from,body,acts,cats,meta={}){
   const c=Object.entries(cats).map(([a,cs])=>`${a}: ${cs.join(", ")}`).join("\n");
+  const accountList=Array.isArray(meta.accountNames)?meta.accountNames.filter(Boolean):[];
+  const accountsLine=accountList.length?accountList.join(", "):"Unknown";
   const attachmentNames=(meta.attachmentNames||[]).slice(0,12).join(", ");
-  const attachmentText=clipTextForAI((meta.attachmentText||"")+"",14000);
-  const emailBody=clipTextForAI((body||"")+"",14000);
+  const attachmentText=clipTextForAI((meta.attachmentText||"")+"",11000);
+  const emailBody=clipTextForAI((body||"")+"",11000);
   const hasAttachment=meta.hasAttachment?"yes":"no";
   const raw=await callAI([{role:"user",content:`You are a cashflow extraction engine for bookkeeping.
 Analyze this ENTIRE email body and ENTIRE attachment text.
-Goal:
-1) Decide if this email contains real cash inflow/outflow transaction evidence.
-2) If yes, extract all transactions with amount, type, date, vendor, category.
+You must decide cashflow directly from the content without relying on external rules.
 
-Rules:
-- Consider BOTH body and attachment text.
-- Bank alerts with debited/credited + amount are valid transactions.
-- Ignore newsletters, OTP, login/security notifications unless they clearly include a transaction.
-- Ignore TradingView/Kite/KiteAlgo market signal alerts (entry/target/SL/buy/sell) unless there is explicit payment/receipt/debit/credit evidence.
-- Ignore promotional/marketing/coupon/product-launch emails (e.g., "introducing", "offer", "coupon", "save", "discount"), even when they include prices/amounts.
-- Treat amount mentions as transactions ONLY when there is explicit payment evidence (debited/credited/paid/charged/receipt/invoice/transaction reference).
-- Do not use years/IDs/OTP/order IDs as amounts.
-- If no valid transaction evidence, return isCashFlow=false and transactions=[].
+Tasks:
+1) Determine whether this email has real cash movement data.
+2) Extract all transactions if present.
+3) Transaction type can be expense, income, or transfer.
+4) For transfer, populate accountName (from) and targetAccountName (to) when inferable.
+5) If account cannot be inferred, keep accountName/targetAccountName blank and still extract.
+
+Output status:
+- "success" when at least one valid transaction is extracted.
+- "no_transaction" when email was processed and contains no cash movement.
+- "retry" when extraction failed due to unreadable/insufficient/processing issues.
 
 Subject: "${subject}"
 From: "${from}"
@@ -628,27 +480,29 @@ ${attachmentText}
 Activities: ${acts.join(", ")}
 Categories:
 ${c}
+Known ledger account names (optional):
+${accountsLine}
 
 Return ONLY JSON:
 {
-  "isCashFlow": true/false,
-  "confidence": 0.0,
+  "status": "success|no_transaction|retry",
   "reason": "",
   "transactions": [
-    {"type":"expense|income","businessActivity":"","category":"","isNewCategory":false,"description":"","amount":0,"date":"YYYY-MM-DD","vendor":"","paymentMethod":""}
+    {"type":"expense|income|transfer","businessActivity":"","category":"","isNewCategory":false,"description":"","amount":0,"date":"YYYY-MM-DD","vendor":"","paymentMethod":"","accountName":"","targetAccountName":""}
   ]
 }`}],1600);
   try{
     const obj=JSON.parse(raw.replace(/```json|```/g,"").trim());
     const tx=Array.isArray(obj?.transactions)?obj.transactions:[];
+    const statusRaw=String(obj?.status||"").toLowerCase();
+    const status=statusRaw==="success"||statusRaw==="no_transaction"||statusRaw==="retry"?statusRaw:(tx.length?"success":"no_transaction");
     return{
-      isCashFlow:Boolean(obj?.isCashFlow),
-      confidence:Number(obj?.confidence)||0,
+      status,
       reason:String(obj?.reason||""),
       transactions:tx,
     };
   }catch{
-    return{isCashFlow:false,confidence:0,reason:"parse_failed",transactions:[]};
+    return{status:"retry",reason:"parse_failed",transactions:[]};
   }
 }
 async function aiParseStatement(text,name,type){
@@ -1377,11 +1231,53 @@ export default function App(){
   useEffect(()=>{debouncedSync({acts,cats});},[acts,cats]);
 
   const ensureCat=(act,cat)=>setCats(p=>({...p,[act]:(p[act]||[]).includes(cat)?p[act]:[...(p[act]||[]),cat]}));
+  const addBusinessActivity=useCallback((name)=>{
+    const n=String(name||"").trim();
+    if(!n)return{ok:false,error:"Enter business activity name."};
+    const existing=acts.find(a=>a.toLowerCase()===n.toLowerCase());
+    const finalName=existing||n;
+    if(!existing)setActs(p=>[...p,finalName]);
+    setCats(p=>({...p,[finalName]:Array.isArray(p[finalName])&&p[finalName].length?p[finalName]:[...NEW_ACTIVITY_DEFAULT_CATS]}));
+    return{
+      ok:true,
+      name:finalName,
+      defaultCategory:(cats[finalName]&&cats[finalName][0])||NEW_ACTIVITY_DEFAULT_CATS[0],
+    };
+  },[acts,cats]);
+  const renameBusinessActivity=useCallback((fromName,toName)=>{
+    const oldName=String(fromName||"").trim();
+    const nextName=String(toName||"").trim();
+    if(!oldName||!nextName)return{ok:false,error:"Activity name is required."};
+    if(oldName===nextName)return{ok:true,name:nextName};
+    const duplicate=acts.find(a=>a.toLowerCase()===nextName.toLowerCase()&&a!==oldName);
+    if(duplicate)return{ok:false,error:`"${duplicate}" already exists.`};
+    setActs(prev=>prev.map(a=>a===oldName?nextName:a));
+    setCats(prev=>{
+      const oldCats=Array.isArray(prev[oldName])?prev[oldName]:[];
+      const nextCats=Array.isArray(prev[nextName])?prev[nextName]:[];
+      const merged=[...new Set([...(nextCats.length?nextCats:oldCats),...oldCats])];
+      const {[oldName]:_ignored,...rest}=prev;
+      return{
+        ...rest,
+        [nextName]:merged.length?merged:[...NEW_ACTIVITY_DEFAULT_CATS],
+      };
+    });
+    setTxns(prev=>prev.map(t=>t.businessActivity===oldName?{...t,businessActivity:nextName}:t));
+    setInbox(prev=>prev.map(i=>i.businessActivity===oldName?{...i,businessActivity:nextName}:i));
+    setFilter(prev=>prev.activity===oldName?{...prev,activity:nextName}:prev);
+    return{ok:true,name:nextName};
+  },[acts]);
+  const addAccountFromModal=useCallback((a)=>{
+    const created={...a,id:gid()};
+    setAccs(p=>[...p,created]);
+    return created;
+  },[]);
   const saveTx=useCallback((tx)=>{
     if(tx.isNewCategory)ensureCat(tx.businessActivity,tx.category);
     const accName=tx.accountId?accs.find(a=>a.id===tx.accountId)?.name||"":tx.accountName||"";
     const liabName=tx.liabilityAccountId?accs.find(a=>a.id===tx.liabilityAccountId)?.name||"":tx.liabilityAccountName||"";
-    const je=buildJE(tx,accs);const full={...tx,accountName:accName,liabilityAccountName:liabName,journalEntries:je};
+    const targetAccName=tx.targetAccountId?accs.find(a=>a.id===tx.targetAccountId)?.name||"":tx.targetAccountName||"";
+    const je=buildJE(tx,accs);const full={...tx,accountName:accName,liabilityAccountName:liabName,targetAccountName:targetAccName,journalEntries:je};
     if(tx.id&&txns.find(t=>t.id===tx.id))setTxns(p=>p.map(t=>t.id===tx.id?full:t));
     else setTxns(p=>[{...full,id:gid(),createdAt:new Date().toISOString()},...p]);
     setShowAdd(false);setEditTx(null);
@@ -1393,7 +1289,8 @@ export default function App(){
     const tx={...item,id:gid(),createdAt:new Date().toISOString(),source:item.source||"auto"};
     const accName=tx.accountId?accs.find(a=>a.id===tx.accountId)?.name||"":tx.accountName||"";
     const liabName=tx.liabilityAccountId?accs.find(a=>a.id===tx.liabilityAccountId)?.name||"":tx.liabilityAccountName||"";
-    setTxns(p=>[{...tx,accountName:accName,liabilityAccountName:liabName,journalEntries:buildJE(tx,accs)},...p]);
+    const targetAccName=tx.targetAccountId?accs.find(a=>a.id===tx.targetAccountId)?.name||"":tx.targetAccountName||"";
+    setTxns(p=>[{...tx,accountName:accName,liabilityAccountName:liabName,targetAccountName:targetAccName,journalEntries:buildJE(tx,accs)},...p]);
     setInbox(p=>p.filter(i=>i._iid!==item._iid));
   };
   const editInbox=item=>{setEditTx({...item,id:undefined});setAddType(item.type||"expense");setShowAdd(true);setInbox(p=>p.filter(i=>i._iid!==item._iid));};
@@ -1447,23 +1344,23 @@ export default function App(){
         {authCfg.enabled&&authUser&&<button className="btn sm ghost" style={{marginRight:6}} onClick={signOut}>Sign out</button>}
         <button className="btn sm ghost" style={{marginRight:6}} onClick={()=>{setAddType("income");setEditTx(null);setShowAdd(true);}}>+ Income</button>
         <button className="btn sm pri" onClick={()=>{setAddType("expense");setEditTx(null);setShowAdd(true);}}>+ Expense</button>
-        <button className="btn sm" style={{marginLeft:6,background:"#f59e0b",color:"#fff"}} onClick={()=>{setAddType("borrow");setEditTx(null);setShowAdd(true);}}>+ Borrowed</button>
+        <button className="btn sm" style={{marginLeft:6,background:"#0ea5e9",color:"#fff"}} onClick={()=>{setAddType("transfer");setEditTx(null);setShowAdd(true);}}>⇄ Transfer</button>
       </nav>
       <div className="wrap">
         {tab==="dashboard"&&<DashTab byAct={byAct} totInc={totInc} totExp={totExp} todInc={todInc} todExp={todExp} txns={txns} todayTxns={todayTxns} inbox={inbox} emails={emails} onEdit={tx=>{setEditTx(tx);setAddType(tx.type);setShowAdd(true);}} onDelete={delTx}/>}
         {tab==="transactions"&&<LedgerTab txns={filtered} filter={filter} setFilter={setFilter} acts={acts} onEdit={tx=>{setEditTx(tx);setAddType(tx.type);setShowAdd(true);}} onDelete={delTx}/>}
         {tab==="inbox"&&<InboxTab inbox={inbox} addInbox={addInbox} acts={acts} cats={cats} onApprove={approveInbox} onEdit={editInbox} onDiscard={discardInbox}/>}
         <div style={{display:tab==="email"?"block":"none"}} aria-hidden={tab!=="email"}>
-          <EmailTab emails={emails} setEmails={setEmails} inbox={inbox} addInbox={addInbox} acts={acts} cats={cats} defaultGoogleClientId={authCfg.googleClientId||DEFAULT_GOOGLE_CLIENT_ID} defaultMicrosoftClientId={sbCfg.clientId||DEFAULT_MICROSOFT_CLIENT_ID||""}/>
+          <EmailTab emails={emails} setEmails={setEmails} inbox={inbox} addInbox={addInbox} acts={acts} cats={cats} accs={accs} defaultGoogleClientId={authCfg.googleClientId||DEFAULT_GOOGLE_CLIENT_ID} defaultMicrosoftClientId={sbCfg.clientId||DEFAULT_MICROSOFT_CLIENT_ID||""}/>
         </div>
         {tab==="journal"&&<JournalTab txns={txns}/>}
         {tab==="accounts"&&<AccountsTab accs={accs} setAccs={setAccs} txns={txns} addInbox={addInbox} acts={acts} cats={cats}/>}
         {tab==="reports"&&<ReportsTab txns={txns} acts={acts} totInc={totInc} totExp={totExp}/>}
-        {tab==="settings"&&<SettingsTab acts={acts} setActs={setActs} cats={cats} setCats={setCats} backups={backups} onBackupNow={()=>pushBackupSnapshot("manual")} onRestoreBackup={restoreBackupSnapshot} onFactoryReset={factoryReset}/>}
+        {tab==="settings"&&<SettingsTab acts={acts} setActs={setActs} cats={cats} setCats={setCats} backups={backups} onBackupNow={()=>pushBackupSnapshot("manual")} onRestoreBackup={restoreBackupSnapshot} onFactoryReset={factoryReset} onRenameActivity={renameBusinessActivity}/>}
         {tab==="cloud"&&<CloudTab sbCfg={sbCfg} setSbCfg={setSbCfg} syncStatus={syncStatus} lastSync={lastSync} onSync={pushToCloud} onLoad={loadFromCloud} txns={txns} setTxns={setTxns} inbox={inbox} setInbox={setInbox} accs={accs} setAccs={setAccs} acts={acts} setActs={setActs} cats={cats} setCats={setCats} smsNums={smsNums} setSmsNums={setSmsNums} emails={emails} setEmails={setEmails}/>}
         {tab==="daily"&&<DailyTab todayTxns={todayTxns} todInc={todInc} todExp={todExp} summary={summary} sumLoad={sumLoad} getSummary={async()=>{setSumLoad(true);setSummary(await aiSummarize(todayTxns));setSumLoad(false);}} onEdit={tx=>{setEditTx(tx);setAddType(tx.type);setShowAdd(true);}} onDelete={delTx} inbox={inbox} onApprove={approveInbox} onDiscard={discardInbox} onEditPending={editInbox}/>}
       </div>
-      {showAdd&&<AddModal type={addType} existing={editTx} acts={acts} cats={cats} accs={accs} onSave={saveTx} onClose={()=>{setShowAdd(false);setEditTx(null);}}/>}
+      {showAdd&&<AddModal type={addType} existing={editTx} acts={acts} cats={cats} accs={accs} onAddAccount={addAccountFromModal} onAddActivity={addBusinessActivity} onSave={saveTx} onClose={()=>{setShowAdd(false);setEditTx(null);}}/>}
     </div>
   );
 }
@@ -2000,13 +1897,14 @@ function SmsOverviewModal({onClose}){
 }
 
 // ── EMAIL TAB ─────────────────────────────────────────────────────────────────
-function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClientId,defaultMicrosoftClientId}){
+function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleClientId,defaultMicrosoftClientId}){
   const[syncingIds,setSyncingIds]=useState({});
   const[syncProgress,setSyncProgress]=useState({});
   const[logs,setLogs]=useState({});
   const[toast,setToast]=useState("");
   const[connectBusy,setConnectBusy]=useState("");
   const[firstSyncPrompt,setFirstSyncPrompt]=useState(null); // {accId,fromDate,scanAll}
+  const[pendingView,setPendingView]=useState({open:false,accountId:""});
   const[aiPending,setAiPending]=useState(()=>((LS.get(AI_PENDING_EMAIL_KEY,[])||[]).map(normalizeAiPendingEntry)).filter(e=>e.accountId&&e.msgId));
   const[retryBusy,setRetryBusy]=useState(false);
   const retryBusyRef=useRef(false);
@@ -2050,6 +1948,11 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClient
     }
     return map;
   },{});
+  const pendingRows=(aiPending||[])
+    .map(normalizeAiPendingEntry)
+    .sort((a,b)=>Date.parse(a.nextRetryAt||0)-Date.parse(b.nextRetryAt||0));
+  const pendingRowsFiltered=pendingRows.filter(row=>!pendingView.accountId||row.accountId===pendingView.accountId);
+  const pendingAccountName=id=>emails.find(a=>a.id===id)?.email||emails.find(a=>a.id===id)?.label||id;
 
   useEffect(()=>{
     LS.set(AI_PENDING_EMAIL_KEY,aiPending.map(normalizeAiPendingEntry));
@@ -2271,22 +2174,25 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClient
           attachmentNames:evidence.attachmentNames||[],
           attachmentText:evidence.attachmentText||"",
           hasAttachment:Boolean(evidence.hasAttachment),
+          accountNames:accs.map(a=>a.name).filter(Boolean),
         },
       ),
       35000,
       "AI mail analysis",
     );
+    if(String(aiResult?.status||"").toLowerCase()==="retry"){
+      throw new Error(`ai_retry_required: ${aiResult?.reason||"unknown"}`);
+    }
     let items=Array.isArray(aiResult.transactions)?aiResult.transactions:[];
     items=sanitizeEmailTransactions(items,{
+      acts,
+      cats,
+      eDate:evidence.eDate||today(),
       subject:evidence.subject||"",
       from:evidence.from||"",
-      body:evidence.body||"",
-      attachmentNames:evidence.attachmentNames||[],
-      attachmentText:evidence.attachmentText||"",
-      hasAttachment:Boolean(evidence.hasAttachment),
-      aiCashFlow:Boolean(aiResult?.isCashFlow),
     });
-    if(!(Boolean(aiResult?.isCashFlow)&&Array.isArray(items)&&items.length>0))return[];
+    if(String(aiResult?.status||"").toLowerCase()!=="success")return[];
+    if(!Array.isArray(items)||!items.length)return[];
     return items;
   };
 
@@ -2365,30 +2271,10 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClient
         setProgress(acc.id,{phase:"processing",processed:done,total:toProcess.length,remaining:Math.max(0,toProcess.length-done),matched:messages.length,newCount:fresh.length,found:found.length,failed,skipped,pending:pendingQueued,failureReasons:{...failureReasons}});
       };
       const processMessage=async(msg)=>{
+        let evidence=null;
         try{
-          const evidence=await fetchMessageEvidence(provider,token,msg.id);
-          let items=[];
-          try{
-            items=await analyzeMessageEvidence(evidence);
-          }catch(aiErr){
-            pendingQueued++;
-            failed++;
-            const reason=classifySyncError(aiErr);
-            failureReasons[reason]=(failureReasons[reason]||0)+1;
-            const nowIso=new Date().toISOString();
-            enqueueAiPending({
-              id:aiPendingId(acc.id,msg.id),
-              accountId:acc.id,
-              provider,
-              msgId:msg.id,
-              queuedAt:nowIso,
-              attempts:1,
-              nextRetryAt:new Date(Date.now()+AI_RETRY_INTERVAL_MS).toISOString(),
-              lastError:String(aiErr?.message||reason||"ai_failed"),
-            });
-            processed.add(msg.id);
-            return;
-          }
+          evidence=await fetchMessageEvidence(provider,token,msg.id);
+          const items=await analyzeMessageEvidence(evidence);
           if(!items.length){
             skipped++;
             processed.add(msg.id);
@@ -2398,8 +2284,26 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClient
           processed.add(msg.id);
         }catch(e){
           failed++;
+          pendingQueued++;
           const reason=classifySyncError(e);
           failureReasons[reason]=(failureReasons[reason]||0)+1;
+          const nowIso=new Date().toISOString();
+          enqueueAiPending({
+            id:aiPendingId(acc.id,msg.id),
+            accountId:acc.id,
+            provider,
+            msgId:msg.id,
+            subject:evidence?.subject||msg?.subject||"",
+            from:evidence?.from||msg?.from?.emailAddress?.address||"",
+            emailDate:evidence?.eDate||"",
+            snippet:(evidence?.body||"").slice(0,220),
+            queuedAt:nowIso,
+            lastTriedAt:nowIso,
+            attempts:1,
+            nextRetryAt:new Date(Date.now()+AI_RETRY_INTERVAL_MS).toISOString(),
+            lastError:String(e?.message||reason||"processing_failed").slice(0,180),
+          });
+          processed.add(msg.id);
           console.error(e);
         }finally{
           done++;
@@ -2426,7 +2330,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClient
         seen.add(key);
         deduped.push(i);
       }
-      const valid=deduped.filter(i=>i.amount>0&&(i.type==="income"||i.type==="expense"));
+      const valid=deduped.filter(i=>i.amount>0&&(i.type==="income"||i.type==="expense"||i.type==="transfer"));
       const syncStamp=new Date().toISOString();
       setEmails(prev=>prev.map(a=>a.id===acc.id?{
         ...a,
@@ -2447,14 +2351,14 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClient
           setSyncing(acc.id,false);
           return;
         }
-        log(acc.id,`✓ Done — no income/expense found.${failed?` Failed: ${failed}.`:""}${skipped?` Skipped: ${skipped}.`:""}${pendingQueued?` Pending AI retry: ${pendingQueued}.`:""}`);
+        log(acc.id,`✓ Done — no cashflow transaction found.${failed?` Failed: ${failed}.`:""}${skipped?` Skipped: ${skipped}.`:""}${pendingQueued?` Pending AI retry: ${pendingQueued}.`:""}`);
         setProgress(acc.id,{phase:"done",processed:toProcess.length,total:toProcess.length,remaining:0,matched:messages.length,newCount:fresh.length,found:0,failed,skipped,pending:pendingQueued,failureReasons:{...failureReasons}});
         setSyncing(acc.id,false);
         return;
       }
       const queued=valid.map(i=>({...i,source:"email",reviewStatus:"pending"}));
       addInbox(queued);
-      log(acc.id,`AI found ${valid.length} income/expense item(s). Added to Review queue.${pendingQueued?` Pending AI retry: ${pendingQueued}.`:""}`);
+      log(acc.id,`AI found ${valid.length} transaction item(s). Added to Review queue.${pendingQueued?` Pending AI retry: ${pendingQueued}.`:""}`);
       setProgress(acc.id,{phase:"done",processed:toProcess.length,total:toProcess.length,remaining:0,matched:messages.length,newCount:fresh.length,found:valid.length,failed,skipped,pending:pendingQueued,failureReasons:{...failureReasons}});
       setToast(`📥 ${valid.length} item(s) queued for review.`);
     }catch(e){
@@ -2514,6 +2418,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClient
           setAiPending(prev=>prev.map(p=>p.id===row.id?{
             ...p,
             nextRetryAt:new Date(Date.now()+AI_RETRY_INTERVAL_MS).toISOString(),
+            lastTriedAt:new Date().toISOString(),
             lastError:"account_not_connected",
           }:p));
           continue;
@@ -2563,12 +2468,6 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClient
         }catch(err){
           const msg=String(err?.message||"unknown_error");
           const lower=msg.toLowerCase();
-          const notFound=lower.includes("404")||lower.includes("not found");
-          if(notFound){
-            markProcessedMessage(acc.id,row.msgId);
-            setAiPending(prev=>prev.filter(p=>p.id!==row.id));
-            continue;
-          }
           if(provider==="google"&&(lower.includes("google_reauth_required")||lower.includes("401"))){
             setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,token:null,connected:true,userDisconnected:false,reauthRequired:true}:a));
           }else if(lower.includes("401")||lower.includes("not signed in to microsoft")){
@@ -2578,6 +2477,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClient
             ...p,
             attempts:(Number(p.attempts)||0)+1,
             nextRetryAt:new Date(Date.now()+AI_RETRY_INTERVAL_MS).toISOString(),
+            lastTriedAt:new Date().toISOString(),
             lastError:msg.slice(0,180),
           }:p));
         }
@@ -2650,9 +2550,10 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClient
           <div style={{fontSize:13,color:"#94a3b8"}}>
             Connected accounts: <b style={{color:"#e2e8f0"}}>{connected}</b> / {emails.length}
             {emailInbox>0&&<span style={{marginLeft:10,color:"#f59e0b"}}>· {emailInbox} items pending in Inbox</span>}
-            {totalPendingAi>0&&<span style={{marginLeft:10,color:"#c4b5fd"}}>· AI retry queue: {totalPendingAi}{duePendingAi>0?` (due ${duePendingAi})`:""}</span>}
+            {totalPendingAi>0&&<button className="btn sm ghost" style={{marginLeft:10,padding:"2px 8px",fontSize:12,color:"#c4b5fd",borderColor:"#3b2f66"}} onClick={()=>setPendingView({open:true,accountId:""})}>AI retry queue: {totalPendingAi}{duePendingAi>0?` (due ${duePendingAi})`:""}</button>}
           </div>
           <div style={{display:"flex",gap:8,flexWrap:"wrap",justifyContent:"flex-end"}}>
+            {totalPendingAi>0&&<button className="btn sm ghost" disabled={Boolean(connectBusy)} onClick={()=>setPendingView({open:true,accountId:""})}>📋 View AI Pending</button>}
             {totalPendingAi>0&&<button className="btn sm ghost" disabled={retryBusy||Boolean(connectBusy)} onClick={()=>runPendingAiRetry({force:true})}>{retryBusy?"⏳ Retrying AI…":"🤖 Retry AI Pending"}</button>}
             {syncableAccounts.length>0&&<button className="btn sm pri" disabled={anySyncing||Boolean(connectBusy)} onClick={()=>syncableAccounts.forEach(a=>startSync(a,false))}>{anySyncing?"⏳ Syncing…":"🔄 Sync All Accounts"}</button>}
           </div>
@@ -2691,7 +2592,11 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClient
                   {!linked&&<span style={{color:"#f87171"}}>Disconnected</span>}
                   {acc.firstSyncCompleted&&acc.syncFromDate&&<span> · first synced from {fmtD(acc.syncFromDate)}</span>}
                   {acc.lastSync&&<span> · last sync {fmtDT(acc.lastSync)}</span>}
-                  {pendingByAccount[acc.id]>0&&<span style={{color:"#c4b5fd"}}> · AI retry pending {pendingByAccount[acc.id]}{duePendingByAccount[acc.id]?` (due ${duePendingByAccount[acc.id]})`:""}</span>}
+                  {pendingByAccount[acc.id]>0&&(
+                    <button className="btn sm ghost" style={{marginLeft:8,padding:"2px 8px",fontSize:11,color:"#c4b5fd",borderColor:"#3b2f66"}} onClick={()=>setPendingView({open:true,accountId:acc.id})}>
+                      AI retry pending {pendingByAccount[acc.id]}{duePendingByAccount[acc.id]?` (due ${duePendingByAccount[acc.id]})`:""}
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
@@ -2713,7 +2618,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClient
                   {syncProgress[acc.id].phase==="fetching"&&"Fetching emails…"}
                   {syncProgress[acc.id].phase==="processing"&&`Processed ${syncProgress[acc.id].processed||0}/${syncProgress[acc.id].total||0}${syncProgress[acc.id].failed?` · failed ${syncProgress[acc.id].failed}`:""}${syncProgress[acc.id].skipped?` · skipped ${syncProgress[acc.id].skipped}`:""}${syncProgress[acc.id].pending?` · pending AI ${syncProgress[acc.id].pending}`:""}`}
                   {syncProgress[acc.id].phase==="review"&&`Scan complete. ${syncProgress[acc.id].found||0} item(s) awaiting review.${syncProgress[acc.id].pending?` Pending AI retry: ${syncProgress[acc.id].pending}.`:""}`}
-                  {syncProgress[acc.id].phase==="done"&&`Sync completed.${Number(syncProgress[acc.id].found)>0?` ${syncProgress[acc.id].found} item(s) in review queue.`:""}${syncProgress[acc.id].pending?` Pending AI retry: ${syncProgress[acc.id].pending}.`:""}`}
+                  {syncProgress[acc.id].phase==="done"&&`Sync completed.${Number(syncProgress[acc.id].found)>0?` ${syncProgress[acc.id].found} transaction(s) in review queue.`:""}${syncProgress[acc.id].pending?` Pending AI retry: ${syncProgress[acc.id].pending}.`:""}`}
                   {syncProgress[acc.id].phase==="error"&&`Sync failed.${syncProgress[acc.id].pending?` Pending AI retry: ${syncProgress[acc.id].pending}.`:""}`}
                 </span>
                 <span style={{color:"#94a3b8"}}>
@@ -2756,6 +2661,47 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,defaultGoogleClient
         </div>
       )})}
 
+      {pendingView.open&&(
+        <div className="overlay"><div className="modal" style={{maxWidth:1020}}>
+          <MH title={`AI Pending Retry (${pendingRowsFiltered.length})`} onClose={()=>setPendingView({open:false,accountId:""})}/>
+          <div style={{fontSize:12,color:"#94a3b8",marginBottom:10}}>
+            Emails listed below were not fully processed by AI yet. They stay here and retry automatically every 30 minutes until processing succeeds.
+          </div>
+          {pendingView.accountId&&<div style={{fontSize:12,color:"#c4b5fd",marginBottom:10}}>Filtered account: {pendingAccountName(pendingView.accountId)}</div>}
+          {pendingRowsFiltered.length===0?(
+            <div className="card" style={{textAlign:"center",padding:26,color:"#64748b"}}>No pending retry items.</div>
+          ):(
+            <div style={{maxHeight:"56vh",overflowY:"auto",border:"1px solid #1e293b",borderRadius:10}}>
+              {pendingRowsFiltered.map(row=>{
+                const nextAt=Date.parse(row.nextRetryAt||"");
+                const due=!Number.isFinite(nextAt)||nextAt<=Date.now();
+                return(
+                  <div key={row.id} style={{padding:"10px 12px",borderBottom:"1px solid #1e293b",background:due?"#0f172a":"transparent"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",gap:10,flexWrap:"wrap",marginBottom:4}}>
+                      <div style={{fontSize:13,fontWeight:600,color:"#e2e8f0"}}>{row.subject||"(No subject captured)"}</div>
+                      <div style={{fontSize:11,color:due?"#fbbf24":"#64748b"}}>{due?"Due now":`Next retry ${fmtDT(row.nextRetryAt)}`}</div>
+                    </div>
+                    <div style={{fontSize:12,color:"#94a3b8",display:"flex",gap:10,flexWrap:"wrap"}}>
+                      <span>{row.provider==="microsoft"?"Outlook":"Gmail"} · {pendingAccountName(row.accountId)}</span>
+                      {row.from&&<span>From: {row.from}</span>}
+                      {row.emailDate&&<span>Email date: {fmtD(row.emailDate)}</span>}
+                      <span>Attempts: {row.attempts||0}</span>
+                      <span>Message ID: {row.msgId}</span>
+                    </div>
+                    <div style={{fontSize:11,color:"#fca5a5",marginTop:6}}>Reason: {row.lastError||"unknown_error"}</div>
+                    {row.snippet&&<div style={{fontSize:11,color:"#64748b",marginTop:4,lineHeight:1.6}}>{row.snippet.slice(0,260)}</div>}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          <div style={{display:"flex",gap:10,marginTop:12}}>
+            <button className="btn ghost" style={{flex:1}} onClick={()=>setPendingView({open:false,accountId:""})}>Close</button>
+            <button className="btn pri" style={{flex:2}} disabled={retryBusy||Boolean(connectBusy)||pendingRowsFiltered.length===0} onClick={()=>runPendingAiRetry({force:true})}>{retryBusy?"⏳ Retrying AI…":"🤖 Retry Pending Now"}</button>
+          </div>
+        </div></div>
+      )}
+
       {firstSyncPrompt&&<EmailFirstSyncModal value={firstSyncPrompt.fromDate} onClose={()=>setFirstSyncPrompt(null)} onStart={(fromDate)=>{
         const acc=emails.find(a=>a.id===firstSyncPrompt.accId);
         if(acc)runSync(acc,{scanAll:firstSyncPrompt.scanAll,fromDate,markFirstSync:!acc.firstSyncCompleted});
@@ -2771,7 +2717,7 @@ function EmailFirstSyncModal({value,onClose,onStart}){
     <div className="overlay"><div className="modal" style={{maxWidth:520}}>
       <MH title="First Sync Date" onClose={onClose}/>
       <div style={{fontSize:13,color:"#94a3b8",lineHeight:1.7,marginBottom:10}}>
-        Choose the starting date. LedgerAI will scan all emails from this date to today and use AI to extract income/expense transactions.
+        Choose the starting date. LedgerAI will scan all emails from this date to today and use AI to extract cashflow transactions.
       </div>
       <label>Sync from date</label>
       <input type="date" value={fromDate} onChange={e=>setFromDate(e.target.value)} max={today()}/>
@@ -2787,7 +2733,8 @@ function EmailReviewModal({initialItems,acts,cats,onClose,onSubmit}){
   const normalize=(i)=>{
     const act=i.businessActivity||acts[0]||"Personal";
     const cat=i.category||cats[act]?.[0]||"Other";
-    return{...i,type:i.type==="income"?"income":"expense",businessActivity:act,category:cat,date:i.date||today(),amount:Number(i.amount)||0,description:i.description||i.vendor||cat,paymentMethod:i.paymentMethod||""};
+    const rowType=i.type==="income"?"income":i.type==="transfer"?"transfer":"expense";
+    return{...i,type:rowType,businessActivity:act,category:cat,date:i.date||today(),amount:Number(i.amount)||0,description:i.description||i.vendor||cat,paymentMethod:i.paymentMethod||""};
   };
   const[rows,setRows]=useState(()=>initialItems.map(normalize));
   const update=(idx,patch)=>setRows(p=>p.map((r,i)=>i===idx?{...r,...patch}:r));
@@ -2800,7 +2747,7 @@ function EmailReviewModal({initialItems,acts,cats,onClose,onSubmit}){
         {rows.map((r,i)=>(
           <div key={`${r.emailMsgId||"m"}-${i}`} style={{border:"1px solid #1e293b",borderRadius:10,padding:10,background:"#0a0f1d"}}>
             <div style={{display:"grid",gridTemplateColumns:"110px 120px 120px 1fr 1fr",gap:8,marginBottom:8}}>
-              <div><label>Type</label><select value={r.type} onChange={e=>update(i,{type:e.target.value})}><option value="expense">Expense</option><option value="income">Income</option></select></div>
+              <div><label>Type</label><select value={r.type} onChange={e=>update(i,{type:e.target.value})}><option value="expense">Expense</option><option value="income">Income</option><option value="transfer">Transfer</option></select></div>
               <div><label>Date</label><input type="date" value={r.date||""} onChange={e=>update(i,{date:e.target.value})}/></div>
               <div><label>Amount</label><input type="number" value={r.amount||""} onChange={e=>update(i,{amount:Number(e.target.value)})}/></div>
               <div><label>Business</label><select value={r.businessActivity||acts[0]||""} onChange={e=>update(i,{businessActivity:e.target.value,category:cats[e.target.value]?.[0]||r.category||"Other"})}>{acts.map(a=><option key={a} value={a}>{a}</option>)}</select></div>
@@ -2875,7 +2822,7 @@ function LedgerTab({txns,filter,setFilter,acts,onEdit,onDelete}){
         <option value="All">All Activities</option>{acts.map(a=><option key={a}>{a}</option>)}
       </select>
       <select style={{width:"auto"}} value={filter.type} onChange={e=>setFilter(p=>({...p,type:e.target.value}))}>
-        <option value="All">All Types</option><option value="income">Income</option><option value="expense">Expense</option><option value="borrow">Borrowed Cash</option>
+        <option value="All">All Types</option><option value="income">Income</option><option value="expense">Expense</option><option value="transfer">Transfer</option><option value="borrow">Borrowed Cash</option>
       </select>
       <input type="date" style={{width:"auto"}} value={filter.from} onChange={e=>setFilter(p=>({...p,from:e.target.value}))}/>
       <input type="date" style={{width:"auto"}} value={filter.to} onChange={e=>setFilter(p=>({...p,to:e.target.value}))}/>
@@ -2926,7 +2873,7 @@ function InboxTab({inbox,addInbox,acts,cats,onApprove,onEdit,onDiscard}){
 
 function ICard({item,onApprove,onEdit,onDiscard}){
   const[ex,setEx]=useState(false);
-  const typeColor=item.type==="income"?"#34d399":item.type==="borrow"?"#f59e0b":"#f87171";
+  const typeColor=item.type==="income"?"#34d399":item.type==="borrow"?"#f59e0b":item.type==="transfer"?"#38bdf8":"#f87171";
   return(
     <div className="card" style={{marginBottom:8,borderLeft:`3px solid ${typeColor}`}}>
       <R style={{marginBottom:8}}>
@@ -2940,7 +2887,13 @@ function ICard({item,onApprove,onEdit,onDiscard}){
             <span style={{fontSize:11,color:"#64748b"}}>{fmtD(item.date)}</span>
           </div>
           <div style={{fontWeight:500,fontSize:14}}>{item.description||item.category}</div>
-          <div style={{fontSize:12,color:"#475569"}}>{item.businessActivity} · {item.category}{item.vendor?` · ${item.vendor}`:""}{item.paymentMethod?` · ${item.paymentMethod}`:""}{item.accountName?` · ${item.accountName}`:""}{item.borrowSource?` · Borrowed from ${item.borrowSource}`:""}</div>
+          <div style={{fontSize:12,color:"#475569"}}>
+            {item.businessActivity} · {item.category}
+            {item.vendor?` · ${item.vendor}`:""}
+            {item.paymentMethod?` · ${item.paymentMethod}`:""}
+            {item.type==="transfer"&&item.accountName&&item.targetAccountName?` · ${item.accountName} → ${item.targetAccountName}`:(item.accountName?` · ${item.accountName}`:"")}
+            {item.borrowSource?` · Borrowed from ${item.borrowSource}`:""}
+          </div>
           {item.emailSubject&&<div style={{fontSize:11,color:"#374151",marginTop:3,cursor:"pointer"}} onClick={()=>setEx(!ex)}>📧 {item.emailSubject.slice(0,60)}{item.emailSubject.length>60?"…":""} {ex?"▲":"▼"}</div>}
           {ex&&item.emailFrom&&<div style={{fontSize:11,color:"#374151",marginTop:2}}>From: {item.emailFrom}</div>}
         </div>
@@ -2991,8 +2944,10 @@ function JournalTab({txns}){
 function AccountsTab({accs,setAccs,txns,addInbox,acts,cats}){
   const[showForm,setShowForm]=useState(false);
   const[reconId,setReconId]=useState(null);
+  const[editAccId,setEditAccId]=useState(null);
   const assets=accs.filter(a=>a.cls==="asset");
   const liabs=accs.filter(a=>a.cls==="liability");
+  const editAcc=accs.find(a=>a.id===editAccId)||null;
   return(<div>
     <R style={{marginBottom:18}}><h2 className="h2" style={{flex:1}}>Accounts & Balances</h2><button className="btn sm pri" onClick={()=>setShowForm(true)}>+ Add Account</button></R>
     <div className="g4" style={{marginBottom:18}}>
@@ -3008,6 +2963,7 @@ function AccountsTab({accs,setAccs,txns,addInbox,acts,cats}){
           <div key={acc.id} className="card" style={{marginBottom:8,padding:"12px 16px"}}><R>
             <div style={{flex:1}}><div style={{fontWeight:500,fontSize:14}}>{acc.name}</div><div style={{fontSize:12,color:"#475569"}}>{acc.typeName}{acc.bank?` · ${acc.bank}`:""}{acc.number?` · ···${acc.number.slice(-4)}`:""}</div></div>
             <div className="mono" style={{fontSize:16,fontWeight:700,color:c,marginRight:12}}>{fmt(acc.balance||0)}</div>
+            <button className="btn sm" style={{background:"#0f172a",color:"#93c5fd",marginRight:6}} onClick={()=>setEditAccId(acc.id)}>✏️ Edit Balance</button>
             <button className="btn sm" style={{background:"#1a2234",color:"#818cf8",marginRight:6}} onClick={()=>setReconId(acc.id)}>📂 Reconcile</button>
             <button className="btn sm dan" onClick={()=>setAccs(p=>p.filter(a=>a.id!==acc.id))}>✕</button>
           </R></div>
@@ -3015,6 +2971,7 @@ function AccountsTab({accs,setAccs,txns,addInbox,acts,cats}){
       </div>
     ))}
     {showForm&&<AddAccModal onSave={a=>{setAccs(p=>[...p,{...a,id:gid()}]);setShowForm(false);}} onClose={()=>setShowForm(false)}/>}
+    {editAcc&&<EditAccBalanceModal account={editAcc} onSave={bal=>{setAccs(p=>p.map(a=>a.id===editAcc.id?{...a,balance:bal}:a));setEditAccId(null);}} onClose={()=>setEditAccId(null)}/>}
     {reconId&&<ReconModal account={accs.find(a=>a.id===reconId)} txns={txns} acts={acts} addInbox={addInbox} onClose={()=>setReconId(null)}/>}
   </div>);
 }
@@ -3032,6 +2989,19 @@ function AddAccModal({onSave,onClose}){
     <div style={{display:"flex",gap:10,marginTop:18}}>
       <button className="btn ghost" onClick={onClose} style={{flex:1}}>Cancel</button>
       <button className="btn pri" style={{flex:2}} onClick={()=>{if(!f.name)return alert("Enter account name");onSave({...f,cls:t.cls,typeName:t.label,balance:Number(f.balance)||0});}}>Add Account</button>
+    </div>
+  </div></div>);
+}
+
+function EditAccBalanceModal({account,onSave,onClose}){
+  const[balance,setBalance]=useState(String(account.balance??0));
+  return(<div className="overlay"><div className="modal" style={{maxWidth:420}}>
+    <MH title={`Edit Balance: ${account.name}`} onClose={onClose}/>
+    <label>Updated Balance (₹)</label>
+    <input type="number" value={balance} onChange={e=>setBalance(e.target.value)} placeholder="0"/>
+    <div style={{display:"flex",gap:10,marginTop:18}}>
+      <button className="btn ghost" onClick={onClose} style={{flex:1}}>Cancel</button>
+      <button className="btn pri" style={{flex:2}} onClick={()=>onSave(Number(balance)||0)}>Save Balance</button>
     </div>
   </div></div>);
 }
@@ -3408,7 +3378,7 @@ function AzureGuideModal({onClose}){
   );
 }
 // ── SETTINGS ──────────────────────────────────────────────────────────────────
-function SettingsTab({acts,setActs,cats,setCats,backups,onBackupNow,onRestoreBackup,onFactoryReset}){
+function SettingsTab({acts,setActs,cats,setCats,backups,onBackupNow,onRestoreBackup,onFactoryReset,onRenameActivity}){
   const[newAct,setNewAct]=useState("");const[selAct,setSelAct]=useState(acts[0]||"");
   const[newCN,setNewCN]=useState("");const[newCD,setNewCD]=useState("");
   const[aiLoad,setAiLoad]=useState(false);const[aiSug,setAiSug]=useState(null);
@@ -3421,7 +3391,19 @@ function SettingsTab({acts,setActs,cats,setCats,backups,onBackupNow,onRestoreBac
   const[aiSecret,setAiSecret]=useState(savedAICfg.secret||"");
   const[aiModel,setAiModel]=useState(savedAICfg.model||DEFAULT_AI_MODEL);
   const[aiStatus,setAiStatus]=useState("");
-  const addAct=()=>{if(!newAct.trim())return;const n=newAct.trim();setActs(p=>[...p,n]);setCats(p=>({...p,[n]:["General","Marketing","Operations","Other"]}));setNewAct("");};
+  const addAct=()=>{if(!newAct.trim())return;const n=newAct.trim();setActs(p=>[...p,n]);setCats(p=>({...p,[n]:[...NEW_ACTIVITY_DEFAULT_CATS]}));setNewAct("");};
+  const renameAct=(act)=>{
+    const next=window.prompt("Rename business activity",act);
+    if(next===null)return;
+    const target=next.trim();
+    if(!target)return alert("Activity name cannot be empty.");
+    if(onRenameActivity){
+      const res=onRenameActivity(act,target);
+      if(!res?.ok)alert(res?.error||"Unable to rename activity.");
+      return;
+    }
+    setActs(p=>p.map(x=>x===act?target:x));
+  };
   const checkAI=async()=>{
     if(!newCN.trim())return;
     setAiLoad(true);
@@ -3493,12 +3475,18 @@ function SettingsTab({acts,setActs,cats,setCats,backups,onBackupNow,onRestoreBac
         <button className="btn ghost" onClick={testAICfg}>Test AI Backend</button>
       </div>
       {aiStatus&&<div style={{fontSize:12,color:"#c7d2fe",marginTop:8}}>{aiStatus}</div>}
-      <div style={{fontSize:11,color:"#475569",marginTop:8}}>If endpoint is empty or unreachable, email sync falls back to heuristic extraction with lower accuracy.</div>
+      <div style={{fontSize:11,color:"#475569",marginTop:8}}>Email sync uses AI-only processing for body + attachments. If AI cannot process an email, it stays in AI Pending Retry until resolved.</div>
     </div>
     <div className="g2" style={{gap:18}}>
       <div className="card">
         <div style={{fontWeight:600,fontSize:14,marginBottom:14,color:"#94a3b8"}}>Business Activities</div>
-        {acts.map(a=><div key={a} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:"1px solid #1a2438",fontSize:13}}><span>{a}</span>{!DEF_ACTS.includes(a)&&<button className="btn sm dan" onClick={()=>setActs(p=>p.filter(x=>x!==a))}>✕</button>}</div>)}
+        {acts.map(a=><div key={a} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:"1px solid #1a2438",fontSize:13}}>
+          <span>{a}</span>
+          <div style={{display:"flex",gap:6}}>
+            <button className="btn sm ghost" style={{padding:"2px 8px"}} onClick={()=>renameAct(a)}>✎</button>
+            {!DEF_ACTS.includes(a)&&<button className="btn sm dan" onClick={()=>setActs(p=>p.filter(x=>x!==a))}>✕</button>}
+          </div>
+        </div>)}
         <label style={{marginTop:14}}>Add New Activity</label>
         <input value={newAct} onChange={e=>setNewAct(e.target.value)} placeholder="e.g. Real Estate Consulting"/>
         <button className="btn pri" style={{marginTop:8,width:"100%"}} onClick={addAct}>+ Add Activity</button>
@@ -3620,27 +3608,75 @@ function DailyTab({todayTxns,todInc,todExp,summary,sumLoad,getSummary,onEdit,onD
 }
 
 // ── ADD/EDIT MODAL ────────────────────────────────────────────────────────────
-function AddModal({type,existing,acts,cats,accs,onSave,onClose}){
+function AddModal({type,existing,acts,cats,accs,onAddAccount,onAddActivity,onSave,onClose}){
   const defaultAct=acts.includes("Personal")?"Personal":(acts[0]||"");
   const[form,setForm]=useState({
     type,date:today(),description:"",vendor:"",amount:"",
-    businessActivity:type==="borrow"?defaultAct:(acts[0]||""),
-    category:type==="borrow"?"Borrowed Cash":"",
-    paymentMethod:type==="borrow"?"Cash":"UPI",
-    accountId:"",liabilityAccountId:"",borrowSource:"",
+    businessActivity:type==="borrow"||type==="transfer"?defaultAct:(acts[0]||""),
+    category:type==="borrow"?"Borrowed Cash":type==="transfer"?"Account Transfer":"",
+    paymentMethod:type==="borrow"?"Cash":type==="transfer"?"Account Transfer":"UPI",
+    accountId:"",targetAccountId:"",liabilityAccountId:"",borrowSource:"",
     notes:"",
     ...existing
   });
   const[raw,setRaw]=useState("");const[imgB64,setImg]=useState(null);const[load,setLoad]=useState(false);const[sub,setSub]=useState("form");
+  const[showQuickAct,setShowQuickAct]=useState(false);
+  const[quickActName,setQuickActName]=useState("");
+  const[showQuickAcc,setShowQuickAcc]=useState(false);
+  const[quickAcc,setQuickAcc]=useState({name:"",type:"savings",number:"",bank:"",balance:""});
   const fref=useRef();
   const set=(k,v)=>setForm(p=>({...p,[k]:v}));
   const clist=cats[form.businessActivity]||["Other"];
   const assetAccs=accs.filter(a=>a.cls==="asset");
   const liabAccs=accs.filter(a=>a.cls==="liability");
+  const quickType=ACC_TYPES.find(x=>x.key===quickAcc.type)||ACC_TYPES[0];
+  const legacyBorrowEnabled=form.type==="borrow"||existing?.type==="borrow";
+  const tabTypes=["income","expense","transfer",...(legacyBorrowEnabled?["borrow"]:[])];
+  const addQuickAccount=()=>{
+    if(!onAddAccount)return;
+    if(!quickAcc.name.trim())return alert("Enter account name");
+    const created=onAddAccount({
+      name:quickAcc.name.trim(),
+      type:quickAcc.type,
+      number:(quickAcc.number||"").trim(),
+      bank:(quickAcc.bank||"").trim(),
+      balance:Number(quickAcc.balance)||0,
+      cls:quickType.cls,
+      typeName:quickType.label,
+    });
+    const newId=created?.id||"";
+    if(newId){
+      setForm(p=>{
+        if(p.type!=="transfer")return {...p,accountId:p.accountId||newId};
+        if(!p.accountId)return {...p,accountId:newId};
+        if(!p.targetAccountId)return {...p,targetAccountId:newId};
+        return p;
+      });
+    }
+    setQuickAcc({name:"",type:"savings",number:"",bank:"",balance:""});
+    setShowQuickAcc(false);
+  };
+  const addQuickActivity=()=>{
+    const name=quickActName.trim();
+    if(!name)return alert("Enter business activity name.");
+    if(!onAddActivity)return;
+    const created=onAddActivity(name);
+    if(!created?.ok)return alert(created?.error||"Unable to add business activity.");
+    if(form.type!=="borrow"&&form.type!=="transfer"){
+      const defaultCategory=created.defaultCategory||NEW_ACTIVITY_DEFAULT_CATS[0];
+      setForm(p=>({...p,businessActivity:created.name||name,category:defaultCategory}));
+    }
+    setQuickActName("");
+    setShowQuickAct(false);
+  };
   const setType=t=>setForm(p=>{
     if(t==="borrow"){
       const src=(p.borrowSource||p.vendor||"").trim();
       return {...p,type:t,businessActivity:defaultAct,category:"Borrowed Cash",paymentMethod:p.paymentMethod||"Cash",borrowSource:src,vendor:src||p.vendor};
+    }
+    if(t==="transfer"){
+      const desc=(p.description||"").trim()||"Account transfer";
+      return {...p,type:t,businessActivity:defaultAct,category:"Account Transfer",paymentMethod:"Account Transfer",description:desc,liabilityAccountId:"",borrowSource:"",vendor:""};
     }
     const nextAct=p.businessActivity||acts[0]||"";
     const nextCats=cats[nextAct]||["Other"];
@@ -3666,27 +3702,96 @@ function AddModal({type,existing,acts,cats,accs,onSave,onClose}){
   return(
     <div className="overlay"><div className="modal">
       <R style={{marginBottom:14}}>
-        <div style={{flex:1}}><div style={{display:"flex",gap:6,marginBottom:4}}>{["income","expense","borrow"].map(t=><button key={t} className={`btn sm ${form.type===t?(t==="income"?"suc":t==="expense"?"dan":""):"ghost"}`} style={form.type===t&&t==="borrow"?{background:"#f59e0b",color:"#fff"}:{}} onClick={()=>{setType(t);if(t==="borrow")setSub("form");}}>{t==="income"?"+ Income":t==="expense"?"− Expense":"↘ Borrowed"}</button>)}</div><div style={{fontSize:16,fontWeight:700}}>{existing?"Edit":"New"} {form.type==="income"?"Income":form.type==="expense"?"Expense":"Borrowed Cash"}</div></div>
+        <div style={{flex:1}}>
+          <div style={{display:"flex",gap:6,marginBottom:4,flexWrap:"wrap"}}>
+            {tabTypes.map(t=><button key={t} className={`btn sm ${form.type===t?(t==="income"?"suc":t==="expense"?"dan":""):"ghost"}`} style={form.type===t&&t==="borrow"?{background:"#f59e0b",color:"#fff"}:form.type===t&&t==="transfer"?{background:"#0ea5e9",color:"#fff"}:{}} onClick={()=>{setType(t);if(t==="borrow"||t==="transfer")setSub("form");}}>
+              {t==="income"?"+ Income":t==="expense"?"− Expense":t==="transfer"?"⇄ Transfer":"↘ Borrowed"}
+            </button>)}
+          </div>
+          <div style={{fontSize:16,fontWeight:700}}>
+            {existing?"Edit":"New"} {form.type==="income"?"Income":form.type==="expense"?"Expense":form.type==="transfer"?"Transfer":"Borrowed Cash"}
+          </div>
+        </div>
         <button className="btn ghost" onClick={onClose} style={{fontSize:16,padding:"3px 10px"}}>✕</button>
       </R>
-      {form.type!=="borrow"&&<div style={{display:"flex",gap:6,marginBottom:14,borderBottom:"1px solid #1e293b",paddingBottom:12}}>
+      {(form.type==="income"||form.type==="expense")&&<div style={{display:"flex",gap:6,marginBottom:14,borderBottom:"1px solid #1e293b",paddingBottom:12}}>
         {[["form","📝 Manual"],["paste","📋 Text AI"],["invoice","📷 Invoice"]].map(([k,l])=><button key={k} className={`btn sm ${sub===k?"pri":"ghost"}`} onClick={()=>setSub(k)}>{l}</button>)}
       </div>}
-      {form.type!=="borrow"&&sub==="paste"&&<><label>Paste receipt / SMS / email text</label><textarea rows={5} value={raw} onChange={e=>setRaw(e.target.value)} placeholder="Paste any receipt, bank SMS, Kite message…"/><button className="btn pri" style={{marginTop:10,width:"100%"}} onClick={runText} disabled={load||!raw.trim()}>{load?"🤖 Classifying…":"🤖 Auto-fill with AI"}</button></>}
-      {form.type!=="borrow"&&sub==="invoice"&&<><label>Upload invoice image</label><input type="file" ref={fref} accept="image/*" onChange={e=>{const f=e.target.files?.[0];if(!f)return;const rd=new FileReader();rd.onload=()=>setImg(rd.result.split(",")[1]);rd.readAsDataURL(f);}}/>{imgB64&&<img src={`data:image/jpeg;base64,${imgB64}`} style={{width:"100%",borderRadius:8,maxHeight:180,objectFit:"contain",background:"#0f172a",marginTop:8}} alt=""/>}<button className="btn pri" style={{marginTop:10,width:"100%"}} onClick={runImg} disabled={load||!imgB64}>{load?"🤖 Reading…":"🤖 Extract with AI"}</button></>}
+      {(form.type==="income"||form.type==="expense")&&sub==="paste"&&<><label>Paste receipt / SMS / email text</label><textarea rows={5} value={raw} onChange={e=>setRaw(e.target.value)} placeholder="Paste any receipt, bank SMS, Kite message…"/><button className="btn pri" style={{marginTop:10,width:"100%"}} onClick={runText} disabled={load||!raw.trim()}>{load?"🤖 Classifying…":"🤖 Auto-fill with AI"}</button></>}
+      {(form.type==="income"||form.type==="expense")&&sub==="invoice"&&<><label>Upload invoice image</label><input type="file" ref={fref} accept="image/*" onChange={e=>{const f=e.target.files?.[0];if(!f)return;const rd=new FileReader();rd.onload=()=>setImg(rd.result.split(",")[1]);rd.readAsDataURL(f);}}/>{imgB64&&<img src={`data:image/jpeg;base64,${imgB64}`} style={{width:"100%",borderRadius:8,maxHeight:180,objectFit:"contain",background:"#0f172a",marginTop:8}} alt=""/>}<button className="btn pri" style={{marginTop:10,width:"100%"}} onClick={runImg} disabled={load||!imgB64}>{load?"🤖 Reading…":"🤖 Extract with AI"}</button></>}
       {sub==="form"&&<>
-        {accs.length===0&&<div style={{background:"#450a0a",border:"1px solid #f87171",borderRadius:8,padding:"8px 12px",marginBottom:10,fontSize:12,color:"#fca5a5"}}>Add at least one account in the Accounts tab before saving transactions.</div>}
+        {accs.length===0&&<div style={{background:"#450a0a",border:"1px solid #f87171",borderRadius:8,padding:"8px 12px",marginBottom:10,fontSize:12,color:"#fca5a5"}}>{form.type==="transfer"?"Add at least two accounts (From/To) before saving transfers.":"Add at least one account in the Accounts tab before saving transactions."}</div>}
         {form.aiGenerated&&<div style={{background:"#0a0a1e",border:"1px solid #6366f1",borderRadius:8,padding:"7px 12px",marginBottom:10,fontSize:12,color:"#c7d2fe"}}>✨ AI auto-filled — review all fields</div>}
         {form.isNewCategory&&<div style={{background:"#0d0920",border:"1px solid #a855f7",borderRadius:8,padding:"5px 12px",marginBottom:8,fontSize:12,color:"#d8b4fe"}}>🆕 New category "{form.category}" will be created</div>}
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
           <div><label>Date</label><input type="date" value={form.date} onChange={e=>set("date",e.target.value)}/></div>
           <div><label>Amount (₹)</label><input type="number" value={form.amount} onChange={e=>set("amount",e.target.value)} placeholder="0"/></div>
         </div>
-        {form.type!=="borrow"&&<><label>Business Activity</label><select value={form.businessActivity} onChange={e=>set("businessActivity",e.target.value)}>{acts.map(a=><option key={a}>{a}</option>)}</select></>}
-        {form.type!=="borrow"&&<><label>Category</label><select value={form.category} onChange={e=>set("category",e.target.value)}>{clist.map(c=><option key={c}>{c}</option>)}</select></>}
+        {form.type!=="borrow"&&form.type!=="transfer"&&<>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:2}}>
+            <label style={{margin:0}}>Business Activity</label>
+            <button className="btn sm ghost" type="button" onClick={()=>setShowQuickAct(s=>!s)}>{showQuickAct?"Hide":"+ Add Activity"}</button>
+          </div>
+          <select value={form.businessActivity} onChange={e=>set("businessActivity",e.target.value)}>{acts.map(a=><option key={a}>{a}</option>)}</select>
+          {showQuickAct&&<div style={{background:"#0a0c12",border:"1px solid #1e293b",borderRadius:8,padding:12,marginTop:8}}>
+            <label>New Business Activity</label>
+            <input value={quickActName} onChange={e=>setQuickActName(e.target.value)} placeholder="e.g. Advisory Services"/>
+            <button className="btn pri" type="button" style={{marginTop:10,width:"100%"}} onClick={addQuickActivity}>Add Activity</button>
+          </div>}
+        </>}
+        {form.type!=="borrow"&&form.type!=="transfer"&&<><label>Category</label><select value={form.category} onChange={e=>set("category",e.target.value)}>{clist.map(c=><option key={c}>{c}</option>)}</select></>}
         {form.type==="borrow"&&<><label>Borrowed From Source</label><input value={form.borrowSource||""} onChange={e=>set("borrowSource",e.target.value)} placeholder="e.g. Rahul, Family, NBFC, Friend"/></>}
         {form.type==="borrow"&&liabAccs.length>0&&<><label>Liability Account (Optional)</label><select value={form.liabilityAccountId||""} onChange={e=>set("liabilityAccountId",e.target.value)}><option value="">— Select liability source —</option>{liabAccs.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select></>}
-        {accs.length>0&&<><label>{form.type==="expense"?"Paid From Account":form.type==="income"?"Received In Account":"Received In Account (Cash/Bank)"}</label><select value={form.accountId||""} onChange={e=>set("accountId",e.target.value)}><option value="">— Select account —</option>{(form.type==="borrow"?assetAccs:accs).map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select></>}
+        {form.type==="transfer"&&<>
+          <label>Transfer From Account</label>
+          <select value={form.accountId||""} onChange={e=>set("accountId",e.target.value)}>
+            <option value="">— Select source account —</option>
+            {accs.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}
+          </select>
+          <label>Transfer To Account</label>
+          <select value={form.targetAccountId||""} onChange={e=>set("targetAccountId",e.target.value)}>
+            <option value="">— Select destination account —</option>
+            {accs.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}
+          </select>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:4}}>
+            <div style={{fontSize:12,color:"#94a3b8"}}>Need a new account? Add it here.</div>
+            <button className="btn sm ghost" type="button" onClick={()=>setShowQuickAcc(s=>!s)}>{showQuickAcc?"Hide":"+ Quick Add Account"}</button>
+          </div>
+          {showQuickAcc&&<div style={{background:"#0a0c12",border:"1px solid #1e293b",borderRadius:8,padding:12,marginTop:8}}>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+              <div><label>Account Type</label><select value={quickAcc.type} onChange={e=>setQuickAcc(p=>({...p,type:e.target.value}))}>{ACC_TYPES.map(x=><option key={x.key} value={x.key}>{x.label} ({x.cls})</option>)}</select></div>
+              <div><label>Account Name</label><input value={quickAcc.name} onChange={e=>setQuickAcc(p=>({...p,name:e.target.value}))} placeholder="e.g. Rahul / New Wallet"/></div>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginTop:8}}>
+              <div><label>Bank / Institution</label><input value={quickAcc.bank} onChange={e=>setQuickAcc(p=>({...p,bank:e.target.value}))} placeholder="Optional"/></div>
+              <div><label>Last 4</label><input value={quickAcc.number} onChange={e=>setQuickAcc(p=>({...p,number:e.target.value}))} placeholder="Optional"/></div>
+              <div><label>Opening Balance (₹)</label><input type="number" value={quickAcc.balance} onChange={e=>setQuickAcc(p=>({...p,balance:e.target.value}))} placeholder="0"/></div>
+            </div>
+            <button className="btn pri" type="button" style={{marginTop:10,width:"100%"}} onClick={addQuickAccount}>Add Account</button>
+          </div>}
+        </>}
+        {form.type!=="transfer"&&<>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:2}}>
+            <label style={{margin:0}}>{form.type==="expense"?"Paid From Account":form.type==="income"?"Received In Account":"Received In Account (Cash/Bank)"}</label>
+            <button className="btn sm ghost" type="button" onClick={()=>setShowQuickAcc(s=>!s)}>{showQuickAcc?"Hide":"+ Add Account"}</button>
+          </div>
+          <select value={form.accountId||""} onChange={e=>set("accountId",e.target.value)}>
+            <option value="">— Select account —</option>
+            {(form.type==="borrow"?assetAccs:accs).map(a=><option key={a.id} value={a.id}>{a.name}</option>)}
+          </select>
+          {showQuickAcc&&<div style={{background:"#0a0c12",border:"1px solid #1e293b",borderRadius:8,padding:12,marginTop:8}}>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+              <div><label>Account Type</label><select value={quickAcc.type} onChange={e=>setQuickAcc(p=>({...p,type:e.target.value}))}>{ACC_TYPES.map(x=><option key={x.key} value={x.key}>{x.label} ({x.cls})</option>)}</select></div>
+              <div><label>Account Name</label><input value={quickAcc.name} onChange={e=>setQuickAcc(p=>({...p,name:e.target.value}))} placeholder="e.g. New Bank / Friend"/></div>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginTop:8}}>
+              <div><label>Bank / Institution</label><input value={quickAcc.bank} onChange={e=>setQuickAcc(p=>({...p,bank:e.target.value}))} placeholder="Optional"/></div>
+              <div><label>Last 4</label><input value={quickAcc.number} onChange={e=>setQuickAcc(p=>({...p,number:e.target.value}))} placeholder="Optional"/></div>
+              <div><label>Opening Balance (₹)</label><input type="number" value={quickAcc.balance} onChange={e=>setQuickAcc(p=>({...p,balance:e.target.value}))} placeholder="0"/></div>
+            </div>
+            <button className="btn pri" type="button" style={{marginTop:10,width:"100%"}} onClick={addQuickAccount}>Add Account</button>
+          </div>}
+        </>}
         <label>Description</label><input value={form.description} onChange={e=>set("description",e.target.value)} placeholder="Brief description"/>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
           <div><label>Vendor</label><input value={form.vendor||""} onChange={e=>set("vendor",e.target.value)} placeholder="Optional"/></div>
@@ -3700,10 +3805,20 @@ function AddModal({type,existing,acts,cats,accs,onSave,onClose}){
           <button className="btn ghost" onClick={onClose} style={{flex:1}}>Cancel</button>
           <button className="btn pri" style={{flex:2}} onClick={()=>{
             if(!form.amount||isNaN(Number(form.amount)))return alert("Enter a valid amount");
-            if(accs.length===0)return alert("Add at least one account in Accounts tab.");
-            if(!form.accountId)return alert("Select which account this transaction used.");
+            if(form.type==="transfer"&&accs.length<2)return alert("Add at least two accounts before saving a transfer.");
+            if(form.type!=="transfer"&&accs.length===0)return alert("Add at least one account in Accounts tab.");
+            if(!form.accountId)return alert(form.type==="transfer"?"Select Transfer From account.":"Select which account this transaction used.");
+            if(form.type==="transfer"&&!form.targetAccountId)return alert("Select Transfer To account.");
+            if(form.type==="transfer"&&form.accountId===form.targetAccountId)return alert("Transfer From and To accounts must be different.");
             if(form.type==="borrow"&&!form.liabilityAccountId&&!(form.borrowSource||"").trim())return alert("Select liability account or enter borrowed source.");
             const amt=Number(form.amount);
+            if(form.type==="transfer"){
+              const fromName=accs.find(a=>a.id===form.accountId)?.name||"Source";
+              const toName=accs.find(a=>a.id===form.targetAccountId)?.name||"Destination";
+              const desc=(form.description||"").trim()||`Transfer: ${fromName} → ${toName}`;
+              onSave({...form,amount:amt,type:"transfer",description:desc,businessActivity:defaultAct,category:"Account Transfer",paymentMethod:"Account Transfer",isNewCategory:false,vendor:form.vendor||""});
+              return;
+            }
             if(form.type==="borrow"){
               const src=(form.borrowSource||form.vendor||"").trim();
               const desc=(form.description||"").trim()||`Cash borrowed from ${src||"Other source"}`;
@@ -3711,7 +3826,7 @@ function AddModal({type,existing,acts,cats,accs,onSave,onClose}){
               return;
             }
             onSave({...form,amount:amt,type:form.type});
-          }}>{existing?"Update Entry":`Save ${form.type==="income"?"Income":form.type==="expense"?"Expense":"Borrowed Cash"}`}</button>
+          }}>{existing?"Update Entry":`Save ${form.type==="income"?"Income":form.type==="expense"?"Expense":form.type==="transfer"?"Transfer":"Borrowed Cash"}`}</button>
         </div>
       </>}
     </div></div>
@@ -3730,7 +3845,12 @@ function TxTable({txns,onEdit,onDelete}){
         <span style={{color:"#475569",fontFamily:"DM Mono",fontSize:11}}>{fmtD(tx.date)}</span>
         <div><div style={{fontWeight:500}}>{tx.description||tx.category}</div>
           <div style={{fontSize:11,color:"#475569",display:"flex",gap:5,marginTop:1,flexWrap:"wrap"}}>
-            {tx.vendor&&<span>{tx.vendor}</span>}{tx.paymentMethod&&<span>· {tx.paymentMethod}</span>}{tx.accountName&&<span>· {tx.accountName}</span>}{tx.borrowSource&&<span>· from {tx.borrowSource}</span>}
+            {tx.vendor&&<span>{tx.vendor}</span>}
+            {tx.paymentMethod&&<span>· {tx.paymentMethod}</span>}
+            {tx.type==="transfer"
+              ? <span>· {tx.accountName||"From"} → {tx.targetAccountName||"To"}</span>
+              : tx.accountName&&<span>· {tx.accountName}</span>}
+            {tx.borrowSource&&<span>· from {tx.borrowSource}</span>}
             {tx.source==="email"&&<span style={{background:"#1a2010",color:"#86efac",padding:"0 4px",borderRadius:3,fontSize:10}}>📧</span>}
             {tx.source==="auto"&&<span style={{background:"#1e1b4b",color:"#818cf8",padding:"0 4px",borderRadius:3,fontSize:10}}>AI</span>}
             {tx.source==="statement"&&<span style={{background:"#052e16",color:"#34d399",padding:"0 4px",borderRadius:3,fontSize:10}}>Stmt</span>}
@@ -3738,7 +3858,7 @@ function TxTable({txns,onEdit,onDelete}){
         </div>
         <span style={{fontSize:11,color:tx.businessActivity==="Personal"?"#c084fc":"#64748b"}}>{tx.businessActivity}</span>
         <span style={{fontSize:11,color:"#64748b"}}>{tx.category}</span>
-        <span className="mono" style={{fontWeight:700,color:tx.type==="income"?"#34d399":tx.type==="borrow"?"#f59e0b":"#f87171"}}>{tx.type==="income"?"+":tx.type==="borrow"?"↘":"−"}{fmt(tx.amount)}</span>
+        <span className="mono" style={{fontWeight:700,color:tx.type==="income"?"#34d399":tx.type==="borrow"?"#f59e0b":tx.type==="transfer"?"#38bdf8":"#f87171"}}>{tx.type==="income"?"+":tx.type==="borrow"?"↘":tx.type==="transfer"?"⇄":"−"}{fmt(tx.amount)}</span>
         <button className="btn sm dan" style={{padding:"2px 6px"}} onClick={e=>{e.stopPropagation();onDelete(tx.id);}}>✕</button>
       </div>
     ))}
@@ -3765,7 +3885,7 @@ nav{border-bottom:1px solid #1a2438;padding:0 18px;display:flex;align-items:cent
 .btn.ghost{background:transparent;color:#94a3b8;border:1px solid #1e293b}.btn.ghost:hover{background:#1e293b;color:#e2e8f0}
 .btn:disabled{opacity:.5;cursor:not-allowed}
 .tag{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600}
-.tincome{background:#052e16;color:#34d399}.texpense{background:#450a0a;color:#f87171}.tborrow{background:#422006;color:#f59e0b}
+.tincome{background:#052e16;color:#34d399}.texpense{background:#450a0a;color:#f87171}.tborrow{background:#422006;color:#f59e0b}.ttransfer{background:#082f49;color:#38bdf8}
 input,select,textarea{background:#0a0d18;border:1px solid #1a2438;border-radius:8px;color:#e2e8f0;font-family:inherit;padding:8px 12px;font-size:13px;width:100%;outline:none;transition:border .15s}
 input:focus,select:focus,textarea:focus{border-color:#6366f1}
 input[type=checkbox]{width:auto;height:auto;margin:0}
