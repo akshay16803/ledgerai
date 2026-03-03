@@ -65,7 +65,7 @@ const amtClose=(a,b)=>Math.abs(a-b)<2;
 const strSim=(a,b)=>{a=(a||"").toLowerCase();b=(b||"").toLowerCase();let m=0;for(let c of a)if(b.includes(c))m++;return m/Math.max(a.length,b.length,1);};
 const LOCKED_OWNER_EMAIL = "akshaychouhan16803@gmail.com";
 const DEFAULT_GOOGLE_CLIENT_ID = "975238186836-47bvtn56uhrlcbe11n1pe1h26qbor5s1.apps.googleusercontent.com";
-const DEFAULT_MICROSOFT_CLIENT_ID = (import.meta.env.VITE_MICROSOFT_CLIENT_ID || "c44b4083-3bb0-49c1-b47d-974e53cbdf3c").trim();
+const DEFAULT_MICROSOFT_CLIENT_ID = (import.meta.env.VITE_MICROSOFT_CLIENT_ID || "").trim();
 const DEFAULT_AI_MODEL = "claude-sonnet-4-20250514";
 const EMAIL_SYNC_CACHE_VERSION = "v5";
 
@@ -2369,6 +2369,8 @@ function CloudTab({sbCfg,setSbCfg,syncStatus,lastSync,onSync,onLoad,txns,setTxns
       alert("Microsoft connector is not configured. Admin: set VITE_MICROSOFT_CLIENT_ID or enter Azure Application (Client) ID here.");
       return;
     }
+    // Persist client ID even if auth popup fails, so Email->Connect Outlook can still use it.
+    setSbCfg(p=>({...p,clientId:resolvedClientId}));
     setConnecting(true);
     try{
       const account=await odLogin(resolvedClientId);
