@@ -427,7 +427,7 @@ async function callAI(messages,max_tokens=800){
   const ctrl=new AbortController();
   const timer=setTimeout(()=>ctrl.abort(),25000);
   try{
-    const r=await fetch(endpoint,{method:"POST",headers:{"Content-Type":"application/json",...(secret?{"x-ledgerai-key":secret}:{})},body:JSON.stringify({model,max_tokens,messages}),signal:ctrl.signal});
+    const r=await fetch(endpoint,{method:"POST",headers:{"Content-Type":"application/json",...(secret?{"Authorization":`Bearer ${secret}`}:{})},body:JSON.stringify({model,max_tokens,messages}),signal:ctrl.signal});
     const txt=await r.text();
     let d={};
     try{d=JSON.parse(txt||"{}");}catch{}
@@ -436,7 +436,8 @@ async function callAI(messages,max_tokens=800){
       throw new Error(`AI ${r.status}: ${msg}`);
     }
     const out=
-      d.text
+      d.choices?.[0]?.message?.content       // OpenAI / OpenAI-compatible
+      ?? d.text
       ?? d.output_text
       ?? d.output
       ?? d.content?.[0]?.text
