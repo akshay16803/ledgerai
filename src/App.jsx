@@ -2486,17 +2486,23 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
       .map(normalizeAiPendingEntry)
       .filter(row=>row.accountId&&row.msgId)
       .filter(row=>{
+        // force=true (user clicked "Retry Now") bypasses the nextRetryAt cooldown
+        // and processes ALL pending items, not just overdue ones
+        if(force)return true;
         const nextAt=Date.parse(row.nextRetryAt||"");
         return !Number.isFinite(nextAt)||nextAt<=Date.now();
-      })
-      .slice(0,AI_RETRY_BATCH_SIZE);
-    if(!due.length)return;
+      });
+    // When force=true process everything; otherwise cap at batch size for background runs
+    const toProcess=force?due:due.slice(0,AI_RETRY_BATCH_SIZE);
+    if(!toProcess.length)return;
     retryBusyRef.current=true;
     setRetryBusy(true);
     retryLastRunRef.current=now;
     let recovered=0;
+    let processed=0;
     try{
-      for(const row of due){
+      for(const row of toProcess){
+        processed++;
         const accRaw=emails.find(a=>a.id===row.accountId);
         if(!accRaw){
           setAiPending(prev=>prev.filter(p=>p.id!==row.id));
@@ -2553,7 +2559,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
           if(queued.length){
             recovered+=queued.length;
             addInbox(queued);
-            log(acc.id,`🤖 AI retry recovered ${queued.length} item(s) from pending queue.`);
+            log(acc.id,`🤖 AI retry recovered ${queued.length} item(s) from pending queue. (${processed}/${toProcess.length})`);
           }
         }catch(err){
           const msg=String(err?.message||"unknown_error");
@@ -2572,7 +2578,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
           }:p));
         }
       }
-      if(recovered>0)setToast(`🤖 AI retry queued ${recovered} item(s) for review.`);
+      if(recovered>0)setToast(`🤖 AI retry queued ${recovered} item(s) for review (${toProcess.length} emails processed).`);
     }finally{
       retryBusyRef.current=false;
       setRetryBusy(false);
