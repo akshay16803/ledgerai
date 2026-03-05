@@ -2093,28 +2093,36 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
       const authResp=await requestGoogleToken(googleClientId,{prompt:"consent"});
       const token=authResp?.access_token||"";
       if(!token)throw new Error("google_token_missing");
+      // CRITICAL: For reconnection of an existing account, clear reauthRequired and save token
+      // IMMEDIATELY — before any API calls. If gmailGetProfile fails (network blip, quota, etc.)
+      // the catch block would otherwise leave reauthRequired:true, creating an endless loop.
+      if(existing){
+        setEmails(prev=>prev.map(a=>a.id===existing.id?{...a,token,connected:true,userDisconnected:false,reauthRequired:false,clientId:googleClientId,lastAuthAt:new Date().toISOString()}:a));
+        saveGmailTokenToSession(existing.id,token);
+      }
       const profile=await gmailGetProfile(token);
       const mail=(profile.emailAddress||"").trim();
-      if(!mail)throw new Error("Google did not return email address.");
+      if(!mail&&!existing)throw new Error("Google did not return email address.");
+      const mailToUse=mail||(existing?.email||"");
       const newAccId=gid();
       // Determine the final account ID before setState (for saving token to sessionStorage)
-      const existingByEmail=existing||emails.find(a=>providerOf(a)==="google"&&(a.email||"").toLowerCase()===mail.toLowerCase());
+      const existingByEmail=existing||emails.find(a=>providerOf(a)==="google"&&(a.email||"").toLowerCase()===mailToUse.toLowerCase());
       setEmails(prev=>{
         const next=[...prev];
         const ix=existing
           ?next.findIndex(a=>a.id===existing.id)
-          :next.findIndex(a=>providerOf(a)==="google"&&(a.email||"").toLowerCase()===mail.toLowerCase());
-        const base=hydrateEmailAccount({id:newAccId,provider:"google",label:mail.split("@")[0],email:mail,syncQuery:GMAIL_QUERY,maxEmails:100,autoPost:false,enabled:true,firstSyncCompleted:false,syncFromDate:"",autoSyncHourly:true});
+          :next.findIndex(a=>providerOf(a)==="google"&&(a.email||"").toLowerCase()===mailToUse.toLowerCase());
+        const base=hydrateEmailAccount({id:newAccId,provider:"google",label:mailToUse.split("@")[0],email:mailToUse,syncQuery:GMAIL_QUERY,maxEmails:100,autoPost:false,enabled:true,firstSyncCompleted:false,syncFromDate:"",autoSyncHourly:true});
         if(ix>=0){
           const cur=hydrateEmailAccount(next[ix]);
-          next[ix]={...cur,provider:"google",email:mail,token,connected:true,userDisconnected:false,reauthRequired:false,enabled:true,clientId:googleClientId,autoSyncHourly:cur.autoSyncHourly!==false,lastAuthAt:new Date().toISOString()};
+          next[ix]={...cur,provider:"google",email:mailToUse,token,connected:true,userDisconnected:false,reauthRequired:false,enabled:true,clientId:googleClientId,autoSyncHourly:cur.autoSyncHourly!==false,lastAuthAt:new Date().toISOString()};
         }else{
           next.unshift({...base,token,connected:true,userDisconnected:false,reauthRequired:false,clientId:googleClientId,lastAuthAt:new Date().toISOString()});
         }
         return next;
       });
-      saveGmailTokenToSession(existingByEmail?.id||newAccId,token);
-      setToast(`✅ Gmail connected: ${mail}`);
+      if(!existing)saveGmailTokenToSession(existingByEmail?.id||newAccId,token);
+      setToast(`✅ Gmail connected: ${mailToUse}`);
     }catch(err){
       const msg=String(err?.message||"");
       if(msg.includes("access_denied")){
@@ -2486,6 +2494,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
   const runPendingAiRetry=async({force=false}={})=>{
     const now=Date.now();
     if(retryBusyRef.current)return;
+    if(connectBusyRef.current)return; // never retry while an OAuth popup is open
     if(!force&&now-retryLastRunRef.current<15000)return;
     const due=(aiPending||[])
       .map(normalizeAiPendingEntry)
