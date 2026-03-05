@@ -2500,6 +2500,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
     retryLastRunRef.current=now;
     let recovered=0;
     let processed=0;
+    const reauthNeeded=new Set();
     try{
       for(const row of toProcess){
         processed++;
@@ -2510,6 +2511,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
         }
         const acc=hydrateEmailAccount(accRaw);
         const provider=providerOf(acc);
+        if(provider==="google"&&reauthNeeded.has(acc.id))continue;
         if(!isSyncReady(acc)){
           setAiPending(prev=>prev.map(p=>p.id===row.id?{
             ...p,
@@ -2564,18 +2566,35 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
         }catch(err){
           const msg=String(err?.message||"unknown_error");
           const lower=msg.toLowerCase();
-          if(provider==="google"&&(lower.includes("google_reauth_required")||lower.includes("401"))){
+          const isGoogleAuth=provider==="google"&&(lower.includes("google_reauth_required")||lower.includes("401"));
+          const isMsAuth=provider==="microsoft"&&(lower.includes("401")||lower.includes("not signed in to microsoft"));
+          if(isGoogleAuth){
+            reauthNeeded.add(acc.id);
             setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,token:null,connected:true,userDisconnected:false,reauthRequired:true}:a));
-          }else if(lower.includes("401")||lower.includes("not signed in to microsoft")){
+            // Don't advance nextRetryAt — keep email immediately due so it retries right after reconnect
+            setAiPending(prev=>prev.map(p=>p.id===row.id?{
+              ...p,
+              lastTriedAt:new Date().toISOString(),
+              lastError:msg.slice(0,180),
+            }:p));
+          }else if(isMsAuth){
             setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,token:null,connected:true,userDisconnected:false,reauthRequired:true}:a));
+            setAiPending(prev=>prev.map(p=>p.id===row.id?{
+              ...p,
+              attempts:(Number(p.attempts)||0)+1,
+              nextRetryAt:new Date(Date.now()+AI_RETRY_INTERVAL_MS).toISOString(),
+              lastTriedAt:new Date().toISOString(),
+              lastError:msg.slice(0,180),
+            }:p));
+          }else{
+            setAiPending(prev=>prev.map(p=>p.id===row.id?{
+              ...p,
+              attempts:(Number(p.attempts)||0)+1,
+              nextRetryAt:new Date(Date.now()+AI_RETRY_INTERVAL_MS).toISOString(),
+              lastTriedAt:new Date().toISOString(),
+              lastError:msg.slice(0,180),
+            }:p));
           }
-          setAiPending(prev=>prev.map(p=>p.id===row.id?{
-            ...p,
-            attempts:(Number(p.attempts)||0)+1,
-            nextRetryAt:new Date(Date.now()+AI_RETRY_INTERVAL_MS).toISOString(),
-            lastTriedAt:new Date().toISOString(),
-            lastError:msg.slice(0,180),
-          }:p));
         }
       }
       if(recovered>0)setToast(`🤖 AI retry queued ${recovered} item(s) for review (${toProcess.length} emails processed).`);
