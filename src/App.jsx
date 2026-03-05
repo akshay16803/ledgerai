@@ -4,6 +4,11 @@ const LS = {
   get: (k, d) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } },
   set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
 };
+const SS = {
+  get: (k, d) => { try { const v = sessionStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } },
+  set: (k, v) => { try { sessionStorage.setItem(k, JSON.stringify(v)); } catch {} },
+  del: (k) => { try { sessionStorage.removeItem(k); } catch {} },
+};
 
 const DEF_ACTS = ["Futures & Commodities Trading","Equity Trading","Kite / Zerodha Platform","Personal","Trial Business – Venture A","Trial Business – Venture B","Trial Business – Venture C"];
 const DEF_CATS = {
@@ -129,6 +134,25 @@ function quickHash(str=""){
 
 function sanitizeEmailsForStorage(list=[]){
   return (list||[]).map(a=>({...a,token:undefined}));
+}
+
+// Gmail token sessionStorage cache — tokens survive page refresh within the same tab
+// but are cleared when the tab is closed (sessionStorage is per-tab).
+// Google access tokens are valid for 3600s; we treat them as expired at 3500s to be safe.
+const GMAIL_TOKEN_TTL=3500*1000;
+function saveGmailTokenToSession(accountId,token){
+  if(!accountId||!token)return;
+  SS.set(`gmail_tok_${accountId}`,{token,expiry:Date.now()+GMAIL_TOKEN_TTL});
+}
+function loadGmailTokenFromSession(accountId){
+  if(!accountId)return null;
+  const cached=SS.get(`gmail_tok_${accountId}`,null);
+  if(!cached?.token)return null;
+  if(Date.now()>cached.expiry-60000){SS.del(`gmail_tok_${accountId}`);return null;} // <1 min left, treat as expired
+  return cached.token;
+}
+function clearGmailTokenFromSession(accountId){
+  if(accountId)SS.del(`gmail_tok_${accountId}`);
 }
 
 if(typeof window!=="undefined"){
@@ -973,7 +997,12 @@ export default function App(){
   const[cats,setCats]=useState(()=>LS.get("ledger_cats",DEF_CATS));
   const[accs,setAccs]=useState(()=>LS.get("ledger_accs",[]));
   const[inbox,setInbox]=useState(()=>LS.get("ledger_inbox",[]));
-  const[emails,setEmails]=useState(()=>LS.get("ledger_emails",[]).map(a=>({...hydrateEmailAccount(a),token:undefined})));
+  const[emails,setEmails]=useState(()=>LS.get("ledger_emails",[]).map(a=>{
+    const h=hydrateEmailAccount(a);
+    // Restore cached token from sessionStorage so page refreshes don't force reconnect
+    const cachedToken=h.provider!=="microsoft"?loadGmailTokenFromSession(h.id):undefined;
+    return{...h,token:cachedToken||undefined};
+  }));
   const[smsNums,setSmsNums]=useState(()=>LS.get("ledger_sms",[]));
   const[sbCfg,setSbCfg]=useState(()=>{
     const base=defaultCloudCfg();
@@ -1146,6 +1175,32 @@ export default function App(){
   useEffect(()=>LS.set("ledger_sms",smsNums),[smsNums]);
   useEffect(()=>LS.set("ledger_odcfg",sbCfg),[sbCfg]);
   useEffect(()=>LS.set("ledger_lastsync",lastSync),[lastSync]);
+
+  // Proactively refresh Gmail tokens before they expire so auto-sync never hits a stale token.
+  // Runs every 5 minutes; only tries a silent refresh when a token is missing or expiring within 10 min.
+  useEffect(()=>{
+    const interval=setInterval(()=>{
+      setEmails(prev=>{
+        prev.forEach(acc=>{
+          if(acc.provider==="microsoft"||!acc.connected||acc.userDisconnected||!acc.clientId)return;
+          const cached=SS.get(`gmail_tok_${acc.id}`,null);
+          if(!cached||(cached.expiry-Date.now())<10*60*1000){
+            new Promise((res,rej)=>initOAuth(acc.clientId,(err,r)=>err?rej(err):res(r),{prompt:"",loginHint:acc.email||""}))
+              .then(resp=>{
+                const token=resp?.access_token||"";
+                if(token){
+                  saveGmailTokenToSession(acc.id,token);
+                  setEmails(p=>p.map(a=>a.id===acc.id?{...a,token,connected:true,reauthRequired:false,lastAuthAt:new Date().toISOString()}:a));
+                }
+              })
+              .catch(()=>{});
+          }
+        });
+        return prev; // no state change here; updates happen inside the async .then()
+      });
+    },5*60*1000);
+    return()=>clearInterval(interval);
+  },[]);// eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(()=>{
     const t=setTimeout(()=>{pushBackupSnapshot("auto");},1200);
@@ -1998,10 +2053,18 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
     const resolvedClientId=(acc?.clientId||googleClientId||"").trim();
     if(!resolvedClientId)throw new Error("Google OAuth is not configured for this app yet.");
     const loginHint=(acc?.email||"").trim();
+    // 1. Check sessionStorage cache first — survives page refresh within the same browser tab
+    const cachedToken=loadGmailTokenFromSession(acc?.id);
+    if(cachedToken){
+      if(!acc?.token)setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,token:cachedToken,connected:true,userDisconnected:false,reauthRequired:false}:a));
+      return cachedToken;
+    }
+    // 2. Try silent refresh via Google Identity Services
     try{
       const silentResp=await requestGoogleToken(resolvedClientId,{prompt:"",loginHint});
       const token=silentResp?.access_token||"";
       if(token){
+        saveGmailTokenToSession(acc?.id,token);
         setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,token,connected:true,userDisconnected:false,reauthRequired:false,clientId:resolvedClientId,lastAuthAt:new Date().toISOString()}:a));
         return token;
       }
@@ -2010,9 +2073,11 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
     }
     if(acc?.token)return acc.token;
     if(!interactive)throw new Error("google_reauth_required");
+    // 3. Interactive consent — opens Google popup
     const consentResp=await requestGoogleToken(resolvedClientId,{prompt:"consent",loginHint});
     const token=consentResp?.access_token||"";
     if(!token)throw new Error("google_token_missing");
+    saveGmailTokenToSession(acc?.id,token);
     setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,token,connected:true,userDisconnected:false,reauthRequired:false,clientId:resolvedClientId,lastAuthAt:new Date().toISOString()}:a));
     return token;
   };
@@ -2029,12 +2094,15 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
       const profile=await gmailGetProfile(token);
       const mail=(profile.emailAddress||"").trim();
       if(!mail)throw new Error("Google did not return email address.");
+      const newAccId=gid();
+      // Determine the final account ID before setState (for saving token to sessionStorage)
+      const existingByEmail=existing||emails.find(a=>providerOf(a)==="google"&&(a.email||"").toLowerCase()===mail.toLowerCase());
       setEmails(prev=>{
         const next=[...prev];
         const ix=existing
           ?next.findIndex(a=>a.id===existing.id)
           :next.findIndex(a=>providerOf(a)==="google"&&(a.email||"").toLowerCase()===mail.toLowerCase());
-        const base=hydrateEmailAccount({id:gid(),provider:"google",label:mail.split("@")[0],email:mail,syncQuery:GMAIL_QUERY,maxEmails:100,autoPost:false,enabled:true,firstSyncCompleted:false,syncFromDate:"",autoSyncHourly:true});
+        const base=hydrateEmailAccount({id:newAccId,provider:"google",label:mail.split("@")[0],email:mail,syncQuery:GMAIL_QUERY,maxEmails:100,autoPost:false,enabled:true,firstSyncCompleted:false,syncFromDate:"",autoSyncHourly:true});
         if(ix>=0){
           const cur=hydrateEmailAccount(next[ix]);
           next[ix]={...cur,provider:"google",email:mail,token,connected:true,userDisconnected:false,reauthRequired:false,enabled:true,clientId:googleClientId,autoSyncHourly:cur.autoSyncHourly!==false,lastAuthAt:new Date().toISOString()};
@@ -2043,6 +2111,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
         }
         return next;
       });
+      saveGmailTokenToSession(existingByEmail?.id||newAccId,token);
       setToast(`✅ Gmail connected: ${mail}`);
     }catch(err){
       const msg=String(err?.message||"");
@@ -2102,6 +2171,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
 
   const disconnectAccount=(acc)=>{
     const provider=providerOf(acc);
+    if(provider==="google")clearGmailTokenFromSession(acc.id);
     setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,token:null,connected:false,userDisconnected:true,reauthRequired:false}:a));
     setToast(`${provider==="microsoft"?"Outlook":"Gmail"} disconnected: ${acc.email||acc.label||"account"}`);
   };
