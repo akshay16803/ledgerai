@@ -1963,6 +1963,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
   const[aiPending,setAiPending]=useState(()=>((LS.get(AI_PENDING_EMAIL_KEY,[])||[]).map(normalizeAiPendingEntry)).filter(e=>e.accountId&&e.msgId));
   const[retryBusy,setRetryBusy]=useState(false);
   const retryBusyRef=useRef(false);
+  const connectBusyRef=useRef("");
   const retryLastRunRef=useRef(0);
   const log=(id,msg)=>setLogs(p=>({...p,[id]:msg}));
   const googleClientId=(defaultGoogleClientId||DEFAULT_GOOGLE_CLIENT_ID||"").trim();
@@ -2087,6 +2088,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
     if(!googleClientId){alert("Google OAuth is not configured for this app yet.");return;}
     if(!window.google?.accounts?.oauth2){alert("Google Identity Services loading… please wait a moment and try again.");return;}
     setConnectBusy("google");
+    connectBusyRef.current="google";
     try{
       const authResp=await requestGoogleToken(googleClientId,{prompt:"consent"});
       const token=authResp?.access_token||"";
@@ -2123,6 +2125,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
         alert("Google sign-in was cancelled.");
       }else alert(`OAuth error: ${msg}`);
     }finally{
+      connectBusyRef.current="";
       setConnectBusy("");
     }
   };
@@ -2135,6 +2138,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
       return;
     }
     setConnectBusy("microsoft");
+    connectBusyRef.current="microsoft";
     try{
       const login=await msLoginMail(msClient);
       const account=login.account||{};
@@ -2159,6 +2163,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
     }catch(e){
       alert(`Microsoft OAuth error: ${friendlyMicrosoftAuthError(e)}`);
     }finally{
+      connectBusyRef.current="";
       setConnectBusy("");
     }
   };
@@ -2607,6 +2612,11 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
 
   useEffect(()=>{
     const runAutoSync=()=>{
+      // Don't run any auto-sync or retry while a connect/reconnect OAuth flow is in progress.
+      // The OAuth popup closing fires a "focus" event that would otherwise trigger a retry
+      // with a stale emails closure (token:null), immediately overwriting reauthRequired:false
+      // that connectGoogleAccount just set.
+      if(connectBusyRef.current)return;
       runPendingAiRetry({force:false}).catch(()=>{});
       if(Object.values(syncingIds).some(Boolean))return;
       const now=Date.now();
