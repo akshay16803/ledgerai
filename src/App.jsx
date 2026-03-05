@@ -854,20 +854,34 @@ function initOAuth(clientId,cb,opts={}){
   if(!window.google?.accounts?.oauth2){cb(new Error("Google Identity Services not loaded"),null);return;}
   const prompt=(opts?.prompt ?? "consent");
   const loginHint=(opts?.loginHint || "").trim();
+  // Timeout: 8s for silent refresh (prompt=""), 2 minutes for interactive consent popup
+  const timeout=prompt===""?8000:120000;
   const req={prompt};
   if(loginHint)req.login_hint=loginHint;
-  window.google.accounts.oauth2.initTokenClient({
-    client_id:clientId,
-    scope:"https://www.googleapis.com/auth/gmail.readonly",
-    callback:(r)=>{
-      if(r?.error)cb(new Error(r.error),null);
-      else cb(null,r);
-    },
-    error_callback:(e)=>{
-      const code=e?.type||e?.error||"oauth_error";
-      cb(new Error(code),null);
-    },
-  }).requestAccessToken(req);
+  let settled=false;
+  const timer=setTimeout(()=>{
+    if(!settled){settled=true;cb(new Error("oauth_timeout"),null);}
+  },timeout);
+  try{
+    window.google.accounts.oauth2.initTokenClient({
+      client_id:clientId,
+      scope:"https://www.googleapis.com/auth/gmail.readonly",
+      callback:(r)=>{
+        if(settled)return;
+        settled=true;clearTimeout(timer);
+        if(r?.error)cb(new Error(r.error),null);
+        else cb(null,r);
+      },
+      error_callback:(e)=>{
+        if(settled)return;
+        settled=true;clearTimeout(timer);
+        const code=e?.type||e?.error||"oauth_error";
+        cb(new Error(code),null);
+      },
+    }).requestAccessToken(req);
+  }catch(initErr){
+    if(!settled){settled=true;clearTimeout(timer);cb(initErr,null);}
+  }
 }
 
 async function msGraphFetch(url,token,extraHeaders={}){
@@ -1185,15 +1199,17 @@ export default function App(){
           if(acc.provider==="microsoft"||!acc.connected||acc.userDisconnected||!acc.clientId)return;
           const cached=SS.get(`gmail_tok_${acc.id}`,null);
           if(!cached||(cached.expiry-Date.now())<10*60*1000){
+            console.log(`[proactiveRefresh] refreshing token for ${acc.id} (cached=${Boolean(cached)} ttl=${cached?Math.round((cached.expiry-Date.now())/1000):0}s)`);
             new Promise((res,rej)=>initOAuth(acc.clientId,(err,r)=>err?rej(err):res(r),{prompt:"",loginHint:acc.email||""}))
               .then(resp=>{
                 const token=resp?.access_token||"";
                 if(token){
+                  console.log(`[proactiveRefresh] ✓ refreshed token for ${acc.id}`);
                   saveGmailTokenToSession(acc.id,token);
                   setEmails(p=>p.map(a=>a.id===acc.id?{...a,token,connected:true,reauthRequired:false,lastAuthAt:new Date().toISOString()}:a));
                 }
               })
-              .catch(()=>{});
+              .catch((refreshErr)=>{console.log(`[proactiveRefresh] ✗ failed for ${acc.id}: ${refreshErr?.message||"unknown"}`);});
           }
         });
         return prev; // no state change here; updates happen inside the async .then()
@@ -2054,30 +2070,49 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
     const resolvedClientId=(acc?.clientId||googleClientId||"").trim();
     if(!resolvedClientId)throw new Error("Google OAuth is not configured for this app yet.");
     const loginHint=(acc?.email||"").trim();
+    console.log(`[ensureGoogleToken] id=${acc?.id} email=${loginHint} interactive=${interactive} hasToken=${Boolean(acc?.token)}`);
     // 1. Check sessionStorage cache first — survives page refresh within the same browser tab
     const cachedToken=loadGmailTokenFromSession(acc?.id);
     if(cachedToken){
+      console.log(`[ensureGoogleToken] ✓ cache hit for ${acc?.id}`);
       if(!acc?.token)setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,token:cachedToken,connected:true,userDisconnected:false,reauthRequired:false}:a));
       return cachedToken;
     }
-    // 2. Try silent refresh via Google Identity Services
+    // 2. Try silent refresh via Google Identity Services (has 8s timeout via initOAuth)
     try{
+      console.log(`[ensureGoogleToken] cache miss, trying silent refresh for ${acc?.id}…`);
       const silentResp=await requestGoogleToken(resolvedClientId,{prompt:"",loginHint});
       const token=silentResp?.access_token||"";
       if(token){
+        console.log(`[ensureGoogleToken] ✓ silent refresh succeeded for ${acc?.id}`);
         saveGmailTokenToSession(acc?.id,token);
         setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,token,connected:true,userDisconnected:false,reauthRequired:false,clientId:resolvedClientId,lastAuthAt:new Date().toISOString()}:a));
         return token;
       }
     }catch(_err){
-      // Silent refresh can fail when Google needs user interaction. We'll fall back below.
+      console.log(`[ensureGoogleToken] silent refresh failed for ${acc?.id}: ${_err?.message||"unknown"}`);
     }
-    if(acc?.token)return acc.token;
-    if(!interactive)throw new Error("google_reauth_required");
-    // 3. Interactive consent — opens Google popup
+    // 3. Only use acc.token if it was obtained very recently (within token TTL window).
+    //    If sessionStorage cache expired, acc.token is almost certainly expired too — returning
+    //    an expired token causes 401 errors that trigger reauthRequired in an endless loop.
+    if(acc?.token&&acc?.lastAuthAt){
+      const authAge=Date.now()-Date.parse(acc.lastAuthAt);
+      if(Number.isFinite(authAge)&&authAge>=0&&authAge<GMAIL_TOKEN_TTL){
+        console.log(`[ensureGoogleToken] using acc.token (age ${Math.round(authAge/1000)}s < TTL ${GMAIL_TOKEN_TTL/1000}s)`);
+        return acc.token;
+      }
+      console.log(`[ensureGoogleToken] acc.token too old (age ${Math.round(authAge/1000)}s), skipping fallback`);
+    }
+    if(!interactive){
+      console.log(`[ensureGoogleToken] ✗ no valid token, not interactive → throwing google_reauth_required`);
+      throw new Error("google_reauth_required");
+    }
+    // 4. Interactive consent — opens Google popup
+    console.log(`[ensureGoogleToken] trying interactive consent popup for ${acc?.id}…`);
     const consentResp=await requestGoogleToken(resolvedClientId,{prompt:"consent",loginHint});
     const token=consentResp?.access_token||"";
     if(!token)throw new Error("google_token_missing");
+    console.log(`[ensureGoogleToken] ✓ interactive consent succeeded for ${acc?.id}`);
     saveGmailTokenToSession(acc?.id,token);
     setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,token,connected:true,userDisconnected:false,reauthRequired:false,clientId:resolvedClientId,lastAuthAt:new Date().toISOString()}:a));
     return token;
@@ -2087,16 +2122,19 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
     if(connectBusy)return;
     if(!googleClientId){alert("Google OAuth is not configured for this app yet.");return;}
     if(!window.google?.accounts?.oauth2){alert("Google Identity Services loading… please wait a moment and try again.");return;}
+    console.log(`[connectGoogleAccount] START existing=${existing?.id||"null"} email=${existing?.email||"new"}`);
     setConnectBusy("google");
     connectBusyRef.current="google";
     try{
       const authResp=await requestGoogleToken(googleClientId,{prompt:"consent"});
       const token=authResp?.access_token||"";
       if(!token)throw new Error("google_token_missing");
+      console.log(`[connectGoogleAccount] ✓ got token`);
       // CRITICAL: For reconnection of an existing account, clear reauthRequired and save token
       // IMMEDIATELY — before any API calls. If gmailGetProfile fails (network blip, quota, etc.)
       // the catch block would otherwise leave reauthRequired:true, creating an endless loop.
       if(existing){
+        console.log(`[connectGoogleAccount] saving token early for existing account ${existing.id}`);
         setEmails(prev=>prev.map(a=>a.id===existing.id?{...a,token,connected:true,userDisconnected:false,reauthRequired:false,clientId:googleClientId,lastAuthAt:new Date().toISOString()}:a));
         saveGmailTokenToSession(existing.id,token);
       }
@@ -2461,7 +2499,8 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
       setToast(`📥 ${valid.length} item(s) queued for review.`);
     }catch(e){
       const msg=String(e.message||"");
-      if(provider==="google"&&(msg.includes("google_reauth_required")||msg.includes("401"))){
+      console.log(`[runSync] CATCH for ${acc.id}: ${msg} interactive=${interactive} silent=${silent} connectBusy=${connectBusyRef.current}`);
+      if(provider==="google"&&(msg.includes("google_reauth_required")||msg.includes("401")||msg.includes("popup")||msg.includes("oauth_timeout"))){
         log(acc.id,interactive?"⚠ Google session needs refresh. Click Connect Gmail once to re-authorize.":"⚠ Google token expired during background sync — will retry automatically.");
         // ONLY mark reauthRequired from USER-INITIATED syncs (interactive && !silent).
         // Background auto-syncs silently skip — the proactive token refresh or next
@@ -2470,7 +2509,8 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
           setEmails(prev=>prev.map(a=>{
             if(a.id!==acc.id)return a;
             const recentAuth=a.lastAuthAt&&(Date.now()-Date.parse(a.lastAuthAt))<55*60*1000;
-            if(recentAuth)return a; // token lifetime hasn't elapsed, don't mark reauth
+            if(recentAuth){console.log(`[runSync] recentAuth guard: skipping reauthRequired=true (authAge=${Math.round((Date.now()-Date.parse(a.lastAuthAt))/1000)}s)`);return a;}
+            console.log(`[runSync] setting reauthRequired=true for ${a.id}`);
             return{...a,token:null,connected:true,userDisconnected:false,reauthRequired:true};
           }));
           alert("Google session needs refresh. Click Connect Gmail once, then sync will continue automatically.");
@@ -2517,46 +2557,61 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
       .map(normalizeAiPendingEntry)
       .filter(row=>row.accountId&&row.msgId)
       .filter(row=>{
-        // force=true (user clicked "Retry Now") bypasses the nextRetryAt cooldown
-        // and processes ALL pending items, not just overdue ones
         if(force)return true;
         const nextAt=Date.parse(row.nextRetryAt||"");
         return !Number.isFinite(nextAt)||nextAt<=Date.now();
       });
-    // When force=true process everything; otherwise cap at batch size for background runs
     const toProcess=force?due:due.slice(0,AI_RETRY_BATCH_SIZE);
-    if(!toProcess.length)return;
+    if(!toProcess.length){
+      if(force)setToast("No pending AI retry items to process.");
+      return;
+    }
     retryBusyRef.current=true;
     setRetryBusy(true);
     retryLastRunRef.current=now;
     let recovered=0;
     let processed=0;
+    let authErrors=0;
+    let aiErrors=0;
+    let skipped=0;
     const reauthNeeded=new Set();
+    console.log(`[runPendingAiRetry] START force=${force} items=${toProcess.length}`);
     try{
       for(const row of toProcess){
-        // If an OAuth reconnect started while we were already looping, stop immediately.
-        // Continuing would use stale tokens and the catch block could overwrite reauthRequired:false.
-        if(connectBusyRef.current)break;
+        if(connectBusyRef.current){console.log("[runPendingAiRetry] connectBusy detected, breaking");break;}
         processed++;
         const accRaw=emails.find(a=>a.id===row.accountId);
         if(!accRaw){
+          console.log(`[runPendingAiRetry] account ${row.accountId} not found, removing pending item`);
           setAiPending(prev=>prev.filter(p=>p.id!==row.id));
+          skipped++;
           continue;
         }
         const acc=hydrateEmailAccount(accRaw);
         const provider=providerOf(acc);
-        if(provider==="google"&&reauthNeeded.has(acc.id))continue;
+        if(provider==="google"&&reauthNeeded.has(acc.id)){skipped++;continue;}
         if(!isSyncReady(acc)){
+          console.log(`[runPendingAiRetry] account ${acc.id} not sync-ready, skipping`);
           setAiPending(prev=>prev.map(p=>p.id===row.id?{
             ...p,
             nextRetryAt:new Date(Date.now()+AI_RETRY_INTERVAL_MS).toISOString(),
             lastTriedAt:new Date().toISOString(),
             lastError:"account_not_connected",
           }:p));
+          skipped++;
+          continue;
+        }
+        // If account already has reauthRequired set, don't even try — tell user to reconnect first.
+        if(acc.reauthRequired&&force){
+          console.log(`[runPendingAiRetry] account ${acc.id} has reauthRequired=true, skipping`);
+          reauthNeeded.add(acc.id);
+          log(acc.id,`⚠ Account needs reconnection. Click Connect ${provider==="microsoft"?"Outlook":"Gmail"} first, then retry.`);
+          skipped++;
           continue;
         }
         try{
           let token=acc.token||"";
+          console.log(`[runPendingAiRetry] processing ${processed}/${toProcess.length}: msgId=${row.msgId} provider=${provider} accToken=${Boolean(token)}`);
           if(provider==="microsoft"){
             const msClient=sanitizeMsClientId((acc.msClientId||microsoftClientId||"").trim());
             if(!msClient)throw new Error("microsoft_client_missing");
@@ -2564,26 +2619,25 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
             token=auth.accessToken;
             const msAcc=auth.account||{};
             setEmails(prev=>prev.map(a=>a.id===acc.id?{
-              ...a,
-              token,
-              connected:true,
-              userDisconnected:false,
-              reauthRequired:false,
+              ...a,token,connected:true,userDisconnected:false,reauthRequired:false,
               msClientId:msClient,
               msAccountId:msAcc.homeAccountId||a.msAccountId||"",
               msUsername:msAcc.username||a.msUsername||a.email||"",
             }:a));
           }else{
-            // When force=true (user clicked "Retry AI Pending"), allow interactive OAuth
-            // so Google can open a popup for token refresh if silent methods fail.
-            // Background retries (force=false) stay non-interactive.
-            token=await ensureGoogleToken(acc,{interactive:force});
+            // For user-initiated retries (force=true), DON'T use interactive:true.
+            // Interactive popup may be blocked by browser in async context.
+            // Instead, rely on cached token from recent reconnect, or silent refresh.
+            // If both fail, tell user to reconnect first (clear feedback).
+            token=await ensureGoogleToken(acc,{interactive:false});
           }
+          console.log(`[runPendingAiRetry] got token for ${acc.id}, fetching evidence…`);
           const evidence=await fetchMessageEvidence(provider,token,row.msgId);
+          console.log(`[runPendingAiRetry] got evidence, running AI analysis…`);
           const items=await analyzeMessageEvidence(evidence);
           markProcessedMessage(acc.id,row.msgId);
           setAiPending(prev=>prev.filter(p=>p.id!==row.id));
-          if(!items.length)continue;
+          if(!items.length){console.log(`[runPendingAiRetry] AI found 0 items for msgId=${row.msgId}`);continue;}
           const queued=items.map(item=>({
             ...item,
             date:item.date||evidence.eDate||today(),
@@ -2605,23 +2659,32 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
           const lower=msg.toLowerCase();
           const isGoogleAuth=provider==="google"&&(lower.includes("google_reauth_required")||lower.includes("401"));
           const isMsAuth=provider==="microsoft"&&(lower.includes("401")||lower.includes("not signed in to microsoft"));
-          if(isGoogleAuth){
+          // Also detect popup/timeout errors from Google OAuth as auth failures
+          const isPopupError=provider==="google"&&(lower.includes("popup")||lower.includes("oauth_timeout"));
+          console.log(`[runPendingAiRetry] ERROR for msgId=${row.msgId}: ${msg} (isGoogleAuth=${isGoogleAuth} isPopupError=${isPopupError})`);
+          if(isGoogleAuth||isPopupError){
+            authErrors++;
             reauthNeeded.add(acc.id);
             if(force){
-              // User clicked "Retry AI Pending" — show them what happened
               log(acc.id,"⚠ Google session expired. Click Connect Gmail to reconnect, then retry.");
-              setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,token:null,connected:true,userDisconnected:false,reauthRequired:true}:a));
+              if(!connectBusyRef.current){
+                setEmails(prev=>prev.map(a=>{
+                  if(a.id!==acc.id)return a;
+                  const recentAuth=a.lastAuthAt&&(Date.now()-Date.parse(a.lastAuthAt))<55*60*1000;
+                  if(recentAuth)return a;
+                  return{...a,token:null,connected:true,userDisconnected:false,reauthRequired:true};
+                }));
+              }
             }else{
-              // Background retry — silently skip, proactive refresh will handle it
               log(acc.id,"⚠ Google token expired during AI retry — will retry automatically after token refresh.");
             }
-            // Don't advance nextRetryAt — keep email immediately due so it retries right after token refresh
             setAiPending(prev=>prev.map(p=>p.id===row.id?{
               ...p,
               lastTriedAt:new Date().toISOString(),
               lastError:msg.slice(0,180),
             }:p));
           }else if(isMsAuth){
+            authErrors++;
             if(force){
               log(acc.id,"⚠ Microsoft session expired. Click Connect Outlook to reconnect, then retry.");
               setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,token:null,connected:true,userDisconnected:false,reauthRequired:true}:a));
@@ -2636,6 +2699,8 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
               lastError:msg.slice(0,180),
             }:p));
           }else{
+            aiErrors++;
+            console.error(`[runPendingAiRetry] AI/processing error:`,err);
             setAiPending(prev=>prev.map(p=>p.id===row.id?{
               ...p,
               attempts:(Number(p.attempts)||0)+1,
@@ -2646,7 +2711,21 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
           }
         }
       }
-      if(recovered>0)setToast(`🤖 AI retry queued ${recovered} item(s) for review (${toProcess.length} emails processed).`);
+      // ALWAYS provide feedback when user clicked retry (force=true)
+      console.log(`[runPendingAiRetry] DONE force=${force} processed=${processed} recovered=${recovered} authErrors=${authErrors} aiErrors=${aiErrors} skipped=${skipped}`);
+      if(recovered>0){
+        setToast(`🤖 AI retry recovered ${recovered} item(s) for review (${toProcess.length} emails processed).`);
+      }else if(force&&toProcess.length>0){
+        if(authErrors>0){
+          setToast(`⚠ Gmail session expired for ${reauthNeeded.size} account(s). Click Connect Gmail first, then retry.`);
+        }else if(aiErrors>0){
+          setToast(`⚠ AI retry: ${aiErrors} email(s) failed processing. Check Settings → AI Backend.`);
+        }else if(skipped===toProcess.length){
+          setToast(`⚠ All ${toProcess.length} pending item(s) were skipped — accounts may need reconnection.`);
+        }else{
+          setToast(`🤖 AI retry processed ${processed} email(s) — no financial transactions found.`);
+        }
+      }
     }finally{
       retryBusyRef.current=false;
       setRetryBusy(false);
@@ -2660,7 +2739,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
       // The OAuth popup closing fires a "focus" event that would otherwise trigger a retry
       // with a stale emails closure (token:null), immediately overwriting reauthRequired:false
       // that connectGoogleAccount just set.
-      if(connectBusyRef.current)return;
+      if(connectBusyRef.current){console.log("[runAutoSync] skipped: connectBusy");return;}
       runPendingAiRetry({force:false}).catch(()=>{});
       if(Object.values(syncingIds).some(Boolean))return;
       const now=Date.now();
@@ -2685,7 +2764,9 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
       if(document.visibilityState==="visible")runAutoSync();
     };
     const t=setInterval(runAutoSync,60*1000);
-    const kick=setTimeout(runAutoSync,3000);
+    // Delay initial kick to 8 seconds (was 3s) so reconnect OAuth has time to complete
+    // before background processes start using the new token.
+    const kick=setTimeout(runAutoSync,8000);
     window.addEventListener("focus",runAutoSync);
     window.addEventListener("online",runAutoSync);
     document.addEventListener("visibilitychange",onVisible);
