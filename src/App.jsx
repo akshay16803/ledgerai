@@ -2462,23 +2462,25 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
     }catch(e){
       const msg=String(e.message||"");
       if(provider==="google"&&(msg.includes("google_reauth_required")||msg.includes("401"))){
-        log(acc.id,"⚠ Google session needs refresh. Click Connect Gmail once to re-authorize if sync keeps failing.");
-        // Guard: use updater to check LATEST state — don't overwrite a fresh reconnect
-        if(!connectBusyRef.current){
+        log(acc.id,interactive?"⚠ Google session needs refresh. Click Connect Gmail once to re-authorize.":"⚠ Google token expired during background sync — will retry automatically.");
+        // ONLY mark reauthRequired from USER-INITIATED syncs (interactive && !silent).
+        // Background auto-syncs silently skip — the proactive token refresh or next
+        // user action will recover. This prevents background noise from spamming "re-auth needed".
+        if(interactive&&!silent&&!connectBusyRef.current){
           setEmails(prev=>prev.map(a=>{
             if(a.id!==acc.id)return a;
-            const recentAuth=a.lastAuthAt&&(Date.now()-Date.parse(a.lastAuthAt))<30000;
-            if(recentAuth)return a;
+            const recentAuth=a.lastAuthAt&&(Date.now()-Date.parse(a.lastAuthAt))<55*60*1000;
+            if(recentAuth)return a; // token lifetime hasn't elapsed, don't mark reauth
             return{...a,token:null,connected:true,userDisconnected:false,reauthRequired:true};
           }));
+          alert("Google session needs refresh. Click Connect Gmail once, then sync will continue automatically.");
         }
-        if(interactive&&!silent)alert("Google session needs refresh. Click Connect Gmail once, then sync will continue automatically.");
       }else if(msg.includes("401")||msg.includes("Not signed in to Microsoft")){
-        log(acc.id,provider==="microsoft"?"⚠ Microsoft session expired — reconnect required.":"⚠ Token expired — reconnect required.");
-        if(!connectBusyRef.current){
+        log(acc.id,interactive?(provider==="microsoft"?"⚠ Microsoft session expired — reconnect required.":"⚠ Token expired — reconnect required."):"⚠ Token expired during background sync — will retry automatically.");
+        if(interactive&&!silent&&!connectBusyRef.current){
           setEmails(prev=>prev.map(a=>{
             if(a.id!==acc.id)return a;
-            const recentAuth=a.lastAuthAt&&(Date.now()-Date.parse(a.lastAuthAt))<30000;
+            const recentAuth=a.lastAuthAt&&(Date.now()-Date.parse(a.lastAuthAt))<55*60*1000;
             if(recentAuth)return a;
             return{...a,token:null,connected:true,userDisconnected:false,reauthRequired:true};
           }));
@@ -2602,32 +2604,18 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
           const isMsAuth=provider==="microsoft"&&(lower.includes("401")||lower.includes("not signed in to microsoft"));
           if(isGoogleAuth){
             reauthNeeded.add(acc.id);
-            // Only set reauthRequired:true if NO OAuth reconnect is in progress
-            // AND the account wasn't freshly re-authed in the last 30 seconds.
-            // Uses the setEmails updater to check the LATEST state (not stale closure).
-            if(!connectBusyRef.current){
-              setEmails(prev=>prev.map(a=>{
-                if(a.id!==acc.id)return a;
-                const recentAuth=a.lastAuthAt&&(Date.now()-Date.parse(a.lastAuthAt))<30000;
-                if(recentAuth)return a; // don't overwrite a fresh reconnect
-                return{...a,token:null,connected:true,userDisconnected:false,reauthRequired:true};
-              }));
-            }
-            // Don't advance nextRetryAt — keep email immediately due so it retries right after reconnect
+            // NEVER set reauthRequired:true from background AI retry.
+            // The proactive token refresh or next user-initiated sync will handle recovery.
+            // Just log and skip — don't spam the user with "re-auth needed".
+            log(acc.id,"⚠ Google token expired during AI retry — will retry automatically after token refresh.");
+            // Don't advance nextRetryAt — keep email immediately due so it retries right after token refresh
             setAiPending(prev=>prev.map(p=>p.id===row.id?{
               ...p,
               lastTriedAt:new Date().toISOString(),
               lastError:msg.slice(0,180),
             }:p));
           }else if(isMsAuth){
-            if(!connectBusyRef.current){
-              setEmails(prev=>prev.map(a=>{
-                if(a.id!==acc.id)return a;
-                const recentAuth=a.lastAuthAt&&(Date.now()-Date.parse(a.lastAuthAt))<30000;
-                if(recentAuth)return a;
-                return{...a,token:null,connected:true,userDisconnected:false,reauthRequired:true};
-              }));
-            }
+            log(acc.id,"⚠ Microsoft token expired during AI retry — will retry automatically.");
             setAiPending(prev=>prev.map(p=>p.id===row.id?{
               ...p,
               attempts:(Number(p.attempts)||0)+1,
