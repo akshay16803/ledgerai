@@ -2574,7 +2574,10 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
               msUsername:msAcc.username||a.msUsername||a.email||"",
             }:a));
           }else{
-            token=await ensureGoogleToken(acc,{interactive:false});
+            // When force=true (user clicked "Retry AI Pending"), allow interactive OAuth
+            // so Google can open a popup for token refresh if silent methods fail.
+            // Background retries (force=false) stay non-interactive.
+            token=await ensureGoogleToken(acc,{interactive:force});
           }
           const evidence=await fetchMessageEvidence(provider,token,row.msgId);
           const items=await analyzeMessageEvidence(evidence);
@@ -2604,10 +2607,14 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
           const isMsAuth=provider==="microsoft"&&(lower.includes("401")||lower.includes("not signed in to microsoft"));
           if(isGoogleAuth){
             reauthNeeded.add(acc.id);
-            // NEVER set reauthRequired:true from background AI retry.
-            // The proactive token refresh or next user-initiated sync will handle recovery.
-            // Just log and skip — don't spam the user with "re-auth needed".
-            log(acc.id,"⚠ Google token expired during AI retry — will retry automatically after token refresh.");
+            if(force){
+              // User clicked "Retry AI Pending" — show them what happened
+              log(acc.id,"⚠ Google session expired. Click Connect Gmail to reconnect, then retry.");
+              setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,token:null,connected:true,userDisconnected:false,reauthRequired:true}:a));
+            }else{
+              // Background retry — silently skip, proactive refresh will handle it
+              log(acc.id,"⚠ Google token expired during AI retry — will retry automatically after token refresh.");
+            }
             // Don't advance nextRetryAt — keep email immediately due so it retries right after token refresh
             setAiPending(prev=>prev.map(p=>p.id===row.id?{
               ...p,
@@ -2615,7 +2622,12 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
               lastError:msg.slice(0,180),
             }:p));
           }else if(isMsAuth){
-            log(acc.id,"⚠ Microsoft token expired during AI retry — will retry automatically.");
+            if(force){
+              log(acc.id,"⚠ Microsoft session expired. Click Connect Outlook to reconnect, then retry.");
+              setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,token:null,connected:true,userDisconnected:false,reauthRequired:true}:a));
+            }else{
+              log(acc.id,"⚠ Microsoft token expired during AI retry — will retry automatically.");
+            }
             setAiPending(prev=>prev.map(p=>p.id===row.id?{
               ...p,
               attempts:(Number(p.attempts)||0)+1,
