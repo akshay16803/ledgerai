@@ -2672,11 +2672,11 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
         .filter(acc=>{
           const last=Date.parse(acc.lastAutoSyncAt||acc.lastSync||"");
           if(!Number.isFinite(last))return true;
-          return (now-last)>=60*60*1000;
+          return (now-last)>=30*60*1000;
         });
       if(!due.length)return;
       due.forEach(acc=>{
-        log(acc.id,"⏱ Hourly auto-sync started (new emails only)...");
+        log(acc.id,"⏱ Auto-sync started (new emails only)...");
         setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,lastAutoSyncAt:new Date().toISOString()}:a));
         runSync(acc,{scanAll:false,auto:true,interactive:false,silent:true});
       });
