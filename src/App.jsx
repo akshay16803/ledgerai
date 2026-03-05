@@ -2463,11 +2463,26 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
       const msg=String(e.message||"");
       if(provider==="google"&&(msg.includes("google_reauth_required")||msg.includes("401"))){
         log(acc.id,"⚠ Google session needs refresh. Click Connect Gmail once to re-authorize if sync keeps failing.");
-        setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,token:null,connected:true,userDisconnected:false,reauthRequired:true}:a));
+        // Guard: use updater to check LATEST state — don't overwrite a fresh reconnect
+        if(!connectBusyRef.current){
+          setEmails(prev=>prev.map(a=>{
+            if(a.id!==acc.id)return a;
+            const recentAuth=a.lastAuthAt&&(Date.now()-Date.parse(a.lastAuthAt))<30000;
+            if(recentAuth)return a;
+            return{...a,token:null,connected:true,userDisconnected:false,reauthRequired:true};
+          }));
+        }
         if(interactive&&!silent)alert("Google session needs refresh. Click Connect Gmail once, then sync will continue automatically.");
       }else if(msg.includes("401")||msg.includes("Not signed in to Microsoft")){
         log(acc.id,provider==="microsoft"?"⚠ Microsoft session expired — reconnect required.":"⚠ Token expired — reconnect required.");
-        setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,token:null,connected:true,userDisconnected:false,reauthRequired:true}:a));
+        if(!connectBusyRef.current){
+          setEmails(prev=>prev.map(a=>{
+            if(a.id!==acc.id)return a;
+            const recentAuth=a.lastAuthAt&&(Date.now()-Date.parse(a.lastAuthAt))<30000;
+            if(recentAuth)return a;
+            return{...a,token:null,connected:true,userDisconnected:false,reauthRequired:true};
+          }));
+        }
       }else if(msg.includes("ai_config_error")){
         const detail=msg.replace("ai_config_error:","").trim();
         log(acc.id,`⚠ AI backend config issue: ${detail}`);
@@ -2517,6 +2532,9 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
     const reauthNeeded=new Set();
     try{
       for(const row of toProcess){
+        // If an OAuth reconnect started while we were already looping, stop immediately.
+        // Continuing would use stale tokens and the catch block could overwrite reauthRequired:false.
+        if(connectBusyRef.current)break;
         processed++;
         const accRaw=emails.find(a=>a.id===row.accountId);
         if(!accRaw){
@@ -2584,7 +2602,17 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
           const isMsAuth=provider==="microsoft"&&(lower.includes("401")||lower.includes("not signed in to microsoft"));
           if(isGoogleAuth){
             reauthNeeded.add(acc.id);
-            setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,token:null,connected:true,userDisconnected:false,reauthRequired:true}:a));
+            // Only set reauthRequired:true if NO OAuth reconnect is in progress
+            // AND the account wasn't freshly re-authed in the last 30 seconds.
+            // Uses the setEmails updater to check the LATEST state (not stale closure).
+            if(!connectBusyRef.current){
+              setEmails(prev=>prev.map(a=>{
+                if(a.id!==acc.id)return a;
+                const recentAuth=a.lastAuthAt&&(Date.now()-Date.parse(a.lastAuthAt))<30000;
+                if(recentAuth)return a; // don't overwrite a fresh reconnect
+                return{...a,token:null,connected:true,userDisconnected:false,reauthRequired:true};
+              }));
+            }
             // Don't advance nextRetryAt — keep email immediately due so it retries right after reconnect
             setAiPending(prev=>prev.map(p=>p.id===row.id?{
               ...p,
@@ -2592,7 +2620,14 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
               lastError:msg.slice(0,180),
             }:p));
           }else if(isMsAuth){
-            setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,token:null,connected:true,userDisconnected:false,reauthRequired:true}:a));
+            if(!connectBusyRef.current){
+              setEmails(prev=>prev.map(a=>{
+                if(a.id!==acc.id)return a;
+                const recentAuth=a.lastAuthAt&&(Date.now()-Date.parse(a.lastAuthAt))<30000;
+                if(recentAuth)return a;
+                return{...a,token:null,connected:true,userDisconnected:false,reauthRequired:true};
+              }));
+            }
             setAiPending(prev=>prev.map(p=>p.id===row.id?{
               ...p,
               attempts:(Number(p.attempts)||0)+1,
