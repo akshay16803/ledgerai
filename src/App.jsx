@@ -3219,46 +3219,350 @@ function ReconModal({account,txns,acts,addInbox,onClose}){
 }
 
 // ── REPORTS ───────────────────────────────────────────────────────────────────
+// ── PIE CHART COMPONENT ─────────────────────────────────────────────────────────
+function PieChart({data,size=200,onSliceClick}){
+  if(!data||!data.length)return null;
+  const total=data.reduce((s,d)=>s+d.value,0);
+  if(total===0)return null;
+  const COLORS=["#f87171","#fb923c","#fbbf24","#a3e635","#34d399","#22d3ee","#818cf8","#c084fc","#f472b6","#94a3b8"];
+  let cumulative=0;
+  const slices=data.map((d,i)=>{
+    const pct=d.value/total;
+    const startAngle=cumulative*360;
+    cumulative+=pct;
+    const endAngle=cumulative*360;
+    const largeArc=pct>0.5?1:0;
+    const startRad=(startAngle-90)*Math.PI/180;
+    const endRad=(endAngle-90)*Math.PI/180;
+    const r=size/2-2;
+    const cx=size/2,cy=size/2;
+    const x1=cx+r*Math.cos(startRad),y1=cy+r*Math.sin(startRad);
+    const x2=cx+r*Math.cos(endRad),y2=cy+r*Math.sin(endRad);
+    const path=pct>=0.9999?`M ${cx},${cy-r} A ${r},${r} 0 1,1 ${cx-0.01},${cy-r} Z`:`M ${cx},${cy} L ${x1},${y1} A ${r},${r} 0 ${largeArc},1 ${x2},${y2} Z`;
+    return{...d,path,color:COLORS[i%COLORS.length],pct,startAngle,endAngle};
+  });
+  return(
+    <svg width={size} height={size} style={{display:"block"}}>
+      {slices.map((s,i)=>(
+        <path key={i} d={s.path} fill={s.color} stroke="#0f1624" strokeWidth="2" 
+          style={{cursor:onSliceClick?"pointer":"default",transition:"transform 0.15s",transformOrigin:"center"}}
+          onClick={()=>onSliceClick&&onSliceClick(s)}
+          onMouseEnter={e=>e.target.style.transform="scale(1.03)"}
+          onMouseLeave={e=>e.target.style.transform="scale(1)"}
+        >
+          <title>{s.label}: {fmt(s.value)} ({(s.pct*100).toFixed(1)}%)</title>
+        </path>
+      ))}
+      <circle cx={size/2} cy={size/2} r={size/4} fill="#0f1624"/>
+      <text x={size/2} y={size/2-8} textAnchor="middle" fill="#64748b" fontSize="10" fontWeight="600">TOTAL</text>
+      <text x={size/2} y={size/2+12} textAnchor="middle" fill="#f1f5f9" fontSize="14" fontWeight="700" fontFamily="'DM Mono',monospace">{fmt(total)}</text>
+    </svg>
+  );
+}
+
+// ── BAR CHART COMPONENT ─────────────────────────────────────────────────────────
+function BarChart({data,height=180,barColor="#f87171",onClick}){
+  if(!data||!data.length)return null;
+  const maxVal=Math.max(...data.map(d=>d.value),1);
+  const barWidth=Math.min(40,Math.floor((100/data.length)*0.7));
+  return(
+    <div style={{height,display:"flex",alignItems:"flex-end",gap:4,padding:"0 4px"}}>
+      {data.map((d,i)=>{
+        const h=Math.max(4,(d.value/maxVal)*(height-30));
+        return(
+          <div key={i} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",cursor:onClick?"pointer":"default"}} onClick={()=>onClick&&onClick(d)}>
+            <div style={{fontSize:9,color:"#64748b",marginBottom:2,whiteSpace:"nowrap"}}>{fmt(d.value)}</div>
+            <div style={{width:"100%",maxWidth:barWidth,height:h,background:barColor,borderRadius:"4px 4px 0 0",transition:"all 0.2s"}} 
+              onMouseEnter={e=>e.target.style.opacity=0.8} onMouseLeave={e=>e.target.style.opacity=1}/>
+            <div style={{fontSize:10,color:"#94a3b8",marginTop:4,textAlign:"center",lineHeight:1.1}}>{d.label}</div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── DRILL-DOWN MODAL ────────────────────────────────────────────────────────────
+function DrillDownModal({title,transactions,onClose,color="#f87171"}){
+  const[sortBy,setSortBy]=useState("date");
+  const[sortDir,setSortDir]=useState("desc");
+  const sorted=[...transactions].sort((a,b)=>{
+    if(sortBy==="date")return sortDir==="desc"?(b.date||"").localeCompare(a.date||""):(a.date||"").localeCompare(b.date||"");
+    if(sortBy==="amount")return sortDir==="desc"?b.amount-a.amount:a.amount-b.amount;
+    if(sortBy==="vendor")return sortDir==="desc"?(b.vendor||"").localeCompare(a.vendor||""):(a.vendor||"").localeCompare(b.vendor||"");
+    return 0;
+  });
+  const total=transactions.reduce((s,t)=>s+t.amount,0);
+  const toggleSort=(col)=>{if(sortBy===col)setSortDir(d=>d==="desc"?"asc":"desc");else{setSortBy(col);setSortDir("desc");}};
+  return(
+    <div className="overlay" onClick={onClose}>
+      <div className="modal" style={{maxWidth:720,maxHeight:"85vh"}} onClick={e=>e.stopPropagation()}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+          <div>
+            <h3 style={{fontSize:18,fontWeight:700,color:"#f1f5f9",margin:0}}>{title}</h3>
+            <div style={{fontSize:13,color:"#64748b",marginTop:4}}>{transactions.length} transactions · Total: <span className="mono" style={{color}}>{fmt(total)}</span></div>
+          </div>
+          <button className="btn ghost sm" onClick={onClose}>✕ Close</button>
+        </div>
+        <div style={{display:"flex",gap:8,marginBottom:12}}>
+          <button className={`btn sm ${sortBy==="date"?"pri":"ghost"}`} onClick={()=>toggleSort("date")}>Date {sortBy==="date"&&(sortDir==="desc"?"↓":"↑")}</button>
+          <button className={`btn sm ${sortBy==="amount"?"pri":"ghost"}`} onClick={()=>toggleSort("amount")}>Amount {sortBy==="amount"&&(sortDir==="desc"?"↓":"↑")}</button>
+          <button className={`btn sm ${sortBy==="vendor"?"pri":"ghost"}`} onClick={()=>toggleSort("vendor")}>Vendor {sortBy==="vendor"&&(sortDir==="desc"?"↓":"↑")}</button>
+        </div>
+        <div style={{maxHeight:"55vh",overflowY:"auto"}}>
+          {sorted.map((tx,i)=>(
+            <div key={tx.id||i} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 12px",background:i%2===0?"#0a0d18":"transparent",borderRadius:6,marginBottom:2}}>
+              <div style={{width:70,fontSize:11,color:"#64748b"}}>{fmtD(tx.date)}</div>
+              <div style={{flex:1}}>
+                <div style={{fontSize:13,fontWeight:500,color:"#e2e8f0"}}>{tx.description||tx.category}</div>
+                <div style={{fontSize:11,color:"#64748b"}}>{tx.vendor&&<span>{tx.vendor} · </span>}{tx.paymentMethod&&<span>{tx.paymentMethod} · </span>}{tx.businessActivity}</div>
+              </div>
+              <div className="mono" style={{fontSize:14,fontWeight:600,color}}>{fmt(tx.amount)}</div>
+            </div>
+          ))}
+          {sorted.length===0&&<div style={{color:"#475569",textAlign:"center",padding:20}}>No transactions found.</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── ENHANCED REPORTS TAB ────────────────────────────────────────────────────────
 function ReportsTab({txns,acts,totInc,totExp}){
-  const dr=txns.filter(t=>t.type==="expense"&&t.businessActivity==="Personal");
+  const[drillDown,setDrillDown]=useState(null);
+  const[activeView,setActiveView]=useState("overview");
+  
+  // Expense calculations
+  const expenses=txns.filter(t=>t.type==="expense");
+  const dr=expenses.filter(t=>t.businessActivity==="Personal");
   const drT=dr.reduce((s,t)=>s+t.amount,0);
-  const catMap={};txns.filter(t=>t.type==="expense").forEach(t=>{catMap[t.category]=(catMap[t.category]||0)+t.amount;});
+  
+  // Category breakdown
+  const catMap={};expenses.forEach(t=>{catMap[t.category]=(catMap[t.category]||0)+t.amount;});
   const cats=Object.entries(catMap).sort((a,b)=>b[1]-a[1]);
   const maxC=cats[0]?.[1]||1;
+  const catPieData=cats.slice(0,10).map(([label,value])=>({label,value}));
+  
+  // Vendor breakdown
+  const vendorMap={};expenses.forEach(t=>{const v=(t.vendor||"Unknown").trim()||"Unknown";vendorMap[v]=(vendorMap[v]||0)+t.amount;});
+  const vendors=Object.entries(vendorMap).sort((a,b)=>b[1]-a[1]);
+  const vendorPieData=vendors.slice(0,10).map(([label,value])=>({label,value}));
+  
+  // Monthly trend (last 6 months)
+  const monthMap={};expenses.forEach(t=>{if(!t.date)return;const m=t.date.slice(0,7);monthMap[m]=(monthMap[m]||0)+t.amount;});
+  const months=Object.keys(monthMap).sort().slice(-6);
+  const monthData=months.map(m=>({label:new Date(m+"-01").toLocaleDateString("en-IN",{month:"short"}),value:monthMap[m]||0,fullMonth:m}));
+  
+  // Activity breakdown
+  const actMap={};expenses.forEach(t=>{actMap[t.businessActivity]=(actMap[t.businessActivity]||0)+t.amount;});
+  const actData=Object.entries(actMap).sort((a,b)=>b[1]-a[1]).map(([label,value])=>({label,value}));
+  
+  // Payment method breakdown
+  const payMap={};expenses.forEach(t=>{const p=(t.paymentMethod||"Unknown").trim()||"Unknown";payMap[p]=(payMap[p]||0)+t.amount;});
+  const payData=Object.entries(payMap).sort((a,b)=>b[1]-a[1]).slice(0,8).map(([label,value])=>({label,value}));
+  
   const emailTxns=txns.filter(t=>t.source==="email");
+  
+  // Drill-down handlers
+  const openCategoryDrill=(cat)=>{
+    const txs=expenses.filter(t=>t.category===cat);
+    setDrillDown({title:`Category: ${cat}`,transactions:txs,color:"#f87171"});
+  };
+  const openVendorDrill=(vendor)=>{
+    const v=vendor==="Unknown"?"":vendor;
+    const txs=expenses.filter(t=>(t.vendor||"").trim()===v||(v===""&&!(t.vendor||"").trim()));
+    setDrillDown({title:`Vendor: ${vendor}`,transactions:txs,color:"#fb923c"});
+  };
+  const openMonthDrill=(m)=>{
+    const txs=expenses.filter(t=>t.date&&t.date.startsWith(m));
+    const monthName=new Date(m+"-01").toLocaleDateString("en-IN",{month:"long",year:"numeric"});
+    setDrillDown({title:`Expenses: ${monthName}`,transactions:txs,color:"#818cf8"});
+  };
+  const openActivityDrill=(act)=>{
+    const txs=expenses.filter(t=>t.businessActivity===act);
+    setDrillDown({title:`Activity: ${act}`,transactions:txs,color:"#34d399"});
+  };
+  
   return(<div>
-    <h2 className="h2" style={{marginBottom:18}}>Reports</h2>
-    <div className="g2" style={{gap:18}}>
-      <div className="card">
-        <div style={{fontWeight:600,fontSize:14,marginBottom:14,color:"#94a3b8",borderBottom:"1px solid #1e293b",paddingBottom:10}}>Profit & Loss</div>
-        {acts.filter(a=>a!=="Personal").map(a=>{const inc=txns.filter(t=>t.type==="income"&&t.businessActivity===a).reduce((s,t)=>s+t.amount,0);const exp=txns.filter(t=>t.type==="expense"&&t.businessActivity===a).reduce((s,t)=>s+t.amount,0);if(!inc&&!exp)return null;return<div key={a} style={{marginBottom:8}}><div style={{fontSize:11,color:"#64748b",fontWeight:600}}>{a}</div><div style={{display:"flex",gap:12,paddingLeft:8,fontSize:12}}><span className="mono" style={{color:"#34d399"}}>Inc {fmt(inc)}</span><span className="mono" style={{color:"#f87171"}}>Exp {fmt(exp)}</span><span className="mono" style={{color:inc-exp>=0?"#818cf8":"#f59e0b"}}>Net {fmt(inc-exp)}</span></div></div>;})}
-        <div style={{borderTop:"1px solid #1e293b",marginTop:10,paddingTop:10}}>
-          <R style={{marginBottom:4}}><span style={{fontWeight:600,fontSize:13}}>Total Income</span><span className="mono" style={{color:"#34d399"}}>{fmt(totInc)}</span></R>
-          <R style={{marginBottom:4}}><span style={{fontWeight:600,fontSize:13}}>Total Expenses</span><span className="mono" style={{color:"#f87171"}}>{fmt(totExp)}</span></R>
-          <div style={{background:totInc-totExp>=0?"#052e16":"#450a0a",borderRadius:8,padding:"10px 12px",marginTop:8,display:"flex",justifyContent:"space-between",fontWeight:700}}>
-            <span>Net Profit / Loss</span><span className="mono" style={{color:totInc-totExp>=0?"#34d399":"#f87171"}}>{fmt(totInc-totExp)}</span>
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
+      <h2 className="h2" style={{marginBottom:0}}>Reports & Analytics</h2>
+      <div style={{display:"flex",gap:6}}>
+        {[["overview","Overview"],["expenses","Expense Deep Dive"],["vendors","Vendor Analysis"]].map(([k,l])=>(
+          <button key={k} className={`btn sm ${activeView===k?"pri":"ghost"}`} onClick={()=>setActiveView(k)}>{l}</button>
+        ))}
+      </div>
+    </div>
+    
+    {activeView==="overview"&&(
+      <div className="g2" style={{gap:18}}>
+        {/* P&L Summary */}
+        <div className="card">
+          <div style={{fontWeight:600,fontSize:14,marginBottom:14,color:"#94a3b8",borderBottom:"1px solid #1e293b",paddingBottom:10}}>Profit & Loss</div>
+          {acts.filter(a=>a!=="Personal").map(a=>{const inc=txns.filter(t=>t.type==="income"&&t.businessActivity===a).reduce((s,t)=>s+t.amount,0);const exp=txns.filter(t=>t.type==="expense"&&t.businessActivity===a).reduce((s,t)=>s+t.amount,0);if(!inc&&!exp)return null;return<div key={a} style={{marginBottom:8}}><div style={{fontSize:11,color:"#64748b",fontWeight:600}}>{a}</div><div style={{display:"flex",gap:12,paddingLeft:8,fontSize:12}}><span className="mono" style={{color:"#34d399"}}>Inc {fmt(inc)}</span><span className="mono" style={{color:"#f87171"}}>Exp {fmt(exp)}</span><span className="mono" style={{color:inc-exp>=0?"#818cf8":"#f59e0b"}}>Net {fmt(inc-exp)}</span></div></div>;})}
+          <div style={{borderTop:"1px solid #1e293b",marginTop:10,paddingTop:10}}>
+            <R style={{marginBottom:4}}><span style={{fontWeight:600,fontSize:13}}>Total Income</span><span className="mono" style={{color:"#34d399"}}>{fmt(totInc)}</span></R>
+            <R style={{marginBottom:4}}><span style={{fontWeight:600,fontSize:13}}>Total Expenses</span><span className="mono" style={{color:"#f87171"}}>{fmt(totExp)}</span></R>
+            <div style={{background:totInc-totExp>=0?"#052e16":"#450a0a",borderRadius:8,padding:"10px 12px",marginTop:8,display:"flex",justifyContent:"space-between",fontWeight:700}}>
+              <span>Net Profit / Loss</span><span className="mono" style={{color:totInc-totExp>=0?"#34d399":"#f87171"}}>{fmt(totInc-totExp)}</span>
+            </div>
+          </div>
+        </div>
+        
+        {/* Personal Drawings */}
+        <div className="card">
+          <div style={{fontWeight:600,fontSize:14,marginBottom:14,color:"#94a3b8",borderBottom:"1px solid #1e293b",paddingBottom:10}}>Personal Drawings</div>
+          <div className="mono" style={{fontSize:28,fontWeight:700,color:"#c084fc",marginBottom:14}}>{fmt(drT)}</div>
+          {Object.entries(dr.reduce((m,t)=>{m[t.category]=(m[t.category]||0)+t.amount;return m;},{})).sort((a,b)=>b[1]-a[1]).slice(0,5).map(([cat,amt])=>(
+            <R key={cat} style={{padding:"3px 0",fontSize:13,cursor:"pointer"}} onClick={()=>openCategoryDrill(cat)}>
+              <span style={{color:"#94a3b8"}}>{cat}</span><span className="mono" style={{color:"#c084fc"}}>{fmt(amt)}</span>
+            </R>
+          ))}
+          {dr.length===0&&<div style={{color:"#475569",fontSize:13}}>No drawings yet.</div>}
+        </div>
+        
+        {/* Monthly Trend */}
+        <div className="card" style={{gridColumn:"1/-1"}}>
+          <div style={{fontWeight:600,fontSize:14,marginBottom:14,color:"#94a3b8",borderBottom:"1px solid #1e293b",paddingBottom:10}}>Monthly Expense Trend</div>
+          {monthData.length>0?(
+            <BarChart data={monthData} height={160} barColor="#f87171" onClick={(d)=>openMonthDrill(d.fullMonth)}/>
+          ):(
+            <div style={{color:"#475569",fontSize:13,textAlign:"center",padding:20}}>No expense data yet.</div>
+          )}
+          <div style={{fontSize:11,color:"#64748b",textAlign:"center",marginTop:8}}>Click on a bar to see transactions</div>
+        </div>
+      </div>
+    )}
+    
+    {activeView==="expenses"&&(
+      <div className="g2" style={{gap:18}}>
+        {/* Pie Chart - Category */}
+        <div className="card">
+          <div style={{fontWeight:600,fontSize:14,marginBottom:14,color:"#94a3b8",borderBottom:"1px solid #1e293b",paddingBottom:10}}>Expenses by Category</div>
+          <div style={{display:"flex",justifyContent:"center",marginBottom:16}}>
+            <PieChart data={catPieData} size={200} onSliceClick={(s)=>openCategoryDrill(s.label)}/>
+          </div>
+          <div style={{fontSize:11,color:"#64748b",textAlign:"center",marginBottom:12}}>Click a slice to drill down</div>
+          <div style={{maxHeight:200,overflowY:"auto"}}>
+            {cats.map(([cat,amt],i)=>{
+              const COLORS=["#f87171","#fb923c","#fbbf24","#a3e635","#34d399","#22d3ee","#818cf8","#c084fc","#f472b6","#94a3b8"];
+              const pct=totExp>0?((amt/totExp)*100).toFixed(1):"0";
+              return(
+                <div key={cat} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 0",cursor:"pointer",borderBottom:"1px solid #1a2438"}} onClick={()=>openCategoryDrill(cat)}>
+                  <div style={{width:12,height:12,borderRadius:2,background:COLORS[i%COLORS.length],flexShrink:0}}/>
+                  <div style={{flex:1,fontSize:12,color:"#e2e8f0"}}>{cat}</div>
+                  <div className="mono" style={{fontSize:11,color:"#64748b"}}>{pct}%</div>
+                  <div className="mono" style={{fontSize:12,color:"#f87171",fontWeight:600}}>{fmt(amt)}</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+        
+        {/* Activity Breakdown */}
+        <div className="card">
+          <div style={{fontWeight:600,fontSize:14,marginBottom:14,color:"#94a3b8",borderBottom:"1px solid #1e293b",paddingBottom:10}}>Expenses by Activity</div>
+          <div style={{display:"flex",justifyContent:"center",marginBottom:16}}>
+            <PieChart data={actData} size={200} onSliceClick={(s)=>openActivityDrill(s.label)}/>
+          </div>
+          <div style={{maxHeight:200,overflowY:"auto"}}>
+            {actData.map((d,i)=>{
+              const COLORS=["#f87171","#fb923c","#fbbf24","#a3e635","#34d399","#22d3ee","#818cf8","#c084fc","#f472b6","#94a3b8"];
+              const pct=totExp>0?((d.value/totExp)*100).toFixed(1):"0";
+              return(
+                <div key={d.label} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 0",cursor:"pointer",borderBottom:"1px solid #1a2438"}} onClick={()=>openActivityDrill(d.label)}>
+                  <div style={{width:12,height:12,borderRadius:2,background:COLORS[i%COLORS.length],flexShrink:0}}/>
+                  <div style={{flex:1,fontSize:12,color:"#e2e8f0"}}>{d.label}</div>
+                  <div className="mono" style={{fontSize:11,color:"#64748b"}}>{pct}%</div>
+                  <div className="mono" style={{fontSize:12,color:"#34d399",fontWeight:600}}>{fmt(d.value)}</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+        
+        {/* Payment Method */}
+        <div className="card" style={{gridColumn:"1/-1"}}>
+          <div style={{fontWeight:600,fontSize:14,marginBottom:14,color:"#94a3b8",borderBottom:"1px solid #1e293b",paddingBottom:10}}>Expenses by Payment Method</div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:12}}>
+            {payData.map((d,i)=>{
+              const COLORS=["#818cf8","#34d399","#f87171","#fb923c","#fbbf24","#22d3ee","#c084fc","#f472b6"];
+              const pct=totExp>0?((d.value/totExp)*100).toFixed(1):"0";
+              return(
+                <div key={d.label} style={{background:"#0a0d18",borderRadius:8,padding:12,border:"1px solid #1a2438"}}>
+                  <div style={{fontSize:11,color:"#64748b",marginBottom:4}}>{d.label}</div>
+                  <div className="mono" style={{fontSize:18,fontWeight:700,color:COLORS[i%COLORS.length]}}>{fmt(d.value)}</div>
+                  <div style={{fontSize:10,color:"#475569"}}>{pct}% of total</div>
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>
-      <div className="card">
-        <div style={{fontWeight:600,fontSize:14,marginBottom:14,color:"#94a3b8",borderBottom:"1px solid #1e293b",paddingBottom:10}}>Personal Drawings</div>
-        <div className="mono" style={{fontSize:28,fontWeight:700,color:"#c084fc",marginBottom:14}}>{fmt(drT)}</div>
-        {Object.entries(dr.reduce((m,t)=>{m[t.category]=(m[t.category]||0)+t.amount;return m;},{})).sort((a,b)=>b[1]-a[1]).map(([cat,amt])=><R key={cat} style={{padding:"3px 0",fontSize:13}}><span style={{color:"#94a3b8"}}>{cat}</span><span className="mono" style={{color:"#c084fc"}}>{fmt(amt)}</span></R>)}
-        {dr.length===0&&<div style={{color:"#475569",fontSize:13}}>No drawings yet.</div>}
+    )}
+    
+    {activeView==="vendors"&&(
+      <div className="g2" style={{gap:18}}>
+        {/* Vendor Pie Chart */}
+        <div className="card">
+          <div style={{fontWeight:600,fontSize:14,marginBottom:14,color:"#94a3b8",borderBottom:"1px solid #1e293b",paddingBottom:10}}>Top Vendors (Pie)</div>
+          <div style={{display:"flex",justifyContent:"center",marginBottom:16}}>
+            <PieChart data={vendorPieData} size={200} onSliceClick={(s)=>openVendorDrill(s.label)}/>
+          </div>
+          <div style={{fontSize:11,color:"#64748b",textAlign:"center"}}>Click a slice to see all transactions</div>
+        </div>
+        
+        {/* Vendor List */}
+        <div className="card">
+          <div style={{fontWeight:600,fontSize:14,marginBottom:14,color:"#94a3b8",borderBottom:"1px solid #1e293b",paddingBottom:10}}>
+            All Vendors ({vendors.length})
+          </div>
+          <div style={{maxHeight:350,overflowY:"auto"}}>
+            {vendors.map(([vendor,amt],i)=>{
+              const count=expenses.filter(t=>(t.vendor||"").trim()===(vendor==="Unknown"?"":(vendor||"").trim())||(vendor==="Unknown"&&!(t.vendor||"").trim())).length;
+              const pct=totExp>0?((amt/totExp)*100).toFixed(1):"0";
+              return(
+                <div key={vendor} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 8px",cursor:"pointer",background:i%2===0?"#0a0d18":"transparent",borderRadius:6}} onClick={()=>openVendorDrill(vendor)}>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:13,fontWeight:500,color:"#e2e8f0"}}>{vendor}</div>
+                    <div style={{fontSize:11,color:"#64748b"}}>{count} transaction{count!==1?"s":""} · {pct}% of expenses</div>
+                  </div>
+                  <div className="mono" style={{fontSize:14,fontWeight:600,color:"#fb923c"}}>{fmt(amt)}</div>
+                </div>
+              );
+            })}
+            {vendors.length===0&&<div style={{color:"#475569",fontSize:13,textAlign:"center",padding:20}}>No vendor data yet.</div>}
+          </div>
+        </div>
+        
+        {/* Top Spenders */}
+        <div className="card" style={{gridColumn:"1/-1"}}>
+          <div style={{fontWeight:600,fontSize:14,marginBottom:14,color:"#94a3b8",borderBottom:"1px solid #1e293b",paddingBottom:10}}>Top 10 Vendors by Spend</div>
+          {vendors.slice(0,10).length>0?(
+            <div>
+              {vendors.slice(0,10).map(([vendor,amt],i)=>{
+                const pct=totExp>0?(amt/totExp)*100:0;
+                return(
+                  <div key={vendor} style={{marginBottom:10,cursor:"pointer"}} onClick={()=>openVendorDrill(vendor)}>
+                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+                      <span style={{fontSize:12,color:"#e2e8f0"}}>{i+1}. {vendor}</span>
+                      <span className="mono" style={{fontSize:12,color:"#fb923c"}}>{fmt(amt)}</span>
+                    </div>
+                    <div style={{background:"#1e293b",borderRadius:4,height:8,overflow:"hidden"}}>
+                      <div style={{height:"100%",background:`linear-gradient(90deg, #fb923c, #f97316)`,borderRadius:4,width:`${pct}%`,transition:"width 0.3s"}}/>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ):(
+            <div style={{color:"#475569",fontSize:13,textAlign:"center",padding:20}}>No vendor data yet.</div>
+          )}
+        </div>
       </div>
-      <div className="card">
-        <div style={{fontWeight:600,fontSize:14,marginBottom:14,color:"#94a3b8",borderBottom:"1px solid #1e293b",paddingBottom:10}}>Email Auto-Imports</div>
-        <div className="mono" style={{fontSize:28,fontWeight:700,color:"#86efac",marginBottom:8}}>{emailTxns.length}</div>
-        <div style={{fontSize:13,color:"#64748b",marginBottom:10}}>transactions from email</div>
-        <R style={{fontSize:13}}><span style={{color:"#94a3b8"}}>Expenses</span><span className="mono" style={{color:"#f87171"}}>{fmt(emailTxns.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amount,0))}</span></R>
-        <R style={{fontSize:13}}><span style={{color:"#94a3b8"}}>Income</span><span className="mono" style={{color:"#34d399"}}>{fmt(emailTxns.filter(t=>t.type==="income").reduce((s,t)=>s+t.amount,0))}</span></R>
-      </div>
-      <div className="card" style={{gridColumn:"1/-1"}}>
-        <div style={{fontWeight:600,fontSize:14,marginBottom:14,color:"#94a3b8",borderBottom:"1px solid #1e293b",paddingBottom:10}}>Expenses by Category</div>
-        {cats.map(([cat,amt])=><div key={cat} style={{marginBottom:8}}><R style={{marginBottom:3}}><span style={{fontSize:12,color:"#94a3b8"}}>{cat}</span><span className="mono" style={{fontSize:12,color:"#f87171"}}>{fmt(amt)}</span></R><div style={{background:"#1e293b",borderRadius:3,height:5,overflow:"hidden"}}><div style={{height:"100%",background:"#f87171",borderRadius:3,width:`${(amt/maxC)*100}%`}}/></div></div>)}
-        {cats.length===0&&<div style={{color:"#475569",fontSize:13}}>No expenses yet.</div>}
-      </div>
-    </div>
+    )}
+    
+    {/* Drill-Down Modal */}
+    {drillDown&&<DrillDownModal title={drillDown.title} transactions={drillDown.transactions} color={drillDown.color} onClose={()=>setDrillDown(null)}/>}
   </div>);
 }
 
