@@ -3695,65 +3695,69 @@ function ReportsTab({txns,acts,totInc,totExp}){
     
     {activeView==="activity"&&(
       <div className="g2" style={{gap:18}}>
-        {/* Activity-wise P&L */}
-        {acts.map(act=>{
-          const actInc=filteredTxns.filter(t=>t.type==="income"&&t.businessActivity===act).reduce((s,t)=>s+t.amount,0);
-          const actExp=filteredTxns.filter(t=>t.type==="expense"&&t.businessActivity===act).reduce((s,t)=>s+t.amount,0);
-          if(!actInc&&!actExp)return null;
-          const actCatMap={};filteredTxns.filter(t=>t.type==="expense"&&t.businessActivity===act).forEach(t=>{actCatMap[t.category]=(actCatMap[t.category]||0)+t.amount;});
-          const actCats=Object.entries(actCatMap).sort((a,b)=>b[1]-a[1]);
-          const actCatPieData=actCats.slice(0,8).map(([label,value])=>({label,value}));
-          
-          return(
-            <div key={act} className="card" data-testid={`activity-card-${act.replace(/\s+/g,'-').toLowerCase()}`}>
-              <div style={{fontWeight:600,fontSize:14,marginBottom:14,color:"#94a3b8",borderBottom:"1px solid #1e293b",paddingBottom:10,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                <span>{act}</span>
-                <span className="mono" style={{color:actInc-actExp>=0?"#34d399":"#f87171",fontSize:16}}>{fmt(actInc-actExp)}</span>
-              </div>
-              <div style={{display:"flex",gap:16,marginBottom:16}}>
-                <div style={{flex:1}}>
-                  <div style={{fontSize:11,color:"#64748b",marginBottom:4}}>Income</div>
-                  <div className="mono" style={{fontSize:20,fontWeight:700,color:"#34d399"}}>{fmt(actInc)}</div>
+        {/* Activity-wise P&L - use unique activities from transactions */}
+        {(() => {
+          const uniqueActs = [...new Set([...acts, ...filteredTxns.map(t => t.businessActivity).filter(Boolean)])];
+          const actCards = uniqueActs.map(act=>{
+            const actInc=filteredTxns.filter(t=>t.type==="income"&&t.businessActivity===act).reduce((s,t)=>s+t.amount,0);
+            const actExp=filteredTxns.filter(t=>t.type==="expense"&&t.businessActivity===act).reduce((s,t)=>s+t.amount,0);
+            if(!actInc&&!actExp)return null;
+            const actCatMap={};filteredTxns.filter(t=>t.type==="expense"&&t.businessActivity===act).forEach(t=>{actCatMap[t.category]=(actCatMap[t.category]||0)+t.amount;});
+            const actCats=Object.entries(actCatMap).sort((a,b)=>b[1]-a[1]);
+            const actCatPieData=actCats.slice(0,8).map(([label,value])=>({label,value}));
+            
+            return(
+              <div key={act} className="card" data-testid={`activity-card-${act.replace(/\s+/g,'-').toLowerCase()}`}>
+                <div style={{fontWeight:600,fontSize:14,marginBottom:14,color:"#94a3b8",borderBottom:"1px solid #1e293b",paddingBottom:10,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <span>{act}</span>
+                  <span className="mono" style={{color:actInc-actExp>=0?"#34d399":"#f87171",fontSize:16}}>{fmt(actInc-actExp)}</span>
                 </div>
-                <div style={{flex:1}}>
-                  <div style={{fontSize:11,color:"#64748b",marginBottom:4}}>Expenses</div>
-                  <div className="mono" style={{fontSize:20,fontWeight:700,color:"#f87171"}}>{fmt(actExp)}</div>
-                </div>
-              </div>
-              {actCatPieData.length>0&&(
-                <div>
-                  <div style={{fontSize:11,color:"#64748b",marginBottom:8}}>Expense Breakdown</div>
-                  <div style={{display:"flex",gap:16,alignItems:"flex-start"}}>
-                    <PieChart data={actCatPieData} size={120} onSliceClick={(s)=>{
-                      const txs=filteredTxns.filter(t=>t.type==="expense"&&t.businessActivity===act&&t.category===s.label);
-                      setDrillDown({title:`${act} - ${s.label}`,transactions:txs,color:"#818cf8"});
-                    }} chartId={`activity-${act.replace(/\s+/g,'-').toLowerCase()}`}/>
-                    <div style={{flex:1,maxHeight:150,overflowY:"auto"}}>
-                      {actCats.slice(0,6).map(([cat,amt],i)=>{
-                        const COLORS=["#f87171","#fb923c","#fbbf24","#a3e635","#34d399","#22d3ee","#818cf8","#c084fc"];
-                        return(
-                          <div key={cat} style={{display:"flex",alignItems:"center",gap:6,padding:"4px 0",fontSize:11,cursor:"pointer"}} onClick={()=>{
-                            const txs=filteredTxns.filter(t=>t.type==="expense"&&t.businessActivity===act&&t.category===cat);
-                            setDrillDown({title:`${act} - ${cat}`,transactions:txs,color:COLORS[i%COLORS.length]});
-                          }}>
-                            <div style={{width:8,height:8,borderRadius:2,background:COLORS[i%COLORS.length]}}/>
-                            <span style={{flex:1,color:"#94a3b8"}}>{cat}</span>
-                            <span className="mono" style={{color:"#e2e8f0"}}>{fmt(amt)}</span>
-                          </div>
-                        );
-                      })}
-                    </div>
+                <div style={{display:"flex",gap:16,marginBottom:16}}>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:11,color:"#64748b",marginBottom:4}}>Income</div>
+                    <div className="mono" style={{fontSize:20,fontWeight:700,color:"#34d399"}}>{fmt(actInc)}</div>
+                  </div>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:11,color:"#64748b",marginBottom:4}}>Expenses</div>
+                    <div className="mono" style={{fontSize:20,fontWeight:700,color:"#f87171"}}>{fmt(actExp)}</div>
                   </div>
                 </div>
-              )}
+                {actCatPieData.length>0&&(
+                  <div>
+                    <div style={{fontSize:11,color:"#64748b",marginBottom:8}}>Expense Breakdown</div>
+                    <div style={{display:"flex",gap:16,alignItems:"flex-start"}}>
+                      <PieChart data={actCatPieData} size={120} onSliceClick={(s)=>{
+                        const txs=filteredTxns.filter(t=>t.type==="expense"&&t.businessActivity===act&&t.category===s.label);
+                        setDrillDown({title:`${act} - ${s.label}`,transactions:txs,color:"#818cf8"});
+                      }} chartId={`activity-${act.replace(/\s+/g,'-').toLowerCase()}`}/>
+                      <div style={{flex:1,maxHeight:150,overflowY:"auto"}}>
+                        {actCats.slice(0,6).map(([cat,amt],i)=>{
+                          const COLORS=["#f87171","#fb923c","#fbbf24","#a3e635","#34d399","#22d3ee","#818cf8","#c084fc"];
+                          return(
+                            <div key={cat} style={{display:"flex",alignItems:"center",gap:6,padding:"4px 0",fontSize:11,cursor:"pointer"}} onClick={()=>{
+                              const txs=filteredTxns.filter(t=>t.type==="expense"&&t.businessActivity===act&&t.category===cat);
+                              setDrillDown({title:`${act} - ${cat}`,transactions:txs,color:COLORS[i%COLORS.length]});
+                            }}>
+                              <div style={{width:8,height:8,borderRadius:2,background:COLORS[i%COLORS.length]}}/>
+                              <span style={{flex:1,color:"#94a3b8"}}>{cat}</span>
+                              <span className="mono" style={{color:"#e2e8f0"}}>{fmt(amt)}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          }).filter(Boolean);
+          
+          return actCards.length > 0 ? actCards : (
+            <div className="card" style={{gridColumn:"1/-1"}}>
+              <div style={{color:"#475569",fontSize:13,textAlign:"center",padding:20}}>No activity data found for selected filters.</div>
             </div>
           );
-        })}
-        {acts.every(act=>{const actInc=filteredTxns.filter(t=>t.type==="income"&&t.businessActivity===act).reduce((s,t)=>s+t.amount,0);const actExp=filteredTxns.filter(t=>t.type==="expense"&&t.businessActivity===act).reduce((s,t)=>s+t.amount,0);return!actInc&&!actExp;})&&(
-          <div className="card" style={{gridColumn:"1/-1"}}>
-            <div style={{color:"#475569",fontSize:13,textAlign:"center",padding:20}}>No activity data found for selected filters.</div>
-          </div>
-        )}
+        })()}
       </div>
     )}
     
