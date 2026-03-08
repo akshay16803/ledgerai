@@ -23,40 +23,65 @@ LedgerAI is a personal finance/bookkeeping dashboard for Indian traders. Core ob
 - Expense drill-down modals with sorting
 - Vendor analysis view with top 10 ranking
 
-### Phase 2 (Current Session) - March 8, 2026
+### Phase 2 - March 8, 2026
 - **Date Range Filter** - Filter all reports by From/To dates
 - **Activity Filter** - Filter by specific business activity
 - **Activity Analysis View** - P&L breakdown per activity with pie charts
 - **Export Functionality** - CSV, Excel (XLS), PDF export
 - **Recurring Expense Detection** - Auto-detect patterns, manual marking
 - **Future Cashflow Tab** - 12-month projection based on recurring expenses
-- **AI-Powered Recurring Detection** - During email sync, AI identifies subscriptions (Netflix, insurance, utilities, EMIs)
+- **AI-Powered Recurring Detection** - During email sync, AI identifies subscriptions
+
+### Phase 3 (Current) - March 8, 2026
+- **Month-over-Month Comparison** - Compare current vs previous month expenses
+  - Overall total change with percentage
+  - Category-wise changes (top movers)
+  - Vendor-wise changes
+  - 6-month trend chart
+- **Removed Unused Tabs** - Simplified navigation (removed Journal, Day Review)
+- **Duplicate Detection** - AI generates transaction signatures to prevent SMS/Email duplicates
+- **Improved AI Retry** - Auto-refresh tokens before requiring reconnect
+- **SMS Transaction Analysis** - Enhanced SMS parsing with duplicate filtering
 
 ## Technical Stack
 - **Frontend**: React + Vite
 - **Storage**: localStorage + OneDrive cloud sync
-- **AI**: Cloudflare Workers AI for email analysis
+- **AI**: Cloudflare Workers AI for email/SMS analysis
+
+## SMS Integration Approach
+Due to browser security restrictions, SMS cannot be read directly. The solution:
+1. Use free forwarder apps (MacroDroid for Android, Shortcuts for iOS)
+2. These apps auto-forward bank SMS to connected Gmail
+3. LedgerAI picks them up during email sync
+4. AI analyzes and extracts transaction data
+5. Duplicate detection filters out items already in ledger
 
 ## Prioritized Backlog
 
-### P0 (Critical)
-- None - core functionality complete
+### P0 (Critical) - Fixed
+- ✅ Email reconnection stability improved
+- ✅ AI retry without forced reconnect
 
 ### P1 (High Priority)
-- Budget setting/alerts per category
-- Expense comparison (month-over-month)
-- SMS parsing for Indian bank alerts
-
-### P2 (Nice to Have)
-- Mobile responsive improvements
-- Dark/Light theme toggle
-- Recurring income tracking (salary, dividends)
+- Direct SMS API integration (if native app developed)
+- Budget tracking with alerts
 - Investment portfolio tracking
 
-## Next Tasks
-1. Add SMS bank alert parsing
-2. Implement budget tracking with alerts
-3. Add expense comparison views
+### P2 (Nice to Have)
+- Mobile app with native SMS reading
+- Dark/Light theme toggle
+- Recurring income tracking
+
+## Navigation (Simplified)
+- Dashboard
+- Ledger
+- Inbox
+- Email
+- Accounts
+- Reports (with 5 views: Overview, Month Comparison, Expense Deep Dive, Activity Analysis, Vendor Analysis)
+- Recurring
+- Future Cashflow
+- Settings
 
 ## Feature Summary
 - ✅ Visual Charts (Pie, Bar)
@@ -68,3 +93,6 @@ LedgerAI is a personal finance/bookkeeping dashboard for Indian traders. Core ob
 - ✅ Recurring Detection
 - ✅ Future Cashflow Projection
 - ✅ AI Email Analysis with Recurring Detection
+- ✅ Month-over-Month Comparison
+- ✅ Duplicate Transaction Detection
+- ✅ Improved AI Retry (no forced reconnect)

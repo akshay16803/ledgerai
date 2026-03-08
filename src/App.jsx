@@ -637,10 +637,69 @@ async function aiClassify(text,acts,cats,type="expense"){
 async function aiExtractBatch(text,acts,cats){
   const c=Object.entries(cats).map(([a,cs])=>`${a}: ${cs.join(", ")}`).join("\n");
   try{
-    const raw=await callAI([{role:"user",content:`Extract ALL financial transactions from text. Indian context.\nText:\n${text.slice(0,3000)}\nActivities: ${acts.join(", ")}\nCategories:\n${c}\nReturn ONLY JSON array: [{"type":"expense|income","businessActivity":"","category":"","isNewCategory":false,"description":"","amount":0,"date":"YYYY-MM-DD","vendor":"","paymentMethod":""}]`}],1400);
+    const raw=await callAI([{role:"user",content:`Extract ALL financial transactions from text. Indian context.
+IMPORTANT: Generate a unique transaction signature for each transaction using format: "VENDOR_AMOUNT_DATE" (e.g., "SWIGGY_850_2026-03-02") to help detect duplicates.
+Text:\n${text.slice(0,3000)}\nActivities: ${acts.join(", ")}\nCategories:\n${c}\nReturn ONLY JSON array: [{"type":"expense|income","businessActivity":"","category":"","isNewCategory":false,"description":"","amount":0,"date":"YYYY-MM-DD","vendor":"","paymentMethod":"","txSignature":""}]`}],1400);
     try{const a=JSON.parse(raw.replace(/```json|```/g,"").trim());return Array.isArray(a)?a:[];}catch{return[];}
   }catch{return[];}
 }
+
+// ── DUPLICATE DETECTION ─────────────────────────────────────────────────────────
+function generateTxSignature(tx){
+  // Create a signature from vendor, amount, date to detect duplicates
+  const vendor=((tx.vendor||tx.description||"").toLowerCase().replace(/[^a-z0-9]/g,"")).slice(0,20);
+  const amount=Math.round(tx.amount||0);
+  const date=(tx.date||"").slice(0,10);
+  return `${vendor}_${amount}_${date}`;
+}
+
+function isDuplicateTransaction(newTx,existingTxns=[],inbox=[]){
+  const sig=generateTxSignature(newTx);
+  if(!sig||sig==="_0_")return false;
+  
+  // Check against existing transactions
+  for(const tx of existingTxns){
+    const existingSig=tx.txSignature||generateTxSignature(tx);
+    if(existingSig===sig){
+      // Same signature - check if amounts are close (within 5%)
+      const amtDiff=Math.abs((tx.amount||0)-(newTx.amount||0));
+      const tolerance=Math.max(tx.amount,newTx.amount)*0.05;
+      if(amtDiff<=tolerance)return true;
+    }
+  }
+  
+  // Check against inbox items
+  for(const item of inbox){
+    const inboxSig=item.txSignature||generateTxSignature(item);
+    if(inboxSig===sig){
+      const amtDiff=Math.abs((item.amount||0)-(newTx.amount||0));
+      const tolerance=Math.max(item.amount,newTx.amount)*0.05;
+      if(amtDiff<=tolerance)return true;
+    }
+  }
+  
+  return false;
+}
+
+function filterDuplicates(newItems,existingTxns=[],inbox=[]){
+  const filtered=[];
+  const duplicates=[];
+  
+  for(const item of newItems){
+    if(isDuplicateTransaction(item,existingTxns,inbox)){
+      duplicates.push(item);
+    }else{
+      // Add signature for future duplicate detection
+      filtered.push({
+        ...item,
+        txSignature:item.txSignature||generateTxSignature(item),
+      });
+    }
+  }
+  
+  return{filtered,duplicates,duplicateCount:duplicates.length};
+}
+
 async function aiAnalyzeEmail(subject,from,body,acts,cats,meta={}){
   const c=Object.entries(cats).map(([a,cs])=>`${a}: ${cs.join(", ")}`).join("\n");
   const accountList=Array.isArray(meta.accountNames)?meta.accountNames.filter(Boolean):[];
@@ -1546,7 +1605,8 @@ export default function App(){
     return true;
   });
   const recurringTxns=txns.filter(t=>t.isRecurring);
-  const TABS=[["dashboard","Dashboard"],["transactions","Ledger"],["inbox",`Inbox${inbox.length?` (${inbox.length})`:""}`],["email",`Email${emails.length?` (${emails.length})`:""}`],["journal","Journal"],["accounts","Accounts"],["reports","Reports"],["recurring",`Recurring${recurringTxns.length?` (${recurringTxns.length})`:""}`],["cashflow","Future Cashflow"],["settings","Settings"],["daily",`Day Review${inbox.length?` (${inbox.length})`:""}`]];
+  // Simplified tabs - removed Journal (use ledger), Day Review (use Dashboard+Inbox)
+  const TABS=[["dashboard","Dashboard"],["transactions","Ledger"],["inbox",`Inbox${inbox.length?` (${inbox.length})`:""}`],["email",`Email${emails.length?` (${emails.length})`:""}`],["accounts","Accounts"],["reports","Reports"],["recurring",`Recurring${recurringTxns.length?` (${recurringTxns.length})`:""}`],["cashflow","Future Cashflow"],["settings","Settings"]];
 
   if(authCfg.enabled&&!authCfg.googleClientId){
     return <AuthSetupScreen authCfg={authCfg} setAuthCfg={setAuthCfg}/>;
@@ -1779,12 +1839,13 @@ function AuthLoginScreen({clientId,ownerEmail,onCredential,authMsg,allowTemporar
 }
 
 // ── MESSAGES / SMS TAB ────────────────────────────────────────────────────────
-function MessagesTab({smsNums,setSmsNums,emails,inbox,addInbox,acts,cats}){
+function MessagesTab({smsNums,setSmsNums,emails,inbox,addInbox,acts,cats,txns}){
   const[method,setMethod]=useState("android"); // android | ios | ifttt
   const[showAdd,setShowAdd]=useState(false);
   const[showGuide,setShowGuide]=useState(null); // "android"|"ios"|"ifttt"|null
   const[testText,setTestText]=useState("");
   const[testLoad,setTestLoad]=useState(false);
+  const[lastDuplicates,setLastDuplicates]=useState(0);
 
   const activeSims = [...new Set(smsNums.filter(s=>s.sim).map(s=>s.sim))];
   const linkedEmails = emails.filter(e=>e.connected);
@@ -1801,10 +1862,18 @@ function MessagesTab({smsNums,setSmsNums,emails,inbox,addInbox,acts,cats}){
   const testSingle = async()=>{
     if(!testText.trim())return;
     setTestLoad(true);
+    setLastDuplicates(0);
     const items = await aiExtractBatch(testText, acts, cats);
     if(items.length){
-      addInbox(items.map(i=>({...i,type:i.type||"expense",source:"sms",smsText:testText})));
-      alert(`✓ Extracted ${items.length} transaction(s) — check Inbox.`);
+      // Filter duplicates against existing transactions and inbox
+      const{filtered,duplicateCount}=filterDuplicates(items,txns||[],inbox||[]);
+      setLastDuplicates(duplicateCount);
+      if(filtered.length>0){
+        addInbox(filtered.map(i=>({...i,type:i.type||"expense",source:"sms",smsText:testText})));
+        alert(`✓ Extracted ${filtered.length} transaction(s) — check Inbox.${duplicateCount>0?` (${duplicateCount} duplicate(s) skipped)`:""}`);
+      }else{
+        alert(`All ${items.length} transaction(s) already exist in your records (duplicates skipped).`);
+      }
     } else {
       alert("No financial transactions found in this message.");
     }
@@ -2790,6 +2859,39 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
           const isGoogleAuth=provider==="google"&&(lower.includes("google_reauth_required")||lower.includes("401"));
           const isMsAuth=provider==="microsoft"&&(lower.includes("401")||lower.includes("not signed in to microsoft"));
           if(isGoogleAuth){
+            // Try one more time with interactive auth before giving up
+            if(force&&!reauthNeeded.has(acc.id)){
+              try{
+                log(acc.id,"🔄 Token expired, attempting automatic refresh...");
+                const freshToken=await ensureGoogleToken(acc,{interactive:true,forceRefresh:true});
+                if(freshToken){
+                  // Retry with fresh token
+                  const evidence=await fetchMessageEvidence(provider,freshToken,row.msgId);
+                  const items=await analyzeMessageEvidence(evidence);
+                  markProcessedMessage(acc.id,row.msgId);
+                  setAiPending(prev=>prev.filter(p=>p.id!==row.id));
+                  if(items.length){
+                    const queued=items.map(item=>({
+                      ...item,
+                      date:item.date||evidence.eDate||today(),
+                      source:"email",
+                      reviewStatus:"pending",
+                      emailProvider:provider,
+                      emailSubject:evidence.subject||"",
+                      emailFrom:evidence.from||"",
+                      emailAccountId:acc.id,
+                      emailMsgId:row.msgId,
+                    }));
+                    recovered+=queued.length;
+                    addInbox(queued);
+                    log(acc.id,`🤖 AI retry recovered ${queued.length} item(s) after token refresh.`);
+                  }
+                  continue; // Success! Move to next item
+                }
+              }catch(refreshErr){
+                // Fall through to normal error handling
+              }
+            }
             reauthNeeded.add(acc.id);
             if(force){
               // User clicked "Retry AI Pending" — show them what happened
@@ -2820,6 +2922,8 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
               lastError:msg.slice(0,180),
             }:p));
           }else{
+            // Non-auth error - just queue for retry without requiring reconnect
+            log(acc.id,`⚠ AI processing error: ${msg.slice(0,100)}. Will retry.`);
             setAiPending(prev=>prev.map(p=>p.id===row.id?{
               ...p,
               attempts:(Number(p.attempts)||0)+1,
@@ -3607,7 +3711,7 @@ function ReportsTab({txns,acts,totInc,totExp}){
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18,flexWrap:"wrap",gap:12}}>
       <h2 className="h2" style={{marginBottom:0}}>Reports & Analytics</h2>
       <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-        {[["overview","Overview"],["expenses","Expense Deep Dive"],["activity","Activity Analysis"],["vendors","Vendor Analysis"]].map(([k,l])=>(
+        {[["overview","Overview"],["comparison","Month Comparison"],["expenses","Expense Deep Dive"],["activity","Activity Analysis"],["vendors","Vendor Analysis"]].map(([k,l])=>(
           <button key={k} className={`btn sm ${activeView===k?"pri":"ghost"}`} onClick={()=>setActiveView(k)} data-testid={`view-${k}-btn`}>{l}</button>
         ))}
       </div>
@@ -3690,6 +3794,177 @@ function ReportsTab({txns,acts,totInc,totExp}){
           )}
           <div style={{fontSize:11,color:"#64748b",textAlign:"center",marginTop:8}}>Click on a bar to see transactions</div>
         </div>
+      </div>
+    )}
+    
+    {activeView==="comparison"&&(
+      <div className="g2" style={{gap:18}}>
+        {/* Month-over-Month Comparison */}
+        {(() => {
+          // Get last 6 months data
+          const allExpenses=txns.filter(t=>t.type==="expense");
+          const monthMap={};
+          allExpenses.forEach(t=>{
+            if(!t.date)return;
+            const m=t.date.slice(0,7);
+            if(!monthMap[m])monthMap[m]={total:0,categories:{},vendors:{}};
+            monthMap[m].total+=t.amount;
+            monthMap[m].categories[t.category]=(monthMap[m].categories[t.category]||0)+t.amount;
+            const v=t.vendor||"Unknown";
+            monthMap[m].vendors[v]=(monthMap[m].vendors[v]||0)+t.amount;
+          });
+          const sortedMonths=Object.keys(monthMap).sort().slice(-6);
+          if(sortedMonths.length<2)return(
+            <div className="card" style={{gridColumn:"1/-1"}}>
+              <div style={{color:"#475569",fontSize:13,textAlign:"center",padding:40}}>
+                Need at least 2 months of data for comparison. Keep tracking your expenses!
+              </div>
+            </div>
+          );
+          
+          const currentMonth=sortedMonths[sortedMonths.length-1];
+          const prevMonth=sortedMonths[sortedMonths.length-2];
+          const currData=monthMap[currentMonth];
+          const prevData=monthMap[prevMonth];
+          
+          const currTotal=currData?.total||0;
+          const prevTotal=prevData?.total||0;
+          const totalChange=prevTotal>0?((currTotal-prevTotal)/prevTotal*100):0;
+          
+          // Category comparison
+          const allCats=[...new Set([...Object.keys(currData?.categories||{}), ...Object.keys(prevData?.categories||{})])];
+          const catComparison=allCats.map(cat=>{
+            const curr=currData?.categories?.[cat]||0;
+            const prev=prevData?.categories?.[cat]||0;
+            const change=prev>0?((curr-prev)/prev*100):curr>0?100:0;
+            return{cat,curr,prev,change,diff:curr-prev};
+          }).sort((a,b)=>Math.abs(b.diff)-Math.abs(a.diff));
+          
+          // Vendor comparison
+          const allVendors=[...new Set([...Object.keys(currData?.vendors||{}), ...Object.keys(prevData?.vendors||{})])];
+          const vendorComparison=allVendors.map(v=>{
+            const curr=currData?.vendors?.[v]||0;
+            const prev=prevData?.vendors?.[v]||0;
+            const change=prev>0?((curr-prev)/prev*100):curr>0?100:0;
+            return{vendor:v,curr,prev,change,diff:curr-prev};
+          }).sort((a,b)=>Math.abs(b.diff)-Math.abs(a.diff));
+          
+          const currMonthLabel=new Date(currentMonth+"-01").toLocaleDateString("en-IN",{month:"long",year:"numeric"});
+          const prevMonthLabel=new Date(prevMonth+"-01").toLocaleDateString("en-IN",{month:"long",year:"numeric"});
+          
+          return(
+            <>
+              {/* Overall Comparison */}
+              <div className="card" style={{gridColumn:"1/-1"}} data-testid="overall-comparison-card">
+                <div style={{fontWeight:600,fontSize:14,marginBottom:14,color:"#94a3b8",borderBottom:"1px solid #1e293b",paddingBottom:10}}>
+                  Overall Expense Comparison
+                </div>
+                <div style={{display:"flex",gap:20,justifyContent:"center",alignItems:"center",flexWrap:"wrap"}}>
+                  <div style={{textAlign:"center",minWidth:150}}>
+                    <div style={{fontSize:11,color:"#64748b",marginBottom:4}}>{prevMonthLabel}</div>
+                    <div className="mono" style={{fontSize:24,fontWeight:700,color:"#94a3b8"}}>{fmt(prevTotal)}</div>
+                  </div>
+                  <div style={{fontSize:32,color:totalChange>0?"#f87171":"#34d399"}}>→</div>
+                  <div style={{textAlign:"center",minWidth:150}}>
+                    <div style={{fontSize:11,color:"#64748b",marginBottom:4}}>{currMonthLabel}</div>
+                    <div className="mono" style={{fontSize:24,fontWeight:700,color:totalChange>0?"#f87171":"#34d399"}}>{fmt(currTotal)}</div>
+                  </div>
+                  <div style={{padding:"12px 20px",background:totalChange>0?"#450a0a":"#052e16",borderRadius:12,textAlign:"center"}}>
+                    <div style={{fontSize:24,fontWeight:700,color:totalChange>0?"#f87171":"#34d399"}}>
+                      {totalChange>0?"+":""}{totalChange.toFixed(1)}%
+                    </div>
+                    <div style={{fontSize:11,color:"#64748b",marginTop:2}}>
+                      {totalChange>0?"Spending increased":"Spending decreased"}
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
+              {/* Category Changes */}
+              <div className="card" data-testid="category-comparison-card">
+                <div style={{fontWeight:600,fontSize:14,marginBottom:14,color:"#94a3b8",borderBottom:"1px solid #1e293b",paddingBottom:10}}>
+                  Category Changes (Top Movers)
+                </div>
+                <div style={{maxHeight:300,overflowY:"auto"}}>
+                  {catComparison.slice(0,10).map((c,i)=>(
+                    <div key={c.cat} style={{display:"flex",alignItems:"center",gap:12,padding:"8px 0",borderBottom:"1px solid #1a2438"}}>
+                      <div style={{flex:1}}>
+                        <div style={{fontSize:13,color:"#e2e8f0"}}>{c.cat}</div>
+                        <div style={{fontSize:11,color:"#64748b"}}>{fmt(c.prev)} → {fmt(c.curr)}</div>
+                      </div>
+                      <div style={{display:"flex",alignItems:"center",gap:8}}>
+                        <div className="mono" style={{fontSize:13,fontWeight:600,color:c.diff>0?"#f87171":"#34d399"}}>
+                          {c.diff>0?"+":""}{fmt(c.diff)}
+                        </div>
+                        <div style={{fontSize:11,padding:"2px 6px",borderRadius:4,background:c.change>0?"#450a0a":"#052e16",color:c.change>0?"#f87171":"#34d399"}}>
+                          {c.change>0?"+":""}{c.change.toFixed(0)}%
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              
+              {/* Vendor Changes */}
+              <div className="card" data-testid="vendor-comparison-card">
+                <div style={{fontWeight:600,fontSize:14,marginBottom:14,color:"#94a3b8",borderBottom:"1px solid #1e293b",paddingBottom:10}}>
+                  Vendor Changes (Top Movers)
+                </div>
+                <div style={{maxHeight:300,overflowY:"auto"}}>
+                  {vendorComparison.slice(0,10).map((v,i)=>(
+                    <div key={v.vendor} style={{display:"flex",alignItems:"center",gap:12,padding:"8px 0",borderBottom:"1px solid #1a2438"}}>
+                      <div style={{flex:1}}>
+                        <div style={{fontSize:13,color:"#e2e8f0"}}>{v.vendor}</div>
+                        <div style={{fontSize:11,color:"#64748b"}}>{fmt(v.prev)} → {fmt(v.curr)}</div>
+                      </div>
+                      <div style={{display:"flex",alignItems:"center",gap:8}}>
+                        <div className="mono" style={{fontSize:13,fontWeight:600,color:v.diff>0?"#f87171":"#34d399"}}>
+                          {v.diff>0?"+":""}{fmt(v.diff)}
+                        </div>
+                        <div style={{fontSize:11,padding:"2px 6px",borderRadius:4,background:v.change>0?"#450a0a":"#052e16",color:v.change>0?"#f87171":"#34d399"}}>
+                          {v.change>0?"+":""}{v.change.toFixed(0)}%
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              
+              {/* Monthly Trend (last 6 months) */}
+              <div className="card" style={{gridColumn:"1/-1"}} data-testid="monthly-comparison-chart">
+                <div style={{fontWeight:600,fontSize:14,marginBottom:14,color:"#94a3b8",borderBottom:"1px solid #1e293b",paddingBottom:10}}>
+                  6-Month Expense Trend
+                </div>
+                <div style={{display:"flex",alignItems:"flex-end",gap:12,height:180,justifyContent:"center"}}>
+                  {sortedMonths.map((m,i)=>{
+                    const val=monthMap[m]?.total||0;
+                    const maxVal=Math.max(...sortedMonths.map(mm=>monthMap[mm]?.total||0));
+                    const h=maxVal>0?Math.max(20,(val/maxVal)*140):20;
+                    const isLast=i===sortedMonths.length-1;
+                    const isPrev=i===sortedMonths.length-2;
+                    const monthLabel=new Date(m+"-01").toLocaleDateString("en-IN",{month:"short"});
+                    return(
+                      <div key={m} style={{display:"flex",flexDirection:"column",alignItems:"center",minWidth:60}}>
+                        <div className="mono" style={{fontSize:10,color:"#64748b",marginBottom:4}}>{fmt(val)}</div>
+                        <div style={{
+                          width:40,height:h,
+                          background:isLast?"linear-gradient(180deg, #f87171, #dc2626)":isPrev?"linear-gradient(180deg, #818cf8, #6366f1)":"linear-gradient(180deg, #475569, #334155)",
+                          borderRadius:"4px 4px 0 0",
+                          transition:"all 0.2s"
+                        }}/>
+                        <div style={{fontSize:11,color:isLast?"#f87171":isPrev?"#818cf8":"#94a3b8",marginTop:6,fontWeight:isLast||isPrev?600:400}}>{monthLabel}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div style={{display:"flex",justifyContent:"center",gap:16,marginTop:12,fontSize:11}}>
+                  <span style={{color:"#818cf8"}}>■ {prevMonthLabel}</span>
+                  <span style={{color:"#f87171"}}>■ {currMonthLabel}</span>
+                </div>
+              </div>
+            </>
+          );
+        })()}
       </div>
     )}
     
