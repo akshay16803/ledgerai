@@ -67,8 +67,181 @@ const today = () => new Date().toISOString().slice(0,10);
 const fmt   = n  => new Intl.NumberFormat("en-IN",{style:"currency",currency:"INR",minimumFractionDigits:0}).format(n||0);
 const fmtD  = d  => d?new Date(d).toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"}):"";
 const fmtDT = d  => d?new Date(d).toLocaleString("en-IN",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"}):"";
+const fmtNum = n => new Intl.NumberFormat("en-IN").format(n||0);
 const amtClose=(a,b)=>Math.abs(a-b)<2;
 const strSim=(a,b)=>{a=(a||"").toLowerCase();b=(b||"").toLowerCase();let m=0;for(let c of a)if(b.includes(c))m++;return m/Math.max(a.length,b.length,1);};
+
+// ── RECURRING EXPENSE DETECTION ─────────────────────────────────────────────────
+const RECURRING_KEYWORDS = ["subscription","premium","renewal","monthly","annual","yearly","quarterly","installment","emi","auto-debit","autopay","recurring"];
+const RECURRING_VENDORS = ["netflix","spotify","amazon prime","youtube","hotstar","zee5","sonyliv","jiocinema","audible","kindle","apple music","google one","icloud","dropbox","microsoft 365","adobe","zoom","slack","notion","canva","github","aws","azure","gcp","gym","cult.fit","electricity","water","gas","internet","broadband","jio","airtel","vi","bsnl","insurance","lic","hdfc ergo","icici lombard","bajaj allianz","star health","niva bupa","tata aig","new india","rent","maintenance","society"];
+
+function detectRecurringPattern(txns=[],vendor="",category="",amount=0){
+  // Check if vendor/category suggests recurring
+  const vLower=(vendor||"").toLowerCase();
+  const cLower=(category||"").toLowerCase();
+  const isKnownRecurring=RECURRING_VENDORS.some(rv=>vLower.includes(rv))||RECURRING_KEYWORDS.some(rk=>cLower.includes(rk)||vLower.includes(rk));
+  
+  // Check transaction history for same vendor with similar amounts
+  const sameVendorTxns=txns.filter(t=>t.type==="expense"&&(t.vendor||"").toLowerCase()===vLower&&Math.abs(t.amount-amount)<amount*0.15);
+  
+  if(sameVendorTxns.length>=2){
+    // Calculate average days between transactions
+    const dates=sameVendorTxns.map(t=>new Date(t.date).getTime()).sort((a,b)=>a-b);
+    const gaps=[];
+    for(let i=1;i<dates.length;i++)gaps.push((dates[i]-dates[i-1])/(1000*60*60*24));
+    const avgGap=gaps.length?gaps.reduce((s,g)=>s+g,0)/gaps.length:0;
+    
+    if(avgGap>=25&&avgGap<=35)return{isRecurring:true,recurrenceType:"monthly",confidence:"high"};
+    if(avgGap>=85&&avgGap<=100)return{isRecurring:true,recurrenceType:"quarterly",confidence:"high"};
+    if(avgGap>=350&&avgGap<=380)return{isRecurring:true,recurrenceType:"yearly",confidence:"high"};
+  }
+  
+  if(isKnownRecurring){
+    // Guess recurrence type from keywords
+    if(vLower.includes("annual")||vLower.includes("yearly")||cLower.includes("annual"))return{isRecurring:true,recurrenceType:"yearly",confidence:"medium"};
+    if(vLower.includes("quarterly")||cLower.includes("quarterly"))return{isRecurring:true,recurrenceType:"quarterly",confidence:"medium"};
+    return{isRecurring:true,recurrenceType:"monthly",confidence:"medium"};
+  }
+  
+  return{isRecurring:false,recurrenceType:"one-time",confidence:"low"};
+}
+
+function calculateNextDueDate(lastDate,recurrenceType){
+  if(!lastDate||recurrenceType==="one-time")return null;
+  const d=new Date(lastDate);
+  if(recurrenceType==="monthly")d.setMonth(d.getMonth()+1);
+  else if(recurrenceType==="quarterly")d.setMonth(d.getMonth()+3);
+  else if(recurrenceType==="yearly")d.setFullYear(d.getFullYear()+1);
+  else return null;
+  return d.toISOString().slice(0,10);
+}
+
+function generateFutureCashflow(recurringExpenses=[],months=12){
+  const startDate=new Date();
+  const endDate=new Date();
+  endDate.setMonth(endDate.getMonth()+months);
+  
+  const projections=[];
+  const monthlyTotals={};
+  
+  recurringExpenses.forEach(exp=>{
+    if(!exp.isRecurring||exp.recurrenceType==="one-time")return;
+    
+    let nextDate=exp.nextDueDate?new Date(exp.nextDueDate):new Date(exp.date);
+    if(nextDate<startDate){
+      // Calculate next occurrence from last known date
+      while(nextDate<startDate){
+        if(exp.recurrenceType==="monthly")nextDate.setMonth(nextDate.getMonth()+1);
+        else if(exp.recurrenceType==="quarterly")nextDate.setMonth(nextDate.getMonth()+3);
+        else if(exp.recurrenceType==="yearly")nextDate.setFullYear(nextDate.getFullYear()+1);
+        else break;
+      }
+    }
+    
+    while(nextDate<=endDate){
+      const monthKey=nextDate.toISOString().slice(0,7);
+      const projection={
+        ...exp,
+        projectedDate:nextDate.toISOString().slice(0,10),
+        monthKey,
+        isProjection:true,
+      };
+      projections.push(projection);
+      monthlyTotals[monthKey]=(monthlyTotals[monthKey]||0)+exp.amount;
+      
+      // Move to next occurrence
+      if(exp.recurrenceType==="monthly")nextDate.setMonth(nextDate.getMonth()+1);
+      else if(exp.recurrenceType==="quarterly")nextDate.setMonth(nextDate.getMonth()+3);
+      else if(exp.recurrenceType==="yearly")nextDate.setFullYear(nextDate.getFullYear()+1);
+      else break;
+    }
+  });
+  
+  return{projections:projections.sort((a,b)=>a.projectedDate.localeCompare(b.projectedDate)),monthlyTotals};
+}
+
+// ── EXPORT UTILITIES ────────────────────────────────────────────────────────────
+function exportToCSV(data,filename){
+  if(!data.length)return;
+  const headers=Object.keys(data[0]);
+  const csvRows=[headers.join(",")];
+  data.forEach(row=>{
+    csvRows.push(headers.map(h=>{
+      const val=row[h];
+      if(val===null||val===undefined)return "";
+      const str=String(val).replace(/"/g,'""');
+      return str.includes(",")||str.includes('"')||str.includes("\n")?`"${str}"`:str;
+    }).join(","));
+  });
+  const blob=new Blob([csvRows.join("\n")],{type:"text/csv;charset=utf-8;"});
+  downloadBlob(blob,filename);
+}
+
+function exportToXLS(data,filename){
+  if(!data.length)return;
+  const headers=Object.keys(data[0]);
+  let html='<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="UTF-8"></head><body><table border="1">';
+  html+="<tr>"+headers.map(h=>`<th style="background:#1e293b;color:#fff;font-weight:bold">${h}</th>`).join("")+"</tr>";
+  data.forEach(row=>{
+    html+="<tr>"+headers.map(h=>{
+      const val=row[h];
+      const style=typeof val==="number"?'style="mso-number-format:0"':"";
+      return `<td ${style}>${val??""}</td>`;
+    }).join("")+"</tr>";
+  });
+  html+="</table></body></html>";
+  const blob=new Blob([html],{type:"application/vnd.ms-excel;charset=utf-8;"});
+  downloadBlob(blob,filename);
+}
+
+function exportToPDF(data,title,filename){
+  if(!data.length)return;
+  const headers=Object.keys(data[0]);
+  let html=`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${title}</title><style>
+    body{font-family:Arial,sans-serif;padding:20px;color:#333}
+    h1{color:#1e293b;border-bottom:2px solid #6366f1;padding-bottom:10px}
+    table{width:100%;border-collapse:collapse;margin-top:20px}
+    th{background:#1e293b;color:#fff;padding:10px;text-align:left;font-size:12px}
+    td{padding:8px;border-bottom:1px solid #e2e8f0;font-size:11px}
+    tr:nth-child(even){background:#f8fafc}
+    .total{font-weight:bold;background:#f1f5f9}
+    @media print{body{padding:0}h1{font-size:18px}}
+  </style></head><body>`;
+  html+=`<h1>${title}</h1><p>Generated: ${new Date().toLocaleString("en-IN")}</p>`;
+  html+="<table><thead><tr>"+headers.map(h=>`<th>${h}</th>`).join("")+"</tr></thead><tbody>";
+  data.forEach(row=>{
+    html+="<tr>"+headers.map(h=>`<td>${row[h]??""}</td>`).join("")+"</tr>";
+  });
+  html+="</tbody></table></body></html>";
+  const printWindow=window.open("","_blank");
+  printWindow.document.write(html);
+  printWindow.document.close();
+  setTimeout(()=>{printWindow.print();},500);
+}
+
+function downloadBlob(blob,filename){
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a");
+  a.href=url;a.download=filename;
+  document.body.appendChild(a);a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function prepareExportData(txns,type="all"){
+  return txns.filter(t=>type==="all"||t.type===type).map(t=>({
+    Date:t.date||"",
+    Type:t.type||"",
+    Amount:t.amount||0,
+    Description:t.description||"",
+    Category:t.category||"",
+    "Business Activity":t.businessActivity||"",
+    Vendor:t.vendor||"",
+    "Payment Method":t.paymentMethod||"",
+    "Is Recurring":t.isRecurring?"Yes":"No",
+    "Recurrence":t.recurrenceType||"one-time",
+  }));
+}
 const LOCKED_OWNER_EMAIL = "akshaychouhan16803@gmail.com";
 const DEFAULT_GOOGLE_CLIENT_ID = "975238186836-47bvtn56uhrlcbe11n1pe1h26qbor5s1.apps.googleusercontent.com";
 const BLOCKED_MS_CLIENT_IDS = new Set([
@@ -486,6 +659,14 @@ Tasks:
 3) Transaction type can be expense, income, or transfer.
 4) For transfer, populate accountName (from) and targetAccountName (to) when inferable.
 5) If account cannot be inferred, keep accountName/targetAccountName blank and still extract.
+6) IMPORTANT: Detect if this is a RECURRING expense/subscription. Set isRecurring=true for:
+   - Insurance premiums (health, life, vehicle, travel - except one-time travel insurance)
+   - Subscriptions (Netflix, Spotify, YouTube, cloud storage, SaaS tools, gym memberships)
+   - EMI payments, loan installments
+   - Utility bills (electricity, water, gas, internet, phone)
+   - Rent payments
+   - Any payment that mentions "monthly", "annual", "renewal", "subscription", "premium due"
+7) For recurring items, estimate the recurrence: "monthly", "quarterly", "yearly", or "one-time"
 
 Output status:
 - "success" when at least one valid transaction is extracted.
@@ -512,7 +693,7 @@ Return ONLY JSON:
   "status": "success|no_transaction|retry",
   "reason": "",
   "transactions": [
-    {"type":"expense|income|transfer","businessActivity":"","category":"","isNewCategory":false,"description":"","amount":0,"date":"YYYY-MM-DD","vendor":"","paymentMethod":"","accountName":"","targetAccountName":""}
+    {"type":"expense|income|transfer","businessActivity":"","category":"","isNewCategory":false,"description":"","amount":0,"date":"YYYY-MM-DD","vendor":"","paymentMethod":"","accountName":"","targetAccountName":"","isRecurring":false,"recurrenceType":"monthly|quarterly|yearly|one-time","nextDueDate":"YYYY-MM-DD or null"}
   ]
 }`}],1600);
   try{
@@ -1364,7 +1545,8 @@ export default function App(){
     if(filter.to&&t.date>filter.to)return false;
     return true;
   });
-  const TABS=[["dashboard","Dashboard"],["transactions","Ledger"],["inbox",`Inbox${inbox.length?` (${inbox.length})`:""}`],["email",`Email${emails.length?` (${emails.length})`:""}`],["journal","Journal"],["accounts","Accounts"],["reports","Reports"],["settings","Settings"],["daily",`Day Review${inbox.length?` (${inbox.length})`:""}`]];
+  const recurringTxns=txns.filter(t=>t.isRecurring);
+  const TABS=[["dashboard","Dashboard"],["transactions","Ledger"],["inbox",`Inbox${inbox.length?` (${inbox.length})`:""}`],["email",`Email${emails.length?` (${emails.length})`:""}`],["journal","Journal"],["accounts","Accounts"],["reports","Reports"],["recurring",`Recurring${recurringTxns.length?` (${recurringTxns.length})`:""}`],["cashflow","Future Cashflow"],["settings","Settings"],["daily",`Day Review${inbox.length?` (${inbox.length})`:""}`]];
 
   if(authCfg.enabled&&!authCfg.googleClientId){
     return <AuthSetupScreen authCfg={authCfg} setAuthCfg={setAuthCfg}/>;
@@ -1411,6 +1593,8 @@ export default function App(){
         {tab==="journal"&&<JournalTab txns={txns}/>}
         {tab==="accounts"&&<AccountsTab accs={accs} setAccs={setAccs} txns={txns} addInbox={addInbox} acts={acts} cats={cats}/>}
         {tab==="reports"&&<ReportsTab txns={txns} acts={acts} totInc={totInc} totExp={totExp}/>}
+        {tab==="recurring"&&<RecurringTab txns={txns} setTxns={setTxns}/>}
+        {tab==="cashflow"&&<CashflowTab txns={txns}/>}
         {tab==="settings"&&<SettingsTab acts={acts} setActs={setActs} cats={cats} setCats={setCats} backups={backups} onBackupNow={()=>pushBackupSnapshot("manual")} onRestoreBackup={restoreBackupSnapshot} onFactoryReset={factoryReset} onRenameActivity={renameBusinessActivity}/>}
         {tab==="cloud"&&<CloudTab sbCfg={sbCfg} setSbCfg={setSbCfg} syncStatus={syncStatus} lastSync={lastSync} onSync={pushToCloud} onLoad={loadFromCloud} txns={txns} setTxns={setTxns} inbox={inbox} setInbox={setInbox} accs={accs} setAccs={setAccs} acts={acts} setActs={setActs} cats={cats} setCats={setCats} smsNums={smsNums} setSmsNums={setSmsNums} emails={emails} setEmails={setEmails}/>}
         {tab==="daily"&&<DailyTab todayTxns={todayTxns} todInc={todInc} todExp={todExp} summary={summary} sumLoad={sumLoad} getSummary={async()=>{setSumLoad(true);setSummary(await aiSummarize(todayTxns));setSumLoad(false);}} onEdit={tx=>{setEditTx(tx);setAddType(tx.type);setShowAdd(true);}} onDelete={delTx} inbox={inbox} onApprove={approveInbox} onDiscard={discardInbox} onEditPending={editInbox}/>}
@@ -3334,9 +3518,24 @@ function DrillDownModal({title,transactions,onClose,color="#f87171"}){
 function ReportsTab({txns,acts,totInc,totExp}){
   const[drillDown,setDrillDown]=useState(null);
   const[activeView,setActiveView]=useState("overview");
+  const[dateFrom,setDateFrom]=useState("");
+  const[dateTo,setDateTo]=useState("");
+  const[selectedActivity,setSelectedActivity]=useState("all");
+  const[showExport,setShowExport]=useState(false);
+  
+  // Filter transactions by date range and activity
+  const filteredTxns=txns.filter(t=>{
+    const inDateRange=(!dateFrom||t.date>=dateFrom)&&(!dateTo||t.date<=dateTo);
+    const inActivity=selectedActivity==="all"||t.businessActivity===selectedActivity;
+    return inDateRange&&inActivity;
+  });
+  
+  // Recalculate totals based on filters
+  const filteredInc=filteredTxns.filter(t=>t.type==="income").reduce((s,t)=>s+t.amount,0);
+  const filteredExp=filteredTxns.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amount,0);
   
   // Expense calculations
-  const expenses=txns.filter(t=>t.type==="expense");
+  const expenses=filteredTxns.filter(t=>t.type==="expense");
   const dr=expenses.filter(t=>t.businessActivity==="Personal");
   const drT=dr.reduce((s,t)=>s+t.amount,0);
   
@@ -3364,7 +3563,12 @@ function ReportsTab({txns,acts,totInc,totExp}){
   const payMap={};expenses.forEach(t=>{const p=(t.paymentMethod||"Unknown").trim()||"Unknown";payMap[p]=(payMap[p]||0)+t.amount;});
   const payData=Object.entries(payMap).sort((a,b)=>b[1]-a[1]).slice(0,8).map(([label,value])=>({label,value}));
   
-  const emailTxns=txns.filter(t=>t.source==="email");
+  // Income by category/activity for activity analysis
+  const incomeByAct={};filteredTxns.filter(t=>t.type==="income").forEach(t=>{incomeByAct[t.businessActivity]=(incomeByAct[t.businessActivity]||0)+t.amount;});
+  const expByAct={};expenses.forEach(t=>{expByAct[t.businessActivity]=(expByAct[t.businessActivity]||0)+t.amount;});
+  
+  const emailTxns=filteredTxns.filter(t=>t.source==="email");
+  const hasFilters=dateFrom||dateTo||selectedActivity!=="all";
   
   // Drill-down handlers
   const openCategoryDrill=(cat)=>{
@@ -3386,33 +3590,86 @@ function ReportsTab({txns,acts,totInc,totExp}){
     setDrillDown({title:`Activity: ${act}`,transactions:txs,color:"#34d399"});
   };
   
+  const clearFilters=()=>{setDateFrom("");setDateTo("");setSelectedActivity("all");};
+  
+  // Export handlers
+  const handleExport=(format)=>{
+    const data=prepareExportData(filteredTxns);
+    const dateStr=new Date().toISOString().slice(0,10);
+    const filename=`ledgerai_report_${dateStr}`;
+    if(format==="csv")exportToCSV(data,filename+".csv");
+    else if(format==="xls")exportToXLS(data,filename+".xls");
+    else if(format==="pdf")exportToPDF(data,"LedgerAI Financial Report",filename);
+    setShowExport(false);
+  };
+  
   return(<div>
-    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18,flexWrap:"wrap",gap:12}}>
       <h2 className="h2" style={{marginBottom:0}}>Reports & Analytics</h2>
-      <div style={{display:"flex",gap:6}}>
-        {[["overview","Overview"],["expenses","Expense Deep Dive"],["vendors","Vendor Analysis"]].map(([k,l])=>(
-          <button key={k} className={`btn sm ${activeView===k?"pri":"ghost"}`} onClick={()=>setActiveView(k)}>{l}</button>
+      <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+        {[["overview","Overview"],["expenses","Expense Deep Dive"],["activity","Activity Analysis"],["vendors","Vendor Analysis"]].map(([k,l])=>(
+          <button key={k} className={`btn sm ${activeView===k?"pri":"ghost"}`} onClick={()=>setActiveView(k)} data-testid={`view-${k}-btn`}>{l}</button>
         ))}
       </div>
+    </div>
+    
+    {/* Filters Bar */}
+    <div className="card" style={{marginBottom:18,padding:14}} data-testid="filters-bar">
+      <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+        <div style={{display:"flex",alignItems:"center",gap:6}}>
+          <label style={{fontSize:12,color:"#94a3b8"}}>From:</label>
+          <input type="date" value={dateFrom} onChange={e=>setDateFrom(e.target.value)} className="inp" style={{width:140,padding:"6px 8px",fontSize:12}} data-testid="date-from-input"/>
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:6}}>
+          <label style={{fontSize:12,color:"#94a3b8"}}>To:</label>
+          <input type="date" value={dateTo} onChange={e=>setDateTo(e.target.value)} className="inp" style={{width:140,padding:"6px 8px",fontSize:12}} data-testid="date-to-input"/>
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:6}}>
+          <label style={{fontSize:12,color:"#94a3b8"}}>Activity:</label>
+          <select value={selectedActivity} onChange={e=>setSelectedActivity(e.target.value)} className="inp" style={{padding:"6px 8px",fontSize:12,minWidth:140}} data-testid="activity-filter-select">
+            <option value="all">All Activities</option>
+            {acts.map(a=><option key={a} value={a}>{a}</option>)}
+          </select>
+        </div>
+        {hasFilters&&<button className="btn ghost sm" onClick={clearFilters} data-testid="clear-filters-btn">✕ Clear Filters</button>}
+        <div style={{marginLeft:"auto",display:"flex",gap:6}}>
+          <button className="btn ghost sm" onClick={()=>setShowExport(!showExport)} data-testid="export-btn">📥 Export</button>
+        </div>
+      </div>
+      {hasFilters&&(
+        <div style={{marginTop:10,fontSize:12,color:"#818cf8",background:"#1e1b4b",padding:"8px 12px",borderRadius:6}}>
+          Showing filtered results: {filteredTxns.length} transactions · Income: {fmt(filteredInc)} · Expenses: {fmt(filteredExp)}
+        </div>
+      )}
+      {showExport&&(
+        <div style={{marginTop:12,padding:12,background:"#0a0d18",borderRadius:8,border:"1px solid #1a2438"}}>
+          <div style={{fontSize:13,fontWeight:600,color:"#e2e8f0",marginBottom:10}}>Export {filteredTxns.length} Transactions</div>
+          <div style={{display:"flex",gap:8}}>
+            <button className="btn ghost sm" onClick={()=>handleExport("csv")} data-testid="export-csv-btn">📄 CSV</button>
+            <button className="btn ghost sm" onClick={()=>handleExport("xls")} data-testid="export-xls-btn">📊 Excel</button>
+            <button className="btn ghost sm" onClick={()=>handleExport("pdf")} data-testid="export-pdf-btn">📑 PDF (Print)</button>
+          </div>
+        </div>
+      )}
     </div>
     
     {activeView==="overview"&&(
       <div className="g2" style={{gap:18}}>
         {/* P&L Summary */}
-        <div className="card">
+        <div className="card" data-testid="pnl-card">
           <div style={{fontWeight:600,fontSize:14,marginBottom:14,color:"#94a3b8",borderBottom:"1px solid #1e293b",paddingBottom:10}}>Profit & Loss</div>
-          {acts.filter(a=>a!=="Personal").map(a=>{const inc=txns.filter(t=>t.type==="income"&&t.businessActivity===a).reduce((s,t)=>s+t.amount,0);const exp=txns.filter(t=>t.type==="expense"&&t.businessActivity===a).reduce((s,t)=>s+t.amount,0);if(!inc&&!exp)return null;return<div key={a} style={{marginBottom:8}}><div style={{fontSize:11,color:"#64748b",fontWeight:600}}>{a}</div><div style={{display:"flex",gap:12,paddingLeft:8,fontSize:12}}><span className="mono" style={{color:"#34d399"}}>Inc {fmt(inc)}</span><span className="mono" style={{color:"#f87171"}}>Exp {fmt(exp)}</span><span className="mono" style={{color:inc-exp>=0?"#818cf8":"#f59e0b"}}>Net {fmt(inc-exp)}</span></div></div>;})}
+          {acts.filter(a=>a!=="Personal").map(a=>{const inc=filteredTxns.filter(t=>t.type==="income"&&t.businessActivity===a).reduce((s,t)=>s+t.amount,0);const exp=filteredTxns.filter(t=>t.type==="expense"&&t.businessActivity===a).reduce((s,t)=>s+t.amount,0);if(!inc&&!exp)return null;return<div key={a} style={{marginBottom:8}}><div style={{fontSize:11,color:"#64748b",fontWeight:600}}>{a}</div><div style={{display:"flex",gap:12,paddingLeft:8,fontSize:12}}><span className="mono" style={{color:"#34d399"}}>Inc {fmt(inc)}</span><span className="mono" style={{color:"#f87171"}}>Exp {fmt(exp)}</span><span className="mono" style={{color:inc-exp>=0?"#818cf8":"#f59e0b"}}>Net {fmt(inc-exp)}</span></div></div>;})}
           <div style={{borderTop:"1px solid #1e293b",marginTop:10,paddingTop:10}}>
-            <R style={{marginBottom:4}}><span style={{fontWeight:600,fontSize:13}}>Total Income</span><span className="mono" style={{color:"#34d399"}}>{fmt(totInc)}</span></R>
-            <R style={{marginBottom:4}}><span style={{fontWeight:600,fontSize:13}}>Total Expenses</span><span className="mono" style={{color:"#f87171"}}>{fmt(totExp)}</span></R>
-            <div style={{background:totInc-totExp>=0?"#052e16":"#450a0a",borderRadius:8,padding:"10px 12px",marginTop:8,display:"flex",justifyContent:"space-between",fontWeight:700}}>
-              <span>Net Profit / Loss</span><span className="mono" style={{color:totInc-totExp>=0?"#34d399":"#f87171"}}>{fmt(totInc-totExp)}</span>
+            <R style={{marginBottom:4}}><span style={{fontWeight:600,fontSize:13}}>Total Income</span><span className="mono" style={{color:"#34d399"}}>{fmt(filteredInc)}</span></R>
+            <R style={{marginBottom:4}}><span style={{fontWeight:600,fontSize:13}}>Total Expenses</span><span className="mono" style={{color:"#f87171"}}>{fmt(filteredExp)}</span></R>
+            <div style={{background:filteredInc-filteredExp>=0?"#052e16":"#450a0a",borderRadius:8,padding:"10px 12px",marginTop:8,display:"flex",justifyContent:"space-between",fontWeight:700}}>
+              <span>Net Profit / Loss</span><span className="mono" style={{color:filteredInc-filteredExp>=0?"#34d399":"#f87171"}}>{fmt(filteredInc-filteredExp)}</span>
             </div>
           </div>
         </div>
         
         {/* Personal Drawings */}
-        <div className="card">
+        <div className="card" data-testid="drawings-card">
           <div style={{fontWeight:600,fontSize:14,marginBottom:14,color:"#94a3b8",borderBottom:"1px solid #1e293b",paddingBottom:10}}>Personal Drawings</div>
           <div className="mono" style={{fontSize:28,fontWeight:700,color:"#c084fc",marginBottom:14}}>{fmt(drT)}</div>
           {Object.entries(dr.reduce((m,t)=>{m[t.category]=(m[t.category]||0)+t.amount;return m;},{})).sort((a,b)=>b[1]-a[1]).slice(0,5).map(([cat,amt])=>(
@@ -3424,7 +3681,7 @@ function ReportsTab({txns,acts,totInc,totExp}){
         </div>
         
         {/* Monthly Trend */}
-        <div className="card" style={{gridColumn:"1/-1"}}>
+        <div className="card" style={{gridColumn:"1/-1"}} data-testid="monthly-trend-card">
           <div style={{fontWeight:600,fontSize:14,marginBottom:14,color:"#94a3b8",borderBottom:"1px solid #1e293b",paddingBottom:10}}>Monthly Expense Trend</div>
           {monthData.length>0?(
             <BarChart data={monthData} height={160} barColor="#f87171" onClick={(d)=>openMonthDrill(d.fullMonth)} chartId="monthly-trend"/>
@@ -3436,10 +3693,74 @@ function ReportsTab({txns,acts,totInc,totExp}){
       </div>
     )}
     
+    {activeView==="activity"&&(
+      <div className="g2" style={{gap:18}}>
+        {/* Activity-wise P&L */}
+        {acts.map(act=>{
+          const actInc=filteredTxns.filter(t=>t.type==="income"&&t.businessActivity===act).reduce((s,t)=>s+t.amount,0);
+          const actExp=filteredTxns.filter(t=>t.type==="expense"&&t.businessActivity===act).reduce((s,t)=>s+t.amount,0);
+          if(!actInc&&!actExp)return null;
+          const actCatMap={};filteredTxns.filter(t=>t.type==="expense"&&t.businessActivity===act).forEach(t=>{actCatMap[t.category]=(actCatMap[t.category]||0)+t.amount;});
+          const actCats=Object.entries(actCatMap).sort((a,b)=>b[1]-a[1]);
+          const actCatPieData=actCats.slice(0,8).map(([label,value])=>({label,value}));
+          
+          return(
+            <div key={act} className="card" data-testid={`activity-card-${act.replace(/\s+/g,'-').toLowerCase()}`}>
+              <div style={{fontWeight:600,fontSize:14,marginBottom:14,color:"#94a3b8",borderBottom:"1px solid #1e293b",paddingBottom:10,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <span>{act}</span>
+                <span className="mono" style={{color:actInc-actExp>=0?"#34d399":"#f87171",fontSize:16}}>{fmt(actInc-actExp)}</span>
+              </div>
+              <div style={{display:"flex",gap:16,marginBottom:16}}>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:11,color:"#64748b",marginBottom:4}}>Income</div>
+                  <div className="mono" style={{fontSize:20,fontWeight:700,color:"#34d399"}}>{fmt(actInc)}</div>
+                </div>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:11,color:"#64748b",marginBottom:4}}>Expenses</div>
+                  <div className="mono" style={{fontSize:20,fontWeight:700,color:"#f87171"}}>{fmt(actExp)}</div>
+                </div>
+              </div>
+              {actCatPieData.length>0&&(
+                <div>
+                  <div style={{fontSize:11,color:"#64748b",marginBottom:8}}>Expense Breakdown</div>
+                  <div style={{display:"flex",gap:16,alignItems:"flex-start"}}>
+                    <PieChart data={actCatPieData} size={120} onSliceClick={(s)=>{
+                      const txs=filteredTxns.filter(t=>t.type==="expense"&&t.businessActivity===act&&t.category===s.label);
+                      setDrillDown({title:`${act} - ${s.label}`,transactions:txs,color:"#818cf8"});
+                    }} chartId={`activity-${act.replace(/\s+/g,'-').toLowerCase()}`}/>
+                    <div style={{flex:1,maxHeight:150,overflowY:"auto"}}>
+                      {actCats.slice(0,6).map(([cat,amt],i)=>{
+                        const COLORS=["#f87171","#fb923c","#fbbf24","#a3e635","#34d399","#22d3ee","#818cf8","#c084fc"];
+                        return(
+                          <div key={cat} style={{display:"flex",alignItems:"center",gap:6,padding:"4px 0",fontSize:11,cursor:"pointer"}} onClick={()=>{
+                            const txs=filteredTxns.filter(t=>t.type==="expense"&&t.businessActivity===act&&t.category===cat);
+                            setDrillDown({title:`${act} - ${cat}`,transactions:txs,color:COLORS[i%COLORS.length]});
+                          }}>
+                            <div style={{width:8,height:8,borderRadius:2,background:COLORS[i%COLORS.length]}}/>
+                            <span style={{flex:1,color:"#94a3b8"}}>{cat}</span>
+                            <span className="mono" style={{color:"#e2e8f0"}}>{fmt(amt)}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+        {acts.every(act=>{const actInc=filteredTxns.filter(t=>t.type==="income"&&t.businessActivity===act).reduce((s,t)=>s+t.amount,0);const actExp=filteredTxns.filter(t=>t.type==="expense"&&t.businessActivity===act).reduce((s,t)=>s+t.amount,0);return!actInc&&!actExp;})&&(
+          <div className="card" style={{gridColumn:"1/-1"}}>
+            <div style={{color:"#475569",fontSize:13,textAlign:"center",padding:20}}>No activity data found for selected filters.</div>
+          </div>
+        )}
+      </div>
+    )}
+    
     {activeView==="expenses"&&(
       <div className="g2" style={{gap:18}}>
         {/* Pie Chart - Category */}
-        <div className="card">
+        <div className="card" data-testid="category-pie-card">
           <div style={{fontWeight:600,fontSize:14,marginBottom:14,color:"#94a3b8",borderBottom:"1px solid #1e293b",paddingBottom:10}}>Expenses by Category</div>
           <div style={{display:"flex",justifyContent:"center",marginBottom:16}}>
             <PieChart data={catPieData} size={200} onSliceClick={(s)=>openCategoryDrill(s.label)} chartId="category"/>
@@ -3448,9 +3769,9 @@ function ReportsTab({txns,acts,totInc,totExp}){
           <div style={{maxHeight:200,overflowY:"auto"}}>
             {cats.map(([cat,amt],i)=>{
               const COLORS=["#f87171","#fb923c","#fbbf24","#a3e635","#34d399","#22d3ee","#818cf8","#c084fc","#f472b6","#94a3b8"];
-              const pct=totExp>0?((amt/totExp)*100).toFixed(1):"0";
+              const pct=filteredExp>0?((amt/filteredExp)*100).toFixed(1):"0";
               return(
-                <div key={cat} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 0",cursor:"pointer",borderBottom:"1px solid #1a2438"}} onClick={()=>openCategoryDrill(cat)}>
+                <div key={cat} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 0",cursor:"pointer",borderBottom:"1px solid #1a2438"}} onClick={()=>openCategoryDrill(cat)} data-testid={`category-row-${cat.replace(/\s+/g,'-').toLowerCase()}`}>
                   <div style={{width:12,height:12,borderRadius:2,background:COLORS[i%COLORS.length],flexShrink:0}}/>
                   <div style={{flex:1,fontSize:12,color:"#e2e8f0"}}>{cat}</div>
                   <div className="mono" style={{fontSize:11,color:"#64748b"}}>{pct}%</div>
@@ -3462,7 +3783,7 @@ function ReportsTab({txns,acts,totInc,totExp}){
         </div>
         
         {/* Activity Breakdown */}
-        <div className="card">
+        <div className="card" data-testid="activity-pie-card">
           <div style={{fontWeight:600,fontSize:14,marginBottom:14,color:"#94a3b8",borderBottom:"1px solid #1e293b",paddingBottom:10}}>Expenses by Activity</div>
           <div style={{display:"flex",justifyContent:"center",marginBottom:16}}>
             <PieChart data={actData} size={200} onSliceClick={(s)=>openActivityDrill(s.label)} chartId="activity"/>
@@ -3470,7 +3791,7 @@ function ReportsTab({txns,acts,totInc,totExp}){
           <div style={{maxHeight:200,overflowY:"auto"}}>
             {actData.map((d,i)=>{
               const COLORS=["#f87171","#fb923c","#fbbf24","#a3e635","#34d399","#22d3ee","#818cf8","#c084fc","#f472b6","#94a3b8"];
-              const pct=totExp>0?((d.value/totExp)*100).toFixed(1):"0";
+              const pct=filteredExp>0?((d.value/filteredExp)*100).toFixed(1):"0";
               return(
                 <div key={d.label} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 0",cursor:"pointer",borderBottom:"1px solid #1a2438"}} onClick={()=>openActivityDrill(d.label)}>
                   <div style={{width:12,height:12,borderRadius:2,background:COLORS[i%COLORS.length],flexShrink:0}}/>
@@ -3484,12 +3805,12 @@ function ReportsTab({txns,acts,totInc,totExp}){
         </div>
         
         {/* Payment Method */}
-        <div className="card" style={{gridColumn:"1/-1"}}>
+        <div className="card" style={{gridColumn:"1/-1"}} data-testid="payment-method-card">
           <div style={{fontWeight:600,fontSize:14,marginBottom:14,color:"#94a3b8",borderBottom:"1px solid #1e293b",paddingBottom:10}}>Expenses by Payment Method</div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:12}}>
             {payData.map((d,i)=>{
               const COLORS=["#818cf8","#34d399","#f87171","#fb923c","#fbbf24","#22d3ee","#c084fc","#f472b6"];
-              const pct=totExp>0?((d.value/totExp)*100).toFixed(1):"0";
+              const pct=filteredExp>0?((d.value/filteredExp)*100).toFixed(1):"0";
               return(
                 <div key={d.label} style={{background:"#0a0d18",borderRadius:8,padding:12,border:"1px solid #1a2438"}}>
                   <div style={{fontSize:11,color:"#64748b",marginBottom:4}}>{d.label}</div>
@@ -3506,7 +3827,7 @@ function ReportsTab({txns,acts,totInc,totExp}){
     {activeView==="vendors"&&(
       <div className="g2" style={{gap:18}}>
         {/* Vendor Pie Chart */}
-        <div className="card">
+        <div className="card" data-testid="vendor-pie-card">
           <div style={{fontWeight:600,fontSize:14,marginBottom:14,color:"#94a3b8",borderBottom:"1px solid #1e293b",paddingBottom:10}}>Top Vendors (Pie)</div>
           <div style={{display:"flex",justifyContent:"center",marginBottom:16}}>
             <PieChart data={vendorPieData} size={200} onSliceClick={(s)=>openVendorDrill(s.label)} chartId="vendor"/>
@@ -3515,14 +3836,14 @@ function ReportsTab({txns,acts,totInc,totExp}){
         </div>
         
         {/* Vendor List */}
-        <div className="card">
+        <div className="card" data-testid="vendor-list-card">
           <div style={{fontWeight:600,fontSize:14,marginBottom:14,color:"#94a3b8",borderBottom:"1px solid #1e293b",paddingBottom:10}}>
             All Vendors ({vendors.length})
           </div>
           <div style={{maxHeight:350,overflowY:"auto"}}>
             {vendors.map(([vendor,amt],i)=>{
               const count=expenses.filter(t=>(t.vendor||"").trim()===(vendor==="Unknown"?"":(vendor||"").trim())||(vendor==="Unknown"&&!(t.vendor||"").trim())).length;
-              const pct=totExp>0?((amt/totExp)*100).toFixed(1):"0";
+              const pct=filteredExp>0?((amt/filteredExp)*100).toFixed(1):"0";
               return(
                 <div key={vendor} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 8px",cursor:"pointer",background:i%2===0?"#0a0d18":"transparent",borderRadius:6}} onClick={()=>openVendorDrill(vendor)}>
                   <div style={{flex:1}}>
@@ -3538,12 +3859,12 @@ function ReportsTab({txns,acts,totInc,totExp}){
         </div>
         
         {/* Top Spenders */}
-        <div className="card" style={{gridColumn:"1/-1"}}>
+        <div className="card" style={{gridColumn:"1/-1"}} data-testid="top-vendors-card">
           <div style={{fontWeight:600,fontSize:14,marginBottom:14,color:"#94a3b8",borderBottom:"1px solid #1e293b",paddingBottom:10}}>Top 10 Vendors by Spend</div>
           {vendors.slice(0,10).length>0?(
             <div>
               {vendors.slice(0,10).map(([vendor,amt],i)=>{
-                const pct=totExp>0?(amt/totExp)*100:0;
+                const pct=filteredExp>0?(amt/filteredExp)*100:0;
                 return(
                   <div key={vendor} style={{marginBottom:10,cursor:"pointer"}} onClick={()=>openVendorDrill(vendor)}>
                     <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
@@ -3567,6 +3888,359 @@ function ReportsTab({txns,acts,totInc,totExp}){
     {/* Drill-Down Modal */}
     {drillDown&&<DrillDownModal title={drillDown.title} transactions={drillDown.transactions} color={drillDown.color} onClose={()=>setDrillDown(null)}/>}
   </div>);
+}
+
+// ── RECURRING EXPENSES TAB ──────────────────────────────────────────────────────
+function RecurringTab({txns,setTxns}){
+  const[showAdd,setShowAdd]=useState(false);
+  const[editItem,setEditItem]=useState(null);
+  const[newRecurring,setNewRecurring]=useState({vendor:"",amount:0,category:"",recurrenceType:"monthly",nextDueDate:"",description:"",businessActivity:"Personal"});
+  
+  // Get all recurring transactions
+  const recurringTxns=txns.filter(t=>t.isRecurring);
+  
+  // Auto-detect recurring patterns from transaction history
+  const detectRecurring=()=>{
+    const vendorGroups={};
+    txns.filter(t=>t.type==="expense").forEach(t=>{
+      const v=(t.vendor||"").toLowerCase().trim();
+      if(!v)return;
+      if(!vendorGroups[v])vendorGroups[v]=[];
+      vendorGroups[v].push(t);
+    });
+    
+    const detected=[];
+    Object.entries(vendorGroups).forEach(([vendor,vTxns])=>{
+      if(vTxns.length<2)return;
+      const amounts=vTxns.map(t=>t.amount);
+      const avgAmount=amounts.reduce((s,a)=>s+a,0)/amounts.length;
+      const amountVariance=Math.max(...amounts)-Math.min(...amounts);
+      
+      // If amounts are relatively consistent (within 20%)
+      if(amountVariance<avgAmount*0.2){
+        const dates=vTxns.map(t=>new Date(t.date).getTime()).sort((a,b)=>a-b);
+        const gaps=[];
+        for(let i=1;i<dates.length;i++)gaps.push((dates[i]-dates[i-1])/(1000*60*60*24));
+        const avgGap=gaps.length?gaps.reduce((s,g)=>s+g,0)/gaps.length:0;
+        
+        let recType="one-time";
+        if(avgGap>=25&&avgGap<=35)recType="monthly";
+        else if(avgGap>=85&&avgGap<=100)recType="quarterly";
+        else if(avgGap>=350&&avgGap<=380)recType="yearly";
+        
+        if(recType!=="one-time"){
+          detected.push({
+            vendor:vTxns[0].vendor,
+            amount:Math.round(avgAmount),
+            category:vTxns[0].category,
+            businessActivity:vTxns[0].businessActivity,
+            recurrenceType:recType,
+            lastDate:vTxns.sort((a,b)=>b.date.localeCompare(a.date))[0].date,
+            confidence:"high",
+            txCount:vTxns.length,
+          });
+        }
+      }
+    });
+    
+    // Also check known recurring vendors
+    const knownRecurring=RECURRING_VENDORS;
+    txns.filter(t=>t.type==="expense"&&!t.isRecurring).forEach(t=>{
+      const vLower=(t.vendor||"").toLowerCase();
+      if(knownRecurring.some(kr=>vLower.includes(kr))&&!detected.find(d=>d.vendor?.toLowerCase()===vLower)){
+        detected.push({
+          vendor:t.vendor,
+          amount:t.amount,
+          category:t.category,
+          businessActivity:t.businessActivity,
+          recurrenceType:"monthly",
+          lastDate:t.date,
+          confidence:"medium",
+          txCount:1,
+          source:"known_vendor",
+        });
+      }
+    });
+    
+    return detected.sort((a,b)=>b.amount-a.amount);
+  };
+  
+  const detectedRecurring=detectRecurring();
+  const untaggedRecurring=detectedRecurring.filter(d=>!recurringTxns.find(r=>r.vendor?.toLowerCase()===d.vendor?.toLowerCase()));
+  
+  // Mark transaction as recurring
+  const markAsRecurring=(tx,recType)=>{
+    const nextDue=calculateNextDueDate(tx.date||tx.lastDate,recType);
+    setTxns(prev=>prev.map(t=>{
+      if((t.vendor||"").toLowerCase()===(tx.vendor||"").toLowerCase()&&t.type==="expense"){
+        return{...t,isRecurring:true,recurrenceType:recType,nextDueDate:nextDue};
+      }
+      return t;
+    }));
+  };
+  
+  // Group recurring by type
+  const monthlyRec=recurringTxns.filter(t=>t.recurrenceType==="monthly");
+  const quarterlyRec=recurringTxns.filter(t=>t.recurrenceType==="quarterly");
+  const yearlyRec=recurringTxns.filter(t=>t.recurrenceType==="yearly");
+  
+  const monthlyTotal=monthlyRec.reduce((s,t)=>s+t.amount,0);
+  const quarterlyTotal=quarterlyRec.reduce((s,t)=>s+t.amount,0)/3;
+  const yearlyTotal=yearlyRec.reduce((s,t)=>s+t.amount,0)/12;
+  const estimatedMonthly=monthlyTotal+quarterlyTotal+yearlyTotal;
+  
+  return(
+    <div data-testid="recurring-tab">
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
+        <h2 className="h2" style={{marginBottom:0}}>Recurring Expenses</h2>
+        <button className="btn pri sm" onClick={()=>setShowAdd(true)} data-testid="add-recurring-btn">+ Add Recurring</button>
+      </div>
+      
+      {/* Summary Cards */}
+      <div className="g2" style={{marginBottom:20}}>
+        <div className="card" style={{textAlign:"center"}} data-testid="monthly-total-card">
+          <div style={{fontSize:11,color:"#64748b",marginBottom:6}}>Estimated Monthly Outflow</div>
+          <div className="mono" style={{fontSize:28,fontWeight:700,color:"#f87171"}}>{fmt(estimatedMonthly)}</div>
+          <div style={{fontSize:10,color:"#475569",marginTop:4}}>Based on {recurringTxns.length} recurring items</div>
+        </div>
+        <div className="card" data-testid="recurring-breakdown-card">
+          <div style={{fontSize:11,color:"#64748b",marginBottom:10}}>Breakdown by Frequency</div>
+          <R style={{marginBottom:6}}><span style={{color:"#94a3b8"}}>Monthly ({monthlyRec.length})</span><span className="mono" style={{color:"#f87171"}}>{fmt(monthlyTotal)}/mo</span></R>
+          <R style={{marginBottom:6}}><span style={{color:"#94a3b8"}}>Quarterly ({quarterlyRec.length})</span><span className="mono" style={{color:"#fb923c"}}>{fmt(quarterlyRec.reduce((s,t)=>s+t.amount,0))}/qtr</span></R>
+          <R><span style={{color:"#94a3b8"}}>Yearly ({yearlyRec.length})</span><span className="mono" style={{color:"#fbbf24"}}>{fmt(yearlyRec.reduce((s,t)=>s+t.amount,0))}/yr</span></R>
+        </div>
+      </div>
+      
+      {/* Auto-Detected Recurring */}
+      {untaggedRecurring.length>0&&(
+        <div className="card" style={{marginBottom:20,border:"1px solid #422006"}} data-testid="detected-recurring-card">
+          <div style={{fontWeight:600,fontSize:14,marginBottom:14,color:"#fbbf24",borderBottom:"1px solid #1e293b",paddingBottom:10}}>
+            🔍 Detected Recurring Expenses ({untaggedRecurring.length})
+          </div>
+          <div style={{fontSize:12,color:"#94a3b8",marginBottom:12}}>These expenses appear to be recurring based on your transaction history. Click to confirm.</div>
+          <div style={{maxHeight:250,overflowY:"auto"}}>
+            {untaggedRecurring.map((d,i)=>(
+              <div key={i} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 8px",background:i%2===0?"#0a0d18":"transparent",borderRadius:6}}>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:13,fontWeight:500,color:"#e2e8f0"}}>{d.vendor}</div>
+                  <div style={{fontSize:11,color:"#64748b"}}>{d.category} · {d.businessActivity} · {d.txCount} transaction{d.txCount>1?"s":""}</div>
+                </div>
+                <div className="mono" style={{fontSize:14,fontWeight:600,color:"#f87171"}}>{fmt(d.amount)}</div>
+                <select 
+                  className="inp" 
+                  style={{padding:"4px 8px",fontSize:11,width:100}} 
+                  defaultValue={d.recurrenceType}
+                  onChange={e=>markAsRecurring(d,e.target.value)}
+                  data-testid={`mark-recurring-${i}`}
+                >
+                  <option value="">Mark as...</option>
+                  <option value="monthly">Monthly</option>
+                  <option value="quarterly">Quarterly</option>
+                  <option value="yearly">Yearly</option>
+                </select>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      
+      {/* Confirmed Recurring List */}
+      <div className="card" data-testid="confirmed-recurring-card">
+        <div style={{fontWeight:600,fontSize:14,marginBottom:14,color:"#94a3b8",borderBottom:"1px solid #1e293b",paddingBottom:10}}>
+          Confirmed Recurring ({recurringTxns.length})
+        </div>
+        {recurringTxns.length>0?(
+          <div style={{maxHeight:400,overflowY:"auto"}}>
+            {recurringTxns.sort((a,b)=>(a.nextDueDate||"").localeCompare(b.nextDueDate||"")).map((tx,i)=>{
+              const isUpcoming=tx.nextDueDate&&tx.nextDueDate<=new Date(Date.now()+7*24*60*60*1000).toISOString().slice(0,10);
+              return(
+                <div key={tx.id||i} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 8px",background:i%2===0?"#0a0d18":"transparent",borderRadius:6,borderLeft:isUpcoming?"3px solid #f87171":"none"}}>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:13,fontWeight:500,color:"#e2e8f0"}}>{tx.vendor||tx.description||tx.category}</div>
+                    <div style={{fontSize:11,color:"#64748b"}}>
+                      {tx.category} · {tx.recurrenceType} · 
+                      {tx.nextDueDate&&<span style={{color:isUpcoming?"#f87171":"#818cf8"}}> Next: {fmtD(tx.nextDueDate)}</span>}
+                    </div>
+                  </div>
+                  <div className="mono" style={{fontSize:14,fontWeight:600,color:"#f87171"}}>{fmt(tx.amount)}</div>
+                  <button className="btn ghost sm" onClick={()=>{
+                    setTxns(prev=>prev.map(t=>t.id===tx.id?{...t,isRecurring:false,recurrenceType:"one-time",nextDueDate:null}:t));
+                  }} data-testid={`remove-recurring-${i}`}>✕</button>
+                </div>
+              );
+            })}
+          </div>
+        ):(
+          <div style={{color:"#475569",fontSize:13,textAlign:"center",padding:20}}>
+            No recurring expenses confirmed yet. Check the auto-detected section above or add manually.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── FUTURE CASHFLOW TAB ─────────────────────────────────────────────────────────
+function CashflowTab({txns}){
+  const[months,setMonths]=useState(12);
+  const[showDetails,setShowDetails]=useState(null);
+  
+  // Get recurring expenses
+  const recurringExpenses=txns.filter(t=>t.isRecurring&&t.type==="expense");
+  const{projections,monthlyTotals}=generateFutureCashflow(recurringExpenses,months);
+  
+  // Generate month labels for next N months
+  const monthLabels=[];
+  const now=new Date();
+  for(let i=0;i<months;i++){
+    const d=new Date(now.getFullYear(),now.getMonth()+i,1);
+    monthLabels.push({
+      key:d.toISOString().slice(0,7),
+      label:d.toLocaleDateString("en-IN",{month:"short",year:"2-digit"}),
+      fullLabel:d.toLocaleDateString("en-IN",{month:"long",year:"numeric"}),
+    });
+  }
+  
+  // Calculate totals
+  const totalProjected=Object.values(monthlyTotals).reduce((s,v)=>s+v,0);
+  const avgMonthly=months>0?totalProjected/months:0;
+  const maxMonth=Math.max(...Object.values(monthlyTotals),1);
+  
+  // Group projections by vendor for summary
+  const byVendor={};
+  projections.forEach(p=>{
+    const v=p.vendor||p.description||p.category;
+    if(!byVendor[v])byVendor[v]={total:0,count:0,recurrence:p.recurrenceType,amount:p.amount};
+    byVendor[v].total+=p.amount;
+    byVendor[v].count++;
+  });
+  const vendorSummary=Object.entries(byVendor).sort((a,b)=>b[1].total-a[1].total);
+  
+  return(
+    <div data-testid="cashflow-tab">
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18,flexWrap:"wrap",gap:12}}>
+        <h2 className="h2" style={{marginBottom:0}}>Future Cashflow Projection</h2>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <label style={{fontSize:12,color:"#94a3b8"}}>Forecast:</label>
+          <select value={months} onChange={e=>setMonths(Number(e.target.value))} className="inp" style={{padding:"6px 10px",fontSize:12}} data-testid="forecast-months-select">
+            <option value={3}>3 Months</option>
+            <option value={6}>6 Months</option>
+            <option value={12}>12 Months</option>
+            <option value={24}>24 Months</option>
+          </select>
+        </div>
+      </div>
+      
+      {recurringExpenses.length===0?(
+        <div className="card" style={{textAlign:"center",padding:40}}>
+          <div style={{fontSize:48,marginBottom:16}}>📊</div>
+          <div style={{fontSize:16,fontWeight:600,color:"#e2e8f0",marginBottom:8}}>No Recurring Expenses Found</div>
+          <div style={{fontSize:13,color:"#64748b",maxWidth:400,margin:"0 auto"}}>
+            To see future cashflow projections, first mark some expenses as recurring in the "Recurring" tab, 
+            or sync your emails to let AI automatically detect subscriptions and recurring payments.
+          </div>
+        </div>
+      ):(
+        <>
+          {/* Summary Cards */}
+          <div className="g2" style={{marginBottom:20}}>
+            <div className="card" style={{textAlign:"center"}} data-testid="total-projected-card">
+              <div style={{fontSize:11,color:"#64748b",marginBottom:6}}>Total Projected ({months} months)</div>
+              <div className="mono" style={{fontSize:28,fontWeight:700,color:"#f87171"}}>{fmt(totalProjected)}</div>
+              <div style={{fontSize:10,color:"#475569",marginTop:4}}>{projections.length} scheduled payments</div>
+            </div>
+            <div className="card" style={{textAlign:"center"}} data-testid="avg-monthly-card">
+              <div style={{fontSize:11,color:"#64748b",marginBottom:6}}>Average Monthly Outflow</div>
+              <div className="mono" style={{fontSize:28,fontWeight:700,color:"#fb923c"}}>{fmt(avgMonthly)}</div>
+              <div style={{fontSize:10,color:"#475569",marginTop:4}}>Based on {recurringExpenses.length} recurring items</div>
+            </div>
+          </div>
+          
+          {/* Monthly Breakdown Chart */}
+          <div className="card" style={{marginBottom:20}} data-testid="monthly-projection-chart">
+            <div style={{fontWeight:600,fontSize:14,marginBottom:14,color:"#94a3b8",borderBottom:"1px solid #1e293b",paddingBottom:10}}>
+              Monthly Projection
+            </div>
+            <div style={{display:"flex",alignItems:"flex-end",gap:8,height:180,padding:"0 8px",overflowX:"auto"}}>
+              {monthLabels.map((m,i)=>{
+                const val=monthlyTotals[m.key]||0;
+                const h=maxMonth>0?Math.max(4,(val/maxMonth)*140):4;
+                const isCurrentMonth=m.key===now.toISOString().slice(0,7);
+                return(
+                  <div key={m.key} style={{minWidth:50,display:"flex",flexDirection:"column",alignItems:"center",cursor:"pointer"}} onClick={()=>setShowDetails(m.key)} data-testid={`month-bar-${m.key}`}>
+                    <div className="mono" style={{fontSize:9,color:"#64748b",marginBottom:4,whiteSpace:"nowrap"}}>{val>0?fmt(val):"-"}</div>
+                    <div style={{width:36,height:h,background:isCurrentMonth?"linear-gradient(180deg, #818cf8, #6366f1)":"linear-gradient(180deg, #f87171, #dc2626)",borderRadius:"4px 4px 0 0",transition:"all 0.2s"}}/>
+                    <div style={{fontSize:10,color:isCurrentMonth?"#818cf8":"#94a3b8",marginTop:6,fontWeight:isCurrentMonth?600:400}}>{m.label}</div>
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{fontSize:11,color:"#64748b",textAlign:"center",marginTop:12}}>Click on a month to see detailed breakdown</div>
+          </div>
+          
+          {/* Top Recurring by Projected Total */}
+          <div className="card" data-testid="top-recurring-projected">
+            <div style={{fontWeight:600,fontSize:14,marginBottom:14,color:"#94a3b8",borderBottom:"1px solid #1e293b",paddingBottom:10}}>
+              Projected Expenses by Vendor ({months} months)
+            </div>
+            <div style={{maxHeight:300,overflowY:"auto"}}>
+              {vendorSummary.map(([vendor,data],i)=>{
+                const pct=totalProjected>0?(data.total/totalProjected)*100:0;
+                return(
+                  <div key={vendor} style={{marginBottom:12}}>
+                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+                      <div>
+                        <span style={{fontSize:12,color:"#e2e8f0"}}>{vendor}</span>
+                        <span style={{fontSize:10,color:"#64748b",marginLeft:8}}>{data.recurrence} · {data.count} payments</span>
+                      </div>
+                      <span className="mono" style={{fontSize:12,color:"#f87171"}}>{fmt(data.total)}</span>
+                    </div>
+                    <div style={{background:"#1e293b",borderRadius:4,height:6,overflow:"hidden"}}>
+                      <div style={{height:"100%",background:"linear-gradient(90deg, #f87171, #dc2626)",borderRadius:4,width:`${pct}%`,transition:"width 0.3s"}}/>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+          
+          {/* Month Detail Modal */}
+          {showDetails&&(
+            <div className="overlay" onClick={()=>setShowDetails(null)}>
+              <div className="modal" style={{maxWidth:600}} onClick={e=>e.stopPropagation()} data-testid="month-detail-modal">
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+                  <div>
+                    <h3 style={{fontSize:18,fontWeight:700,color:"#f1f5f9",margin:0}}>
+                      {monthLabels.find(m=>m.key===showDetails)?.fullLabel||showDetails}
+                    </h3>
+                    <div style={{fontSize:13,color:"#64748b",marginTop:4}}>
+                      Total: <span className="mono" style={{color:"#f87171"}}>{fmt(monthlyTotals[showDetails]||0)}</span>
+                    </div>
+                  </div>
+                  <button className="btn ghost sm" onClick={()=>setShowDetails(null)}>✕ Close</button>
+                </div>
+                <div style={{maxHeight:"60vh",overflowY:"auto"}}>
+                  {projections.filter(p=>p.monthKey===showDetails).sort((a,b)=>a.projectedDate.localeCompare(b.projectedDate)).map((p,i)=>(
+                    <div key={i} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 8px",background:i%2===0?"#0a0d18":"transparent",borderRadius:6}}>
+                      <div style={{width:70,fontSize:11,color:"#64748b"}}>{fmtD(p.projectedDate)}</div>
+                      <div style={{flex:1}}>
+                        <div style={{fontSize:13,fontWeight:500,color:"#e2e8f0"}}>{p.vendor||p.description||p.category}</div>
+                        <div style={{fontSize:11,color:"#64748b"}}>{p.category} · {p.recurrenceType}</div>
+                      </div>
+                      <div className="mono" style={{fontSize:14,fontWeight:600,color:"#f87171"}}>{fmt(p.amount)}</div>
+                    </div>
+                  ))}
+                  {projections.filter(p=>p.monthKey===showDetails).length===0&&(
+                    <div style={{color:"#475569",textAlign:"center",padding:20}}>No projected expenses for this month.</div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
 }
 
 // ── CLOUD BACKUP TAB (OneDrive) ───────────────────────────────────────────────
