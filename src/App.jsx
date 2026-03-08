@@ -3220,7 +3220,7 @@ function ReconModal({account,txns,acts,addInbox,onClose}){
 
 // ── REPORTS ───────────────────────────────────────────────────────────────────
 // ── PIE CHART COMPONENT ─────────────────────────────────────────────────────────
-function PieChart({data,size=200,onSliceClick}){
+function PieChart({data,size=200,onSliceClick,chartId="pie"}){
   if(!data||!data.length)return null;
   const total=data.reduce((s,d)=>s+d.value,0);
   if(total===0)return null;
@@ -3242,9 +3242,10 @@ function PieChart({data,size=200,onSliceClick}){
     return{...d,path,color:COLORS[i%COLORS.length],pct,startAngle,endAngle};
   });
   return(
-    <svg width={size} height={size} style={{display:"block"}}>
+    <svg width={size} height={size} style={{display:"block"}} data-testid={`${chartId}-chart`}>
       {slices.map((s,i)=>(
         <path key={i} d={s.path} fill={s.color} stroke="#0f1624" strokeWidth="2" 
+          data-testid={`${chartId}-slice-${s.label.replace(/\s+/g,'-').toLowerCase()}`}
           style={{cursor:onSliceClick?"pointer":"default",transition:"transform 0.15s",transformOrigin:"center"}}
           onClick={()=>onSliceClick&&onSliceClick(s)}
           onMouseEnter={e=>e.target.style.transform="scale(1.03)"}
@@ -3261,16 +3262,18 @@ function PieChart({data,size=200,onSliceClick}){
 }
 
 // ── BAR CHART COMPONENT ─────────────────────────────────────────────────────────
-function BarChart({data,height=180,barColor="#f87171",onClick}){
+function BarChart({data,height=180,barColor="#f87171",onClick,chartId="bar"}){
   if(!data||!data.length)return null;
   const maxVal=Math.max(...data.map(d=>d.value),1);
   const barWidth=Math.min(40,Math.floor((100/data.length)*0.7));
   return(
-    <div style={{height,display:"flex",alignItems:"flex-end",gap:4,padding:"0 4px"}}>
+    <div style={{height,display:"flex",alignItems:"flex-end",gap:4,padding:"0 4px"}} data-testid={`${chartId}-chart`}>
       {data.map((d,i)=>{
         const h=Math.max(4,(d.value/maxVal)*(height-30));
         return(
-          <div key={i} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",cursor:onClick?"pointer":"default"}} onClick={()=>onClick&&onClick(d)}>
+          <div key={i} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",cursor:onClick?"pointer":"default"}} 
+            data-testid={`${chartId}-bar-${d.label.replace(/\s+/g,'-').toLowerCase()}`}
+            onClick={()=>onClick&&onClick(d)}>
             <div style={{fontSize:9,color:"#64748b",marginBottom:2,whiteSpace:"nowrap"}}>{fmt(d.value)}</div>
             <div style={{width:"100%",maxWidth:barWidth,height:h,background:barColor,borderRadius:"4px 4px 0 0",transition:"all 0.2s"}} 
               onMouseEnter={e=>e.target.style.opacity=0.8} onMouseLeave={e=>e.target.style.opacity=1}/>
@@ -3295,23 +3298,23 @@ function DrillDownModal({title,transactions,onClose,color="#f87171"}){
   const total=transactions.reduce((s,t)=>s+t.amount,0);
   const toggleSort=(col)=>{if(sortBy===col)setSortDir(d=>d==="desc"?"asc":"desc");else{setSortBy(col);setSortDir("desc");}};
   return(
-    <div className="overlay" onClick={onClose}>
-      <div className="modal" style={{maxWidth:720,maxHeight:"85vh"}} onClick={e=>e.stopPropagation()}>
+    <div className="overlay" onClick={onClose} data-testid="drilldown-overlay">
+      <div className="modal" style={{maxWidth:720,maxHeight:"85vh"}} onClick={e=>e.stopPropagation()} data-testid="drilldown-modal">
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
           <div>
-            <h3 style={{fontSize:18,fontWeight:700,color:"#f1f5f9",margin:0}}>{title}</h3>
-            <div style={{fontSize:13,color:"#64748b",marginTop:4}}>{transactions.length} transactions · Total: <span className="mono" style={{color}}>{fmt(total)}</span></div>
+            <h3 style={{fontSize:18,fontWeight:700,color:"#f1f5f9",margin:0}} data-testid="drilldown-title">{title}</h3>
+            <div style={{fontSize:13,color:"#64748b",marginTop:4}} data-testid="drilldown-summary">{transactions.length} transactions · Total: <span className="mono" style={{color}}>{fmt(total)}</span></div>
           </div>
-          <button className="btn ghost sm" onClick={onClose}>✕ Close</button>
+          <button className="btn ghost sm" onClick={onClose} data-testid="drilldown-close-btn">✕ Close</button>
         </div>
         <div style={{display:"flex",gap:8,marginBottom:12}}>
-          <button className={`btn sm ${sortBy==="date"?"pri":"ghost"}`} onClick={()=>toggleSort("date")}>Date {sortBy==="date"&&(sortDir==="desc"?"↓":"↑")}</button>
-          <button className={`btn sm ${sortBy==="amount"?"pri":"ghost"}`} onClick={()=>toggleSort("amount")}>Amount {sortBy==="amount"&&(sortDir==="desc"?"↓":"↑")}</button>
-          <button className={`btn sm ${sortBy==="vendor"?"pri":"ghost"}`} onClick={()=>toggleSort("vendor")}>Vendor {sortBy==="vendor"&&(sortDir==="desc"?"↓":"↑")}</button>
+          <button className={`btn sm ${sortBy==="date"?"pri":"ghost"}`} onClick={()=>toggleSort("date")} data-testid="sort-date-btn">Date {sortBy==="date"&&(sortDir==="desc"?"↓":"↑")}</button>
+          <button className={`btn sm ${sortBy==="amount"?"pri":"ghost"}`} onClick={()=>toggleSort("amount")} data-testid="sort-amount-btn">Amount {sortBy==="amount"&&(sortDir==="desc"?"↓":"↑")}</button>
+          <button className={`btn sm ${sortBy==="vendor"?"pri":"ghost"}`} onClick={()=>toggleSort("vendor")} data-testid="sort-vendor-btn">Vendor {sortBy==="vendor"&&(sortDir==="desc"?"↓":"↑")}</button>
         </div>
-        <div style={{maxHeight:"55vh",overflowY:"auto"}}>
+        <div style={{maxHeight:"55vh",overflowY:"auto"}} data-testid="drilldown-transactions">
           {sorted.map((tx,i)=>(
-            <div key={tx.id||i} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 12px",background:i%2===0?"#0a0d18":"transparent",borderRadius:6,marginBottom:2}}>
+            <div key={tx.id||i} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 12px",background:i%2===0?"#0a0d18":"transparent",borderRadius:6,marginBottom:2}} data-testid={`transaction-row-${i}`}>
               <div style={{width:70,fontSize:11,color:"#64748b"}}>{fmtD(tx.date)}</div>
               <div style={{flex:1}}>
                 <div style={{fontSize:13,fontWeight:500,color:"#e2e8f0"}}>{tx.description||tx.category}</div>
@@ -3424,7 +3427,7 @@ function ReportsTab({txns,acts,totInc,totExp}){
         <div className="card" style={{gridColumn:"1/-1"}}>
           <div style={{fontWeight:600,fontSize:14,marginBottom:14,color:"#94a3b8",borderBottom:"1px solid #1e293b",paddingBottom:10}}>Monthly Expense Trend</div>
           {monthData.length>0?(
-            <BarChart data={monthData} height={160} barColor="#f87171" onClick={(d)=>openMonthDrill(d.fullMonth)}/>
+            <BarChart data={monthData} height={160} barColor="#f87171" onClick={(d)=>openMonthDrill(d.fullMonth)} chartId="monthly-trend"/>
           ):(
             <div style={{color:"#475569",fontSize:13,textAlign:"center",padding:20}}>No expense data yet.</div>
           )}
@@ -3439,7 +3442,7 @@ function ReportsTab({txns,acts,totInc,totExp}){
         <div className="card">
           <div style={{fontWeight:600,fontSize:14,marginBottom:14,color:"#94a3b8",borderBottom:"1px solid #1e293b",paddingBottom:10}}>Expenses by Category</div>
           <div style={{display:"flex",justifyContent:"center",marginBottom:16}}>
-            <PieChart data={catPieData} size={200} onSliceClick={(s)=>openCategoryDrill(s.label)}/>
+            <PieChart data={catPieData} size={200} onSliceClick={(s)=>openCategoryDrill(s.label)} chartId="category"/>
           </div>
           <div style={{fontSize:11,color:"#64748b",textAlign:"center",marginBottom:12}}>Click a slice to drill down</div>
           <div style={{maxHeight:200,overflowY:"auto"}}>
@@ -3462,7 +3465,7 @@ function ReportsTab({txns,acts,totInc,totExp}){
         <div className="card">
           <div style={{fontWeight:600,fontSize:14,marginBottom:14,color:"#94a3b8",borderBottom:"1px solid #1e293b",paddingBottom:10}}>Expenses by Activity</div>
           <div style={{display:"flex",justifyContent:"center",marginBottom:16}}>
-            <PieChart data={actData} size={200} onSliceClick={(s)=>openActivityDrill(s.label)}/>
+            <PieChart data={actData} size={200} onSliceClick={(s)=>openActivityDrill(s.label)} chartId="activity"/>
           </div>
           <div style={{maxHeight:200,overflowY:"auto"}}>
             {actData.map((d,i)=>{
@@ -3506,7 +3509,7 @@ function ReportsTab({txns,acts,totInc,totExp}){
         <div className="card">
           <div style={{fontWeight:600,fontSize:14,marginBottom:14,color:"#94a3b8",borderBottom:"1px solid #1e293b",paddingBottom:10}}>Top Vendors (Pie)</div>
           <div style={{display:"flex",justifyContent:"center",marginBottom:16}}>
-            <PieChart data={vendorPieData} size={200} onSliceClick={(s)=>openVendorDrill(s.label)}/>
+            <PieChart data={vendorPieData} size={200} onSliceClick={(s)=>openVendorDrill(s.label)} chartId="vendor"/>
           </div>
           <div style={{fontSize:11,color:"#64748b",textAlign:"center"}}>Click a slice to see all transactions</div>
         </div>
