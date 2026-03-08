@@ -44,13 +44,13 @@ LedgerAI is a personal finance/bookkeeping dashboard for Indian traders. Core ob
 - **SMS Transaction Analysis** - Enhanced SMS parsing with duplicate filtering
 
 ### Phase 4 (Current) - March 8, 2026
-- **Deployment Fix** - Fixed ESLint configuration blockers preventing production builds
-  - Removed invalid `defineConfig` and `globalIgnores` imports from ESLint v9
-  - Converted to proper ESLint flat config array format
-  - Disabled strict React 19 hooks rules causing false positive errors:
-    - `react-hooks/purity`, `react-hooks/set-state-in-effect`, `react-hooks/immutability`
-  - ESLint now passes with 0 errors (44 warnings only)
-  - Build completes successfully for production deployment
+- **Deployment Fixes** - Multiple fixes to enable production deployment:
+  1. ESLint configuration - Fixed invalid imports, disabled strict React 19 hooks rules
+  2. Production start script - Changed to `vite build && vite preview` for serving optimized files
+  3. **Vite allowedHosts** - Set `allowedHosts: true` to allow requests from any Emergent cluster domain
+  4. Added `.nvmrc` file specifying Node 20
+  5. Added `engines` field to package.json
+- Build completes successfully, app runs on port 3000
 
 ## Technical Stack
 - **Frontend**: React + Vite

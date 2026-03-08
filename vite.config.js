@@ -9,11 +9,11 @@ export default defineConfig({
   server: {
     host: '0.0.0.0',
     port: 3000,
-    allowedHosts: [
-      '.preview.emergentagent.com',
-      '.preview.emergentcf.cloud',
-      '.cluster-8.preview.emergentcf.cloud',
-      'localhost',
-    ],
+    allowedHosts: true,
+  },
+  preview: {
+    host: '0.0.0.0',
+    port: 3000,
+    allowedHosts: true,
   },
 })
