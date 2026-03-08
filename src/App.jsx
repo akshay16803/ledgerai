@@ -1605,8 +1605,8 @@ export default function App(){
     return true;
   });
   const recurringTxns=txns.filter(t=>t.isRecurring);
-  // Simplified tabs - removed Journal (use ledger), Day Review (use Dashboard+Inbox)
-  const TABS=[["dashboard","Dashboard"],["transactions","Ledger"],["inbox",`Inbox${inbox.length?` (${inbox.length})`:""}`],["email",`Email${emails.length?` (${emails.length})`:""}`],["accounts","Accounts"],["reports","Reports"],["recurring",`Recurring${recurringTxns.length?` (${recurringTxns.length})`:""}`],["cashflow","Future Cashflow"],["settings","Settings"]];
+  // Navigation tabs - Day Review is critical for approving AI-detected transactions
+  const TABS=[["dashboard","Dashboard"],["transactions","Ledger"],["inbox",`Inbox${inbox.length?` (${inbox.length})`:""}`],["daily",`Day Review${inbox.length?` (${inbox.length})`:""}`],["email",`Email${emails.length?` (${emails.length})`:""}`],["accounts","Accounts"],["reports","Reports"],["recurring",`Recurring${recurringTxns.length?` (${recurringTxns.length})`:""}`],["cashflow","Future Cashflow"],["settings","Settings"]];
 
   if(authCfg.enabled&&!authCfg.googleClientId){
     return <AuthSetupScreen authCfg={authCfg} setAuthCfg={setAuthCfg}/>;
