@@ -2516,10 +2516,37 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
     setToast(`${provider==="microsoft"?"Outlook":"Gmail"} disconnected: ${acc.email||acc.label||"account"}`);
   };
 
+  const[removeConfirm,setRemoveConfirm]=useState({open:false,acc:null,text:""});
+  
   const removeAccount=(acc)=>{
-    if(!window.confirm(`Remove ${acc.email||acc.label||"this account"} from Email Integration?`))return;
+    setRemoveConfirm({open:true,acc,text:""});
+  };
+  
+  const confirmRemoveAccount=()=>{
+    if(removeConfirm.text.toLowerCase()!=="remove"){
+      alert("Please type 'remove' to confirm deletion.");
+      return;
+    }
+    const acc=removeConfirm.acc;
     setEmails(prev=>prev.filter(a=>a.id!==acc.id));
     setAiPending(prev=>prev.filter(p=>p.accountId!==acc.id));
+    setRemoveConfirm({open:false,acc:null,text:""});
+    setToast(`Account removed: ${acc?.email||acc?.label||"account"}`);
+  };
+
+  // Human-readable error reasons for AI pending items
+  const getHumanReadableError=(error)=>{
+    if(!error)return"Processing queued";
+    const e=error.toLowerCase();
+    if(e.includes("google_reauth_required")||e.includes("401"))return"Session expired - needs reconnection";
+    if(e.includes("ai_retry_required"))return"AI analysis needs another attempt";
+    if(e.includes("timeout"))return"Request timed out - will retry";
+    if(e.includes("rate_limit")||e.includes("429"))return"API rate limit reached - will retry later";
+    if(e.includes("network")||e.includes("fetch"))return"Network error - will retry";
+    if(e.includes("account_not_connected"))return"Account not connected";
+    if(e.includes("parse"))return"Unable to read email content - will retry";
+    if(e.includes("quota"))return"API quota exceeded - will retry later";
+    return"Processing failed - will retry automatically";
   };
 
   const fetchMessageEvidence=async(provider,token,msgId)=>{
@@ -3065,31 +3092,79 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
       <R style={{marginBottom:10}}>
         <h2 className="h2" style={{flex:1}}>Email Integration</h2>
         <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-          <button className="btn sm suc" disabled={Boolean(connectBusy)} onClick={()=>connectAccount("google",null)}>
-            {connectingGoogle?"⏳ Connecting Gmail…":"+ Connect Gmail Account"}
+          <button className="btn sm suc" disabled={Boolean(connectBusy)} onClick={()=>connectAccount("google",null)} data-testid="connect-gmail-btn">
+            {connectingGoogle?"⏳ Connecting…":"+ Connect Gmail"}
           </button>
-          <button className="btn sm pri" disabled={Boolean(connectBusy)} onClick={()=>connectAccount("microsoft",null)}>
-            {connectingMicrosoft?"⏳ Connecting Outlook…":"+ Connect Outlook Account"}
+          <button className="btn sm pri" disabled={Boolean(connectBusy)} onClick={()=>connectAccount("microsoft",null)} data-testid="connect-outlook-btn">
+            {connectingMicrosoft?"⏳ Connecting…":"+ Connect Outlook"}
           </button>
         </div>
       </R>
 
       {toast&&<div style={{background:"#052e16",border:"1px solid #34d399",borderRadius:10,padding:"10px 12px",fontSize:12,color:"#86efac",marginBottom:12}}>{toast}</div>}
 
-      <div className="card" style={{marginBottom:14,background:"linear-gradient(135deg,#10192d,#0a1220)"}}>
-        <R>
-          <div style={{fontSize:13,color:"#94a3b8"}}>
-            Connected accounts: <b style={{color:"#e2e8f0"}}>{connected}</b> / {emails.length}
-            {emailInbox>0&&<span style={{marginLeft:10,color:"#f59e0b"}}>· {emailInbox} items pending in Inbox</span>}
-            {totalPendingAi>0&&<button className="btn sm ghost" style={{marginLeft:10,padding:"2px 8px",fontSize:12,color:"#c4b5fd",borderColor:"#3b2f66"}} onClick={()=>setPendingView({open:true,accountId:""})}>AI retry queue: {totalPendingAi}{duePendingAi>0?` (due ${duePendingAi})`:""}</button>}
+      {/* Control Bar */}
+      <div className="card" style={{marginBottom:14,background:"linear-gradient(135deg,#10192d,#0a1220)"}} data-testid="email-control-bar">
+        <R style={{flexWrap:"wrap",gap:12}}>
+          <div style={{fontSize:13,color:"#94a3b8",flex:1}}>
+            <span style={{marginRight:16}}>Connected: <b style={{color:connected>0?"#34d399":"#64748b"}}>{connected}</b>/{emails.length}</span>
+            {emailInbox>0&&<span style={{marginRight:16,color:"#86efac"}}>📥 {emailInbox} in Inbox</span>}
           </div>
-          <div style={{display:"flex",gap:8,flexWrap:"wrap",justifyContent:"flex-end"}}>
-            {totalPendingAi>0&&<button className="btn sm ghost" disabled={Boolean(connectBusy)} onClick={()=>setPendingView({open:true,accountId:""})}>📋 View AI Pending</button>}
-            {totalPendingAi>0&&<button className="btn sm ghost" disabled={retryBusy||Boolean(connectBusy)} onClick={()=>runPendingAiRetry({force:true})}>{retryBusy?"⏳ Retrying AI…":"🤖 Retry AI Pending"}</button>}
-            {syncableAccounts.length>0&&<button className="btn sm pri" disabled={anySyncing||Boolean(connectBusy)} onClick={()=>syncableAccounts.forEach(a=>startSync(a,false))}>{anySyncing?"⏳ Syncing…":"🔄 Sync All Accounts"}</button>}
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            {/* View AI Pending */}
+            {totalPendingAi>0&&(
+              <button 
+                className="btn sm ghost" 
+                onClick={()=>setPendingView({open:true,accountId:""})}
+                data-testid="view-ai-pending-btn"
+                style={{color:"#fbbf24",borderColor:"#78350f"}}
+              >
+                📋 View AI Pending ({totalPendingAi})
+              </button>
+            )}
+            
+            {/* Retry AI Pending */}
+            {totalPendingAi>0&&(
+              <button 
+                className="btn sm" 
+                style={{background:"#422006",color:"#fbbf24"}}
+                disabled={retryBusy||Boolean(connectBusy)} 
+                onClick={()=>runPendingAiRetry({force:true})}
+                data-testid="retry-ai-pending-btn"
+              >
+                {retryBusy?"⏳ Processing…":"🤖 Retry AI Pending"}
+              </button>
+            )}
+            
+            {/* Sync All Accounts */}
+            {syncableAccounts.length>0&&(
+              <button 
+                className="btn sm pri" 
+                disabled={anySyncing||Boolean(connectBusy)} 
+                onClick={()=>syncableAccounts.forEach(a=>startSync(a,false))}
+                data-testid="sync-all-btn"
+              >
+                {anySyncing?"⏳ Syncing…":"🔄 Sync All Accounts"}
+              </button>
+            )}
           </div>
         </R>
+        {totalPendingAi>0&&(
+          <div style={{fontSize:11,color:"#94a3b8",marginTop:8,paddingTop:8,borderTop:"1px solid #1e293b"}}>
+            💡 AI Pending: These emails will be automatically retried every 30 minutes, or click "Retry AI Pending" to process now.
+          </div>
+        )}
       </div>
+
+      {emails.length===0&&(
+        <div className="card" style={{textAlign:"center",padding:40}}>
+          <div style={{fontSize:48,marginBottom:16}}>📧</div>
+          <div style={{fontSize:16,fontWeight:600,color:"#e2e8f0",marginBottom:8}}>No Email Accounts Connected</div>
+          <div style={{fontSize:13,color:"#64748b",maxWidth:400,margin:"0 auto"}}>
+            Connect your Gmail or Outlook account to automatically extract financial transactions from your emails (receipts, invoices, bank alerts).
+          </div>
+        </div>
+      )}
 
       {emails.length===0&&(
           <div className="card" style={{textAlign:"center",padding:56,background:"linear-gradient(135deg,#0f1624,#081122)"}}>
@@ -3109,8 +3184,9 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
         const providerLabel=provider==="microsoft"?"Outlook":"Gmail";
         const linked=Boolean(acc.connected)&&!acc.userDisconnected;
         const needsReauth=Boolean(acc.reauthRequired)&&linked;
+        const needsFirstSync=linked&&!acc.firstSyncCompleted;
         return(
-        <div key={acc.id} className="card" style={{marginBottom:12,background:linked?"linear-gradient(135deg,#0f1c36,#0b1530)":"#0f1624"}}>
+        <div key={acc.id} className="card" style={{marginBottom:12,background:linked?"linear-gradient(135deg,#0f1c36,#0b1530)":"#0f1624"}} data-testid={`email-account-${acc.id}`}>
           <R style={{marginBottom:8}}>
             <div style={{display:"flex",gap:12,alignItems:"center",flex:1,minWidth:0}}>
               <div style={{width:40,height:40,borderRadius:20,display:"flex",alignItems:"center",justifyContent:"center",background:linked?"#052e16":"#1a1a2e"}}>{linked?"✅":provider==="microsoft"?"Ⓜ️":"📧"}</div>
@@ -3118,42 +3194,50 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
                 <div style={{fontWeight:700,fontSize:15,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{acc.email||acc.label||"Email account"}</div>
                 <div style={{fontSize:12,color:"#64748b"}}>
                   <span>{providerLabel} · </span>
-                  {linked&&!needsReauth&&<span style={{color:"#34d399"}}>Connected</span>}
-                  {linked&&needsReauth&&<span style={{color:"#f59e0b"}}>Connected · re-auth needed</span>}
+                  {linked&&!needsReauth&&!needsFirstSync&&<span style={{color:"#34d399"}}>Connected</span>}
+                  {linked&&!needsReauth&&needsFirstSync&&<span style={{color:"#fbbf24"}}>Connected · initial sync pending</span>}
+                  {linked&&needsReauth&&<span style={{color:"#f59e0b"}}>Re-authentication needed</span>}
                   {!linked&&<span style={{color:"#f87171"}}>Disconnected</span>}
-                  {acc.firstSyncCompleted&&acc.syncFromDate&&<span> · first synced from {fmtD(acc.syncFromDate)}</span>}
-                  {acc.lastSync&&<span> · last sync {fmtDT(acc.lastSync)}</span>}
+                  {acc.firstSyncCompleted&&acc.syncFromDate&&<span> · syncing from {fmtD(acc.syncFromDate)}</span>}
+                  {acc.lastSync&&<span> · last: {fmtDT(acc.lastSync)}</span>}
                   {pendingByAccount[acc.id]>0&&(
                     <button className="btn sm ghost" style={{marginLeft:8,padding:"2px 8px",fontSize:11,color:"#c4b5fd",borderColor:"#3b2f66"}} onClick={()=>setPendingView({open:true,accountId:acc.id})}>
-                      AI retry pending {pendingByAccount[acc.id]}{duePendingByAccount[acc.id]?` (due ${duePendingByAccount[acc.id]})`:""}
+                      {pendingByAccount[acc.id]} pending
                     </button>
                   )}
                 </div>
               </div>
             </div>
             <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-              {(!linked||needsReauth)&&<button className="btn sm pri" disabled={Boolean(connectBusy)} onClick={()=>connectAccount(provider,acc)}>
-                {provider==="google"&&connectingGoogle?"⏳ Connecting Gmail…":provider==="microsoft"&&connectingMicrosoft?"⏳ Connecting Outlook…":needsReauth?`Reconnect ${providerLabel}`:`Connect ${providerLabel}`}
+              {/* Reconnect button - only shows when disconnected or needs reauth */}
+              {(!linked||needsReauth)&&<button className="btn sm pri" disabled={Boolean(connectBusy)} onClick={()=>connectAccount(provider,acc)} data-testid="reconnect-btn">
+                {provider==="google"&&connectingGoogle?"⏳ Connecting…":provider==="microsoft"&&connectingMicrosoft?"⏳ Connecting…":"🔗 Reconnect"}
               </button>}
-              {linked&&<button className="btn sm" style={{background:"#1a2234",color:"#818cf8"}} disabled={Boolean(syncingIds[acc.id])} onClick={()=>startSync(acc,false)}>{syncingIds[acc.id]?"⏳ Syncing…":"🔄 Sync"}</button>}
-              {linked&&<button className="btn sm ghost" disabled={Boolean(syncingIds[acc.id])} onClick={()=>setFirstSyncPrompt({accId:acc.id,fromDate:acc.syncFromDate||new Date(Date.now()-180*24*60*60*1000).toISOString().slice(0,10),scanAll:true})}>🧠 Scan From Date</button>}
-              {linked&&<button className="btn sm dan" onClick={()=>disconnectAccount(acc)}>Disconnect {providerLabel}</button>}
-              <button className="btn sm ghost" onClick={()=>setEmails(p=>p.map(a=>a.id===acc.id?{...a,_open:!a._open}:a))}>⚙</button>
-              <button className="btn sm ghost" onClick={()=>removeAccount(acc)}>Remove</button>
+              
+              {/* Sync button - only when connected and first sync done */}
+              {linked&&acc.firstSyncCompleted&&<button className="btn sm" style={{background:"#1a2234",color:"#818cf8"}} disabled={Boolean(syncingIds[acc.id])||needsReauth} onClick={()=>startSync(acc,false)} data-testid="sync-btn">{syncingIds[acc.id]?"⏳ Syncing…":"🔄 Sync"}</button>}
+              
+              {/* Scan from Date - ONLY shows once before first sync, then disappears forever */}
+              {linked&&!acc.firstSyncCompleted&&<button className="btn sm suc" disabled={Boolean(syncingIds[acc.id])||needsReauth} onClick={()=>setFirstSyncPrompt({accId:acc.id,fromDate:acc.syncFromDate||new Date(Date.now()-90*24*60*60*1000).toISOString().slice(0,10),scanAll:true})} data-testid="scan-from-date-btn">📅 Set Sync Start Date</button>}
+              
+              {/* Settings toggle */}
+              <button className="btn sm ghost" onClick={()=>setEmails(p=>p.map(a=>a.id===acc.id?{...a,_open:!a._open}:a))} data-testid="settings-btn">⚙</button>
+              
+              {/* Remove button */}
+              <button className="btn sm dan" onClick={()=>removeAccount(acc)} data-testid="remove-btn">Remove</button>
             </div>
           </R>
+          
+          {/* Progress indicator */}
           {syncProgress[acc.id]&&(
             <div style={{background:"#0a0f1d",border:"1px solid #1e293b",borderRadius:8,padding:"8px 12px",fontSize:12,color:"#c7d2fe",marginBottom:8}}>
               <div style={{display:"flex",justifyContent:"space-between",gap:10,marginBottom:6,flexWrap:"wrap"}}>
                 <span>
-                  {syncProgress[acc.id].phase==="fetching"&&"Fetching emails…"}
-                  {syncProgress[acc.id].phase==="processing"&&`Processed ${syncProgress[acc.id].processed||0}/${syncProgress[acc.id].total||0}${syncProgress[acc.id].failed?` · failed ${syncProgress[acc.id].failed}`:""}${syncProgress[acc.id].skipped?` · skipped ${syncProgress[acc.id].skipped}`:""}${syncProgress[acc.id].pending?` · pending AI ${syncProgress[acc.id].pending}`:""}`}
-                  {syncProgress[acc.id].phase==="review"&&`Scan complete. ${syncProgress[acc.id].found||0} item(s) awaiting review.${syncProgress[acc.id].pending?` Pending AI retry: ${syncProgress[acc.id].pending}.`:""}`}
-                  {syncProgress[acc.id].phase==="done"&&`Sync completed.${Number(syncProgress[acc.id].found)>0?` ${syncProgress[acc.id].found} transaction(s) in review queue.`:""}${syncProgress[acc.id].pending?` Pending AI retry: ${syncProgress[acc.id].pending}.`:""}`}
-                  {syncProgress[acc.id].phase==="error"&&`Sync failed.${syncProgress[acc.id].pending?` Pending AI retry: ${syncProgress[acc.id].pending}.`:""}`}
-                </span>
-                <span style={{color:"#94a3b8"}}>
-                  {(syncProgress[acc.id].phase==="processing"||syncProgress[acc.id].phase==="review"||syncProgress[acc.id].phase==="done")&&`Left ${Math.max(0,syncProgress[acc.id].remaining||0)}`}
+                  {syncProgress[acc.id].phase==="fetching"&&"📧 Fetching emails…"}
+                  {syncProgress[acc.id].phase==="processing"&&`🤖 Processing ${syncProgress[acc.id].processed||0}/${syncProgress[acc.id].total||0}${syncProgress[acc.id].failed?` · failed ${syncProgress[acc.id].failed}`:""}${syncProgress[acc.id].skipped?` · skipped ${syncProgress[acc.id].skipped}`:""}${syncProgress[acc.id].pending?` · pending ${syncProgress[acc.id].pending}`:""}`}
+                  {syncProgress[acc.id].phase==="review"&&`✅ Scan complete. ${syncProgress[acc.id].found||0} transaction(s) ready for review.${syncProgress[acc.id].pending?` ${syncProgress[acc.id].pending} queued for retry.`:""}`}
+                  {syncProgress[acc.id].phase==="done"&&`✅ Sync completed.${Number(syncProgress[acc.id].found)>0?` ${syncProgress[acc.id].found} transaction(s) in review.`:" No new transactions."}${syncProgress[acc.id].pending?` ${syncProgress[acc.id].pending} queued for retry.`:""}`}
+                  {syncProgress[acc.id].phase==="error"&&`❌ Sync failed.${syncProgress[acc.id].pending?` ${syncProgress[acc.id].pending} queued for retry.`:""}`}
                 </span>
               </div>
               {Number(syncProgress[acc.id].total)>0&&(
@@ -3161,32 +3245,29 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
                   <div style={{height:"100%",background:"#6366f1",width:`${Math.min(100,Math.round(((syncProgress[acc.id].processed||0)/(syncProgress[acc.id].total||1))*100))}%`,transition:"width .15s linear"}}/>
                 </div>
               )}
-              {(Number(syncProgress[acc.id].failed)>0||Number(syncProgress[acc.id].skipped)>0||Number(syncProgress[acc.id].pending)>0)&&<div style={{marginTop:6,fontSize:11,color:"#64748b"}}>Failed = processing/API error. Skipped = AI found no financial transaction. Pending AI = retry queue (next attempt in 30m).</div>}
-              {Number(syncProgress[acc.id].failed)>0&&formatFailureSummary(syncProgress[acc.id].failureReasons||{})&&(
-                <div style={{marginTop:4,fontSize:11,color:"#94a3b8"}}>
-                  Failure reasons: {formatFailureSummary(syncProgress[acc.id].failureReasons||{})}
-                </div>
-              )}
             </div>
           )}
+          
+          {/* Status log */}
           {logs[acc.id]&&<div style={{background:"#0a0f1d",border:"1px solid #1e293b",borderRadius:8,padding:"8px 12px",fontSize:12,color:"#c7d2fe",marginBottom:acc._open?10:0}}>{logs[acc.id]}</div>}
+          
+          {/* Settings panel */}
           {acc._open&&(
             <div style={{background:"#0a0f1d",border:"1px solid #1e293b",borderRadius:10,padding:14,marginTop:8}}>
-              <div style={{fontSize:11,fontWeight:700,color:"#475569",marginBottom:10,textTransform:"uppercase"}}>Sync Preferences</div>
+              <div style={{fontSize:11,fontWeight:700,color:"#475569",marginBottom:10,textTransform:"uppercase"}}>Account Settings</div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-                <div><label>Account Label</label><input value={acc.label||""} onChange={e=>setEmails(p=>p.map(a=>a.id===acc.id?{...a,label:e.target.value}:a))} placeholder="Business email account"/></div>
+                <div><label>Account Label</label><input value={acc.label||""} onChange={e=>setEmails(p=>p.map(a=>a.id===acc.id?{...a,label:e.target.value}:a))} placeholder="e.g., Business email"/></div>
                 <div><label>Max emails per sync</label><input type="number" min="1" max="5000" value={acc.maxEmails||100} onChange={e=>setEmails(p=>p.map(a=>a.id===acc.id?{...a,maxEmails:Number(e.target.value)}:a))}/></div>
-                {provider==="google"&&<div><label>Search Query</label><input value={acc.syncQuery||GMAIL_QUERY} onChange={e=>setEmails(p=>p.map(a=>a.id===acc.id?{...a,syncQuery:e.target.value}:a))}/></div>}
+                {provider==="google"&&<div><label>Gmail Search Query</label><input value={acc.syncQuery||GMAIL_QUERY} onChange={e=>setEmails(p=>p.map(a=>a.id===acc.id?{...a,syncQuery:e.target.value}:a))}/></div>}
                 <div>
-                  <label style={{display:"block",marginBottom:8}}>Auto sync</label>
+                  <label style={{display:"block",marginBottom:8}}>Auto-sync (every 30 minutes)</label>
                   <label style={{display:"flex",gap:8,alignItems:"center",fontSize:13,color:"#94a3b8"}}>
                     <input type="checkbox" checked={acc.autoSyncHourly!==false} onChange={e=>setEmails(p=>p.map(a=>a.id===acc.id?{...a,autoSyncHourly:e.target.checked}:a))}/>
-                    Run every hour (new emails only)
+                    Enable automatic sync for new emails
                   </label>
                 </div>
               </div>
-              {provider==="microsoft"&&<div style={{fontSize:11,color:"#64748b",marginTop:8}}>Outlook sync scans inbox messages from selected date. Search query is only for Gmail.</div>}
-              <div style={{fontSize:11,color:"#64748b",marginTop:8}}>All extracted transactions go to Inbox review queue. Approve/Reject/Edit from Inbox or Day Review.</div>
+              {acc.firstSyncCompleted&&<div style={{fontSize:11,color:"#64748b",marginTop:8}}>First sync completed from {fmtD(acc.syncFromDate)}. New emails are synced automatically every 30 minutes.</div>}
             </div>
           )}
         </div>
@@ -3194,33 +3275,44 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
 
       {pendingView.open&&(
         <div className="overlay"><div className="modal" style={{maxWidth:1020}}>
-          <MH title={`AI Pending Retry (${pendingRowsFiltered.length})`} onClose={()=>setPendingView({open:false,accountId:""})}/>
-          <div style={{fontSize:12,color:"#94a3b8",marginBottom:10}}>
-            Emails listed below were not fully processed by AI yet. They stay here and retry automatically every 30 minutes until processing succeeds.
+          <MH title={`AI Pending Queue (${pendingRowsFiltered.length})`} onClose={()=>setPendingView({open:false,accountId:""})}/>
+          <div style={{fontSize:13,color:"#94a3b8",marginBottom:14}}>
+            These emails couldn't be processed yet and will retry automatically every 30 minutes. Click "Retry All Now" to process them immediately.
+          </div>
+          <div style={{display:"flex",gap:8,marginBottom:14}}>
+            <button className="btn sm pri" disabled={retryBusy||Boolean(connectBusy)} onClick={()=>{setPendingView({open:false,accountId:""});runPendingAiRetry({force:true});}} data-testid="retry-all-now-btn">
+              {retryBusy?"⏳ Processing…":"🤖 Retry All Now"}
+            </button>
+            <button className="btn sm dan" onClick={()=>{if(window.confirm(`Clear all ${pendingRowsFiltered.length} pending items?`)){setAiPending(prev=>prev.filter(p=>pendingView.accountId?p.accountId!==pendingView.accountId:false));}}}>
+              🗑 Clear All
+            </button>
           </div>
           {pendingView.accountId&&<div style={{fontSize:12,color:"#c4b5fd",marginBottom:10}}>Filtered account: {pendingAccountName(pendingView.accountId)}</div>}
           {pendingRowsFiltered.length===0?(
-            <div className="card" style={{textAlign:"center",padding:26,color:"#64748b"}}>No pending retry items.</div>
+            <div className="card" style={{textAlign:"center",padding:26,color:"#64748b"}}>No pending items. All emails have been processed successfully.</div>
           ):(
             <div style={{maxHeight:"56vh",overflowY:"auto",border:"1px solid #1e293b",borderRadius:10}}>
               {pendingRowsFiltered.map(row=>{
                 const nextAt=Date.parse(row.nextRetryAt||"");
                 const due=!Number.isFinite(nextAt)||nextAt<=Date.now();
+                const humanError=getHumanReadableError(row.lastError);
                 return(
-                  <div key={row.id} style={{padding:"10px 12px",borderBottom:"1px solid #1e293b",background:due?"#0f172a":"transparent"}}>
-                    <div style={{display:"flex",justifyContent:"space-between",gap:10,flexWrap:"wrap",marginBottom:4}}>
-                      <div style={{fontSize:13,fontWeight:600,color:"#e2e8f0"}}>{row.subject||"(No subject captured)"}</div>
-                      <div style={{fontSize:11,color:due?"#fbbf24":"#64748b"}}>{due?"Due now":`Next retry ${fmtDT(row.nextRetryAt)}`}</div>
+                  <div key={row.id} style={{padding:"12px 14px",borderBottom:"1px solid #1e293b",background:due?"#0f172a":"transparent"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",gap:10,flexWrap:"wrap",marginBottom:6}}>
+                      <div style={{fontSize:13,fontWeight:600,color:"#e2e8f0"}}>{row.subject||"(No subject)"}</div>
+                      <div style={{fontSize:11,padding:"2px 8px",borderRadius:4,background:due?"#422006":"#1e293b",color:due?"#fbbf24":"#94a3b8"}}>{due?"Ready to retry":"Scheduled"}</div>
                     </div>
-                    <div style={{fontSize:12,color:"#94a3b8",display:"flex",gap:10,flexWrap:"wrap"}}>
-                      <span>{row.provider==="microsoft"?"Outlook":"Gmail"} · {pendingAccountName(row.accountId)}</span>
-                      {row.from&&<span>From: {row.from}</span>}
-                      {row.emailDate&&<span>Email date: {fmtD(row.emailDate)}</span>}
-                      <span>Attempts: {row.attempts||0}</span>
-                      <span>Message ID: {row.msgId}</span>
+                    <div style={{fontSize:12,color:"#94a3b8",marginBottom:6}}>
+                      <span style={{marginRight:12}}>{row.provider==="microsoft"?"📧 Outlook":"📧 Gmail"}</span>
+                      {row.from&&<span style={{marginRight:12}}>From: {row.from.slice(0,40)}</span>}
+                      {row.emailDate&&<span>Date: {fmtD(row.emailDate)}</span>}
                     </div>
-                    <div style={{fontSize:11,color:"#fca5a5",marginTop:6}}>Reason: {row.lastError||"unknown_error"}</div>
-                    {row.snippet&&<div style={{fontSize:11,color:"#64748b",marginTop:4,lineHeight:1.6}}>{row.snippet.slice(0,260)}</div>}
+                    <div style={{display:"flex",alignItems:"center",gap:8,marginTop:8}}>
+                      <div style={{fontSize:12,color:"#fca5a5",background:"#450a0a",padding:"4px 10px",borderRadius:6}}>
+                        ⚠ {humanError}
+                      </div>
+                      <div style={{fontSize:11,color:"#64748b"}}>Attempt #{row.attempts||1}</div>
+                    </div>
                   </div>
                 );
               })}
@@ -3238,6 +3330,44 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
         if(acc)runSync(acc,{scanAll:firstSyncPrompt.scanAll,fromDate,markFirstSync:!acc.firstSyncCompleted});
         setFirstSyncPrompt(null);
       }}/>}
+      
+      {/* Remove Account Confirmation Modal */}
+      {removeConfirm.open&&(
+        <div className="overlay" onClick={()=>setRemoveConfirm({open:false,acc:null,text:""})}>
+          <div className="modal" style={{maxWidth:450}} onClick={e=>e.stopPropagation()}>
+            <MH title="Remove Email Account" onClose={()=>setRemoveConfirm({open:false,acc:null,text:""})}/>
+            <div style={{fontSize:14,color:"#f87171",background:"#450a0a",padding:"12px 16px",borderRadius:8,marginBottom:16}}>
+              ⚠️ This action cannot be undone. All sync history for this account will be removed.
+            </div>
+            <div style={{fontSize:13,color:"#94a3b8",marginBottom:16}}>
+              You are about to remove: <b style={{color:"#e2e8f0"}}>{removeConfirm.acc?.email||removeConfirm.acc?.label||"this account"}</b>
+            </div>
+            <div style={{marginBottom:16}}>
+              <label style={{fontSize:12,color:"#64748b"}}>Type "remove" to confirm:</label>
+              <input 
+                type="text" 
+                value={removeConfirm.text} 
+                onChange={e=>setRemoveConfirm(prev=>({...prev,text:e.target.value}))}
+                placeholder="Type 'remove' here"
+                autoFocus
+                data-testid="remove-confirm-input"
+              />
+            </div>
+            <div style={{display:"flex",gap:10}}>
+              <button className="btn ghost" style={{flex:1}} onClick={()=>setRemoveConfirm({open:false,acc:null,text:""})}>Cancel</button>
+              <button 
+                className="btn dan" 
+                style={{flex:1}} 
+                disabled={removeConfirm.text.toLowerCase()!=="remove"}
+                onClick={confirmRemoveAccount}
+                data-testid="confirm-remove-btn"
+              >
+                Remove Account
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
