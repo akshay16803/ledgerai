@@ -700,6 +700,80 @@ function filterDuplicates(newItems,existingTxns=[],inbox=[]){
   return{filtered,duplicates,duplicateCount:duplicates.length};
 }
 
+// ── DOCUMENT/RECEIPT ANALYSIS ───────────────────────────────────────────────────
+async function aiAnalyzeDocument(documentText,fileName,fileType,acts,cats){
+  const c=Object.entries(cats).map(([a,cs])=>`${a}: ${cs.join(", ")}`).join("\n");
+  const docType=fileType.includes("pdf")?"PDF Document":fileType.includes("image")?"Receipt/Invoice Image":"Document";
+  
+  const raw=await callAI([{role:"user",content:`You are a cashflow extraction engine for bookkeeping.
+Analyze this ${docType} and extract ALL financial transactions.
+
+Document name: "${fileName}"
+Document type: ${docType}
+
+Document content/text:
+${documentText.slice(0,12000)}
+
+Tasks:
+1) Extract ALL transactions visible in this document (receipts, invoices, bills, statements)
+2) For each transaction identify: type (expense/income), amount, date, vendor, description
+3) Detect if this is a RECURRING expense (subscription, insurance, utility bill, EMI)
+4) For receipts: extract item details, tax amounts, total
+5) For invoices: extract invoice number, due date, items, total
+
+Activities: ${acts.join(", ")}
+Categories:
+${c}
+
+Output status:
+- "success" when at least one valid transaction is extracted
+- "no_transaction" when document has no financial data
+- "unreadable" when document text is unclear/corrupted
+
+Return ONLY JSON:
+{
+  "status": "success|no_transaction|unreadable",
+  "reason": "",
+  "documentType": "receipt|invoice|bill|statement|other",
+  "transactions": [
+    {"type":"expense|income","businessActivity":"","category":"","isNewCategory":false,"description":"","amount":0,"date":"YYYY-MM-DD","vendor":"","paymentMethod":"","isRecurring":false,"recurrenceType":"monthly|quarterly|yearly|one-time","invoiceNumber":"","taxAmount":0}
+  ]
+}`}],1800);
+
+  try{
+    const obj=JSON.parse(raw.replace(/```json|```/g,"").trim());
+    const tx=Array.isArray(obj?.transactions)?obj.transactions:[];
+    const statusRaw=String(obj?.status||"").toLowerCase();
+    const status=statusRaw==="success"||statusRaw==="no_transaction"||statusRaw==="unreadable"?statusRaw:(tx.length?"success":"no_transaction");
+    return{
+      status,
+      reason:String(obj?.reason||""),
+      documentType:obj?.documentType||"other",
+      transactions:tx,
+    };
+  }catch{
+    return{status:"unreadable",reason:"parse_failed",documentType:"other",transactions:[]};
+  }
+}
+
+// Extract text from image using OCR-like AI analysis
+async function extractTextFromImage(base64Data,fileName){
+  try{
+    // For images, we'll send the base64 to AI for text extraction
+    const raw=await callAI([{role:"user",content:`Extract ALL text from this image. This is a financial document (receipt, invoice, bill).
+Return the text exactly as it appears, preserving numbers, dates, and amounts.
+If you cannot read the image, return "UNREADABLE".
+
+Image data (base64): ${base64Data.slice(0,50000)}
+Filename: ${fileName}
+
+Return ONLY the extracted text, no formatting or explanations.`}],2000);
+    return raw||"";
+  }catch{
+    return"";
+  }
+}
+
 async function aiAnalyzeEmail(subject,from,body,acts,cats,meta={}){
   const c=Object.entries(cats).map(([a,cs])=>`${a}: ${cs.join(", ")}`).join("\n");
   const accountList=Array.isArray(meta.accountNames)?meta.accountNames.filter(Boolean):[];
@@ -1646,7 +1720,7 @@ export default function App(){
       <div className="wrap">
         {tab==="dashboard"&&<DashTab byAct={byAct} totInc={totInc} totExp={totExp} todInc={todInc} todExp={todExp} txns={txns} todayTxns={todayTxns} inbox={inbox} emails={emails} onEdit={tx=>{setEditTx(tx);setAddType(tx.type);setShowAdd(true);}} onDelete={delTx}/>}
         {tab==="transactions"&&<LedgerTab txns={filtered} filter={filter} setFilter={setFilter} acts={acts} onEdit={tx=>{setEditTx(tx);setAddType(tx.type);setShowAdd(true);}} onDelete={delTx}/>}
-        {tab==="inbox"&&<InboxTab inbox={inbox} addInbox={addInbox} acts={acts} cats={cats} onApprove={approveInbox} onEdit={editInbox} onDiscard={discardInbox}/>}
+        {tab==="inbox"&&<InboxTab inbox={inbox} addInbox={addInbox} acts={acts} cats={cats} onApprove={approveInbox} onEdit={editInbox} onDiscard={discardInbox} txns={txns}/>}
         <div style={{display:tab==="email"?"block":"none"}} aria-hidden={tab!=="email"}>
           <EmailTab emails={emails} setEmails={setEmails} inbox={inbox} addInbox={addInbox} acts={acts} cats={cats} accs={accs} defaultGoogleClientId={authCfg.googleClientId||DEFAULT_GOOGLE_CLIENT_ID} defaultMicrosoftClientId={sbCfg.clientId||DEFAULT_MICROSOFT_CLIENT_ID||""}/>
         </div>
@@ -3291,13 +3365,116 @@ function LedgerTab({txns,filter,setFilter,acts,onEdit,onDelete}){
 }
 
 // ── INBOX ─────────────────────────────────────────────────────────────────────
-function InboxTab({inbox,addInbox,acts,cats,onApprove,onEdit,onDiscard}){
+function InboxTab({inbox,addInbox,acts,cats,onApprove,onEdit,onDiscard,txns}){
   const[bulk,setBulk]=useState("");
   const[loading,setLoading]=useState(false);
-  const runBatch=async()=>{if(!bulk.trim())return;setLoading(true);const items=await aiExtractBatch(bulk,acts,cats);addInbox(items.map(i=>({...i,type:i.type||"expense"})));setBulk("");setLoading(false);};
+  const[docLoading,setDocLoading]=useState(false);
+  const[dragOver,setDragOver]=useState(false);
+  const fileInputRef=useRef(null);
+  
+  const runBatch=async()=>{
+    if(!bulk.trim())return;
+    setLoading(true);
+    const items=await aiExtractBatch(bulk,acts,cats);
+    const{filtered,duplicateCount}=filterDuplicates(items,txns||[],inbox||[]);
+    if(filtered.length>0){
+      addInbox(filtered.map(i=>({...i,type:i.type||"expense",source:"paste"})));
+    }
+    if(duplicateCount>0)alert(`${duplicateCount} duplicate(s) skipped.`);
+    setBulk("");
+    setLoading(false);
+  };
+  
+  // Document/Receipt upload handler
+  const handleDocumentUpload=async(file)=>{
+    if(!file)return;
+    setDocLoading(true);
+    
+    try{
+      const fileName=file.name;
+      const fileType=file.type;
+      let documentText="";
+      
+      if(fileType.startsWith("image/")){
+        // For images - read as base64 and extract text via AI
+        const base64=await new Promise((resolve,reject)=>{
+          const reader=new FileReader();
+          reader.onload=()=>resolve(reader.result);
+          reader.onerror=reject;
+          reader.readAsDataURL(file);
+        });
+        // Extract text from image
+        documentText=await extractTextFromImage(base64.split(",")[1]||base64,fileName);
+        if(!documentText||documentText==="UNREADABLE"){
+          alert("Could not read text from the image. Please ensure the image is clear and contains readable text.");
+          setDocLoading(false);
+          return;
+        }
+      }else if(fileType==="application/pdf"){
+        // For PDFs - read as text (basic extraction)
+        const text=await file.text();
+        documentText=text||"";
+        if(!documentText.trim()){
+          alert("Could not extract text from PDF. The PDF might be image-based or protected.");
+          setDocLoading(false);
+          return;
+        }
+      }else{
+        // For text files
+        documentText=await file.text();
+      }
+      
+      // Analyze document with AI
+      const result=await aiAnalyzeDocument(documentText,fileName,fileType,acts,cats);
+      
+      if(result.status==="success"&&result.transactions.length>0){
+        // Filter duplicates
+        const{filtered,duplicateCount}=filterDuplicates(result.transactions,txns||[],inbox||[]);
+        
+        if(filtered.length>0){
+          const items=filtered.map(tx=>({
+            ...tx,
+            type:tx.type||"expense",
+            source:"document",
+            documentName:fileName,
+            documentType:result.documentType,
+            txSignature:tx.txSignature||generateTxSignature(tx),
+          }));
+          addInbox(items);
+          alert(`✓ Extracted ${filtered.length} transaction(s) from "${fileName}".${duplicateCount>0?` (${duplicateCount} duplicate(s) skipped)`:""}\n\nCheck the review queue below.`);
+        }else{
+          alert(`All ${result.transactions.length} transaction(s) from this document already exist in your records.`);
+        }
+      }else if(result.status==="no_transaction"){
+        alert(`No financial transactions found in "${fileName}".`);
+      }else{
+        alert(`Could not process "${fileName}": ${result.reason||"Unknown error"}`);
+      }
+    }catch(err){
+      console.error("Document upload error:",err);
+      alert("Error processing document. Please try again.");
+    }
+    
+    setDocLoading(false);
+  };
+  
+  const onFileSelect=(e)=>{
+    const file=e.target.files?.[0];
+    if(file)handleDocumentUpload(file);
+    e.target.value=""; // Reset input
+  };
+  
+  const onDrop=(e)=>{
+    e.preventDefault();
+    setDragOver(false);
+    const file=e.dataTransfer.files?.[0];
+    if(file)handleDocumentUpload(file);
+  };
+  
   const todItems=inbox.filter(i=>i.date===today());
   const oldItems=inbox.filter(i=>i.date!==today());
   const emailItems=inbox.filter(i=>i.source==="email");
+  const docItems=inbox.filter(i=>i.source==="document");
   const approveAll=(items=[])=>items.forEach(onApprove);
   const rejectAll=(items=[])=>{
     if(!items.length)return;
@@ -3306,23 +3483,71 @@ function InboxTab({inbox,addInbox,acts,cats,onApprove,onEdit,onDiscard}){
   };
   return(<div>
     <h2 className="h2" style={{marginBottom:4}}>Inbox — Review & Approve</h2>
-    <p style={{fontSize:13,color:"#64748b",marginBottom:18}}>Transactions from email auto-import or statement reconciliation appear here before entering the ledger.</p>
-    {emailItems.length>0&&<div style={{background:"#052e16",border:"1px solid #34d399",borderRadius:8,padding:"10px 14px",marginBottom:16,fontSize:13,color:"#86efac"}}>📧 <b>{emailItems.length}</b> transaction(s) auto-extracted from email — review below.</div>}
-    <div className="card" style={{marginBottom:22}}>
-      <div style={{fontWeight:600,fontSize:14,marginBottom:10,color:"#94a3b8"}}>📥 Manual Paste (Email / Bank Alert Text)</div>
-      <textarea rows={4} value={bulk} onChange={e=>setBulk(e.target.value)} placeholder="Paste email body, invoice text, or bank alert text…"/>
-      <button className="btn pri" style={{marginTop:10,width:"100%"}} onClick={runBatch} disabled={loading||!bulk.trim()}>{loading?"🤖 Extracting…":"🤖 Extract & Queue for Review"}</button>
+    <p style={{fontSize:13,color:"#64748b",marginBottom:18}}>Transactions from email, SMS, documents, or manual entry appear here before entering the ledger.</p>
+    
+    {emailItems.length>0&&<div style={{background:"#052e16",border:"1px solid #34d399",borderRadius:8,padding:"10px 14px",marginBottom:12,fontSize:13,color:"#86efac"}}>📧 <b>{emailItems.length}</b> transaction(s) auto-extracted from email — review below.</div>}
+    {docItems.length>0&&<div style={{background:"#1e1b4b",border:"1px solid #818cf8",borderRadius:8,padding:"10px 14px",marginBottom:12,fontSize:13,color:"#c7d2fe"}}>📄 <b>{docItems.length}</b> transaction(s) from uploaded documents — review below.</div>}
+    
+    {/* Document Upload Section */}
+    <div className="card" style={{marginBottom:16}}>
+      <div style={{fontWeight:600,fontSize:14,marginBottom:10,color:"#94a3b8"}}>📄 Upload Receipt / Invoice / Document</div>
+      <div 
+        style={{
+          border:dragOver?"2px dashed #818cf8":"2px dashed #1e293b",
+          borderRadius:10,
+          padding:24,
+          textAlign:"center",
+          background:dragOver?"#1e1b4b":"#0a0d18",
+          cursor:"pointer",
+          transition:"all 0.2s",
+        }}
+        onClick={()=>fileInputRef.current?.click()}
+        onDragOver={(e)=>{e.preventDefault();setDragOver(true);}}
+        onDragLeave={()=>setDragOver(false)}
+        onDrop={onDrop}
+        data-testid="document-upload-zone"
+      >
+        {docLoading?(
+          <div style={{color:"#818cf8"}}>
+            <div style={{fontSize:24,marginBottom:8}}>🤖</div>
+            <div>Analyzing document with AI...</div>
+          </div>
+        ):(
+          <>
+            <div style={{fontSize:32,marginBottom:8}}>📤</div>
+            <div style={{fontSize:14,color:"#e2e8f0",marginBottom:4}}>Drop file here or click to upload</div>
+            <div style={{fontSize:12,color:"#64748b"}}>Supports: Images (JPG, PNG), PDF, Text files</div>
+            <div style={{fontSize:11,color:"#475569",marginTop:8}}>AI will extract transaction details automatically</div>
+          </>
+        )}
+      </div>
+      <input 
+        ref={fileInputRef}
+        type="file" 
+        accept="image/*,.pdf,.txt,.csv"
+        onChange={onFileSelect}
+        style={{display:"none"}}
+        data-testid="document-file-input"
+      />
     </div>
+    
+    {/* Manual Paste Section */}
+    <div className="card" style={{marginBottom:22}}>
+      <div style={{fontWeight:600,fontSize:14,marginBottom:10,color:"#94a3b8"}}>📥 Manual Paste (Email / SMS / Bank Alert)</div>
+      <textarea rows={3} value={bulk} onChange={e=>setBulk(e.target.value)} placeholder="Paste email body, SMS text, invoice details, or bank alert…" data-testid="paste-textarea"/>
+      <button className="btn pri" style={{marginTop:10,width:"100%"}} onClick={runBatch} disabled={loading||!bulk.trim()} data-testid="extract-paste-btn">{loading?"🤖 Extracting…":"🤖 Extract & Queue for Review"}</button>
+    </div>
+    
     {inbox.length>0&&(
       <R style={{marginBottom:10}}>
         <div className="sh" style={{margin:0}}>Pending Queue ({inbox.length})</div>
         <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-          <button className="btn sm suc" onClick={()=>approveAll(inbox)}>✓ Accept All</button>
-          <button className="btn sm dan" onClick={()=>rejectAll(inbox)}>✕ Reject All</button>
+          <button className="btn sm suc" onClick={()=>approveAll(inbox)} data-testid="accept-all-btn">✓ Accept All</button>
+          <button className="btn sm dan" onClick={()=>rejectAll(inbox)} data-testid="reject-all-btn">✕ Reject All</button>
         </div>
       </R>
     )}
-    {inbox.length===0&&<div className="card" style={{textAlign:"center",color:"#475569",padding:40}}>No pending items. Sync email accounts or paste messages above.</div>}
+    {inbox.length===0&&<div className="card" style={{textAlign:"center",color:"#475569",padding:40}}>No pending items. Sync email, upload documents, or paste messages above.</div>}
     {todItems.length>0&&<><R style={{marginBottom:10}}><div className="sh">Today ({todItems.length})</div><div style={{display:"flex",gap:8}}><button className="btn sm suc" onClick={()=>approveAll(todItems)}>✓ Accept All Today</button><button className="btn sm dan" onClick={()=>rejectAll(todItems)}>✕ Reject All Today</button></div></R>{todItems.map(item=><ICard key={item._iid} item={item} onApprove={onApprove} onEdit={onEdit} onDiscard={onDiscard}/>)}</>}
     {oldItems.length>0&&<><div className="sh" style={{marginTop:20,marginBottom:10}}>Older ({oldItems.length})</div>{oldItems.map(item=><ICard key={item._iid} item={item} onApprove={onApprove} onEdit={onEdit} onDiscard={onDiscard}/>)}</>}
   </div>);
@@ -3331,6 +3556,7 @@ function InboxTab({inbox,addInbox,acts,cats,onApprove,onEdit,onDiscard}){
 function ICard({item,onApprove,onEdit,onDiscard}){
   const[ex,setEx]=useState(false);
   const typeColor=item.type==="income"?"#34d399":item.type==="borrow"?"#f59e0b":item.type==="transfer"?"#38bdf8":"#f87171";
+  const missingFields=!item.businessActivity||!item.category||!item.amount;
   return(
     <div className="card" style={{marginBottom:8,borderLeft:`3px solid ${typeColor}`}}>
       <R style={{marginBottom:8}}>
@@ -3339,13 +3565,16 @@ function ICard({item,onApprove,onEdit,onDiscard}){
             <span className={`tag t${item.type}`}>{item.type}</span>
             {item.isNewCategory&&<span className="tag" style={{background:"#1e1b4b",color:"#a78bfa"}}>New Cat</span>}
             {item.source==="email"&&<span className="tag" style={{background:"#1a2010",color:"#86efac"}}>📧 Email</span>}
+            {item.source==="document"&&<span className="tag" style={{background:"#1e1b4b",color:"#c7d2fe"}}>📄 Document</span>}
+            {item.source==="sms"&&<span className="tag" style={{background:"#422006",color:"#fbbf24"}}>📱 SMS</span>}
             {item.source==="statement"&&<span className="tag" style={{background:"#052e16",color:"#34d399"}}>Stmt</span>}
-            {item.source==="auto"&&<span className="tag" style={{background:"#0d0d2b",color:"#818cf8"}}>AI</span>}
+            {item.source==="auto"||item.source==="paste"?<span className="tag" style={{background:"#0d0d2b",color:"#818cf8"}}>AI</span>:null}
+            {missingFields&&<span className="tag" style={{background:"#450a0a",color:"#f87171"}}>⚠ Needs Edit</span>}
             <span style={{fontSize:11,color:"#64748b"}}>{fmtD(item.date)}</span>
           </div>
-          <div style={{fontWeight:500,fontSize:14}}>{item.description||item.category}</div>
+          <div style={{fontWeight:500,fontSize:14}}>{item.description||item.category||"Transaction detected"}</div>
           <div style={{fontSize:12,color:"#475569"}}>
-            {item.businessActivity} · {item.category}
+            {item.businessActivity||"(Activity needed)"} · {item.category||"(Category needed)"}
             {item.vendor?` · ${item.vendor}`:""}
             {item.paymentMethod?` · ${item.paymentMethod}`:""}
             {item.type==="transfer"&&item.accountName&&item.targetAccountName?` · ${item.accountName} → ${item.targetAccountName}`:(item.accountName?` · ${item.accountName}`:"")}
@@ -3353,14 +3582,16 @@ function ICard({item,onApprove,onEdit,onDiscard}){
           </div>
           {item.emailSubject&&<div style={{fontSize:11,color:"#374151",marginTop:3,cursor:"pointer"}} onClick={()=>setEx(!ex)}>📧 {item.emailSubject.slice(0,60)}{item.emailSubject.length>60?"…":""} {ex?"▲":"▼"}</div>}
           {ex&&item.emailFrom&&<div style={{fontSize:11,color:"#374151",marginTop:2}}>From: {item.emailFrom}</div>}
+          {item.documentName&&<div style={{fontSize:11,color:"#374151",marginTop:3}}>📄 {item.documentName}</div>}
         </div>
-        <div className="mono" style={{fontSize:20,fontWeight:700,color:typeColor,whiteSpace:"nowrap",marginLeft:12}}>{fmt(item.amount)}</div>
+        <div className="mono" style={{fontSize:20,fontWeight:700,color:typeColor,whiteSpace:"nowrap",marginLeft:12}}>{item.amount?fmt(item.amount):"₹?"}</div>
       </R>
       <div style={{display:"flex",gap:8}}>
-        <button className="btn sm suc" onClick={()=>onApprove(item)}>✓ Approve</button>
-        <button className="btn sm ghost" onClick={()=>onEdit(item)}>✏ Edit</button>
-        <button className="btn sm dan" onClick={()=>onDiscard(item._iid)}>✕ Discard</button>
+        <button className="btn sm suc" onClick={()=>onApprove(item)} disabled={missingFields} title={missingFields?"Fill required fields first":"Approve transaction"} data-testid="approve-btn">✓ Approve</button>
+        <button className="btn sm ghost" onClick={()=>onEdit(item)} data-testid="edit-btn">✏ Edit</button>
+        <button className="btn sm dan" onClick={()=>onDiscard(item._iid)} data-testid="discard-btn">✕ Discard</button>
       </div>
+      {missingFields&&<div style={{fontSize:11,color:"#f87171",marginTop:6}}>⚠ Please click Edit to fill missing fields before approving.</div>}
     </div>
   );
 }
