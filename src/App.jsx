@@ -4,11 +4,6 @@ const LS = {
   get: (k, d) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } },
   set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
 };
-const SS = {
-  get: (k, d) => { try { const v = sessionStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } },
-  set: (k, v) => { try { sessionStorage.setItem(k, JSON.stringify(v)); } catch {} },
-  del: (k) => { try { sessionStorage.removeItem(k); } catch {} },
-};
 
 const DEF_ACTS = ["Futures & Commodities Trading","Equity Trading","Kite / Zerodha Platform","Personal","Trial Business – Venture A","Trial Business – Venture B","Trial Business – Venture C"];
 const DEF_CATS = {
@@ -64,184 +59,293 @@ const KNOWN_SENDERS = [
 
 const gid   = () => Math.random().toString(36).slice(2,10);
 const today = () => new Date().toISOString().slice(0,10);
-const fmt   = n  => new Intl.NumberFormat("en-IN",{style:"currency",currency:"INR",minimumFractionDigits:0}).format(n||0);
+
+function normalizeCurrencyCode(value="",fallback=DEFAULT_BASE_CURRENCY){
+  const raw=String(value||"").trim().toUpperCase();
+  if(!raw)return fallback;
+  if(CURRENCY_ALIASES[raw])return CURRENCY_ALIASES[raw];
+  const letters=raw.replace(/[^A-Z]/g,"");
+  if(CURRENCY_ALIASES[letters])return CURRENCY_ALIASES[letters];
+  if(/^[A-Z]{3}$/.test(letters))return letters;
+  return fallback;
+}
+
+function defaultCurrencyCfg(){
+  return{baseCurrency:DEFAULT_BASE_CURRENCY};
+}
+
+function normalizeCurrencyCfg(cfg={}){
+  return{
+    baseCurrency:normalizeCurrencyCode(cfg?.baseCurrency||DEFAULT_BASE_CURRENCY,DEFAULT_BASE_CURRENCY),
+  };
+}
+
+function loadCurrencyCfg(){
+  return normalizeCurrencyCfg(LS.get(CURRENCY_CFG_KEY,defaultCurrencyCfg()));
+}
+
+function saveCurrencyCfgToStorage(cfg={}){
+  const next=normalizeCurrencyCfg(cfg);
+  LS.set(CURRENCY_CFG_KEY,next);
+  return next;
+}
+
+function getBaseCurrency(){
+  return loadCurrencyCfg().baseCurrency||DEFAULT_BASE_CURRENCY;
+}
+
+function roundMoney(value){
+  const n=Number(value);
+  if(!Number.isFinite(n))return 0;
+  return Math.round(n*100)/100;
+}
+
+function normalizeFxDate(value=""){
+  const raw=String(value||"").trim();
+  if(ISO_DATE_RE.test(raw))return raw;
+  const ts=Date.parse(raw);
+  if(Number.isFinite(ts))return new Date(ts).toISOString().slice(0,10);
+  return today();
+}
+
+function formatMoney(value,currency=getBaseCurrency()){
+  const amount=Number(value)||0;
+  const code=normalizeCurrencyCode(currency,DEFAULT_BASE_CURRENCY);
+  try{
+    return new Intl.NumberFormat("en-IN",{style:"currency",currency:code,minimumFractionDigits:Number.isInteger(amount)?0:2,maximumFractionDigits:2}).format(amount);
+  }catch{
+    return `${code} ${amount.toFixed(Number.isInteger(amount)?0:2)}`;
+  }
+}
+
+function loadFxCache(){
+  const raw=LS.get(FX_CACHE_KEY,{});
+  return raw&&typeof raw==="object"&&!Array.isArray(raw)?raw:{};
+}
+
+function saveFxCache(cache={}){
+  const entries=Object.entries(cache||{})
+    .filter(([,v])=>v&&typeof v==="object")
+    .sort((a,b)=>Date.parse(b[1]?.savedAt||"")-Date.parse(a[1]?.savedAt||""))
+    .slice(0,FX_CACHE_MAX);
+  const next=Object.fromEntries(entries);
+  LS.set(FX_CACHE_KEY,next);
+  return next;
+}
+
+function fxCacheKey(from="",to="",date=""){
+  return `${normalizeCurrencyCode(from,"")}::${normalizeCurrencyCode(to,"")}::${normalizeFxDate(date)}`;
+}
+
+function identityFxResult(item={},baseCurrency=getBaseCurrency()){
+  const from=normalizeCurrencyCode(item.from||item.currency||baseCurrency,baseCurrency);
+  const to=normalizeCurrencyCode(item.to||item.baseCurrency||baseCurrency,baseCurrency);
+  const requestedDate=normalizeFxDate(item.date||item.fxDate||today());
+  return{
+    id:String(item.id||""),
+    amount:roundMoney(item.amount),
+    from,
+    to,
+    requestedDate,
+    rateDate:requestedDate,
+    rate:1,
+    converted:roundMoney(item.amount),
+    provider:"identity",
+  };
+}
+
+async function fetchDirectFxRate(item={}){
+  const from=normalizeCurrencyCode(item.from||item.currency||"",DEFAULT_BASE_CURRENCY);
+  const to=normalizeCurrencyCode(item.to||item.baseCurrency||"",DEFAULT_BASE_CURRENCY);
+  const requestedDate=normalizeFxDate(item.date||item.fxDate||today());
+  if(from===to)return identityFxResult({...item,from,to,date:requestedDate},to);
+  const url=`https://api.frankfurter.dev/v1/${requestedDate}?base=${encodeURIComponent(from)}&symbols=${encodeURIComponent(to)}`;
+  const data=await withTimeout(fetch(url,{headers:{Accept:"application/json"}}).then(async(r)=>{
+    const txt=await r.text();
+    let parsed={};
+    try{parsed=JSON.parse(txt||"{}");}catch{}
+    if(!r.ok)throw new Error(parsed?.message||txt?.slice?.(0,180)||`FX ${r.status}`);
+    return parsed;
+  }),12000,"FX conversion");
+  const rate=Number(data?.rates?.[to]);
+  if(!(rate>0))throw new Error(`FX rate unavailable for ${from}/${to}`);
+  return{
+    id:String(item.id||""),
+    amount:roundMoney(item.amount),
+    from,
+    to,
+    requestedDate,
+    rateDate:String(data?.date||requestedDate),
+    rate,
+    converted:roundMoney((Number(item.amount)||0)*rate),
+    provider:"ECB via Frankfurter",
+  };
+}
+
+async function fetchFxConversions(items=[],cfg=loadAICfg()){
+  const clean=(items||[]).map((item,idx)=>{
+    const amount=Number(item?.amount);
+    const from=normalizeCurrencyCode(item?.from||item?.currency||"",DEFAULT_BASE_CURRENCY);
+    const to=normalizeCurrencyCode(item?.to||item?.baseCurrency||getBaseCurrency(),getBaseCurrency());
+    if(!Number.isFinite(amount)||!from||!to)return null;
+    return{
+      id:String(item?.id||idx),
+      amount,
+      from,
+      to,
+      date:normalizeFxDate(item?.date||item?.fxDate||today()),
+    };
+  }).filter(Boolean);
+  if(!clean.length)return[];
+
+  const cached=loadFxCache();
+  const results=new Map();
+  const misses=[];
+  clean.forEach(item=>{
+    const key=fxCacheKey(item.from,item.to,item.date);
+    const hit=cached[key];
+    if(hit&&Number.isFinite(Number(hit?.rate))){
+      results.set(item.id,{
+        id:item.id,
+        amount:roundMoney(item.amount),
+        from:item.from,
+        to:item.to,
+        requestedDate:item.date,
+        rateDate:String(hit.rateDate||item.date),
+        rate:Number(hit.rate)||1,
+        converted:roundMoney(item.amount*(Number(hit.rate)||1)),
+        provider:String(hit.provider||"cache"),
+      });
+    }else{
+      misses.push(item);
+    }
+  });
+
+  if(misses.length){
+    const endpoint=String(cfg?.endpoint||"").trim();
+    const secret=String(cfg?.secret||"").trim();
+    let fetched=[];
+    if(endpoint){
+      try{
+        const url=aiCloudRetryUrl(endpoint,"/fx/convert");
+        const ctrl=new AbortController();
+        const timer=setTimeout(()=>ctrl.abort(),15000);
+        try{
+          const r=await fetch(url,{
+            method:"POST",
+            headers:{"Content-Type":"application/json",...(secret?{"x-ledgerai-key":secret}:{})},
+            body:JSON.stringify({items:misses}),
+            signal:ctrl.signal,
+          });
+          const txt=await r.text();
+          let data={};
+          try{data=JSON.parse(txt||"{}");}catch{}
+          if(!r.ok)throw new Error(data?.error||txt?.slice?.(0,180)||`FX ${r.status}`);
+          fetched=Array.isArray(data?.results)?data.results:[];
+        }finally{
+          clearTimeout(timer);
+        }
+      }catch{
+        fetched=await Promise.all(misses.map(item=>fetchDirectFxRate(item)));
+      }
+    }else{
+      fetched=await Promise.all(misses.map(item=>fetchDirectFxRate(item)));
+    }
+    const nextCache={...cached};
+    fetched.forEach(row=>{
+      const id=String(row?.id||"");
+      if(!id)return;
+      results.set(id,{
+        id,
+        amount:roundMoney(row.amount),
+        from:normalizeCurrencyCode(row.from||"",DEFAULT_BASE_CURRENCY),
+        to:normalizeCurrencyCode(row.to||"",getBaseCurrency()),
+        requestedDate:normalizeFxDate(row.requestedDate||today()),
+        rateDate:normalizeFxDate(row.rateDate||row.requestedDate||today()),
+        rate:Number(row.rate)||1,
+        converted:roundMoney(row.converted),
+        provider:String(row.provider||"ECB via Frankfurter"),
+      });
+      nextCache[fxCacheKey(row.from,row.to,row.requestedDate||today())]={
+        rate:Number(row.rate)||1,
+        rateDate:normalizeFxDate(row.rateDate||row.requestedDate||today()),
+        provider:String(row.provider||"ECB via Frankfurter"),
+        savedAt:new Date().toISOString(),
+      };
+    });
+    saveFxCache(nextCache);
+  }
+
+  return clean.map(item=>results.get(item.id)||identityFxResult(item,item.to));
+}
+
+async function convertMoneyRows(rows=[],{
+  amountField="amount",
+  originalField=amountField==="balance"?"originalBalance":"originalAmount",
+  currencyField=amountField==="balance"?"accountCurrency":"currency",
+  baseAmountField=amountField==="balance"?"balance":"baseAmount",
+  baseCurrencyField=amountField==="balance"?"balanceBaseCurrency":"baseCurrency",
+  fxDateField=amountField==="balance"?"balanceFxDate":"fxDate",
+  fxRateField=amountField==="balance"?"balanceFxRate":"fxRate",
+  fxRateDateField=amountField==="balance"?"balanceRateDate":"fxRateDate",
+  fxSourceField=amountField==="balance"?"balanceFxSource":"fxSource",
+  fallbackCurrency=getBaseCurrency(),
+  baseCurrency=getBaseCurrency(),
+  dateResolver=(row)=>row?.[fxDateField]||row?.date||today(),
+}={}){
+  const prepared=(rows||[]).map((row,idx)=>{
+    const amount=Number(row?.[originalField]??row?.[amountField]??0);
+    const currency=normalizeCurrencyCode(row?.[currencyField]||"",fallbackCurrency||LEGACY_DEFAULT_CURRENCY);
+    return{
+      idx,
+      id:String(row?.id||row?._iid||`row-${idx}`),
+      amount:Number.isFinite(amount)?amount:0,
+      from:currency,
+      to:baseCurrency,
+      date:normalizeFxDate(dateResolver(row)),
+      row,
+    };
+  });
+  const converted=await fetchFxConversions(prepared.map(({id,amount,from,to,date})=>({id,amount,from,to,date})));
+  const fxById=new Map(converted.map(item=>[String(item.id||""),item]));
+  return prepared.map(item=>{
+    const fx=fxById.get(item.id)||identityFxResult(item,baseCurrency);
+    const originalAmount=roundMoney(item.amount);
+    const convertedAmount=roundMoney(fx.converted);
+    return{
+      ...item.row,
+      [currencyField]:item.from,
+      [originalField]:originalAmount,
+      [amountField]:convertedAmount,
+      [baseAmountField]:convertedAmount,
+      [baseCurrencyField]:baseCurrency,
+      [fxDateField]:item.date,
+      [fxRateField]:Number(fx.rate)||1,
+      [fxRateDateField]:normalizeFxDate(fx.rateDate||item.date),
+      [fxSourceField]:String(fx.provider||"ECB via Frankfurter"),
+    };
+  });
+}
+
+function currencyMetaLabel(entry={},baseCurrency=getBaseCurrency()){
+  const source=normalizeCurrencyCode(entry?.currency||entry?.accountCurrency||"",baseCurrency);
+  const original=Number(entry?.originalAmount??entry?.originalBalance);
+  const baseAmount=Number(entry?.baseAmount??entry?.balance??entry?.amount);
+  const rate=Number(entry?.fxRate??entry?.balanceFxRate);
+  const rateDate=entry?.fxRateDate||entry?.balanceRateDate||entry?.fxDate||entry?.balanceFxDate||"";
+  if(!Number.isFinite(original)||source===baseCurrency)return "";
+  const parts=[`${formatMoney(original,source)} original`];
+  if(Number.isFinite(baseAmount))parts.push(`→ ${formatMoney(baseAmount,baseCurrency)}`);
+  if(Number.isFinite(rate)&&rate>0)parts.push(`@ ${rate.toFixed(4)}`);
+  if(rateDate)parts.push(fmtD(rateDate));
+  return parts.join(" ");
+}
+
+const fmt   = (n,currency=getBaseCurrency()) => formatMoney(n,currency);
 const fmtD  = d  => d?new Date(d).toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"}):"";
 const fmtDT = d  => d?new Date(d).toLocaleString("en-IN",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"}):"";
-const fmtNum = n => new Intl.NumberFormat("en-IN").format(n||0);
 const amtClose=(a,b)=>Math.abs(a-b)<2;
 const strSim=(a,b)=>{a=(a||"").toLowerCase();b=(b||"").toLowerCase();let m=0;for(let c of a)if(b.includes(c))m++;return m/Math.max(a.length,b.length,1);};
-
-// ── RECURRING EXPENSE DETECTION ─────────────────────────────────────────────────
-const RECURRING_KEYWORDS = ["subscription","premium","renewal","monthly","annual","yearly","quarterly","installment","emi","auto-debit","autopay","recurring"];
-const RECURRING_VENDORS = ["netflix","spotify","amazon prime","youtube","hotstar","zee5","sonyliv","jiocinema","audible","kindle","apple music","google one","icloud","dropbox","microsoft 365","adobe","zoom","slack","notion","canva","github","aws","azure","gcp","gym","cult.fit","electricity","water","gas","internet","broadband","jio","airtel","vi","bsnl","insurance","lic","hdfc ergo","icici lombard","bajaj allianz","star health","niva bupa","tata aig","new india","rent","maintenance","society"];
-
-function detectRecurringPattern(txns=[],vendor="",category="",amount=0){
-  // Check if vendor/category suggests recurring
-  const vLower=(vendor||"").toLowerCase();
-  const cLower=(category||"").toLowerCase();
-  const isKnownRecurring=RECURRING_VENDORS.some(rv=>vLower.includes(rv))||RECURRING_KEYWORDS.some(rk=>cLower.includes(rk)||vLower.includes(rk));
-  
-  // Check transaction history for same vendor with similar amounts
-  const sameVendorTxns=txns.filter(t=>t.type==="expense"&&(t.vendor||"").toLowerCase()===vLower&&Math.abs(t.amount-amount)<amount*0.15);
-  
-  if(sameVendorTxns.length>=2){
-    // Calculate average days between transactions
-    const dates=sameVendorTxns.map(t=>new Date(t.date).getTime()).sort((a,b)=>a-b);
-    const gaps=[];
-    for(let i=1;i<dates.length;i++)gaps.push((dates[i]-dates[i-1])/(1000*60*60*24));
-    const avgGap=gaps.length?gaps.reduce((s,g)=>s+g,0)/gaps.length:0;
-    
-    if(avgGap>=25&&avgGap<=35)return{isRecurring:true,recurrenceType:"monthly",confidence:"high"};
-    if(avgGap>=85&&avgGap<=100)return{isRecurring:true,recurrenceType:"quarterly",confidence:"high"};
-    if(avgGap>=350&&avgGap<=380)return{isRecurring:true,recurrenceType:"yearly",confidence:"high"};
-  }
-  
-  if(isKnownRecurring){
-    // Guess recurrence type from keywords
-    if(vLower.includes("annual")||vLower.includes("yearly")||cLower.includes("annual"))return{isRecurring:true,recurrenceType:"yearly",confidence:"medium"};
-    if(vLower.includes("quarterly")||cLower.includes("quarterly"))return{isRecurring:true,recurrenceType:"quarterly",confidence:"medium"};
-    return{isRecurring:true,recurrenceType:"monthly",confidence:"medium"};
-  }
-  
-  return{isRecurring:false,recurrenceType:"one-time",confidence:"low"};
-}
-
-function calculateNextDueDate(lastDate,recurrenceType){
-  if(!lastDate||recurrenceType==="one-time")return null;
-  const d=new Date(lastDate);
-  if(recurrenceType==="monthly")d.setMonth(d.getMonth()+1);
-  else if(recurrenceType==="quarterly")d.setMonth(d.getMonth()+3);
-  else if(recurrenceType==="yearly")d.setFullYear(d.getFullYear()+1);
-  else return null;
-  return d.toISOString().slice(0,10);
-}
-
-function generateFutureCashflow(recurringExpenses=[],months=12){
-  const startDate=new Date();
-  const endDate=new Date();
-  endDate.setMonth(endDate.getMonth()+months);
-  
-  const projections=[];
-  const monthlyTotals={};
-  
-  recurringExpenses.forEach(exp=>{
-    if(!exp.isRecurring||exp.recurrenceType==="one-time")return;
-    
-    let nextDate=exp.nextDueDate?new Date(exp.nextDueDate):new Date(exp.date);
-    if(nextDate<startDate){
-      // Calculate next occurrence from last known date
-      while(nextDate<startDate){
-        if(exp.recurrenceType==="monthly")nextDate.setMonth(nextDate.getMonth()+1);
-        else if(exp.recurrenceType==="quarterly")nextDate.setMonth(nextDate.getMonth()+3);
-        else if(exp.recurrenceType==="yearly")nextDate.setFullYear(nextDate.getFullYear()+1);
-        else break;
-      }
-    }
-    
-    while(nextDate<=endDate){
-      const monthKey=nextDate.toISOString().slice(0,7);
-      const projection={
-        ...exp,
-        projectedDate:nextDate.toISOString().slice(0,10),
-        monthKey,
-        isProjection:true,
-      };
-      projections.push(projection);
-      monthlyTotals[monthKey]=(monthlyTotals[monthKey]||0)+exp.amount;
-      
-      // Move to next occurrence
-      if(exp.recurrenceType==="monthly")nextDate.setMonth(nextDate.getMonth()+1);
-      else if(exp.recurrenceType==="quarterly")nextDate.setMonth(nextDate.getMonth()+3);
-      else if(exp.recurrenceType==="yearly")nextDate.setFullYear(nextDate.getFullYear()+1);
-      else break;
-    }
-  });
-  
-  return{projections:projections.sort((a,b)=>a.projectedDate.localeCompare(b.projectedDate)),monthlyTotals};
-}
-
-// ── EXPORT UTILITIES ────────────────────────────────────────────────────────────
-function exportToCSV(data,filename){
-  if(!data.length)return;
-  const headers=Object.keys(data[0]);
-  const csvRows=[headers.join(",")];
-  data.forEach(row=>{
-    csvRows.push(headers.map(h=>{
-      const val=row[h];
-      if(val===null||val===undefined)return "";
-      const str=String(val).replace(/"/g,'""');
-      return str.includes(",")||str.includes('"')||str.includes("\n")?`"${str}"`:str;
-    }).join(","));
-  });
-  const blob=new Blob([csvRows.join("\n")],{type:"text/csv;charset=utf-8;"});
-  downloadBlob(blob,filename);
-}
-
-function exportToXLS(data,filename){
-  if(!data.length)return;
-  const headers=Object.keys(data[0]);
-  let html='<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="UTF-8"></head><body><table border="1">';
-  html+="<tr>"+headers.map(h=>`<th style="background:#1e293b;color:#fff;font-weight:bold">${h}</th>`).join("")+"</tr>";
-  data.forEach(row=>{
-    html+="<tr>"+headers.map(h=>{
-      const val=row[h];
-      const style=typeof val==="number"?'style="mso-number-format:0"':"";
-      return `<td ${style}>${val??""}</td>`;
-    }).join("")+"</tr>";
-  });
-  html+="</table></body></html>";
-  const blob=new Blob([html],{type:"application/vnd.ms-excel;charset=utf-8;"});
-  downloadBlob(blob,filename);
-}
-
-function exportToPDF(data,title,filename){
-  if(!data.length)return;
-  const headers=Object.keys(data[0]);
-  let html=`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${title}</title><style>
-    body{font-family:Arial,sans-serif;padding:20px;color:#333}
-    h1{color:#1e293b;border-bottom:2px solid #6366f1;padding-bottom:10px}
-    table{width:100%;border-collapse:collapse;margin-top:20px}
-    th{background:#1e293b;color:#fff;padding:10px;text-align:left;font-size:12px}
-    td{padding:8px;border-bottom:1px solid #e2e8f0;font-size:11px}
-    tr:nth-child(even){background:#f8fafc}
-    .total{font-weight:bold;background:#f1f5f9}
-    @media print{body{padding:0}h1{font-size:18px}}
-  </style></head><body>`;
-  html+=`<h1>${title}</h1><p>Generated: ${new Date().toLocaleString("en-IN")}</p>`;
-  html+="<table><thead><tr>"+headers.map(h=>`<th>${h}</th>`).join("")+"</tr></thead><tbody>";
-  data.forEach(row=>{
-    html+="<tr>"+headers.map(h=>`<td>${row[h]??""}</td>`).join("")+"</tr>";
-  });
-  html+="</tbody></table></body></html>";
-  const printWindow=window.open("","_blank");
-  printWindow.document.write(html);
-  printWindow.document.close();
-  setTimeout(()=>{printWindow.print();},500);
-}
-
-function downloadBlob(blob,filename){
-  const url=URL.createObjectURL(blob);
-  const a=document.createElement("a");
-  a.href=url;a.download=filename;
-  document.body.appendChild(a);a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-}
-
-function prepareExportData(txns,type="all"){
-  return txns.filter(t=>type==="all"||t.type===type).map(t=>({
-    Date:t.date||"",
-    Type:t.type||"",
-    Amount:t.amount||0,
-    Description:t.description||"",
-    Category:t.category||"",
-    "Business Activity":t.businessActivity||"",
-    Vendor:t.vendor||"",
-    "Payment Method":t.paymentMethod||"",
-    "Is Recurring":t.isRecurring?"Yes":"No",
-    "Recurrence":t.recurrenceType||"one-time",
-  }));
-}
 const LOCKED_OWNER_EMAIL = "akshaychouhan16803@gmail.com";
 const DEFAULT_GOOGLE_CLIENT_ID = "975238186836-47bvtn56uhrlcbe11n1pe1h26qbor5s1.apps.googleusercontent.com";
 const BLOCKED_MS_CLIENT_IDS = new Set([
@@ -254,15 +358,90 @@ const sanitizeMsClientId = (id="") => {
 };
 const DEFAULT_MICROSOFT_CLIENT_ID = sanitizeMsClientId(import.meta.env.VITE_MICROSOFT_CLIENT_ID || "");
 const DEFAULT_AI_MODEL = "gpt-4.1-mini";
+const DEFAULT_BASE_CURRENCY = "INR";
+const LEGACY_DEFAULT_CURRENCY = "INR";
+const AI_CFG_KEY = "ledger_ai_cfg";
+const CURRENCY_CFG_KEY = "ledger_currency_cfg";
+const FX_CACHE_KEY = "ledger_fx_cache_v1";
 const EMAIL_SYNC_CACHE_VERSION = "v5";
 const BACKUP_KEY = "ledger_backups";
 const MAX_BACKUPS = 50;
+const FX_CACHE_MAX = 800;
 const AI_PENDING_EMAIL_KEY = "ledger_ai_pending_email";
+const AI_PENDING_RESET_KEY = "ledger_ai_pending_reset_at";
+const AI_CLOUD_CLIENT_KEY = "ledger_ai_cloud_client";
+const AI_CLOUD_CLIENT_LEGACY_KEY = "ledger_ai_cloud_client_legacy";
 const AI_RETRY_INTERVAL_MS = 30 * 60 * 1000;
 const AI_RETRY_BATCH_SIZE = 20;
+const AI_CLOUD_PULL_LIMIT = 40;
+const DIAG_LOG_KEY = "ledger_diag_log_v1";
+const DIAG_MAX_EVENTS = 400;
+const DIAG_EXPORT_LIMIT = 180;
+const DIAG_REPEAT_WINDOW_MS = 4000;
+const REDACTED = "[redacted]";
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const CURRENCY_OPTIONS = ["INR","USD","EUR","GBP","AED","AUD","CAD","SGD","JPY","CNY","HKD","CHF"];
+const CURRENCY_ALIASES = {
+  "₹":"INR",
+  "RS":"INR",
+  "RS.":"INR",
+  "RUPEE":"INR",
+  "RUPEES":"INR",
+  "INR":"INR",
+  "$":"USD",
+  "US$":"USD",
+  "USD":"USD",
+  "DOLLAR":"USD",
+  "DOLLARS":"USD",
+  "€":"EUR",
+  "EUR":"EUR",
+  "EURO":"EUR",
+  "EUROS":"EUR",
+  "£":"GBP",
+  "GBP":"GBP",
+  "POUND":"GBP",
+  "POUNDS":"GBP",
+  "AED":"AED",
+  "DIRHAM":"AED",
+  "DIRHAMS":"AED",
+  "AUD":"AUD",
+  "CAD":"CAD",
+  "SGD":"SGD",
+  "JPY":"JPY",
+  "YEN":"JPY",
+  "CNY":"CNY",
+  "RMB":"CNY",
+  "HKD":"HKD",
+  "CHF":"CHF",
+};
 
 function aiPendingId(accountId="",msgId=""){
   return `${String(accountId||"").trim()}::${String(msgId||"").trim()}`;
+}
+
+function normalizeAiEndpointUrl(value=""){
+  const raw=String(value||"").trim();
+  if(!raw)return "";
+  const prefixed=raw.startsWith("//")?`https:${raw}`:raw;
+  const withScheme=/^https?:\/\//i.test(prefixed)?prefixed:`https://${prefixed}`;
+  return withScheme.replace(/\/+$/,"");
+}
+
+function normalizeAICfg(cfg={}){
+  const endpoint=normalizeAiEndpointUrl(cfg?.endpoint||"");
+  const secret=String(cfg?.secret||"").trim();
+  const model=String(cfg?.model||DEFAULT_AI_MODEL).trim()||DEFAULT_AI_MODEL;
+  return {endpoint,secret,model};
+}
+
+function loadAICfg(){
+  return normalizeAICfg(LS.get(AI_CFG_KEY,{endpoint:"",secret:"",model:DEFAULT_AI_MODEL}));
+}
+
+function saveAICfgToStorage(cfg={}){
+  const next=normalizeAICfg(cfg);
+  LS.set(AI_CFG_KEY,next);
+  return next;
 }
 
 function normalizeAiPendingEntry(entry={}){
@@ -281,7 +460,26 @@ function normalizeAiPendingEntry(entry={}){
     attempts: Math.max(0, Number(entry.attempts) || 0),
     nextRetryAt: String(entry.nextRetryAt || new Date(Date.now() + AI_RETRY_INTERVAL_MS).toISOString()),
     lastError: String(entry.lastError || ""),
+    cloudQueued: Boolean(entry.cloudQueued),
+    cloudJobId: String(entry.cloudJobId || id),
   };
+}
+
+function getAiPendingResetAtMs(){
+  const raw=String(LS.get(AI_PENDING_RESET_KEY,"")||"").trim();
+  const ts=Date.parse(raw);
+  return Number.isFinite(ts)?ts:0;
+}
+
+function isAiPendingStaleAfterReset(entry={}){
+  const resetAtMs=getAiPendingResetAtMs();
+  if(!resetAtMs)return false;
+  const candidateTs=
+    Date.parse(String(entry?.completedAt||""))
+    || Date.parse(String(entry?.queuedAt||""))
+    || Date.parse(String(entry?.lastTriedAt||""))
+    || 0;
+  return Number.isFinite(candidateTs)&&candidateTs>0&&candidateTs<resetAtMs;
 }
 
 function defaultCloudCfg(){
@@ -293,6 +491,8 @@ function defaultCloudCfg(){
     url:"",
     key:"",
     needsReconnect:false,
+    lastError:"",
+    lastErrorAt:"",
   };
 }
 
@@ -305,27 +505,366 @@ function quickHash(str=""){
   return (h>>>0).toString(36);
 }
 
-function sanitizeEmailsForStorage(list=[]){
+function getStableAiCloudClientId(){
+  const owner=String(LOCKED_OWNER_EMAIL||"").trim().toLowerCase()||"ledgerai-owner";
+  return `ledger-${quickHash(owner)}`;
+}
+
+function normalizeClientList(items=[]){
+  return Array.from(new Set((items||[]).map(v=>String(v||"").trim()).filter(Boolean))).slice(0,6);
+}
+
+function getAiCloudClientIds(){
+  const stableId=getStableAiCloudClientId();
+  const savedId=String(LS.get(AI_CLOUD_CLIENT_KEY,"")||"").trim();
+  const legacySaved=LS.get(AI_CLOUD_CLIENT_LEGACY_KEY,[]);
+  const mergedLegacy=normalizeClientList([
+    ...(Array.isArray(legacySaved)?legacySaved:[]),
+    savedId&&savedId!==stableId?savedId:"",
+  ]).filter(id=>id!==stableId);
+  LS.set(AI_CLOUD_CLIENT_KEY,stableId);
+  LS.set(AI_CLOUD_CLIENT_LEGACY_KEY,mergedLegacy);
+  return [stableId,...mergedLegacy];
+}
+
+function getAiCloudClientId(){
+  return getAiCloudClientIds()[0]||getStableAiCloudClientId();
+}
+
+function sanitizeEmailsForCloud(list=[]){
   return (list||[]).map(a=>({...a,token:undefined}));
 }
 
-// Gmail token sessionStorage cache — tokens survive page refresh within the same tab
-// but are cleared when the tab is closed (sessionStorage is per-tab).
-// Google access tokens are valid for 3600s; we treat them as expired at 3500s to be safe.
-const GMAIL_TOKEN_TTL=3500*1000;
-function saveGmailTokenToSession(accountId,token){
-  if(!accountId||!token)return;
-  SS.set(`gmail_tok_${accountId}`,{token,expiry:Date.now()+GMAIL_TOKEN_TTL});
+function persistEmailsLocally(list=[]){
+  return (list||[]).map(a=>({...a}));
 }
-function loadGmailTokenFromSession(accountId){
-  if(!accountId)return null;
-  const cached=SS.get(`gmail_tok_${accountId}`,null);
-  if(!cached?.token)return null;
-  if(Date.now()>cached.expiry-60000){SS.del(`gmail_tok_${accountId}`);return null;} // <1 min left, treat as expired
-  return cached.token;
+
+function maskEmailForDiagnostics(value=""){
+  const raw=String(value||"").trim();
+  const at=raw.indexOf("@");
+  if(at<=0)return raw?`${raw.slice(0,2)}***`:"";
+  const local=raw.slice(0,at);
+  const domain=raw.slice(at+1);
+  const head=local.length<=2?local[0]||"":local.slice(0,2);
+  return `${head}***@${domain}`;
 }
-function clearGmailTokenFromSession(accountId){
-  if(accountId)SS.del(`gmail_tok_${accountId}`);
+
+function redactSensitiveText(value=""){
+  let text=String(value??"");
+  if(!text)return "";
+  text=text.replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi,"Bearer [redacted]");
+  text=text.replace(/\b(?:sk|rk)-[A-Za-z0-9_-]{12,}\b/g,REDACTED);
+  text=text.replace(/\beyJ[A-Za-z0-9._-]{20,}\b/g,"[redacted-jwt]");
+  text=text.replace(/(x-ledgerai-key["']?\s*[:=]\s*["']?)[^"'\s,]+/gi,`$1${REDACTED}`);
+  text=text.replace(/(authorization["']?\s*[:=]\s*["']?)[^"'\s,]+/gi,`$1${REDACTED}`);
+  return text;
+}
+
+function sanitizeDiagnosticValue(value,depth=0,seen=new WeakSet()){
+  if(value===null||value===undefined)return value;
+  if(depth>4)return "[truncated]";
+  if(value instanceof Error){
+    return{
+      name:String(value.name||"Error"),
+      message:redactSensitiveText(value.message||""),
+      stack:redactSensitiveText(String(value.stack||"")).split("\n").slice(0,8).join("\n"),
+    };
+  }
+  const t=typeof value;
+  if(t==="string")return redactSensitiveText(value).slice(0,1200);
+  if(t==="number"||t==="boolean")return value;
+  if(t==="function")return `[function ${value.name||"anonymous"}]`;
+  if(Array.isArray(value)){
+    const items=value.slice(0,12).map(v=>sanitizeDiagnosticValue(v,depth+1,seen));
+    if(value.length>12)items.push(`[+${value.length-12} more]`);
+    return items;
+  }
+  if(t==="object"){
+    if(seen.has(value))return "[circular]";
+    seen.add(value);
+    const out={};
+    const entries=Object.entries(value);
+    for(const [idx,[k,v]] of entries.entries()){
+      if(idx>=16){
+        out.__truncated__=`+${entries.length-16} more`;
+        break;
+      }
+      const key=String(k||"");
+      if(/token|secret|password|authorization|cookie|api[_-]?key|shared[_-]?key/i.test(key)){
+        out[key]=REDACTED;
+      }else if(/(^|_)email$|mail|ownerEmail|userPrincipalName/i.test(key)&&typeof v==="string"){
+        out[key]=maskEmailForDiagnostics(v);
+      }else{
+        out[key]=sanitizeDiagnosticValue(v,depth+1,seen);
+      }
+    }
+    seen.delete(value);
+    return out;
+  }
+  return redactSensitiveText(String(value)).slice(0,1200);
+}
+
+function formatDiagnosticArgs(args=[]){
+  return redactSensitiveText(args.map(arg=>{
+    if(arg instanceof Error)return arg.message||arg.name||"Error";
+    if(typeof arg==="string")return arg;
+    try{return JSON.stringify(sanitizeDiagnosticValue(arg));}
+    catch{return String(arg);}
+  }).join(" ")).slice(0,220);
+}
+
+function normalizeDiagnosticEntry(entry={}){
+  const level=["info","warn","error"].includes(entry.level)?entry.level:"info";
+  const scope=String(entry.scope||"app").trim().slice(0,40)||"app";
+  const event=String(entry.event||"event").trim().slice(0,80)||"event";
+  const message=redactSensitiveText(String(entry.message||event||"")).slice(0,220)||event;
+  return{
+    id:String(entry.id||gid()),
+    ts:String(entry.ts||new Date().toISOString()),
+    level,
+    scope,
+    event,
+    accountId:String(entry.accountId||"").trim(),
+    provider:String(entry.provider||"").trim(),
+    message,
+    context:sanitizeDiagnosticValue(entry.context||{}),
+    repeat:Math.max(1,Number(entry.repeat)||1),
+  };
+}
+
+function appendDiagnosticEntry(list=[],entry={}){
+  const next=normalizeDiagnosticEntry(entry);
+  const prev=Array.isArray(list)?list:[];
+  const last=prev[prev.length-1];
+  if(last&&last.level===next.level&&last.scope===next.scope&&last.event===next.event&&last.message===next.message&&last.accountId===next.accountId&&last.provider===next.provider){
+    const delta=Math.abs(Date.parse(next.ts)-Date.parse(last.ts));
+    if(Number.isFinite(delta)&&delta<=DIAG_REPEAT_WINDOW_MS){
+      return [
+        ...prev.slice(0,-1),
+        {
+          ...last,
+          ts:next.ts,
+          repeat:(last.repeat||1)+1,
+          context:Object.keys(next.context||{}).length?next.context:last.context,
+        },
+      ];
+    }
+  }
+  return [...prev,next].slice(-DIAG_MAX_EVENTS);
+}
+
+function loadDiagnostics(){
+  const raw=LS.get(DIAG_LOG_KEY,[]);
+  return Array.isArray(raw)?raw.map(item=>normalizeDiagnosticEntry(item)).slice(-DIAG_MAX_EVENTS):[];
+}
+
+function copyTextToClipboard(text=""){
+  const value=String(text||"");
+  if(!value)return Promise.resolve(false);
+  if(navigator?.clipboard?.writeText){
+    return navigator.clipboard.writeText(value).then(()=>true).catch(()=>false);
+  }
+  try{
+    const ta=document.createElement("textarea");
+    ta.value=value;
+    ta.setAttribute("readonly","readonly");
+    ta.style.position="fixed";
+    ta.style.opacity="0";
+    document.body.appendChild(ta);
+    ta.select();
+    const ok=document.execCommand("copy");
+    document.body.removeChild(ta);
+    return Promise.resolve(Boolean(ok));
+  }catch{
+    return Promise.resolve(false);
+  }
+}
+
+function downloadJsonFile(filename,data){
+  const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);
+  a.download=filename;
+  a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),1500);
+}
+
+function safeOrigin(value=""){
+  const raw=String(value||"").trim();
+  if(!raw)return "";
+  try{
+    const url=new URL(raw);
+    return `${url.origin}${url.pathname}`;
+  }catch{
+    return raw;
+  }
+}
+
+function summarizeDiagnostics(entries=[]){
+  return (entries||[]).reduce((acc,item)=>{
+    const level=item?.level||"info";
+    acc.total+=Number(item?.repeat)||1;
+    if(level==="error")acc.errors+=Number(item?.repeat)||1;
+    else if(level==="warn")acc.warnings+=Number(item?.repeat)||1;
+    else acc.info+=Number(item?.repeat)||1;
+    return acc;
+  },{total:0,errors:0,warnings:0,info:0});
+}
+
+function buildSupportBundle({
+  diagnostics=[],
+  authCfg={},
+  authUser=null,
+  currencyCfg={},
+  txns=[],
+  inbox=[],
+  accs=[],
+  acts=[],
+  smsNums=[],
+  emails=[],
+  sbCfg={},
+  syncStatus="idle",
+  lastSync="",
+  aiPending=[],
+  backups=[],
+}={}){
+  const aiCfg=loadAICfg();
+  const counts=summarizeDiagnostics(diagnostics);
+  const pendingRows=(aiPending||[]).map(normalizeAiPendingEntry);
+  const pendingByAccount=pendingRows.reduce((map,row)=>{
+    map[row.accountId]=(map[row.accountId]||0)+1;
+    return map;
+  },{});
+  const latestBackups=[...(backups||[])].slice(-5).reverse().map(b=>({
+    ts:String(b?.ts||""),
+    reason:String(b?.reason||""),
+    meta:sanitizeDiagnosticValue(b?.meta||{}),
+  }));
+  const emailAccounts=(emails||[]).map(item=>{
+    const acc=hydrateEmailAccount(item);
+    return{
+      id:String(acc.id||""),
+      provider:String(acc.provider||"google"),
+      email:maskEmailForDiagnostics(acc.email||acc.label||""),
+      connected:Boolean(acc.connected),
+      userDisconnected:Boolean(acc.userDisconnected),
+      reauthRequired:Boolean(acc.reauthRequired),
+      firstSyncCompleted:Boolean(acc.firstSyncCompleted),
+      syncFromDate:String(acc.syncFromDate||""),
+      lastSync:String(acc.lastSync||""),
+      lastAuthAt:String(acc.lastAuthAt||""),
+      lastError:redactSensitiveText(String(acc.lastError||"")).slice(0,180),
+      lastErrorAt:String(acc.lastErrorAt||""),
+      pendingAi:pendingByAccount[acc.id]||0,
+    };
+  });
+  return{
+    exportedAt:new Date().toISOString(),
+    diagnosticsVersion:1,
+    app:{
+      origin:window.location.origin,
+      path:window.location.pathname,
+      href:window.location.href,
+      userAgent:navigator.userAgent,
+      language:navigator.language||"",
+      online:Boolean(navigator.onLine),
+      visibility:document.visibilityState||"",
+      timeZone:Intl.DateTimeFormat().resolvedOptions().timeZone||"",
+    },
+    auth:{
+      enabled:Boolean(authCfg?.enabled),
+      signedIn:Boolean(authUser?.email),
+      ownerEmail:maskEmailForDiagnostics(authCfg?.ownerEmail||""),
+      userEmail:maskEmailForDiagnostics(authUser?.email||""),
+    },
+    dataCounts:{
+      transactions:(txns||[]).length,
+      inbox:(inbox||[]).length,
+      inboxEmail:(inbox||[]).filter(i=>i?.source==="email").length,
+      inboxSms:(inbox||[]).filter(i=>i?.source==="sms").length,
+      accounts:(accs||[]).length,
+      activities:(acts||[]).length,
+      smsNumbers:(smsNums||[]).length,
+      emailAccounts:emailAccounts.length,
+      aiPending:pendingRows.length,
+      backups:(backups||[]).length,
+    },
+    aiBackend:{
+      configured:Boolean(aiCfg.endpoint),
+      endpoint:safeOrigin(aiCfg.endpoint),
+      sharedKeyConfigured:Boolean(aiCfg.secret),
+      model:String(aiCfg.model||DEFAULT_AI_MODEL),
+    },
+    currency:{
+      baseCurrency:normalizeCurrencyCode(currencyCfg?.baseCurrency||getBaseCurrency(),getBaseCurrency()),
+      fxCacheEntries:Object.keys(loadFxCache()).length,
+    },
+    cloud:{
+      enabled:Boolean(sbCfg?.enabled),
+      needsReconnect:Boolean(sbCfg?.needsReconnect),
+      syncStatus:String(syncStatus||"idle"),
+      lastSync:String(lastSync||""),
+      accountEmail:maskEmailForDiagnostics(sbCfg?.email||""),
+      clientIdConfigured:Boolean((sbCfg?.clientId||DEFAULT_MICROSOFT_CLIENT_ID||"").trim()),
+      lastError:redactSensitiveText(String(sbCfg?.lastError||"")).slice(0,180),
+      lastErrorAt:String(sbCfg?.lastErrorAt||""),
+    },
+    email:{
+      accounts:emailAccounts,
+      pendingRetryRows:pendingRows.slice(0,40).map(row=>({
+        id:row.id,
+        accountId:row.accountId,
+        provider:row.provider,
+        msgId:row.msgId,
+        emailDate:row.emailDate,
+        attempts:row.attempts,
+        nextRetryAt:row.nextRetryAt,
+        lastTriedAt:row.lastTriedAt,
+        lastError:redactSensitiveText(String(row.lastError||"")).slice(0,180),
+        cloudQueued:Boolean(row.cloudQueued),
+      })),
+    },
+    backups:latestBackups,
+    diagnostics:{
+      counts,
+      recentEvents:(diagnostics||[]).slice(-DIAG_EXPORT_LIMIT),
+    },
+    notes:[
+      "Secrets and tokens are redacted in this bundle.",
+      "Emails are masked in support exports.",
+      "Recent diagnostics are kept locally in browser storage until cleared.",
+    ],
+  };
+}
+
+function buildSupportReportText(bundle={}){
+  const counts=bundle?.diagnostics?.counts||{total:0,errors:0,warnings:0,info:0};
+  const lines=[
+    "LedgerAI Support Report",
+    `Exported: ${bundle.exportedAt||""}`,
+    `URL: ${bundle?.app?.href||""}`,
+    `Browser: ${bundle?.app?.userAgent||""}`,
+    `Time zone: ${bundle?.app?.timeZone||""}`,
+    `Online: ${bundle?.app?.online?"yes":"no"} | Visibility: ${bundle?.app?.visibility||""}`,
+    "",
+    `Auth: enabled=${bundle?.auth?.enabled?"yes":"no"} signedIn=${bundle?.auth?.signedIn?"yes":"no"} user=${bundle?.auth?.userEmail||""}`,
+    `AI backend: configured=${bundle?.aiBackend?.configured?"yes":"no"} endpoint=${bundle?.aiBackend?.endpoint||""} sharedKey=${bundle?.aiBackend?.sharedKeyConfigured?"yes":"no"} model=${bundle?.aiBackend?.model||""}`,
+    `Currency: base=${bundle?.currency?.baseCurrency||DEFAULT_BASE_CURRENCY} fxCache=${bundle?.currency?.fxCacheEntries||0}`,
+    `Cloud: enabled=${bundle?.cloud?.enabled?"yes":"no"} reconnect=${bundle?.cloud?.needsReconnect?"yes":"no"} syncStatus=${bundle?.cloud?.syncStatus||"idle"} lastSync=${bundle?.cloud?.lastSync||""}`,
+    `Data counts: txns=${bundle?.dataCounts?.transactions||0} inbox=${bundle?.dataCounts?.inbox||0} emailAccounts=${bundle?.dataCounts?.emailAccounts||0} aiPending=${bundle?.dataCounts?.aiPending||0}`,
+    "",
+    "Email accounts:",
+    ...(bundle?.email?.accounts?.length?bundle.email.accounts.map(acc=>`- ${acc.provider} ${acc.email} connected=${acc.connected?"yes":"no"} reauth=${acc.reauthRequired?"yes":"no"} pendingAi=${acc.pendingAi||0} lastSync=${acc.lastSync||""}${acc.lastError?` lastError=${acc.lastError}`:""}`):["- none"]),
+    "",
+    `Diagnostics: total=${counts.total||0} errors=${counts.errors||0} warnings=${counts.warnings||0} info=${counts.info||0}`,
+    "Recent events:",
+    ...(bundle?.diagnostics?.recentEvents?.length?bundle.diagnostics.recentEvents.slice(-40).map(item=>{
+      const repeat=(item?.repeat||1)>1?` x${item.repeat}`:"";
+      const account=item?.accountId?` account=${item.accountId}`:"";
+      return `- [${item.ts||""}] ${String(item.level||"info").toUpperCase()} ${item.scope||"app"}/${item.event||"event"}${account}: ${item.message||""}${repeat}`;
+    }):["- none"]),
+  ];
+  return lines.join("\n");
 }
 
 if(typeof window!=="undefined"){
@@ -414,6 +953,7 @@ function sanitizeEmailTransactions(items=[],ctx={}){
   const activities=Array.isArray(ctx.acts)?ctx.acts:[];
   const categories=(ctx.cats&&typeof ctx.cats==="object")?ctx.cats:{};
   const fallbackAct=activities.includes("Personal")?"Personal":(activities[0]||"Personal");
+  const fallbackCurrency=normalizeCurrencyCode(ctx.baseCurrency||getBaseCurrency(),getBaseCurrency());
   return items.map((x,idx)=>{
     const rawType=String(x?.type||"").trim().toLowerCase();
     if(!["income","expense","transfer"].includes(rawType))return null;
@@ -425,29 +965,86 @@ function sanitizeEmailTransactions(items=[],ctx={}){
     const baseCategory=rawType==="transfer"?"Account Transfer":"Other";
     const requestedCategory=String(x?.category||"").trim();
     const category=requestedCategory||baseCategory;
+    const subCategory=String(x?.subCategory||"").trim();
     const desc=String(x?.description||"").trim()||String(ctx.subject||`Email ${rawType}`).trim()||`${rawType} from email`;
     const vendor=String(x?.vendor||"").trim()||String(ctx.from||"").trim();
     const paymentMethod=String(x?.paymentMethod||"").trim()||(rawType==="transfer"?"Account Transfer":"");
     const date=String(x?.date||ctx.eDate||today()).trim();
     const accountName=String(x?.accountName||x?.fromAccountName||"").trim();
     const targetAccountName=String(x?.targetAccountName||x?.toAccountName||"").trim();
+    const currency=normalizeCurrencyCode(x?.currency||x?.currencyCode||"",fallbackCurrency);
     const isNewCategory=rawType==="transfer"?false:(Boolean(x?.isNewCategory)||Boolean(category&&!catList.includes(category)));
     return{
       ...x,
       _aiIndex:idx,
       type:rawType,
       amount,
+      originalAmount:roundMoney(Number(x?.originalAmount??amount)),
+      currency,
       businessActivity,
       category,
+      subCategory:subCategory.slice(0,120),
       isNewCategory,
       description:desc.slice(0,180),
       vendor:vendor.slice(0,140),
+      trackVendor:Boolean(vendor),
       paymentMethod:paymentMethod.slice(0,80),
       date:date||today(),
       accountName:accountName.slice(0,120),
       targetAccountName:targetAccountName.slice(0,120),
     };
   }).filter(Boolean);
+}
+
+async function convertExtractedItemsToBaseCurrency(items=[],{
+  baseCurrency=getBaseCurrency(),
+  fallbackCurrency=baseCurrency,
+  dateFallback=today(),
+}={}){
+  return convertMoneyRows(items,{
+    baseCurrency:normalizeCurrencyCode(baseCurrency,getBaseCurrency()),
+    fallbackCurrency:normalizeCurrencyCode(fallbackCurrency,baseCurrency),
+    dateResolver:(row)=>row?.date||dateFallback,
+  });
+}
+
+function isVendorTracked(entry={}){
+  if(entry?.trackVendor===true)return true;
+  if(entry?.trackVendor===false)return false;
+  return Boolean(String(entry?.vendor||"").trim());
+}
+
+function normalizeTrackedVendor(entry={}){
+  const vendor=String(entry?.vendor||"").trim();
+  return{
+    ...entry,
+    vendor:vendor.slice(0,140),
+    trackVendor:isVendorTracked({...entry,vendor}),
+  };
+}
+
+function getAccountingValidationMessage(entry={},accs=[]){
+  const tx=normalizeTrackedVendor(entry);
+  const errors=[];
+  const amt=Number(tx.amount);
+  if(!(amt>0))errors.push("enter a valid amount");
+  if(tx.type==="transfer"){
+    if((accs||[]).length<2)errors.push("add at least two accounts before approving a transfer");
+    if(!tx.accountId)errors.push("select the transfer from account");
+    if(!tx.targetAccountId)errors.push("select the transfer to account");
+    if(tx.accountId&&tx.targetAccountId&&tx.accountId===tx.targetAccountId)errors.push("choose different transfer from and to accounts");
+  }else{
+    if((accs||[]).length===0)errors.push("add at least one account before approving");
+    if(!tx.accountId)errors.push(tx.type==="income"?"select the receiving account":"select the account used");
+  }
+  if(tx.type==="borrow"&&!tx.liabilityAccountId&&!(tx.borrowSource||"").trim())errors.push("select a liability account or enter the borrowed source");
+  if(tx.type!=="transfer"&&tx.type!=="borrow"){
+    if(!String(tx.businessActivity||"").trim())errors.push("select the business activity");
+    if(!String(tx.category||"").trim())errors.push("select the category");
+  }
+  if(tx.trackVendor&&!String(tx.vendor||"").trim())errors.push("enter the vendor name or turn off vendor tracking");
+  if(!errors.length)return "";
+  return `Update the mandatory fields before saving or approving: ${errors.join(", ")}.`;
 }
 
 async function withTimeout(promise,ms,label="request"){
@@ -592,10 +1189,10 @@ async function callAI(messages,max_tokens=800){
     }
     return "";
   };
-  const cfg=LS.get("ledger_ai_cfg",{endpoint:"",secret:"",model:DEFAULT_AI_MODEL});
-  const endpoint=(cfg.endpoint||"").trim();
-  const secret=(cfg.secret||"").trim();
-  const model=(cfg.model||DEFAULT_AI_MODEL).trim()||DEFAULT_AI_MODEL;
+  const cfg=loadAICfg();
+  const endpoint=cfg.endpoint;
+  const secret=cfg.secret;
+  const model=cfg.model;
   if(!endpoint)throw new Error("AI backend not configured. Open Settings → AI Backend and set endpoint.");
   const ctrl=new AbortController();
   const timer=setTimeout(()=>ctrl.abort(),25000);
@@ -629,152 +1226,21 @@ async function callAI(messages,max_tokens=800){
 }
 async function aiClassify(text,acts,cats,type="expense"){
   const c=Object.entries(cats).map(([a,cs])=>`${a}: ${cs.join(", ")}`).join("\n");
+  const baseCurrency=getBaseCurrency();
   try{
-    const raw=await callAI([{role:"user",content:`Classify this ${type} for Indian trader.\nText: "${text.slice(0,800)}"\nActivities: ${acts.join(", ")}\nCategories:\n${c}\nReturn ONLY JSON: {"businessActivity":"","category":"","isNewCategory":false,"description":"","amount":null,"date":"YYYY-MM-DD","vendor":"","paymentMethod":""}`}]);
+    const raw=await callAI([{role:"user",content:`Classify this ${type} for bookkeeping.\nText: "${text.slice(0,800)}"\nActivities: ${acts.join(", ")}\nCategories:\n${c}\nDetect the transaction currency explicitly. Use ISO currency code like INR, USD, EUR, GBP, AED.\nLedger base currency: ${baseCurrency}\nReturn ONLY JSON: {"businessActivity":"","category":"","isNewCategory":false,"description":"","amount":null,"currency":"","date":"YYYY-MM-DD","vendor":"","paymentMethod":""}`}]);
     try{return JSON.parse(raw.replace(/```json|```/g,"").trim());}catch{return {};}
   }catch{return {};}
 }
 async function aiExtractBatch(text,acts,cats){
   const c=Object.entries(cats).map(([a,cs])=>`${a}: ${cs.join(", ")}`).join("\n");
+  const baseCurrency=getBaseCurrency();
   try{
-    const raw=await callAI([{role:"user",content:`Extract ALL financial transactions from text. Indian context.
-IMPORTANT: Generate a unique transaction signature for each transaction using format: "VENDOR_AMOUNT_DATE" (e.g., "SWIGGY_850_2026-03-02") to help detect duplicates.
-Text:\n${text.slice(0,3000)}\nActivities: ${acts.join(", ")}\nCategories:\n${c}\nReturn ONLY JSON array: [{"type":"expense|income","businessActivity":"","category":"","isNewCategory":false,"description":"","amount":0,"date":"YYYY-MM-DD","vendor":"","paymentMethod":"","txSignature":""}]`}],1400);
+    const raw=await callAI([{role:"user",content:`Extract ALL financial transactions from text.\nText:\n${text.slice(0,3000)}\nActivities: ${acts.join(", ")}\nCategories:\n${c}\nDetect the original transaction currency explicitly for every row and return ISO currency code.\nLedger base currency: ${baseCurrency}\nReturn ONLY JSON array: [{"type":"expense|income","businessActivity":"","category":"","isNewCategory":false,"description":"","amount":0,"currency":"","date":"YYYY-MM-DD","vendor":"","paymentMethod":""}]`}],1400);
     try{const a=JSON.parse(raw.replace(/```json|```/g,"").trim());return Array.isArray(a)?a:[];}catch{return[];}
   }catch{return[];}
 }
-
-// ── DUPLICATE DETECTION ─────────────────────────────────────────────────────────
-function generateTxSignature(tx){
-  // Create a signature from vendor, amount, date to detect duplicates
-  const vendor=((tx.vendor||tx.description||"").toLowerCase().replace(/[^a-z0-9]/g,"")).slice(0,20);
-  const amount=Math.round(tx.amount||0);
-  const date=(tx.date||"").slice(0,10);
-  return `${vendor}_${amount}_${date}`;
-}
-
-function isDuplicateTransaction(newTx,existingTxns=[],inbox=[]){
-  const sig=generateTxSignature(newTx);
-  if(!sig||sig==="_0_")return false;
-  
-  // Check against existing transactions
-  for(const tx of existingTxns){
-    const existingSig=tx.txSignature||generateTxSignature(tx);
-    if(existingSig===sig){
-      // Same signature - check if amounts are close (within 5%)
-      const amtDiff=Math.abs((tx.amount||0)-(newTx.amount||0));
-      const tolerance=Math.max(tx.amount,newTx.amount)*0.05;
-      if(amtDiff<=tolerance)return true;
-    }
-  }
-  
-  // Check against inbox items
-  for(const item of inbox){
-    const inboxSig=item.txSignature||generateTxSignature(item);
-    if(inboxSig===sig){
-      const amtDiff=Math.abs((item.amount||0)-(newTx.amount||0));
-      const tolerance=Math.max(item.amount,newTx.amount)*0.05;
-      if(amtDiff<=tolerance)return true;
-    }
-  }
-  
-  return false;
-}
-
-function filterDuplicates(newItems,existingTxns=[],inbox=[]){
-  const filtered=[];
-  const duplicates=[];
-  
-  for(const item of newItems){
-    if(isDuplicateTransaction(item,existingTxns,inbox)){
-      duplicates.push(item);
-    }else{
-      // Add signature for future duplicate detection
-      filtered.push({
-        ...item,
-        txSignature:item.txSignature||generateTxSignature(item),
-      });
-    }
-  }
-  
-  return{filtered,duplicates,duplicateCount:duplicates.length};
-}
-
-// ── DOCUMENT/RECEIPT ANALYSIS ───────────────────────────────────────────────────
-async function aiAnalyzeDocument(documentText,fileName,fileType,acts,cats){
-  const c=Object.entries(cats).map(([a,cs])=>`${a}: ${cs.join(", ")}`).join("\n");
-  const docType=fileType.includes("pdf")?"PDF Document":fileType.includes("image")?"Receipt/Invoice Image":"Document";
-  
-  const raw=await callAI([{role:"user",content:`You are a cashflow extraction engine for bookkeeping.
-Analyze this ${docType} and extract ALL financial transactions.
-
-Document name: "${fileName}"
-Document type: ${docType}
-
-Document content/text:
-${documentText.slice(0,12000)}
-
-Tasks:
-1) Extract ALL transactions visible in this document (receipts, invoices, bills, statements)
-2) For each transaction identify: type (expense/income), amount, date, vendor, description
-3) Detect if this is a RECURRING expense (subscription, insurance, utility bill, EMI)
-4) For receipts: extract item details, tax amounts, total
-5) For invoices: extract invoice number, due date, items, total
-
-Activities: ${acts.join(", ")}
-Categories:
-${c}
-
-Output status:
-- "success" when at least one valid transaction is extracted
-- "no_transaction" when document has no financial data
-- "unreadable" when document text is unclear/corrupted
-
-Return ONLY JSON:
-{
-  "status": "success|no_transaction|unreadable",
-  "reason": "",
-  "documentType": "receipt|invoice|bill|statement|other",
-  "transactions": [
-    {"type":"expense|income","businessActivity":"","category":"","isNewCategory":false,"description":"","amount":0,"date":"YYYY-MM-DD","vendor":"","paymentMethod":"","isRecurring":false,"recurrenceType":"monthly|quarterly|yearly|one-time","invoiceNumber":"","taxAmount":0}
-  ]
-}`}],1800);
-
-  try{
-    const obj=JSON.parse(raw.replace(/```json|```/g,"").trim());
-    const tx=Array.isArray(obj?.transactions)?obj.transactions:[];
-    const statusRaw=String(obj?.status||"").toLowerCase();
-    const status=statusRaw==="success"||statusRaw==="no_transaction"||statusRaw==="unreadable"?statusRaw:(tx.length?"success":"no_transaction");
-    return{
-      status,
-      reason:String(obj?.reason||""),
-      documentType:obj?.documentType||"other",
-      transactions:tx,
-    };
-  }catch{
-    return{status:"unreadable",reason:"parse_failed",documentType:"other",transactions:[]};
-  }
-}
-
-// Extract text from image using OCR-like AI analysis
-async function extractTextFromImage(base64Data,fileName){
-  try{
-    // For images, we'll send the base64 to AI for text extraction
-    const raw=await callAI([{role:"user",content:`Extract ALL text from this image. This is a financial document (receipt, invoice, bill).
-Return the text exactly as it appears, preserving numbers, dates, and amounts.
-If you cannot read the image, return "UNREADABLE".
-
-Image data (base64): ${base64Data.slice(0,50000)}
-Filename: ${fileName}
-
-Return ONLY the extracted text, no formatting or explanations.`}],2000);
-    return raw||"";
-  }catch{
-    return"";
-  }
-}
-
-async function aiAnalyzeEmail(subject,from,body,acts,cats,meta={}){
+function buildAiEmailAnalysisMessages(subject,from,body,acts,cats,meta={}){
   const c=Object.entries(cats).map(([a,cs])=>`${a}: ${cs.join(", ")}`).join("\n");
   const accountList=Array.isArray(meta.accountNames)?meta.accountNames.filter(Boolean):[];
   const accountsLine=accountList.length?accountList.join(", "):"Unknown";
@@ -782,7 +1248,8 @@ async function aiAnalyzeEmail(subject,from,body,acts,cats,meta={}){
   const attachmentText=clipTextForAI((meta.attachmentText||"")+"",11000);
   const emailBody=clipTextForAI((body||"")+"",11000);
   const hasAttachment=meta.hasAttachment?"yes":"no";
-  const raw=await callAI([{role:"user",content:`You are a cashflow extraction engine for bookkeeping.
+  const baseCurrency=normalizeCurrencyCode(meta.baseCurrency||getBaseCurrency(),getBaseCurrency());
+  return [{role:"user",content:`You are a cashflow extraction engine for bookkeeping.
 Analyze this ENTIRE email body and ENTIRE attachment text.
 You must decide cashflow directly from the content without relying on external rules.
 
@@ -792,14 +1259,7 @@ Tasks:
 3) Transaction type can be expense, income, or transfer.
 4) For transfer, populate accountName (from) and targetAccountName (to) when inferable.
 5) If account cannot be inferred, keep accountName/targetAccountName blank and still extract.
-6) IMPORTANT: Detect if this is a RECURRING expense/subscription. Set isRecurring=true for:
-   - Insurance premiums (health, life, vehicle, travel - except one-time travel insurance)
-   - Subscriptions (Netflix, Spotify, YouTube, cloud storage, SaaS tools, gym memberships)
-   - EMI payments, loan installments
-   - Utility bills (electricity, water, gas, internet, phone)
-   - Rent payments
-   - Any payment that mentions "monthly", "annual", "renewal", "subscription", "premium due"
-7) For recurring items, estimate the recurrence: "monthly", "quarterly", "yearly", or "one-time"
+6) Detect the original currency explicitly for every transaction and return ISO currency code such as INR, USD, EUR, GBP, AED.
 
 Output status:
 - "success" when at least one valid transaction is extracted.
@@ -820,17 +1280,21 @@ Categories:
 ${c}
 Known ledger account names (optional):
 ${accountsLine}
+Ledger base currency: ${baseCurrency}
 
 Return ONLY JSON:
 {
   "status": "success|no_transaction|retry",
   "reason": "",
   "transactions": [
-    {"type":"expense|income|transfer","businessActivity":"","category":"","isNewCategory":false,"description":"","amount":0,"date":"YYYY-MM-DD","vendor":"","paymentMethod":"","accountName":"","targetAccountName":"","isRecurring":false,"recurrenceType":"monthly|quarterly|yearly|one-time","nextDueDate":"YYYY-MM-DD or null"}
+    {"type":"expense|income|transfer","businessActivity":"","category":"","isNewCategory":false,"description":"","amount":0,"currency":"","date":"YYYY-MM-DD","vendor":"","paymentMethod":"","accountName":"","targetAccountName":""}
   ]
-}`}],1600);
+}`}];
+}
+
+function parseAiEmailAnalysisRaw(raw=""){
   try{
-    const obj=JSON.parse(raw.replace(/```json|```/g,"").trim());
+    const obj=JSON.parse(String(raw||"").replace(/```json|```/g,"").trim());
     const tx=Array.isArray(obj?.transactions)?obj.transactions:[];
     const statusRaw=String(obj?.status||"").toLowerCase();
     const status=statusRaw==="success"||statusRaw==="no_transaction"||statusRaw==="retry"?statusRaw:(tx.length?"success":"no_transaction");
@@ -843,9 +1307,102 @@ Return ONLY JSON:
     return{status:"retry",reason:"parse_failed",transactions:[]};
   }
 }
-async function aiParseStatement(text,name,type){
+async function aiAnalyzeEmail(subject,from,body,acts,cats,meta={}){
+  const messages=buildAiEmailAnalysisMessages(subject,from,body,acts,cats,meta);
+  const raw=await callAI(messages,1600);
+  return parseAiEmailAnalysisRaw(raw);
+}
+
+function matchesAccountForReconciliation(tx={},accountId="",accountName=""){
+  const id=String(accountId||"").trim();
+  const name=String(accountName||"").trim();
+  if(!id&&!name)return false;
+  return String(tx?.accountId||"")===id
+    || String(tx?.targetAccountId||"")===id
+    || (name&&String(tx?.accountName||"")===name)
+    || (name&&String(tx?.targetAccountName||"")===name);
+}
+
+function aiCloudRetryUrl(endpoint="",path="/"){
+  const base=normalizeAiEndpointUrl(endpoint||"");
+  if(!base)throw new Error("AI backend endpoint missing");
+  const u=new URL(base);
+  u.pathname=path;
+  u.search="";
+  return u.toString();
+}
+
+function aiCloudRetryHeaders(secret=""){
+  return{
+    "Content-Type":"application/json",
+    ...(secret?{"x-ledgerai-key":secret}:{}),
+  };
+}
+
+async function enqueueCloudAiRetryJob(job,cfg=loadAICfg()){
+  const endpoint=String(cfg?.endpoint||"").trim();
+  if(!endpoint)return{ok:false,error:"endpoint_missing"};
+  const secret=String(cfg?.secret||"").trim();
+  const url=aiCloudRetryUrl(endpoint,"/retry/enqueue");
+  const ctrl=new AbortController();
+  const timer=setTimeout(()=>ctrl.abort(),15000);
   try{
-    const raw=await callAI([{role:"user",content:`Parse bank/card statement. Account: ${name} (${type}).\n${text.slice(0,5000)}\nReturn ONLY JSON array: [{"date":"YYYY-MM-DD","description":"","amount":0,"type":"debit|credit","reference":"","balance":null}]`}],1500);
+    const r=await fetch(url,{
+      method:"POST",
+      headers:aiCloudRetryHeaders(secret),
+      body:JSON.stringify(job||{}),
+      signal:ctrl.signal,
+    });
+    const txt=await r.text();
+    let data={};
+    try{data=JSON.parse(txt||"{}");}catch{}
+    if(!r.ok){
+      const unsupported=r.status===404||r.status===405||r.status===501;
+      return{ok:false,status:r.status,error:String(data?.error||txt||`HTTP ${r.status}`).slice(0,180),unsupported};
+    }
+    return{ok:true,data};
+  }catch(err){
+    const msg=String(err?.message||"cloud_retry_enqueue_failed");
+    return{ok:false,error:msg.includes("aborted")?"cloud_retry_enqueue_timeout":msg.slice(0,180)};
+  }finally{
+    clearTimeout(timer);
+  }
+}
+
+async function pullCloudAiRetryJobs(clientId,limit=AI_CLOUD_PULL_LIMIT,cfg=loadAICfg()){
+  const endpoint=String(cfg?.endpoint||"").trim();
+  if(!endpoint)return{ok:false,error:"endpoint_missing"};
+  const secret=String(cfg?.secret||"").trim();
+  const urlObj=new URL(aiCloudRetryUrl(endpoint,"/retry/pull"));
+  urlObj.searchParams.set("clientId",String(clientId||"").trim());
+  urlObj.searchParams.set("limit",String(Math.max(1,Math.min(Number(limit)||AI_CLOUD_PULL_LIMIT,200))));
+  const ctrl=new AbortController();
+  const timer=setTimeout(()=>ctrl.abort(),15000);
+  try{
+    const r=await fetch(urlObj.toString(),{
+      method:"GET",
+      headers:secret?{"x-ledgerai-key":secret}:{},
+      signal:ctrl.signal,
+    });
+    const txt=await r.text();
+    let data={};
+    try{data=JSON.parse(txt||"{}");}catch{}
+    if(!r.ok){
+      const unsupported=r.status===404||r.status===405||r.status===501;
+      return{ok:false,status:r.status,error:String(data?.error||txt||`HTTP ${r.status}`).slice(0,180),unsupported};
+    }
+    const jobs=Array.isArray(data?.jobs)?data.jobs:[];
+    return{ok:true,jobs,processedCount:Number(data?.processedCount)||0};
+  }catch(err){
+    const msg=String(err?.message||"cloud_retry_pull_failed");
+    return{ok:false,error:msg.includes("aborted")?"cloud_retry_pull_timeout":msg.slice(0,180)};
+  }finally{
+    clearTimeout(timer);
+  }
+}
+async function aiParseStatement(text,name,type,accountCurrency="",baseCurrency=getBaseCurrency()){
+  try{
+    const raw=await callAI([{role:"user",content:`Parse bank/card statement.\nAccount: ${name} (${type})\nAccount currency hint: ${accountCurrency||"unknown"}\nLedger base currency: ${baseCurrency}\nStatement text:\n${text.slice(0,7000)}\nDetect the currency for every transaction row and return ISO currency code.\nReturn ONLY JSON array: [{"date":"YYYY-MM-DD","description":"","amount":0,"currency":"","type":"debit|credit","reference":"","balance":null,"balanceCurrency":""}]`}],1800);
     try{const a=JSON.parse(raw.replace(/```json|```/g,"").trim());return Array.isArray(a)?a:[];}catch{return[];}
   }catch{return[];}
 }
@@ -855,6 +1412,140 @@ async function aiSummarize(txns){
   }catch{
     return "AI summary unavailable right now. Configure AI backend in Settings or try again later.";
   }
+}
+
+function arrayBufferToBinaryString(buffer){
+  const bytes=new Uint8Array(buffer||new ArrayBuffer(0));
+  const chunk=0x8000;
+  let out="";
+  for(let i=0;i<bytes.length;i+=chunk){
+    out+=String.fromCharCode(...bytes.subarray(i,i+chunk));
+  }
+  return out;
+}
+
+function readFileAsText(file){
+  return new Promise((resolve,reject)=>{
+    const reader=new FileReader();
+    reader.onerror=()=>reject(new Error(`Unable to read ${file?.name||"file"}`));
+    reader.onload=()=>resolve(String(reader.result||""));
+    reader.readAsText(file);
+  });
+}
+
+function readFileAsArrayBuffer(file){
+  return new Promise((resolve,reject)=>{
+    const reader=new FileReader();
+    reader.onerror=()=>reject(new Error(`Unable to read ${file?.name||"file"}`));
+    reader.onload=()=>resolve(reader.result);
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+async function readStatementFileText(file){
+  const name=String(file?.name||"").toLowerCase();
+  const type=String(file?.type||"").toLowerCase();
+  if(type.startsWith("text/")||type.includes("json")||type.includes("xml")||type.includes("csv")||/\.(txt|csv|json|xml|html?|md|log)$/i.test(name)){
+    return await readFileAsText(file);
+  }
+  const raw=await readFileAsArrayBuffer(file);
+  return extractAttachmentTextByType(arrayBufferToBinaryString(raw),type,name);
+}
+
+function sanitizeStatementRows(rows=[],ctx={}){
+  const fallbackCurrency=normalizeCurrencyCode(ctx.accountCurrency||ctx.baseCurrency||getBaseCurrency(),getBaseCurrency());
+  return (rows||[]).map((row,idx)=>{
+    const amount=Number(row?.amount);
+    if(!(amount>0))return null;
+    const rawType=String(row?.type||"").trim().toLowerCase();
+    const type=rawType==="credit"?"credit":"debit";
+    const date=String(row?.date||ctx.dateFallback||today()).trim()||today();
+    const description=String(row?.description||row?.reference||`Statement ${type}`).trim()||`Statement ${type}`;
+    return{
+      ...row,
+      _sid:String(row?._sid||`stmt-${idx}`),
+      amount,
+      originalAmount:roundMoney(Number(row?.originalAmount??amount)||amount),
+      currency:normalizeCurrencyCode(row?.currency||row?.balanceCurrency||"",fallbackCurrency),
+      balance:Number.isFinite(Number(row?.balance))?Number(row.balance):null,
+      balanceCurrency:normalizeCurrencyCode(row?.balanceCurrency||row?.currency||"",fallbackCurrency),
+      type,
+      date,
+      description:description.slice(0,220),
+      reference:String(row?.reference||"").trim().slice(0,120),
+    };
+  }).filter(Boolean);
+}
+
+async function prepareStatementRows(rows=[],ctx={}){
+  const sanitized=sanitizeStatementRows(rows,ctx);
+  return await convertMoneyRows(sanitized,{
+    baseCurrency:normalizeCurrencyCode(ctx.baseCurrency||getBaseCurrency(),getBaseCurrency()),
+    fallbackCurrency:normalizeCurrencyCode(ctx.accountCurrency||ctx.baseCurrency||getBaseCurrency(),getBaseCurrency()),
+    dateResolver:(row)=>row?.date||ctx.dateFallback||today(),
+  });
+}
+
+function inDateRange(date="",from="",to=""){
+  const value=String(date||"").trim();
+  if(!value)return true;
+  if(from&&value<from)return false;
+  if(to&&value>to)return false;
+  return true;
+}
+
+function reconciliationScore(statementRow={},ledgerTx={}){
+  const days=Math.abs((Date.parse(statementRow?.date||"")-Date.parse(ledgerTx?.date||""))/86400000||0);
+  const amountGap=Math.abs((Number(statementRow?.amount)||0)-(Number(ledgerTx?.amount)||0));
+  const desc=strSim(statementRow?.description||"",ledgerTx?.description||ledgerTx?.category||"");
+  return Math.max(0,(1/(1+days))*30 + Math.max(0,25-amountGap*4) + desc*45);
+}
+
+function buildReconciliationResult(statementRows=[],ledgerRows=[]){
+  const unmatchedLedger=new Set((ledgerRows||[]).map(tx=>tx.id));
+  const matched=[];
+  const amountMismatches=[];
+  const statementOnly=[];
+  const ledgerOnly=[];
+
+  (statementRows||[]).forEach((row,idx)=>{
+    const candidates=(ledgerRows||[])
+      .filter(tx=>unmatchedLedger.has(tx.id))
+      .map(tx=>({
+        tx,
+        days:Math.abs((Date.parse(row.date||"")-Date.parse(tx.date||""))/86400000||0),
+        amountGap:Math.abs((Number(row.amount)||0)-(Number(tx.amount)||0)),
+        desc:strSim(row.description||"",tx.description||tx.category||""),
+        score:reconciliationScore(row,tx),
+      }))
+      .filter(c=>c.days<=5||c.desc>=0.3)
+      .sort((a,b)=>b.score-a.score);
+    const best=candidates[0]||null;
+    const txDirection=best?.tx?._reconSide||(best?.tx?.type==="income"?"credit":best?.tx?.type==="expense"||best?.tx?.type==="borrow"?"debit":"");
+    const sameDirection=row.type===txDirection;
+    if(best&&sameDirection&&best.amountGap<2&&best.days<=3){
+      unmatchedLedger.delete(best.tx.id);
+      matched.push({id:`match-${idx}`,statementRow:row,ledgerTx:best.tx,score:best.score});
+      return;
+    }
+    if(best&&sameDirection&&best.days<=5&&best.desc>=0.25){
+      unmatchedLedger.delete(best.tx.id);
+      amountMismatches.push({id:`mismatch-${idx}`,statementRow:row,ledgerTx:best.tx,score:best.score,amountGap:best.amountGap,dayGap:best.days});
+      return;
+    }
+    statementOnly.push({id:`stmt-${idx}`,statementRow:row});
+  });
+
+  (ledgerRows||[]).forEach(tx=>{
+    if(unmatchedLedger.has(tx.id))ledgerOnly.push({id:`ledger-${tx.id}`,ledgerTx:tx});
+  });
+
+  return{
+    matched,
+    amountMismatches,
+    statementOnly,
+    ledgerOnly,
+  };
 }
 
 // ── ONEDRIVE / MICROSOFT GRAPH HELPERS ────────────────────────────────────────
@@ -999,14 +1690,16 @@ async function msLoginMail(clientId){
   }
 }
 
-async function msGetMailToken(clientId,accountHint){
+async function msGetMailToken(clientId,accountHint,opts={}){
   const msal=await getMsal(clientId);
   const account=pickMsAccount(msal,accountHint);
   if(!account)throw new Error("Not signed in to Microsoft");
+  const interactive=opts?.interactive!==false;
   try{
     const tok=await msal.acquireTokenSilent({scopes:MS_MAIL_SCOPES,account});
     return{account,accessToken:tok.accessToken};
-  }catch{
+  }catch(err){
+    if(!interactive)throw err;
     const tok=await runMsalInteractive(msal, clientId, () => msal.acquireTokenPopup({scopes:MS_MAIL_SCOPES,account,prompt:"select_account"}));
     return{account,accessToken:tok.accessToken};
   }
@@ -1166,9 +1859,10 @@ async function gmailAttachmentEvidenceText(token,msgId,attachments=[]){
 }
 function initOAuth(clientId,cb,opts={}){
   if(!window.google?.accounts?.oauth2){cb(new Error("Google Identity Services not loaded"),null);return;}
-  const prompt=(opts?.prompt ?? "consent");
+  const prompt=String(opts?.prompt ?? "").trim();
   const loginHint=(opts?.loginHint || "").trim();
-  const req={prompt};
+  const req={};
+  if(prompt)req.prompt=prompt;
   if(loginHint)req.login_hint=loginHint;
   window.google.accounts.oauth2.initTokenClient({
     client_id:clientId,
@@ -1291,6 +1985,28 @@ function hydrateEmailAccount(acc={}){
   };
 }
 
+function mergeLoadedEmailsWithLocalTokens(remoteList=[],localList=[]){
+  const locals=(localList||[]).map(a=>hydrateEmailAccount(a));
+  return (remoteList||[]).map(item=>{
+    const remote=hydrateEmailAccount(item);
+    const remoteEmail=(remote.email||"").toLowerCase();
+    const local=locals.find(a=>a.id===remote.id)
+      || locals.find(a=>a.provider===remote.provider&&remoteEmail&&(a.email||"").toLowerCase()===remoteEmail);
+    if(!local)return remote;
+    return{
+      ...remote,
+      token:local.token||remote.token,
+      tokenExpiresAt:local.tokenExpiresAt||remote.tokenExpiresAt||"",
+      clientId:remote.clientId||local.clientId||"",
+      msClientId:remote.msClientId||local.msClientId||"",
+      msAccountId:remote.msAccountId||local.msAccountId||"",
+      msUsername:remote.msUsername||local.msUsername||"",
+      lastAuthAt:local.lastAuthAt||remote.lastAuthAt||"",
+      reauthRequired:Boolean(remote.reauthRequired&&!local.token),
+    };
+  });
+}
+
 export default function App(){
   const[authCfg,setAuthCfg]=useState(()=>{
     const saved=LS.get("ledger_auth_cfg",{enabled:true,googleClientId:"",ownerEmail:""});
@@ -1306,17 +2022,14 @@ export default function App(){
   const[authBypass,setAuthBypass]=useState(()=>LS.get("ledger_auth_bypass",false));
   const[authMsg,setAuthMsg]=useState("");
   const[tab,setTab]=useState("dashboard");
+  const[currencyCfg,setCurrencyCfg]=useState(()=>loadCurrencyCfg());
+  const[reconAccountId,setReconAccountId]=useState("");
   const[txns,setTxns]=useState(()=>LS.get("ledger_txns",[]));
   const[acts,setActs]=useState(()=>LS.get("ledger_acts",DEF_ACTS));
   const[cats,setCats]=useState(()=>LS.get("ledger_cats",DEF_CATS));
   const[accs,setAccs]=useState(()=>LS.get("ledger_accs",[]));
   const[inbox,setInbox]=useState(()=>LS.get("ledger_inbox",[]));
-  const[emails,setEmails]=useState(()=>LS.get("ledger_emails",[]).map(a=>{
-    const h=hydrateEmailAccount(a);
-    // Restore cached token from sessionStorage so page refreshes don't force reconnect
-    const cachedToken=h.provider!=="microsoft"?loadGmailTokenFromSession(h.id):undefined;
-    return{...h,token:cachedToken||undefined};
-  }));
+  const[emails,setEmails]=useState(()=>LS.get("ledger_emails",[]).map(a=>hydrateEmailAccount(a)));
   const[smsNums,setSmsNums]=useState(()=>LS.get("ledger_sms",[]));
   const[sbCfg,setSbCfg]=useState(()=>{
     const base=defaultCloudCfg();
@@ -1327,6 +2040,8 @@ export default function App(){
   const[syncStatus,setSyncStatus]=useState("idle"); // idle|syncing|ok|error
   const[lastSync,setLastSync]=useState(()=>LS.get("ledger_lastsync",""));
   const syncTimer=useRef(null);
+  const cloudSyncPauseUntilRef=useRef(0);
+  const cloudAutoLoadTriedRef=useRef(false);
   const[showAdd,setShowAdd]=useState(false);
   const[addType,setAddType]=useState("expense");
   const[editTx,setEditTx]=useState(null);
@@ -1336,16 +2051,42 @@ export default function App(){
   const canUseAuthBypass=typeof window!=="undefined"&&(window.location.hostname==="localhost"||window.location.hostname==="127.0.0.1");
   const bypassActive=Boolean(authCfg.enabled&&authBypass&&canUseAuthBypass);
   const[backups,setBackups]=useState(()=>LS.get(BACKUP_KEY,[]));
+  const[resetVersion,setResetVersion]=useState(0);
+  const[diagnostics,setDiagnostics]=useState(()=>loadDiagnostics());
+  const diagnosticsRef=useRef(diagnostics);
+
+  useEffect(()=>{
+    diagnosticsRef.current=diagnostics;
+  },[diagnostics]);
+
+  const addDiagnostic=useCallback((entry={})=>{
+    setDiagnostics(prev=>appendDiagnosticEntry(prev,entry));
+  },[]);
+
+  const clearDiagnostics=useCallback(()=>{
+    setDiagnostics([]);
+  },[]);
+
+  const setCloudIssue=useCallback((message="",patch={})=>{
+    const detail=redactSensitiveText(String(message||"")).slice(0,180);
+    setSbCfg(prev=>({
+      ...prev,
+      ...patch,
+      lastError:detail,
+      lastErrorAt:detail?new Date().toISOString():"",
+    }));
+  },[]);
 
   const buildBackupSnapshot=useCallback((reason="auto")=>{
     const payload={
+      currencyCfg,
       txns,
       inbox,
       accs,
       acts,
       cats,
       smsNums,
-      emails:sanitizeEmailsForStorage(emails),
+      emails:persistEmailsLocally(emails),
     };
     const raw=JSON.stringify(payload);
     return{
@@ -1362,7 +2103,7 @@ export default function App(){
       },
       data:payload,
     };
-  },[txns,inbox,accs,acts,cats,smsNums,emails]);
+  },[currencyCfg,txns,inbox,accs,acts,cats,smsNums,emails]);
 
   const pushBackupSnapshot=useCallback((reason="auto")=>{
     const snap=buildBackupSnapshot(reason);
@@ -1376,35 +2117,105 @@ export default function App(){
     return true;
   },[buildBackupSnapshot]);
 
+  const applyBaseCurrencyChange=useCallback(async(nextCurrency)=>{
+    const nextBase=normalizeCurrencyCode(nextCurrency||currencyCfg.baseCurrency,DEFAULT_BASE_CURRENCY);
+    const prevBase=normalizeCurrencyCode(currencyCfg.baseCurrency||DEFAULT_BASE_CURRENCY,DEFAULT_BASE_CURRENCY);
+    if(nextBase===prevBase){
+      saveCurrencyCfgToStorage({baseCurrency:nextBase});
+      setCurrencyCfg({baseCurrency:nextBase});
+      return{ok:true,baseCurrency:nextBase,changed:false};
+    }
+    try{
+      const [nextTxns,nextInbox,nextAccs]=await Promise.all([
+        convertMoneyRows(txns,{
+          baseCurrency:nextBase,
+          fallbackCurrency:prevBase||LEGACY_DEFAULT_CURRENCY,
+          dateResolver:(row)=>row?.date||row?.fxDate||today(),
+        }),
+        convertMoneyRows(inbox,{
+          baseCurrency:nextBase,
+          fallbackCurrency:prevBase||LEGACY_DEFAULT_CURRENCY,
+          dateResolver:(row)=>row?.date||row?.fxDate||today(),
+        }),
+        convertMoneyRows(accs,{
+          amountField:"balance",
+          originalField:"originalBalance",
+          currencyField:"accountCurrency",
+          baseAmountField:"balance",
+          baseCurrencyField:"balanceBaseCurrency",
+          fxDateField:"balanceFxDate",
+          fxRateField:"balanceFxRate",
+          fxRateDateField:"balanceRateDate",
+          fxSourceField:"balanceFxSource",
+          baseCurrency:nextBase,
+          fallbackCurrency:prevBase||LEGACY_DEFAULT_CURRENCY,
+          dateResolver:(row)=>row?.balanceFxDate||today(),
+        }),
+      ]);
+      saveCurrencyCfgToStorage({baseCurrency:nextBase});
+      setCurrencyCfg({baseCurrency:nextBase});
+      setAccs(nextAccs);
+      setInbox(nextInbox);
+      setTxns(nextTxns.map(tx=>({...tx,journalEntries:buildJE(tx,nextAccs)})));
+      addDiagnostic({level:"info",scope:"currency",event:"base_currency_changed",message:`Base currency changed from ${prevBase} to ${nextBase}.`,context:{from:prevBase,to:nextBase,transactions:nextTxns.length,inbox:nextInbox.length,accounts:nextAccs.length}});
+      return{ok:true,baseCurrency:nextBase,changed:true};
+    }catch(error){
+      addDiagnostic({level:"error",scope:"currency",event:"base_currency_change_failed",message:error?.message||"Base currency change failed.",context:{from:prevBase,to:nextBase,error}});
+      return{ok:false,error:error?.message||"Base currency change failed."};
+    }
+  },[currencyCfg.baseCurrency,txns,inbox,accs,addDiagnostic]);
+
   const restoreBackupSnapshot=useCallback((id)=>{
     const list=LS.get(BACKUP_KEY,[]);
     const snap=list.find(s=>s.id===id);
-    if(!snap?.data)return false;
+    if(!snap?.data){
+      addDiagnostic({level:"warn",scope:"backup",event:"restore_snapshot_missing",message:"Backup restore failed because the snapshot was not found.",context:{snapshotId:id}});
+      return false;
+    }
     const d=snap.data;
+    setCurrencyCfg(normalizeCurrencyCfg(d.currencyCfg||loadCurrencyCfg()));
     setTxns(Array.isArray(d.txns)?d.txns:[]);
     setInbox(Array.isArray(d.inbox)?d.inbox:[]);
     setAccs(Array.isArray(d.accs)?d.accs:[]);
     setActs(Array.isArray(d.acts)&&d.acts.length?d.acts:[...DEF_ACTS]);
     setCats(d.cats&&typeof d.cats==="object"?d.cats:JSON.parse(JSON.stringify(DEF_CATS)));
     setSmsNums(Array.isArray(d.smsNums)?d.smsNums:[]);
-    setEmails(Array.isArray(d.emails)?d.emails.map(a=>({...hydrateEmailAccount(a),token:undefined})):[]);
+    setEmails(prev=>Array.isArray(d.emails)?mergeLoadedEmailsWithLocalTokens(d.emails,prev):[]);
     setSyncStatus("idle");
     setLastSync("");
     setSummary("");
     setSumLoad(false);
     setTab("dashboard");
+    addDiagnostic({level:"info",scope:"backup",event:"restore_snapshot",message:"Local backup snapshot restored.",context:{snapshotId:id,reason:snap.reason||"",meta:sanitizeDiagnosticValue(snap.meta||{})}});
     return true;
-  },[]);
+  },[addDiagnostic]);
 
   const factoryReset=useCallback(()=>{
+    const resetAt=new Date().toISOString();
     const preservedMsClientId=sanitizeMsClientId((sbCfg?.clientId||DEFAULT_MICROSOFT_CLIENT_ID||"").trim());
+    const preservedCloudCfg={
+      ...defaultCloudCfg(),
+      ...(sbCfg||{}),
+      clientId:preservedMsClientId,
+      email:String(sbCfg?.email||""),
+      name:String(sbCfg?.name||""),
+      enabled:Boolean(sbCfg?.enabled&&preservedMsClientId),
+      needsReconnect:Boolean(sbCfg?.needsReconnect),
+    };
+    const preservedAICfg=loadAICfg();
+    const preservedCurrencyCfg=loadCurrencyCfg();
+    const preservedEmails=(emails||[]).map(a=>({
+      ...hydrateEmailAccount(a),
+      reauthRequired:false,
+    }));
     try{
       const preReset=buildBackupSnapshot("factory-reset-before-clear");
       LS.set("ledger_last_reset_backup",preReset);
       pushBackupSnapshot("factory-reset-before-clear");
+      LS.set(AI_PENDING_RESET_KEY,resetAt);
       [
         "ledger_txns","ledger_acts","ledger_cats","ledger_accs","ledger_inbox",
-        "ledger_emails","ledger_sms","ledger_odcfg","ledger_lastsync",
+        "ledger_sms","ledger_lastsync",
         AI_PENDING_EMAIL_KEY,
       ].forEach(k=>localStorage.removeItem(k));
       const purge=[];
@@ -1416,23 +2227,18 @@ export default function App(){
       purge.forEach(k=>localStorage.removeItem(k));
       if(preservedMsClientId)clearStaleMsalInteractionState(preservedMsClientId);
     }catch{}
+    saveAICfgToStorage(preservedAICfg);
+    saveCurrencyCfgToStorage(preservedCurrencyCfg);
+    setCurrencyCfg(preservedCurrencyCfg);
     setTxns([]);
     setActs([...DEF_ACTS]);
     setCats(JSON.parse(JSON.stringify(DEF_CATS)));
     setAccs([]);
     setInbox([]);
-    setEmails([]);
+    setEmails(preservedEmails);
     setSmsNums([]);
-    setSbCfg({
-      ...defaultCloudCfg(),
-      clientId:preservedMsClientId,
-      enabled:false,
-      url:"",
-      key:"",
-      email:"",
-      name:"",
-      needsReconnect:false,
-    });
+    setSbCfg(preservedCloudCfg);
+    cloudSyncPauseUntilRef.current=Date.now()+30000;
     setSyncStatus("idle");
     setLastSync("");
     setSummary("");
@@ -1442,10 +2248,12 @@ export default function App(){
     setEditTx(null);
     setAddType("expense");
     setTab("dashboard");
+    setResetVersion(v=>v+1);
     setAuthBypass(false);
     setBackups(LS.get(BACKUP_KEY,[]));
-    alert("Reset complete. LedgerAI is now fresh.");
-  },[buildBackupSnapshot,pushBackupSnapshot,sbCfg]);
+    addDiagnostic({level:"warn",scope:"app",event:"factory_reset",message:"Factory reset completed. Connectors, AI settings, and currency settings were preserved.",context:{preservedEmails:(preservedEmails||[]).length,preservedCloud:Boolean(preservedCloudCfg?.enabled),preservedAiEndpoint:Boolean(preservedAICfg?.endpoint),baseCurrency:preservedCurrencyCfg?.baseCurrency||DEFAULT_BASE_CURRENCY}});
+    alert("Reset complete. LedgerAI is now fresh. Email + cloud connectors were preserved.");
+  },[addDiagnostic,buildBackupSnapshot,emails,pushBackupSnapshot,sbCfg]);
 
   const onGoogleCredential=useCallback((resp)=>{
     let payload=decodeGoogleCredential(resp?.credential||"");
@@ -1456,24 +2264,35 @@ export default function App(){
         picture:String(resp.picture||""),
       };
     }
-    if(!payload?.email){setAuthMsg("Google login failed. Please try again.");return;}
+    if(!payload?.email){
+      addDiagnostic({level:"warn",scope:"auth",event:"google_login_failed",message:"Google login failed because profile email was missing."});
+      setAuthMsg("Google login failed. Please try again.");
+      return;
+    }
     const email=(payload.email||"").toLowerCase();
     const owner=LOCKED_OWNER_EMAIL.toLowerCase();
-    if(owner!==email){setAuthMsg(`Access denied. This dashboard is locked to ${LOCKED_OWNER_EMAIL}.`);return;}
+    if(owner!==email){
+      addDiagnostic({level:"warn",scope:"auth",event:"owner_mismatch",message:"Google login was rejected because it did not match the locked owner account.",context:{email:payload.email}});
+      setAuthMsg(`Access denied. This dashboard is locked to ${LOCKED_OWNER_EMAIL}.`);
+      return;
+    }
     setAuthCfg(p=>({...p,ownerEmail:LOCKED_OWNER_EMAIL}));
     setAuthUser({email:payload.email,name:payload.name||payload.email,picture:payload.picture||"",lastLoginAt:new Date().toISOString()});
     setAuthBypass(false);
     setAuthMsg("");
-  },[]);
+    addDiagnostic({level:"info",scope:"auth",event:"google_login_success",message:"Owner login succeeded.",context:{email:payload.email}});
+  },[addDiagnostic]);
 
   const signOut=()=>{
     setAuthUser(null);
     try{window.google?.accounts?.id?.disableAutoSelect();}catch{}
+    addDiagnostic({level:"info",scope:"auth",event:"sign_out",message:"User signed out of LedgerAI."});
   };
 
   // ── localStorage mirrors ─────────────────────────────────────────────────
   useEffect(()=>LS.set("ledger_auth_cfg",authCfg),[authCfg]);
   useEffect(()=>LS.set("ledger_auth_bypass",authBypass),[authBypass]);
+  useEffect(()=>saveCurrencyCfgToStorage(currencyCfg),[currencyCfg]);
   useEffect(()=>{
     try{
       if(authUser)localStorage.setItem("ledger_auth_user",JSON.stringify(authUser));
@@ -1485,36 +2304,11 @@ export default function App(){
   useEffect(()=>LS.set("ledger_cats",cats),[cats]);
   useEffect(()=>LS.set("ledger_accs",accs),[accs]);
   useEffect(()=>LS.set("ledger_inbox",inbox),[inbox]);
-  useEffect(()=>LS.set("ledger_emails",sanitizeEmailsForStorage(emails)),[emails]);
+  useEffect(()=>LS.set("ledger_emails",persistEmailsLocally(emails)),[emails]);
   useEffect(()=>LS.set("ledger_sms",smsNums),[smsNums]);
   useEffect(()=>LS.set("ledger_odcfg",sbCfg),[sbCfg]);
   useEffect(()=>LS.set("ledger_lastsync",lastSync),[lastSync]);
-
-  // Proactively refresh Gmail tokens before they expire so auto-sync never hits a stale token.
-  // Runs every 5 minutes; only tries a silent refresh when a token is missing or expiring within 10 min.
-  useEffect(()=>{
-    const interval=setInterval(()=>{
-      setEmails(prev=>{
-        prev.forEach(acc=>{
-          if(acc.provider==="microsoft"||!acc.connected||acc.userDisconnected||!acc.clientId)return;
-          const cached=SS.get(`gmail_tok_${acc.id}`,null);
-          if(!cached||(cached.expiry-Date.now())<10*60*1000){
-            new Promise((res,rej)=>initOAuth(acc.clientId,(err,r)=>err?rej(err):res(r),{prompt:"",loginHint:acc.email||""}))
-              .then(resp=>{
-                const token=resp?.access_token||"";
-                if(token){
-                  saveGmailTokenToSession(acc.id,token);
-                  setEmails(p=>p.map(a=>a.id===acc.id?{...a,token,connected:true,reauthRequired:false,lastAuthAt:new Date().toISOString()}:a));
-                }
-              })
-              .catch(()=>{});
-          }
-        });
-        return prev; // no state change here; updates happen inside the async .then()
-      });
-    },5*60*1000);
-    return()=>clearInterval(interval);
-  },[]);// eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(()=>LS.set(DIAG_LOG_KEY,diagnostics),[diagnostics]);
 
   useEffect(()=>{
     const t=setTimeout(()=>{pushBackupSnapshot("auto");},1200);
@@ -1533,12 +2327,80 @@ export default function App(){
     if(authCfg.ownerEmail!==LOCKED_OWNER_EMAIL)setAuthCfg(p=>({...p,ownerEmail:LOCKED_OWNER_EMAIL}));
   },[authCfg.ownerEmail]);
 
+  useEffect(()=>{
+    const onError=(event)=>{
+      addDiagnostic({
+        level:"error",
+        scope:"window",
+        event:"unhandled_error",
+        message:event?.message||"Unhandled window error",
+        context:{
+          source:event?.filename||"",
+          line:event?.lineno||0,
+          column:event?.colno||0,
+          error:event?.error||null,
+        },
+      });
+    };
+    const onRejection=(event)=>{
+      addDiagnostic({
+        level:"error",
+        scope:"window",
+        event:"unhandled_rejection",
+        message:event?.reason?.message||String(event?.reason||"Unhandled promise rejection"),
+        context:{reason:event?.reason||null},
+      });
+    };
+    window.addEventListener("error",onError);
+    window.addEventListener("unhandledrejection",onRejection);
+    return()=>{
+      window.removeEventListener("error",onError);
+      window.removeEventListener("unhandledrejection",onRejection);
+    };
+  },[addDiagnostic]);
+
+  useEffect(()=>{
+    const baseError=console.error.bind(console);
+    const baseWarn=console.warn.bind(console);
+    console.error=(...args)=>{
+      addDiagnostic({level:"error",scope:"console",event:"console.error",message:formatDiagnosticArgs(args),context:{args:sanitizeDiagnosticValue(args)}});
+      baseError(...args);
+    };
+    console.warn=(...args)=>{
+      addDiagnostic({level:"warn",scope:"console",event:"console.warn",message:formatDiagnosticArgs(args),context:{args:sanitizeDiagnosticValue(args)}});
+      baseWarn(...args);
+    };
+    return()=>{
+      console.error=baseError;
+      console.warn=baseWarn;
+    };
+  },[addDiagnostic]);
+
+  const makeSupportBundle=useCallback(()=>buildSupportBundle({
+    diagnostics:diagnosticsRef.current,
+    authCfg,
+    authUser,
+    currencyCfg,
+    txns,
+    inbox,
+    accs,
+    acts,
+    smsNums,
+    emails,
+    sbCfg,
+    syncStatus,
+    lastSync,
+    aiPending:LS.get(AI_PENDING_EMAIL_KEY,[]),
+    backups,
+  }),[authCfg,authUser,currencyCfg,txns,inbox,accs,acts,smsNums,emails,sbCfg,syncStatus,lastSync,backups]);
+
   // ── OneDrive sync helpers ────────────────────────────────────────────────
   const pushToCloud=useCallback(async(state={})=>{
     if(!sbCfg.enabled||!sbCfg.clientId)return;
     setSyncStatus("syncing");
     try{
       const payload={
+        currencyCfg:state.currencyCfg??currencyCfg,
         txns:state.txns??txns,
         inbox:state.inbox??inbox,
         accs:state.accs??accs,
@@ -1550,18 +2412,23 @@ export default function App(){
       await odSave(sbCfg.clientId,payload);
       const ts=new Date().toISOString();
       setLastSync(ts);setSyncStatus("ok");
+      setCloudIssue("");
+      addDiagnostic({level:"info",scope:"cloud",event:"onedrive_sync_success",message:"OneDrive sync completed.",context:{txns:(payload.txns||[]).length,inbox:(payload.inbox||[]).length,accounts:(payload.accs||[]).length,emails:(payload.emails||[]).length,baseCurrency:payload.currencyCfg?.baseCurrency||currencyCfg.baseCurrency||DEFAULT_BASE_CURRENCY}});
       setTimeout(()=>setSyncStatus("idle"),3000);
     }catch(e){
       console.error("OneDrive sync error",e);
       setSyncStatus("error");
+      setCloudIssue(e?.message||"OneDrive sync failed.");
+      addDiagnostic({level:"error",scope:"cloud",event:"onedrive_sync_error",message:e?.message||"OneDrive sync failed.",context:{error:e}});
       // If token expired, mark as needing reconnect
       if(e.message.includes("Not signed in")||e.message.includes("401"))
         setSbCfg(p=>({...p,enabled:false,needsReconnect:true}));
     }
-  },[sbCfg,txns,inbox,accs,acts,cats,smsNums,emails]);
+  },[addDiagnostic,sbCfg,txns,inbox,accs,acts,cats,smsNums,emails,currencyCfg,setCloudIssue]);
 
   const debouncedSync=useCallback((state={})=>{
     if(!sbCfg.enabled)return;
+    if(Date.now()<cloudSyncPauseUntilRef.current)return;
     if(syncTimer.current)clearTimeout(syncTimer.current);
     syncTimer.current=setTimeout(()=>pushToCloud(state),3000);
   },[sbCfg.enabled,pushToCloud]);
@@ -1572,31 +2439,54 @@ export default function App(){
     try{
       const d=await odLoad(sbCfg.clientId);
       if(!d){setSyncStatus("idle");return;}
+      if(d.currencyCfg)setCurrencyCfg(normalizeCurrencyCfg(d.currencyCfg));
       if(d.txns)setTxns(d.txns);
       if(d.inbox)setInbox(d.inbox);
       if(d.accs)setAccs(d.accs);
       if(d.acts)setActs(d.acts);
       if(d.cats)setCats(d.cats);
       if(d.smsNums)setSmsNums(d.smsNums);
-      if(d.emails)setEmails(d.emails.map(a=>({...hydrateEmailAccount(a),token:undefined})));
+      if(d.emails)setEmails(prev=>mergeLoadedEmailsWithLocalTokens(d.emails,prev));
       setLastSync(new Date().toISOString());setSyncStatus("ok");
+      setCloudIssue("");
+      addDiagnostic({level:"info",scope:"cloud",event:"onedrive_load_success",message:"OneDrive restore completed.",context:{txns:(d?.txns||[]).length,inbox:(d?.inbox||[]).length,accounts:(d?.accs||[]).length,emails:(d?.emails||[]).length,baseCurrency:d?.currencyCfg?.baseCurrency||currencyCfg.baseCurrency||DEFAULT_BASE_CURRENCY}});
       setTimeout(()=>setSyncStatus("idle"),3000);
     }catch(e){
       console.error("OneDrive load error",e);
       setSyncStatus("error");
+      setCloudIssue(e?.message||"OneDrive restore failed.");
+      addDiagnostic({level:"error",scope:"cloud",event:"onedrive_load_error",message:e?.message||"OneDrive restore failed.",context:{error:e}});
+      if(e?.message?.includes?.("Not signed in")||e?.message?.includes?.("401")){
+        setSbCfg(p=>({...p,enabled:false,needsReconnect:true}));
+      }
     }
-  },[sbCfg]);
+  },[addDiagnostic,sbCfg,setSbCfg,currencyCfg.baseCurrency,setCloudIssue]);
 
-  // Auto-load from cloud on first mount if configured
+  // Auto-load from cloud once when connected and local ledger is empty.
   useEffect(()=>{
-    if(sbCfg.enabled&&sbCfg.url&&sbCfg.key)loadFromCloud();
-  // eslint-disable-next-line
-  },[]);
+    if(cloudAutoLoadTriedRef.current)return;
+    if(!sbCfg.enabled||!sbCfg.clientId)return;
+    const hasLocalData=Boolean(
+      (txns?.length||0)
+      ||(inbox?.length||0)
+      ||(accs?.length||0)
+      ||(acts?.length||0)>DEF_ACTS.length
+      ||(emails?.length||0)
+      ||(smsNums?.length||0)
+    );
+    if(hasLocalData){
+      cloudAutoLoadTriedRef.current=true;
+      return;
+    }
+    cloudAutoLoadTriedRef.current=true;
+    loadFromCloud();
+  },[sbCfg.enabled,sbCfg.clientId,txns,inbox,accs,acts,emails,smsNums,loadFromCloud]);
 
   // Auto-sync when data changes
   useEffect(()=>{debouncedSync({txns});},[txns]);
   useEffect(()=>{debouncedSync({inbox});},[inbox]);
   useEffect(()=>{debouncedSync({accs});},[accs]);
+  useEffect(()=>{debouncedSync({currencyCfg});},[currencyCfg]);
   useEffect(()=>{debouncedSync({acts,cats});},[acts,cats]);
 
   const ensureCat=(act,cat)=>setCats(p=>({...p,[act]:(p[act]||[]).includes(cat)?p[act]:[...(p[act]||[]),cat]}));
@@ -1636,33 +2526,84 @@ export default function App(){
     setFilter(prev=>prev.activity===oldName?{...prev,activity:nextName}:prev);
     return{ok:true,name:nextName};
   },[acts]);
+  const attachTxnCurrencyMeta=useCallback((entry={})=>{
+    const amount=roundMoney(Number(entry?.amount)||0);
+    const sourceCurrency=normalizeCurrencyCode(entry?.currency||entry?.baseCurrency||currencyCfg.baseCurrency,currencyCfg.baseCurrency);
+    return{
+      ...entry,
+      currency:sourceCurrency,
+      originalAmount:roundMoney(Number(entry?.originalAmount??amount)||amount),
+      baseAmount:amount,
+      baseCurrency:currencyCfg.baseCurrency,
+      fxRate:Number(entry?.fxRate)||1,
+      fxDate:normalizeFxDate(entry?.fxDate||entry?.date||today()),
+      fxRateDate:normalizeFxDate(entry?.fxRateDate||entry?.fxDate||entry?.date||today()),
+      fxSource:String(entry?.fxSource||"manual"),
+    };
+  },[currencyCfg.baseCurrency]);
   const addAccountFromModal=useCallback((a)=>{
-    const created={...a,id:gid()};
+    const currency=normalizeCurrencyCode(a?.accountCurrency||currencyCfg.baseCurrency,currencyCfg.baseCurrency);
+    const created={
+      ...a,
+      id:gid(),
+      accountCurrency:currency,
+      originalBalance:roundMoney(Number(a?.originalBalance??a?.balance)||0),
+      balance:roundMoney(Number(a?.balance)||0),
+      balanceBaseCurrency:currencyCfg.baseCurrency,
+      balanceFxRate:Number(a?.balanceFxRate)||1,
+      balanceFxDate:normalizeFxDate(a?.balanceFxDate||today()),
+      balanceRateDate:normalizeFxDate(a?.balanceRateDate||a?.balanceFxDate||today()),
+      balanceFxSource:String(a?.balanceFxSource||"manual"),
+    };
     setAccs(p=>[...p,created]);
     return created;
-  },[]);
+  },[currencyCfg.baseCurrency]);
   const saveTx=useCallback((tx)=>{
-    if(tx.isNewCategory)ensureCat(tx.businessActivity,tx.category);
-    const accName=tx.accountId?accs.find(a=>a.id===tx.accountId)?.name||"":tx.accountName||"";
-    const liabName=tx.liabilityAccountId?accs.find(a=>a.id===tx.liabilityAccountId)?.name||"":tx.liabilityAccountName||"";
-    const targetAccName=tx.targetAccountId?accs.find(a=>a.id===tx.targetAccountId)?.name||"":tx.targetAccountName||"";
-    const je=buildJE(tx,accs);const full={...tx,accountName:accName,liabilityAccountName:liabName,targetAccountName:targetAccName,journalEntries:je};
+    const normalizedTx=attachTxnCurrencyMeta(normalizeTrackedVendor(tx));
+    const isPendingInboxEdit=!tx.id&&Boolean(tx._iid);
+    if(normalizedTx.isNewCategory&&!isPendingInboxEdit)ensureCat(normalizedTx.businessActivity,normalizedTx.category);
+    const accName=normalizedTx.accountId?accs.find(a=>a.id===normalizedTx.accountId)?.name||"":normalizedTx.accountName||"";
+    const liabName=normalizedTx.liabilityAccountId?accs.find(a=>a.id===normalizedTx.liabilityAccountId)?.name||"":normalizedTx.liabilityAccountName||"";
+    const targetAccName=normalizedTx.targetAccountId?accs.find(a=>a.id===normalizedTx.targetAccountId)?.name||"":normalizedTx.targetAccountName||"";
+    const {_iid,_ts,...txBase}=normalizedTx;
+    if(isPendingInboxEdit){
+      setInbox(p=>p.map(item=>item._iid===_iid?{
+        ...item,
+        ...txBase,
+        accountName:accName,
+        liabilityAccountName:liabName,
+        targetAccountName:targetAccName,
+        _iid:item._iid,
+        _ts:item._ts,
+      }:item));
+      setShowAdd(false);
+      setEditTx(null);
+      return;
+    }
+    const je=buildJE(txBase,accs);
+    const full={...txBase,accountName:accName,liabilityAccountName:liabName,targetAccountName:targetAccName,journalEntries:je};
     if(tx.id&&txns.find(t=>t.id===tx.id))setTxns(p=>p.map(t=>t.id===tx.id?full:t));
     else setTxns(p=>[{...full,id:gid(),createdAt:new Date().toISOString()},...p]);
     setShowAdd(false);setEditTx(null);
-  },[txns,accs]);
+  },[txns,accs,attachTxnCurrencyMeta]);
   const delTx=id=>setTxns(p=>p.filter(t=>t.id!==id));
-  const addInbox=items=>setInbox(p=>[...items.map(i=>({...i,_iid:gid(),_ts:Date.now()})),...p]);
+  const addInbox=items=>setInbox(p=>[...(items||[]).map(i=>({...attachTxnCurrencyMeta(i),_iid:gid(),_ts:Date.now()})),...p]);
   const approveInbox=item=>{
+    const validationMsg=getAccountingValidationMessage(item,accs);
+    if(validationMsg){
+      alert(validationMsg);
+      return;
+    }
     if(item.isNewCategory)ensureCat(item.businessActivity,item.category);
-    const tx={...item,id:gid(),createdAt:new Date().toISOString(),source:item.source||"auto"};
+    const {_iid,_ts,...itemBase}=attachTxnCurrencyMeta(normalizeTrackedVendor(item));
+    const tx={...itemBase,id:gid(),createdAt:new Date().toISOString(),source:item.source||"auto"};
     const accName=tx.accountId?accs.find(a=>a.id===tx.accountId)?.name||"":tx.accountName||"";
     const liabName=tx.liabilityAccountId?accs.find(a=>a.id===tx.liabilityAccountId)?.name||"":tx.liabilityAccountName||"";
     const targetAccName=tx.targetAccountId?accs.find(a=>a.id===tx.targetAccountId)?.name||"":tx.targetAccountName||"";
     setTxns(p=>[{...tx,accountName:accName,liabilityAccountName:liabName,targetAccountName:targetAccName,journalEntries:buildJE(tx,accs)},...p]);
     setInbox(p=>p.filter(i=>i._iid!==item._iid));
   };
-  const editInbox=item=>{setEditTx({...item,id:undefined});setAddType(item.type||"expense");setShowAdd(true);setInbox(p=>p.filter(i=>i._iid!==item._iid));};
+  const editInbox=item=>{setEditTx({...item,id:undefined});setAddType(item.type||"expense");setShowAdd(true);};
   const discardInbox=iid=>setInbox(p=>p.filter(i=>i._iid!==iid));
 
   const todayTxns=txns.filter(t=>t.date===today());
@@ -1678,9 +2619,7 @@ export default function App(){
     if(filter.to&&t.date>filter.to)return false;
     return true;
   });
-  const recurringTxns=txns.filter(t=>t.isRecurring);
-  // Navigation tabs - Day Review is critical for approving AI-detected transactions
-  const TABS=[["dashboard","Dashboard"],["transactions","Ledger"],["inbox",`Inbox${inbox.length?` (${inbox.length})`:""}`],["daily",`Day Review${inbox.length?` (${inbox.length})`:""}`],["email",`Email${emails.length?` (${emails.length})`:""}`],["accounts","Accounts"],["reports","Reports"],["recurring",`Recurring${recurringTxns.length?` (${recurringTxns.length})`:""}`],["cashflow","Future Cashflow"],["settings","Settings"]];
+  const TABS=[["dashboard","Dashboard"],["transactions","Ledger"],["inbox",`Inbox${inbox.length?` (${inbox.length})`:""}`],["email",`Email${emails.length?` (${emails.length})`:""}`],["journal","Journal"],["accounts","Accounts"],["reconciliation","Reconciliation"],["reports","Reports"],["settings","Settings"],["daily","Day Review"]];
 
   if(authCfg.enabled&&!authCfg.googleClientId){
     return <AuthSetupScreen authCfg={authCfg} setAuthCfg={setAuthCfg}/>;
@@ -1720,18 +2659,17 @@ export default function App(){
       <div className="wrap">
         {tab==="dashboard"&&<DashTab byAct={byAct} totInc={totInc} totExp={totExp} todInc={todInc} todExp={todExp} txns={txns} todayTxns={todayTxns} inbox={inbox} emails={emails} onEdit={tx=>{setEditTx(tx);setAddType(tx.type);setShowAdd(true);}} onDelete={delTx}/>}
         {tab==="transactions"&&<LedgerTab txns={filtered} filter={filter} setFilter={setFilter} acts={acts} onEdit={tx=>{setEditTx(tx);setAddType(tx.type);setShowAdd(true);}} onDelete={delTx}/>}
-        {tab==="inbox"&&<InboxTab inbox={inbox} addInbox={addInbox} acts={acts} cats={cats} onApprove={approveInbox} onEdit={editInbox} onDiscard={discardInbox} txns={txns}/>}
+        {tab==="inbox"&&<InboxTab inbox={inbox} addInbox={addInbox} acts={acts} cats={cats} onApprove={approveInbox} onEdit={editInbox} onDiscard={discardInbox}/>}
         <div style={{display:tab==="email"?"block":"none"}} aria-hidden={tab!=="email"}>
-          <EmailTab emails={emails} setEmails={setEmails} inbox={inbox} addInbox={addInbox} acts={acts} cats={cats} accs={accs} defaultGoogleClientId={authCfg.googleClientId||DEFAULT_GOOGLE_CLIENT_ID} defaultMicrosoftClientId={sbCfg.clientId||DEFAULT_MICROSOFT_CLIENT_ID||""}/>
+          <EmailTab emails={emails} setEmails={setEmails} inbox={inbox} addInbox={addInbox} acts={acts} cats={cats} accs={accs} defaultGoogleClientId={authCfg.googleClientId||DEFAULT_GOOGLE_CLIENT_ID} defaultMicrosoftClientId={sbCfg.clientId||DEFAULT_MICROSOFT_CLIENT_ID||""} addDiagnostic={addDiagnostic} resetVersion={resetVersion}/>
         </div>
         {tab==="journal"&&<JournalTab txns={txns}/>}
-        {tab==="accounts"&&<AccountsTab accs={accs} setAccs={setAccs} txns={txns} addInbox={addInbox} acts={acts} cats={cats}/>}
+        {tab==="accounts"&&<AccountsTab accs={accs} setAccs={setAccs} onOpenReconciliation={(id)=>{setReconAccountId(id);setTab("reconciliation");}}/>}
+        {tab==="reconciliation"&&<ReconciliationTab accs={accs} txns={txns} acts={acts} cats={cats} addInbox={addInbox} onEditLedger={tx=>{setEditTx(tx);setAddType(tx.type);setShowAdd(true);}} preselectedAccountId={reconAccountId}/>}
         {tab==="reports"&&<ReportsTab txns={txns} acts={acts} totInc={totInc} totExp={totExp}/>}
-        {tab==="recurring"&&<RecurringTab txns={txns} setTxns={setTxns}/>}
-        {tab==="cashflow"&&<CashflowTab txns={txns}/>}
-        {tab==="settings"&&<SettingsTab acts={acts} setActs={setActs} cats={cats} setCats={setCats} backups={backups} onBackupNow={()=>pushBackupSnapshot("manual")} onRestoreBackup={restoreBackupSnapshot} onFactoryReset={factoryReset} onRenameActivity={renameBusinessActivity}/>}
-        {tab==="cloud"&&<CloudTab sbCfg={sbCfg} setSbCfg={setSbCfg} syncStatus={syncStatus} lastSync={lastSync} onSync={pushToCloud} onLoad={loadFromCloud} txns={txns} setTxns={setTxns} inbox={inbox} setInbox={setInbox} accs={accs} setAccs={setAccs} acts={acts} setActs={setActs} cats={cats} setCats={setCats} smsNums={smsNums} setSmsNums={setSmsNums} emails={emails} setEmails={setEmails}/>}
-        {tab==="daily"&&<DailyTab todayTxns={todayTxns} todInc={todInc} todExp={todExp} summary={summary} sumLoad={sumLoad} getSummary={async()=>{setSumLoad(true);setSummary(await aiSummarize(todayTxns));setSumLoad(false);}} onEdit={tx=>{setEditTx(tx);setAddType(tx.type);setShowAdd(true);}} onDelete={delTx} inbox={inbox} onApprove={approveInbox} onDiscard={discardInbox} onEditPending={editInbox}/>}
+        {tab==="settings"&&<SettingsTab acts={acts} setActs={setActs} cats={cats} setCats={setCats} backups={backups} onBackupNow={()=>pushBackupSnapshot("manual")} onRestoreBackup={restoreBackupSnapshot} onFactoryReset={factoryReset} onRenameActivity={renameBusinessActivity} currencyCfg={currencyCfg} onSaveCurrencyCfg={applyBaseCurrencyChange} diagnostics={diagnostics} onClearDiagnostics={clearDiagnostics} buildSupportBundle={makeSupportBundle} addDiagnostic={addDiagnostic}/>}
+        {tab==="cloud"&&<CloudTab sbCfg={sbCfg} setSbCfg={setSbCfg} syncStatus={syncStatus} lastSync={lastSync} onSync={pushToCloud} onLoad={loadFromCloud} txns={txns} setTxns={setTxns} inbox={inbox} setInbox={setInbox} accs={accs} setAccs={setAccs} acts={acts} setActs={setActs} cats={cats} setCats={setCats} smsNums={smsNums} setSmsNums={setSmsNums} emails={emails} setEmails={setEmails} addDiagnostic={addDiagnostic}/>}
+        {tab==="daily"&&<DailyTab todayTxns={todayTxns} todInc={todInc} todExp={todExp} summary={summary} sumLoad={sumLoad} getSummary={async()=>{setSumLoad(true);setSummary(await aiSummarize(todayTxns));setSumLoad(false);}} onEdit={tx=>{setEditTx(tx);setAddType(tx.type);setShowAdd(true);}} onDelete={delTx}/>}
       </div>
       {showAdd&&<AddModal type={addType} existing={editTx} acts={acts} cats={cats} accs={accs} onAddAccount={addAccountFromModal} onAddActivity={addBusinessActivity} onSave={saveTx} onClose={()=>{setShowAdd(false);setEditTx(null);}}/>}
     </div>
@@ -1913,13 +2851,12 @@ function AuthLoginScreen({clientId,ownerEmail,onCredential,authMsg,allowTemporar
 }
 
 // ── MESSAGES / SMS TAB ────────────────────────────────────────────────────────
-function MessagesTab({smsNums,setSmsNums,emails,inbox,addInbox,acts,cats,txns}){
+function MessagesTab({smsNums,setSmsNums,emails,inbox,addInbox,acts,cats}){
   const[method,setMethod]=useState("android"); // android | ios | ifttt
   const[showAdd,setShowAdd]=useState(false);
   const[showGuide,setShowGuide]=useState(null); // "android"|"ios"|"ifttt"|null
   const[testText,setTestText]=useState("");
   const[testLoad,setTestLoad]=useState(false);
-  const[lastDuplicates,setLastDuplicates]=useState(0);
 
   const activeSims = [...new Set(smsNums.filter(s=>s.sim).map(s=>s.sim))];
   const linkedEmails = emails.filter(e=>e.connected);
@@ -1936,18 +2873,10 @@ function MessagesTab({smsNums,setSmsNums,emails,inbox,addInbox,acts,cats,txns}){
   const testSingle = async()=>{
     if(!testText.trim())return;
     setTestLoad(true);
-    setLastDuplicates(0);
     const items = await aiExtractBatch(testText, acts, cats);
     if(items.length){
-      // Filter duplicates against existing transactions and inbox
-      const{filtered,duplicateCount}=filterDuplicates(items,txns||[],inbox||[]);
-      setLastDuplicates(duplicateCount);
-      if(filtered.length>0){
-        addInbox(filtered.map(i=>({...i,type:i.type||"expense",source:"sms",smsText:testText})));
-        alert(`✓ Extracted ${filtered.length} transaction(s) — check Inbox.${duplicateCount>0?` (${duplicateCount} duplicate(s) skipped)`:""}`);
-      }else{
-        alert(`All ${items.length} transaction(s) already exist in your records (duplicates skipped).`);
-      }
+      addInbox(items.map(i=>({...i,type:i.type||"expense",source:"sms",smsText:testText})));
+      alert(`✓ Extracted ${items.length} transaction(s) — check Inbox.`);
     } else {
       alert("No financial transactions found in this message.");
     }
@@ -2279,7 +3208,7 @@ function SmsOverviewModal({onClose}){
 }
 
 // ── EMAIL TAB ─────────────────────────────────────────────────────────────────
-function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleClientId,defaultMicrosoftClientId}){
+function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleClientId,defaultMicrosoftClientId,addDiagnostic=()=>{},resetVersion=0}){
   const[syncingIds,setSyncingIds]=useState({});
   const[syncProgress,setSyncProgress]=useState({});
   const[logs,setLogs]=useState({});
@@ -2287,17 +3216,38 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
   const[connectBusy,setConnectBusy]=useState("");
   const[firstSyncPrompt,setFirstSyncPrompt]=useState(null); // {accId,fromDate,scanAll}
   const[pendingView,setPendingView]=useState({open:false,accountId:""});
-  const[aiPending,setAiPending]=useState(()=>((LS.get(AI_PENDING_EMAIL_KEY,[])||[]).map(normalizeAiPendingEntry)).filter(e=>e.accountId&&e.msgId));
+  const[aiPending,setAiPending]=useState(()=>((LS.get(AI_PENDING_EMAIL_KEY,[])||[]).map(normalizeAiPendingEntry)).filter(e=>e.accountId&&e.msgId&&!isAiPendingStaleAfterReset(e)));
   const[retryBusy,setRetryBusy]=useState(false);
   const retryBusyRef=useRef(false);
-  const connectBusyRef=useRef("");
   const retryLastRunRef=useRef(0);
+  const cloudPullBusyRef=useRef(false);
+  const cloudPullLastRunRef=useRef(0);
+  const cloudRetryUnsupportedRef=useRef(false);
   const log=(id,msg)=>setLogs(p=>({...p,[id]:msg}));
+  const setAccountIssue=(accId,message="",patch={})=>{
+    const detail=redactSensitiveText(String(message||"")).slice(0,180);
+    setEmails(prev=>prev.map(a=>a.id===accId?{
+      ...a,
+      ...patch,
+      lastError:detail,
+      lastErrorAt:detail?new Date().toISOString():"",
+    }:a));
+  };
+  const clearAccountIssue=(accId,patch={})=>{
+    setEmails(prev=>prev.map(a=>a.id===accId?{
+      ...a,
+      ...patch,
+      lastError:"",
+      lastErrorAt:"",
+    }:a));
+  };
   const googleClientId=(defaultGoogleClientId||DEFAULT_GOOGLE_CLIENT_ID||"").trim();
   const microsoftClientId=(defaultMicrosoftClientId||DEFAULT_MICROSOFT_CLIENT_ID||"").trim();
+  const cloudRetryClientId=getAiCloudClientId();
   const providerOf=acc=>(((acc?.provider||"google")+"").toLowerCase()==="microsoft"?"microsoft":"google");
-  const isSyncReady=(acc)=>{
+  const isSyncReady=(acc,{allowReauth=false}={})=>{
     if(!acc?.connected||acc?.userDisconnected)return false;
+    if(!allowReauth&&acc?.reauthRequired)return false;
     const provider=providerOf(acc);
     if(provider==="microsoft")return Boolean((acc.msClientId||microsoftClientId||"").trim());
     return Boolean((acc.clientId||googleClientId||"").trim());
@@ -2317,6 +3267,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
   const setProgress=(id,patch)=>setSyncProgress(p=>({...p,[id]:{...(p[id]||{}),...patch}}));
   const totalPendingAi=aiPending.length;
   const duePendingAi=aiPending.filter(row=>{
+    if(row.cloudQueued)return false;
     const nextAt=Date.parse(row.nextRetryAt||"");
     return !Number.isFinite(nextAt)||nextAt<=Date.now();
   }).length;
@@ -2325,6 +3276,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
     return map;
   },{});
   const duePendingByAccount=aiPending.reduce((map,row)=>{
+    if(row.cloudQueued)return map;
     const nextAt=Date.parse(row.nextRetryAt||"");
     if(!Number.isFinite(nextAt)||nextAt<=Date.now()){
       map[row.accountId]=(map[row.accountId]||0)+1;
@@ -2340,6 +3292,21 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
   useEffect(()=>{
     LS.set(AI_PENDING_EMAIL_KEY,aiPending.map(normalizeAiPendingEntry));
   },[aiPending]);
+
+  useEffect(()=>{
+    if(!resetVersion)return;
+    setAiPending([]);
+    setPendingView({open:false,accountId:""});
+    setRetryBusy(false);
+    retryBusyRef.current=false;
+    cloudPullBusyRef.current=false;
+    cloudPullLastRunRef.current=0;
+    retryLastRunRef.current=0;
+    setLogs({});
+    setSyncProgress({});
+    setSyncingIds({});
+    addDiagnostic({level:"info",scope:"email",event:"ai_pending_reset",message:"AI pending queue and email sync state cleared after factory reset."});
+  },[resetVersion,addDiagnostic]);
 
   const markProcessedMessage=(accountId,msgId)=>{
     const key=`proc_${EMAIL_SYNC_CACHE_VERSION}_${accountId}`;
@@ -2362,6 +3329,149 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
     });
   };
 
+  const enqueueCloudRetryFromEvidence=async({acc,evidence,msgId,provider})=>{
+    if(cloudRetryUnsupportedRef.current)return{ok:false,unsupported:true,error:"cloud_retry_unsupported"};
+    if(!acc?.id||!msgId||!evidence)return{ok:false,error:"invalid_cloud_retry_payload"};
+    const cfg=loadAICfg();
+    if(!cfg.endpoint)return{ok:false,error:"ai_endpoint_missing"};
+    const queuedAt=new Date().toISOString();
+    const jobId=`${aiPendingId(acc.id,msgId)}-${quickHash(`${queuedAt}:${Math.random()}`)}`;
+    const messages=buildAiEmailAnalysisMessages(
+      evidence.subject||"",
+      evidence.from||"",
+      evidence.body||"",
+      acts,
+      cats,
+      {
+        attachmentNames:evidence.attachmentNames||[],
+        attachmentText:evidence.attachmentText||"",
+        hasAttachment:Boolean(evidence.hasAttachment),
+        accountNames:accs.map(a=>a.name).filter(Boolean),
+      },
+    );
+    const payload={
+      jobId,
+      clientId:cloudRetryClientId,
+      accountId:String(acc.id||""),
+      provider:String(provider||"google").toLowerCase()==="microsoft"?"microsoft":"google",
+      msgId:String(msgId||""),
+      rowId:aiPendingId(acc.id,msgId),
+      subject:String(evidence.subject||""),
+      from:String(evidence.from||""),
+      emailDate:String(evidence.eDate||today()),
+      model:String(cfg.model||DEFAULT_AI_MODEL).trim()||DEFAULT_AI_MODEL,
+      max_tokens:1600,
+      messages,
+      queuedAt,
+    };
+    const out=await enqueueCloudAiRetryJob(payload,cfg);
+    if(out?.unsupported){
+      cloudRetryUnsupportedRef.current=true;
+      addDiagnostic({level:"warn",scope:"email",event:"cloud_retry_unsupported",message:"Cloud AI retry is not supported by the current AI backend.",accountId:acc.id,provider,context:{msgId}});
+    }
+    if(out?.ok){
+      addDiagnostic({level:"info",scope:"email",event:"cloud_retry_enqueued",message:"Cloud AI retry job was queued.",accountId:acc.id,provider,context:{msgId,jobId:out.jobId||""}});
+    }else if(out?.error){
+      addDiagnostic({level:"warn",scope:"email",event:"cloud_retry_enqueue_failed",message:out.error,accountId:acc.id,provider,context:{msgId}});
+    }
+    if(!out?.ok)return out;
+    return{ok:true,jobId};
+  };
+
+  const pullCloudRetryResults=async({force=false}={})=>{
+    if(cloudRetryUnsupportedRef.current)return;
+    if(cloudPullBusyRef.current)return;
+    const now=Date.now();
+    if(!force&&now-cloudPullLastRunRef.current<45_000)return;
+    cloudPullBusyRef.current=true;
+    cloudPullLastRunRef.current=now;
+    try{
+      const clientIds=getAiCloudClientIds();
+      const pulledJobs=[];
+      const seenJobIds=new Set();
+      for(const clientId of clientIds){
+        const out=await pullCloudAiRetryJobs(clientId,AI_CLOUD_PULL_LIMIT,loadAICfg());
+        if(!out?.ok){
+          if(out?.unsupported)cloudRetryUnsupportedRef.current=true;
+          if(out?.error){
+            addDiagnostic({level:"warn",scope:"email",event:"cloud_retry_pull_failed",message:out.error,context:{clientId}});
+          }
+          continue;
+        }
+        const jobs=(out.jobs||[]).filter(j=>j&&j.accountId&&j.msgId);
+        for(const job of jobs){
+          const jobId=String(job.jobId||"");
+          if(jobId&&seenJobIds.has(jobId))continue;
+          if(jobId)seenJobIds.add(jobId);
+          pulledJobs.push(job);
+        }
+      }
+      const staleJobs=pulledJobs.filter(job=>isAiPendingStaleAfterReset(job));
+      if(staleJobs.length){
+        addDiagnostic({level:"info",scope:"email",event:"cloud_retry_stale_ignored",message:`Ignored ${staleJobs.length} stale cloud AI retry job(s) after factory reset.`,context:{jobs:staleJobs.length}});
+      }
+      const jobs=pulledJobs.filter(job=>!isAiPendingStaleAfterReset(job));
+      if(!jobs.length)return;
+      addDiagnostic({level:"info",scope:"email",event:"cloud_retry_pull_success",message:`Pulled ${jobs.length} completed cloud AI retry job(s).`,context:{jobs:jobs.length}});
+      const rowIds=new Set();
+      const cloudJobIds=new Set();
+      const msgKeys=new Set();
+      const queued=[];
+      let recovered=0;
+      for(const job of jobs){
+        const accountId=String(job.accountId||"");
+        const msgId=String(job.msgId||"");
+        const provider=String(job.provider||"google").toLowerCase()==="microsoft"?"microsoft":"google";
+        const subject=String(job.subject||"");
+        const from=String(job.from||"");
+        const eDate=String(job.emailDate||today())||today();
+        const rowId=String(job.rowId||aiPendingId(accountId,msgId)||"");
+        const cloudJobId=String(job.jobId||"");
+        if(rowId)rowIds.add(rowId);
+        if(cloudJobId)cloudJobIds.add(cloudJobId);
+        msgKeys.add(`${accountId}::${msgId}`);
+        markProcessedMessage(accountId,msgId);
+
+        const parsed=parseAiEmailAnalysisRaw(String(job.outputText||""));
+        if(String(parsed?.status||"").toLowerCase()!=="success")continue;
+        const items=sanitizeEmailTransactions(Array.isArray(parsed?.transactions)?parsed.transactions:[],{
+          acts,
+          cats,
+          eDate,
+          subject,
+          from,
+        });
+        if(!items.length)continue;
+        recovered+=items.length;
+        items.forEach(item=>queued.push({
+          ...item,
+          date:item.date||eDate||today(),
+          source:"email",
+          reviewStatus:"pending",
+          emailProvider:provider,
+          emailSubject:subject,
+          emailFrom:from,
+          emailAccountId:accountId,
+          emailMsgId:msgId,
+        }));
+      }
+      if(queued.length){
+        addInbox(queued);
+        setToast(`🤖 Cloud AI retry queued ${recovered} item(s) for review.`);
+        addDiagnostic({level:"info",scope:"email",event:"cloud_retry_recovered",message:`Cloud AI retry recovered ${recovered} item(s).`,context:{items:recovered}});
+      }
+      setAiPending(prev=>prev.filter(p=>{
+        const key=`${p.accountId}::${p.msgId}`;
+        if(rowIds.has(p.id))return false;
+        if(p.cloudJobId&&cloudJobIds.has(p.cloudJobId))return false;
+        if(msgKeys.has(key))return false;
+        return true;
+      }));
+    }finally{
+      cloudPullBusyRef.current=false;
+    }
+  };
+
   useEffect(()=>{
     if(!toast)return;
     const t=setTimeout(()=>setToast(""),2600);
@@ -2377,37 +3487,108 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
     initOAuth(clientId,(err,res)=>err?reject(err):resolve(res),opts);
   });
 
+  const googleTokenExpiryIso=(resp={})=>{
+    const expiresInSec=Math.max(60,Number(resp?.expires_in)||3600);
+    return new Date(Date.now()+expiresInSec*1000).toISOString();
+  };
+
+  const hasUsableGoogleToken=(acc={})=>{
+    const token=String(acc?.token||"").trim();
+    if(!token)return false;
+    const expMs=Date.parse(acc?.tokenExpiresAt||"");
+    // Legacy tokens without expiry metadata should be treated as stale.
+    if(!Number.isFinite(expMs))return false;
+    return expMs-Date.now()>60*1000;
+  };
+
+  const isGoogleAuthFailure=(msg="")=>{
+    const lower=String(msg||"").toLowerCase();
+    if(lower.includes("google_reauth_required"))return true;
+    if(lower.includes("request had invalid authentication credentials"))return true;
+    if(lower.includes("invalid credentials"))return true;
+    if((lower.includes("gmail")||lower.includes("googleapis.com"))&&(lower.includes("401")||lower.includes("403")||lower.includes("unauthorized")||lower.includes("forbidden")))return true;
+    return false;
+  };
+
+  const isMicrosoftAuthFailure=(msg="")=>{
+    const lower=String(msg||"").toLowerCase();
+    if(lower.includes("not signed in to microsoft"))return true;
+    if((lower.includes("microsoft")||lower.includes("outlook")||lower.includes("graph.microsoft.com"))&&(lower.includes("401")||lower.includes("403")||lower.includes("unauthorized")||lower.includes("forbidden")))return true;
+    return false;
+  };
+
+  const isDismissedAuthFlow=(msg="")=>{
+    const lower=String(msg||"").toLowerCase();
+    return lower.includes("popup_closed")
+      || lower.includes("popup_window_error")
+      || lower.includes("user_cancelled")
+      || lower.includes("interaction_in_progress");
+  };
+
+  const setGoogleSession=(accId,patch={})=>{
+    setEmails(prev=>prev.map(a=>a.id===accId?{...a,...patch,connected:true,userDisconnected:false,reauthRequired:false}:a));
+  };
+
   const ensureGoogleToken=async(acc,{interactive=false}={})=>{
     const resolvedClientId=(acc?.clientId||googleClientId||"").trim();
     if(!resolvedClientId)throw new Error("Google OAuth is not configured for this app yet.");
     const loginHint=(acc?.email||"").trim();
-    // 1. Check sessionStorage cache first — survives page refresh within the same browser tab
-    const cachedToken=loadGmailTokenFromSession(acc?.id);
-    if(cachedToken){
-      if(!acc?.token)setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,token:cachedToken,connected:true,userDisconnected:false,reauthRequired:false}:a));
-      return cachedToken;
-    }
-    // 2. Try silent refresh via Google Identity Services
-    try{
-      const silentResp=await requestGoogleToken(resolvedClientId,{prompt:"",loginHint});
-      const token=silentResp?.access_token||"";
-      if(token){
-        saveGmailTokenToSession(acc?.id,token);
-        setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,token,connected:true,userDisconnected:false,reauthRequired:false,clientId:resolvedClientId,lastAuthAt:new Date().toISOString()}:a));
-        return token;
+    if(hasUsableGoogleToken(acc))return acc.token;
+    const applyToken=(resp={})=>{
+      const token=resp?.access_token||"";
+      if(!token)return "";
+      setGoogleSession(acc.id,{
+        token,
+        tokenExpiresAt:googleTokenExpiryIso(resp),
+        clientId:resolvedClientId,
+        lastAuthAt:new Date().toISOString(),
+      });
+      return token;
+    };
+    const trySilentRefresh=async()=>{
+      const silentResp=await requestGoogleToken(resolvedClientId,{prompt:"none",loginHint});
+      const token=applyToken(silentResp);
+      if(!token)throw new Error("google_silent_refresh_unavailable:no_token");
+      return token;
+    };
+    if(!interactive){
+      // Background flows: allow only silent Google refresh (never popup).
+      try{
+        return await trySilentRefresh();
+      }catch(err){
+        const lower=String(err?.message||"").toLowerCase();
+        const needsReauth=
+          lower.includes("consent")
+          || lower.includes("access_denied")
+          || lower.includes("invalid_grant")
+          || lower.includes("login_required")
+          || lower.includes("interaction_required")
+          || lower.includes("unauthorized_client");
+        if(needsReauth)throw new Error(`google_reauth_required:${lower}`);
+        throw new Error("google_silent_refresh_unavailable:no_cached_token");
       }
-    }catch(_err){
-      // Silent refresh can fail when Google needs user interaction. We'll fall back below.
     }
-    if(acc?.token)return acc.token;
-    if(!interactive)throw new Error("google_reauth_required");
-    // 3. Interactive consent — opens Google popup
-    const consentResp=await requestGoogleToken(resolvedClientId,{prompt:"consent",loginHint});
-    const token=consentResp?.access_token||"";
-    if(!token)throw new Error("google_token_missing");
-    saveGmailTokenToSession(acc?.id,token);
-    setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,token,connected:true,userDisconnected:false,reauthRequired:false,clientId:resolvedClientId,lastAuthAt:new Date().toISOString()}:a));
-    return token;
+    let silentErr=null;
+    try{
+      return await trySilentRefresh();
+    }catch(err){
+      // Silent refresh can fail in background tabs or when browser blocks third-party cookies.
+      silentErr=err;
+    }
+    try{
+      const interactiveResp=await requestGoogleToken(resolvedClientId,{prompt:"",loginHint});
+      const token=applyToken(interactiveResp);
+      if(!token)throw new Error("google_token_missing");
+      return token;
+    }catch(interactiveErr){
+      const lower=String(interactiveErr?.message||"").toLowerCase();
+      const needsConsent=lower.includes("consent")||lower.includes("access_denied");
+      if(!needsConsent)throw interactiveErr;
+      const consentResp=await requestGoogleToken(resolvedClientId,{prompt:"consent",loginHint});
+      const token=applyToken(consentResp);
+      if(!token)throw new Error("google_token_missing");
+      return token;
+    }
   };
 
   const connectGoogleAccount=async(existing=null)=>{
@@ -2415,43 +3596,43 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
     if(!googleClientId){alert("Google OAuth is not configured for this app yet.");return;}
     if(!window.google?.accounts?.oauth2){alert("Google Identity Services loading… please wait a moment and try again.");return;}
     setConnectBusy("google");
-    connectBusyRef.current="google";
+    addDiagnostic({level:"info",scope:"auth",event:"gmail_connect_started",message:"Starting Gmail OAuth flow.",accountId:existing?.id||"",provider:"google"});
     try{
-      const authResp=await requestGoogleToken(googleClientId,{prompt:"consent"});
+      let authResp;
+      const loginHint=(existing?.email||"").trim();
+      try{
+        authResp=await requestGoogleToken(googleClientId,{prompt:"select_account",loginHint});
+      }catch(e){
+        const lower=String(e?.message||"").toLowerCase();
+        const needsConsent=lower.includes("consent")||lower.includes("access_denied");
+        if(!needsConsent)throw e;
+        authResp=await requestGoogleToken(googleClientId,{prompt:"consent",loginHint});
+      }
       const token=authResp?.access_token||"";
       if(!token)throw new Error("google_token_missing");
-      // CRITICAL: For reconnection of an existing account, clear reauthRequired and save token
-      // IMMEDIATELY — before any API calls. If gmailGetProfile fails (network blip, quota, etc.)
-      // the catch block would otherwise leave reauthRequired:true, creating an endless loop.
-      if(existing){
-        setEmails(prev=>prev.map(a=>a.id===existing.id?{...a,token,connected:true,userDisconnected:false,reauthRequired:false,clientId:googleClientId,lastAuthAt:new Date().toISOString()}:a));
-        saveGmailTokenToSession(existing.id,token);
-      }
       const profile=await gmailGetProfile(token);
       const mail=(profile.emailAddress||"").trim();
-      if(!mail&&!existing)throw new Error("Google did not return email address.");
-      const mailToUse=mail||(existing?.email||"");
-      const newAccId=gid();
-      // Determine the final account ID before setState (for saving token to sessionStorage)
-      const existingByEmail=existing||emails.find(a=>providerOf(a)==="google"&&(a.email||"").toLowerCase()===mailToUse.toLowerCase());
+      if(!mail)throw new Error("Google did not return email address.");
       setEmails(prev=>{
         const next=[...prev];
         const ix=existing
           ?next.findIndex(a=>a.id===existing.id)
-          :next.findIndex(a=>providerOf(a)==="google"&&(a.email||"").toLowerCase()===mailToUse.toLowerCase());
-        const base=hydrateEmailAccount({id:newAccId,provider:"google",label:mailToUse.split("@")[0],email:mailToUse,syncQuery:GMAIL_QUERY,maxEmails:100,autoPost:false,enabled:true,firstSyncCompleted:false,syncFromDate:"",autoSyncHourly:true});
+          :next.findIndex(a=>providerOf(a)==="google"&&(a.email||"").toLowerCase()===mail.toLowerCase());
+        const base=hydrateEmailAccount({id:gid(),provider:"google",label:mail.split("@")[0],email:mail,syncQuery:GMAIL_QUERY,maxEmails:100,autoPost:false,enabled:true,firstSyncCompleted:false,syncFromDate:"",autoSyncHourly:true});
         if(ix>=0){
           const cur=hydrateEmailAccount(next[ix]);
-          next[ix]={...cur,provider:"google",email:mailToUse,token,connected:true,userDisconnected:false,reauthRequired:false,enabled:true,clientId:googleClientId,autoSyncHourly:cur.autoSyncHourly!==false,lastAuthAt:new Date().toISOString()};
+          next[ix]={...cur,provider:"google",email:mail,token,tokenExpiresAt:googleTokenExpiryIso(authResp),connected:true,userDisconnected:false,reauthRequired:false,enabled:true,clientId:googleClientId,autoSyncHourly:cur.autoSyncHourly!==false,lastAuthAt:new Date().toISOString(),lastError:"",lastErrorAt:""};
         }else{
-          next.unshift({...base,token,connected:true,userDisconnected:false,reauthRequired:false,clientId:googleClientId,lastAuthAt:new Date().toISOString()});
+          next.unshift({...base,token,tokenExpiresAt:googleTokenExpiryIso(authResp),connected:true,userDisconnected:false,reauthRequired:false,clientId:googleClientId,lastAuthAt:new Date().toISOString(),lastError:"",lastErrorAt:""});
         }
         return next;
       });
-      if(!existing)saveGmailTokenToSession(existingByEmail?.id||newAccId,token);
-      setToast(`✅ Gmail connected: ${mailToUse}`);
+      setToast(`✅ Gmail connected: ${mail}`);
+      addDiagnostic({level:"info",scope:"auth",event:"gmail_connect_success",message:"Gmail account connected.",provider:"google",context:{email:mail,existing:Boolean(existing?.id)}});
     }catch(err){
       const msg=String(err?.message||"");
+      addDiagnostic({level:"error",scope:"auth",event:"gmail_connect_failed",message:msg||"Gmail OAuth failed.",accountId:existing?.id||"",provider:"google",context:{error:err}});
+      if(existing?.id)setAccountIssue(existing.id,msg);
       if(msg.includes("access_denied")){
         alert("Access denied by Google OAuth. Add your email as a Test User in Google Auth Platform, or publish the OAuth app to production.");
       }else if(msg.includes("redirect_uri_mismatch")){
@@ -2460,7 +3641,6 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
         alert("Google sign-in was cancelled.");
       }else alert(`OAuth error: ${msg}`);
     }finally{
-      connectBusyRef.current="";
       setConnectBusy("");
     }
   };
@@ -2473,7 +3653,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
       return;
     }
     setConnectBusy("microsoft");
-    connectBusyRef.current="microsoft";
+    addDiagnostic({level:"info",scope:"auth",event:"outlook_connect_started",message:"Starting Outlook OAuth flow.",accountId:existing?.id||"",provider:"microsoft"});
     try{
       const login=await msLoginMail(msClient);
       const account=login.account||{};
@@ -2488,17 +3668,19 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
         const base=hydrateEmailAccount({id:gid(),provider:"microsoft",label:mail.split("@")[0],email:mail,syncQuery:"",maxEmails:100,autoPost:false,autoSyncHourly:true,enabled:true,firstSyncCompleted:false,syncFromDate:"",msClientId:msClient,msAccountId:account.homeAccountId||"",msUsername:account.username||mail});
         if(ix>=0){
           const cur=hydrateEmailAccount(next[ix]);
-          next[ix]={...cur,provider:"microsoft",email:mail,token:login.accessToken,connected:true,userDisconnected:false,reauthRequired:false,enabled:true,autoSyncHourly:cur.autoSyncHourly!==false,msClientId:msClient,msAccountId:account.homeAccountId||cur.msAccountId||"",msUsername:account.username||cur.msUsername||mail,lastAuthAt:new Date().toISOString()};
+          next[ix]={...cur,provider:"microsoft",email:mail,token:login.accessToken,connected:true,userDisconnected:false,reauthRequired:false,enabled:true,autoSyncHourly:cur.autoSyncHourly!==false,msClientId:msClient,msAccountId:account.homeAccountId||cur.msAccountId||"",msUsername:account.username||cur.msUsername||mail,lastAuthAt:new Date().toISOString(),lastError:"",lastErrorAt:""};
         }else{
-          next.unshift({...base,token:login.accessToken,connected:true,userDisconnected:false,reauthRequired:false,lastAuthAt:new Date().toISOString()});
+          next.unshift({...base,token:login.accessToken,connected:true,userDisconnected:false,reauthRequired:false,lastAuthAt:new Date().toISOString(),lastError:"",lastErrorAt:""});
         }
         return next;
       });
       setToast(`✅ Outlook connected: ${mail}`);
+      addDiagnostic({level:"info",scope:"auth",event:"outlook_connect_success",message:"Outlook account connected.",provider:"microsoft",context:{email:mail,existing:Boolean(existing?.id)}});
     }catch(e){
+      addDiagnostic({level:"error",scope:"auth",event:"outlook_connect_failed",message:e?.message||"Outlook OAuth failed.",accountId:existing?.id||"",provider:"microsoft",context:{error:e}});
+      if(existing?.id)setAccountIssue(existing.id,e?.message||"Outlook OAuth failed.");
       alert(`Microsoft OAuth error: ${friendlyMicrosoftAuthError(e)}`);
     }finally{
-      connectBusyRef.current="";
       setConnectBusy("");
     }
   };
@@ -2511,42 +3693,16 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
 
   const disconnectAccount=(acc)=>{
     const provider=providerOf(acc);
-    if(provider==="google")clearGmailTokenFromSession(acc.id);
-    setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,token:null,connected:false,userDisconnected:true,reauthRequired:false}:a));
+    setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,token:null,connected:false,userDisconnected:true,reauthRequired:false,lastError:"",lastErrorAt:""}:a));
     setToast(`${provider==="microsoft"?"Outlook":"Gmail"} disconnected: ${acc.email||acc.label||"account"}`);
+    addDiagnostic({level:"info",scope:"email",event:"account_disconnected",message:`${provider==="microsoft"?"Outlook":"Gmail"} account disconnected.`,accountId:acc.id,provider,context:{email:acc.email||acc.label||""}});
   };
 
-  const[removeConfirm,setRemoveConfirm]=useState({open:false,acc:null,text:""});
-  
   const removeAccount=(acc)=>{
-    setRemoveConfirm({open:true,acc,text:""});
-  };
-  
-  const confirmRemoveAccount=()=>{
-    if(removeConfirm.text.toLowerCase()!=="remove"){
-      alert("Please type 'remove' to confirm deletion.");
-      return;
-    }
-    const acc=removeConfirm.acc;
+    if(!window.confirm(`Remove ${acc.email||acc.label||"this account"} from Email Integration?`))return;
     setEmails(prev=>prev.filter(a=>a.id!==acc.id));
     setAiPending(prev=>prev.filter(p=>p.accountId!==acc.id));
-    setRemoveConfirm({open:false,acc:null,text:""});
-    setToast(`Account removed: ${acc?.email||acc?.label||"account"}`);
-  };
-
-  // Human-readable error reasons for AI pending items
-  const getHumanReadableError=(error)=>{
-    if(!error)return"Processing queued";
-    const e=error.toLowerCase();
-    if(e.includes("google_reauth_required")||e.includes("401"))return"Session expired - needs reconnection";
-    if(e.includes("ai_retry_required"))return"AI analysis needs another attempt";
-    if(e.includes("timeout"))return"Request timed out - will retry";
-    if(e.includes("rate_limit")||e.includes("429"))return"API rate limit reached - will retry later";
-    if(e.includes("network")||e.includes("fetch"))return"Network error - will retry";
-    if(e.includes("account_not_connected"))return"Account not connected";
-    if(e.includes("parse"))return"Unable to read email content - will retry";
-    if(e.includes("quota"))return"API quota exceeded - will retry later";
-    return"Processing failed - will retry automatically";
+    addDiagnostic({level:"warn",scope:"email",event:"account_removed",message:"Email account removed from integration.",accountId:acc.id,provider:providerOf(acc),context:{email:acc.email||acc.label||""}});
   };
 
   const fetchMessageEvidence=async(provider,token,msgId)=>{
@@ -2600,6 +3756,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
   };
 
   const analyzeMessageEvidence=async(evidence)=>{
+    const baseCurrency=getBaseCurrency();
     const aiResult=await withTimeout(
       aiAnalyzeEmail(
         evidence.subject||"",
@@ -2612,6 +3769,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
           attachmentText:evidence.attachmentText||"",
           hasAttachment:Boolean(evidence.hasAttachment),
           accountNames:accs.map(a=>a.name).filter(Boolean),
+          baseCurrency,
         },
       ),
       35000,
@@ -2624,18 +3782,23 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
     items=sanitizeEmailTransactions(items,{
       acts,
       cats,
+      baseCurrency,
       eDate:evidence.eDate||today(),
       subject:evidence.subject||"",
       from:evidence.from||"",
     });
     if(String(aiResult?.status||"").toLowerCase()!=="success")return[];
     if(!Array.isArray(items)||!items.length)return[];
-    return items;
+    return await convertExtractedItemsToBaseCurrency(items,{
+      baseCurrency,
+      fallbackCurrency:baseCurrency,
+      dateFallback:evidence.eDate||today(),
+    });
   };
 
   const runSync=async(acc,opts={})=>{
     const provider=providerOf(acc);
-    const interactive=opts.interactive!==false;
+    const interactive=opts.interactive===true;
     const silent=opts.silent===true;
     const msClient=sanitizeMsClientId((acc?.msClientId||microsoftClientId||"").trim());
     if(provider==="microsoft"&&!msClient){
@@ -2647,6 +3810,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
     const markFirst=opts.markFirstSync===true;
     setSyncing(acc.id,true);
     setProgress(acc.id,{phase:"fetching",processed:0,total:0,remaining:0,matched:0,newCount:0,found:0,pending:0});
+    addDiagnostic({level:"info",scope:"email",event:"sync_started",message:`${provider==="microsoft"?"Outlook":"Gmail"} sync started.`,accountId:acc.id,provider,context:{scanAll,interactive,silent,fromDate}});
     try{
       const requestedMax=scanAll?50000:Math.max(1,Math.min(Number(acc.maxEmails)||100,5000));
       let token=acc.token||"";
@@ -2654,7 +3818,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
       if(provider==="microsoft"){
         let auth;
         try{
-          auth=await msGetMailToken(msClient,{homeAccountId:acc.msAccountId,username:acc.msUsername||acc.email});
+          auth=await msGetMailToken(msClient,{homeAccountId:acc.msAccountId,username:acc.msUsername||acc.email},{interactive});
         }catch(msAuthErr){
           if(!interactive)throw msAuthErr;
           const login=await msLoginMail(msClient);
@@ -2676,6 +3840,8 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
       }
       if(!messages.length){
         log(acc.id,"✓ No matching emails found.");
+        clearAccountIssue(acc.id);
+        addDiagnostic({level:"info",scope:"email",event:"sync_no_messages",message:"No matching emails were found for sync.",accountId:acc.id,provider,context:{scanAll,fromDate}});
         setProgress(acc.id,{phase:"done",processed:0,total:0,remaining:0,matched:0,newCount:0,found:0,pending:0});
         setSyncing(acc.id,false);
         return;
@@ -2685,6 +3851,8 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
       const fresh=messages.filter(m=>!processed.has(m.id));
       if(!fresh.length){
         log(acc.id,"✓ All emails already processed.");
+        clearAccountIssue(acc.id);
+        addDiagnostic({level:"info",scope:"email",event:"sync_no_new_messages",message:"All matching emails were already processed.",accountId:acc.id,provider,context:{matched:messages.length}});
         setProgress(acc.id,{phase:"done",processed:0,total:0,remaining:0,matched:messages.length,newCount:0,found:0,pending:0});
         setSyncing(acc.id,false);
         return;
@@ -2736,10 +3904,22 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
           if(reason==="config"){
             throw new Error(`ai_config_error: ${String(e?.message||"AI backend config issue")}`);
           }
+          let cloudQueued=false;
+          let cloudJobId="";
+          if(evidence){
+            try{
+              const cloud=await enqueueCloudRetryFromEvidence({acc,evidence,msgId:msg.id,provider});
+              cloudQueued=Boolean(cloud?.ok);
+              cloudJobId=String(cloud?.jobId||"");
+            }catch{}
+          }
           failed++;
           pendingQueued++;
           failureReasons[reason]=(failureReasons[reason]||0)+1;
           const nowIso=new Date().toISOString();
+          const nextRetry=cloudQueued
+            ? new Date(Date.now()+Math.max(AI_RETRY_INTERVAL_MS,2*60*60*1000)).toISOString()
+            : new Date(Date.now()+AI_RETRY_INTERVAL_MS).toISOString();
           enqueueAiPending({
             id:aiPendingId(acc.id,msg.id),
             accountId:acc.id,
@@ -2752,8 +3932,10 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
             queuedAt:nowIso,
             lastTriedAt:nowIso,
             attempts:1,
-            nextRetryAt:new Date(Date.now()+AI_RETRY_INTERVAL_MS).toISOString(),
-            lastError:String(e?.message||reason||"processing_failed").slice(0,180),
+            nextRetryAt:nextRetry,
+            lastError:cloudQueued?"queued_cloud_retry":String(e?.message||reason||"processing_failed").slice(0,180),
+            cloudQueued,
+            cloudJobId:cloudJobId||aiPendingId(acc.id,msg.id),
           });
           processed.add(msg.id);
           console.error(e);
@@ -2795,15 +3977,21 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
         syncFromDate:fromDate||a.syncFromDate||"",
         lastAutoSyncAt:opts.auto===true?syncStamp:(a.lastAutoSyncAt||""),
         msClientId:provider==="microsoft"?(a.msClientId||msClient):a.msClientId,
+        lastError:"",
+        lastErrorAt:"",
       }:a));
       if(!valid.length){
         if(failed===toProcess.length&&!pendingQueued){
           log(acc.id,"⚠ Sync finished, but all emails failed extraction. Check network/auth and retry.");
+          setAccountIssue(acc.id,"All emails failed extraction during sync.");
+          addDiagnostic({level:"error",scope:"email",event:"sync_all_failed",message:"Sync completed but every email failed extraction.",accountId:acc.id,provider,context:{matched:messages.length,total:toProcess.length,failed,skipped,pendingQueued,failureReasons}});
           setProgress(acc.id,{phase:"error",processed:toProcess.length,total:toProcess.length,remaining:0,matched:messages.length,newCount:fresh.length,found:0,failed,skipped,pending:pendingQueued,failureReasons:{...failureReasons}});
           setSyncing(acc.id,false);
           return;
         }
         log(acc.id,`✓ Done — no cashflow transaction found.${failed?` Failed: ${failed}.`:""}${skipped?` Skipped: ${skipped}.`:""}${pendingQueued?` Pending AI retry: ${pendingQueued}.`:""}`);
+        clearAccountIssue(acc.id);
+        addDiagnostic({level:failed>0?"warn":"info",scope:"email",event:"sync_completed_no_transactions",message:"Sync completed with no cashflow transactions.",accountId:acc.id,provider,context:{matched:messages.length,total:toProcess.length,failed,skipped,pendingQueued,failureReasons}});
         setProgress(acc.id,{phase:"done",processed:toProcess.length,total:toProcess.length,remaining:0,matched:messages.length,newCount:fresh.length,found:0,failed,skipped,pending:pendingQueued,failureReasons:{...failureReasons}});
         setSyncing(acc.id,false);
         return;
@@ -2811,41 +3999,37 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
       const queued=valid.map(i=>({...i,source:"email",reviewStatus:"pending"}));
       addInbox(queued);
       log(acc.id,`AI found ${valid.length} transaction item(s). Added to Review queue.${pendingQueued?` Pending AI retry: ${pendingQueued}.`:""}`);
+      clearAccountIssue(acc.id);
+      addDiagnostic({level:"info",scope:"email",event:"sync_completed",message:`Sync completed and queued ${valid.length} transaction item(s).`,accountId:acc.id,provider,context:{matched:messages.length,total:toProcess.length,queued:valid.length,failed,skipped,pendingQueued,failureReasons}});
       setProgress(acc.id,{phase:"done",processed:toProcess.length,total:toProcess.length,remaining:0,matched:messages.length,newCount:fresh.length,found:valid.length,failed,skipped,pending:pendingQueued,failureReasons:{...failureReasons}});
       setToast(`📥 ${valid.length} item(s) queued for review.`);
     }catch(e){
       const msg=String(e.message||"");
-      if(provider==="google"&&(msg.includes("google_reauth_required")||msg.includes("401"))){
-        log(acc.id,interactive?"⚠ Google session needs refresh. Click Connect Gmail once to re-authorize.":"⚠ Google token expired during background sync — will retry automatically.");
-        // ONLY mark reauthRequired from USER-INITIATED syncs (interactive && !silent).
-        // Background auto-syncs silently skip — the proactive token refresh or next
-        // user action will recover. This prevents background noise from spamming "re-auth needed".
-        if(interactive&&!silent&&!connectBusyRef.current){
-          setEmails(prev=>prev.map(a=>{
-            if(a.id!==acc.id)return a;
-            const recentAuth=a.lastAuthAt&&(Date.now()-Date.parse(a.lastAuthAt))<55*60*1000;
-            if(recentAuth)return a; // token lifetime hasn't elapsed, don't mark reauth
-            return{...a,token:null,connected:true,userDisconnected:false,reauthRequired:true};
-          }));
-          alert("Google session needs refresh. Click Connect Gmail once, then sync will continue automatically.");
-        }
-      }else if(msg.includes("401")||msg.includes("Not signed in to Microsoft")){
-        log(acc.id,interactive?(provider==="microsoft"?"⚠ Microsoft session expired — reconnect required.":"⚠ Token expired — reconnect required."):"⚠ Token expired during background sync — will retry automatically.");
-        if(interactive&&!silent&&!connectBusyRef.current){
-          setEmails(prev=>prev.map(a=>{
-            if(a.id!==acc.id)return a;
-            const recentAuth=a.lastAuthAt&&(Date.now()-Date.parse(a.lastAuthAt))<55*60*1000;
-            if(recentAuth)return a;
-            return{...a,token:null,connected:true,userDisconnected:false,reauthRequired:true};
-          }));
-        }
+      if(provider==="google"&&msg.includes("google_silent_refresh_unavailable")){
+        log(acc.id,"ℹ Gmail auto-sync is paused until browser allows a silent token refresh. Keep this tab active or click Sync once.");
+        setAccountIssue(acc.id,"Google silent refresh unavailable. Manual reconnect may be needed.");
+        addDiagnostic({level:"warn",scope:"email",event:"google_silent_refresh_unavailable",message:"Google silent refresh is unavailable for background sync.",accountId:acc.id,provider,context:{error:e}});
+        setProgress(acc.id,{phase:"done",pending:0});
       }else if(msg.includes("ai_config_error")){
         const detail=msg.replace("ai_config_error:","").trim();
         log(acc.id,`⚠ AI backend config issue: ${detail}`);
+        setAccountIssue(acc.id,detail);
+        addDiagnostic({level:"error",scope:"ai",event:"ai_config_error",message:detail||"AI backend config issue.",accountId:acc.id,provider,context:{error:e}});
         if(!silent)alert(`AI backend config issue:\n${detail}\n\nGo to Settings → AI Backend and click Test AI Backend.`);
         setProgress(acc.id,{phase:"error",pending:0,failureReasons:{config:1}});
+      }else if(provider==="google"&&isGoogleAuthFailure(msg)){
+        log(acc.id,"⚠ Google session needs refresh. Click Connect Gmail once to re-authorize if sync keeps failing.");
+        setAccountIssue(acc.id,"Google session needs refresh.",{token:null,connected:true,userDisconnected:false,reauthRequired:true});
+        addDiagnostic({level:"warn",scope:"auth",event:"gmail_reauth_required",message:"Google session needs refresh.",accountId:acc.id,provider,context:{error:e}});
+        if(interactive&&!silent)alert("Google session needs refresh. Click Connect Gmail once, then sync will continue automatically.");
+      }else if(provider==="microsoft"&&isMicrosoftAuthFailure(msg)){
+        log(acc.id,provider==="microsoft"?"⚠ Microsoft session expired — reconnect required.":"⚠ Token expired — reconnect required.");
+        setAccountIssue(acc.id,"Microsoft session expired. Reconnect required.",{token:null,connected:true,userDisconnected:false,reauthRequired:true});
+        addDiagnostic({level:"warn",scope:"auth",event:"outlook_reauth_required",message:"Microsoft session expired and requires reconnect.",accountId:acc.id,provider,context:{error:e}});
       }else{
         log(acc.id,"Error: "+msg);
+        setAccountIssue(acc.id,msg);
+        addDiagnostic({level:"error",scope:"email",event:"sync_failed",message:msg||"Email sync failed.",accountId:acc.id,provider,context:{error:e,scanAll,interactive,silent}});
         setProgress(acc.id,{phase:"error",pending:0});
       }
     }
@@ -2853,54 +4037,60 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
   };
 
   const startSync=(acc,scanAll=false)=>{
+    if(acc?.reauthRequired){
+      alert(`Reconnect this ${providerOf(acc)==="microsoft"?"Outlook":"Gmail"} account first, then sync will resume normally.`);
+      return;
+    }
     if(!isSyncReady(acc)){alert(`Connect this ${providerOf(acc)==="microsoft"?"Outlook":"Gmail"} account first.`);return;}
     if(!acc.firstSyncCompleted){
       const d=acc.syncFromDate||new Date(Date.now()-90*24*60*60*1000).toISOString().slice(0,10);
       setFirstSyncPrompt({accId:acc.id,fromDate:d,scanAll:true});
       return;
     }
-    runSync(acc,{scanAll});
+    runSync(acc,{scanAll,interactive:true});
   };
 
   const runPendingAiRetry=async({force=false}={})=>{
     const now=Date.now();
     if(retryBusyRef.current)return;
-    if(connectBusyRef.current)return; // never retry while an OAuth popup is open
     if(!force&&now-retryLastRunRef.current<15000)return;
-    const due=(aiPending||[])
+    if(force)await pullCloudRetryResults({force:true});
+    const retryRows=(aiPending||[])
       .map(normalizeAiPendingEntry)
       .filter(row=>row.accountId&&row.msgId)
-      .filter(row=>{
-        // force=true (user clicked "Retry Now") bypasses the nextRetryAt cooldown
-        // and processes ALL pending items, not just overdue ones
-        if(force)return true;
+      .filter(row=>!row.cloudQueued)
+      .filter(row=>force||(()=>{
         const nextAt=Date.parse(row.nextRetryAt||"");
         return !Number.isFinite(nextAt)||nextAt<=Date.now();
-      });
-    // When force=true process everything; otherwise cap at batch size for background runs
-    const toProcess=force?due:due.slice(0,AI_RETRY_BATCH_SIZE);
-    if(!toProcess.length)return;
+      })())
+      .slice(0,force?1000:AI_RETRY_BATCH_SIZE);
+    if(!retryRows.length)return;
     retryBusyRef.current=true;
     setRetryBusy(true);
     retryLastRunRef.current=now;
     let recovered=0;
-    let processed=0;
-    const reauthNeeded=new Set();
+    const retryAccountCache=new Map();
+    const retryAccountErrors=new Map();
     try{
-      for(const row of toProcess){
-        // If an OAuth reconnect started while we were already looping, stop immediately.
-        // Continuing would use stale tokens and the catch block could overwrite reauthRequired:false.
-        if(connectBusyRef.current)break;
-        processed++;
-        const accRaw=emails.find(a=>a.id===row.accountId);
+      for(const row of retryRows){
+        const accRaw=retryAccountCache.get(row.accountId)||emails.find(a=>a.id===row.accountId);
         if(!accRaw){
           setAiPending(prev=>prev.filter(p=>p.id!==row.id));
           continue;
         }
         const acc=hydrateEmailAccount(accRaw);
         const provider=providerOf(acc);
-        if(provider==="google"&&reauthNeeded.has(acc.id))continue;
-        if(!isSyncReady(acc)){
+        const blockedError=retryAccountErrors.get(acc.id);
+        if(blockedError){
+          setAiPending(prev=>prev.map(p=>p.id===row.id?{
+            ...p,
+            nextRetryAt:new Date(Date.now()+AI_RETRY_INTERVAL_MS).toISOString(),
+            lastTriedAt:new Date().toISOString(),
+            lastError:String(blockedError||"auth_retry_blocked").slice(0,180),
+          }:p));
+          continue;
+        }
+        if(!isSyncReady(acc,{allowReauth:force})){
           setAiPending(prev=>prev.map(p=>p.id===row.id?{
             ...p,
             nextRetryAt:new Date(Date.now()+AI_RETRY_INTERVAL_MS).toISOString(),
@@ -2909,31 +4099,51 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
           }:p));
           continue;
         }
+        let evidence=null;
         try{
           let token=acc.token||"";
           if(provider==="microsoft"){
             const msClient=sanitizeMsClientId((acc.msClientId||microsoftClientId||"").trim());
             if(!msClient)throw new Error("microsoft_client_missing");
-            const auth=await msGetMailToken(msClient,{homeAccountId:acc.msAccountId,username:acc.msUsername||acc.email});
-            token=auth.accessToken;
-            const msAcc=auth.account||{};
-            setEmails(prev=>prev.map(a=>a.id===acc.id?{
-              ...a,
+            token=String(retryAccountCache.get(acc.id)?.token||"").trim();
+            if(!token){
+              const auth=await msGetMailToken(msClient,{homeAccountId:acc.msAccountId,username:acc.msUsername||acc.email},{interactive:force});
+              token=auth.accessToken;
+              const msAcc=auth.account||{};
+              const nextAcc={
+                ...acc,
+                token,
+                connected:true,
+                userDisconnected:false,
+                reauthRequired:false,
+                msClientId:msClient,
+                msAccountId:msAcc.homeAccountId||acc.msAccountId||"",
+                msUsername:msAcc.username||acc.msUsername||acc.email||"",
+              };
+              retryAccountCache.set(acc.id,nextAcc);
+              setEmails(prev=>prev.map(a=>a.id===acc.id?{
+                ...a,
+                token,
+                connected:true,
+                userDisconnected:false,
+                reauthRequired:false,
+                msClientId:msClient,
+                msAccountId:msAcc.homeAccountId||a.msAccountId||"",
+                msUsername:msAcc.username||a.msUsername||a.email||"",
+              }:a));
+            }
+          }else{
+            token=await ensureGoogleToken(acc,{interactive:force});
+            retryAccountCache.set(acc.id,{
+              ...acc,
               token,
+              tokenExpiresAt:new Date(Date.now()+55*60*1000).toISOString(),
               connected:true,
               userDisconnected:false,
               reauthRequired:false,
-              msClientId:msClient,
-              msAccountId:msAcc.homeAccountId||a.msAccountId||"",
-              msUsername:msAcc.username||a.msUsername||a.email||"",
-            }:a));
-          }else{
-            // When force=true (user clicked "Retry AI Pending"), allow interactive OAuth
-            // so Google can open a popup for token refresh if silent methods fail.
-            // Background retries (force=false) stay non-interactive.
-            token=await ensureGoogleToken(acc,{interactive:force});
+            });
           }
-          const evidence=await fetchMessageEvidence(provider,token,row.msgId);
+          evidence=await fetchMessageEvidence(provider,token,row.msgId);
           const items=await analyzeMessageEvidence(evidence);
           markProcessedMessage(acc.id,row.msgId);
           setAiPending(prev=>prev.filter(p=>p.id!==row.id));
@@ -2952,104 +4162,58 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
           if(queued.length){
             recovered+=queued.length;
             addInbox(queued);
-            log(acc.id,`🤖 AI retry recovered ${queued.length} item(s) from pending queue. (${processed}/${toProcess.length})`);
+            log(acc.id,`🤖 AI retry recovered ${queued.length} item(s) from pending queue.`);
+            clearAccountIssue(acc.id);
+            addDiagnostic({level:"info",scope:"email",event:"ai_retry_recovered",message:`AI retry recovered ${queued.length} item(s).`,accountId:acc.id,provider,context:{items:queued.length,msgId:row.msgId}});
           }
         }catch(err){
           const msg=String(err?.message||"unknown_error");
           const lower=msg.toLowerCase();
-          const isGoogleAuth=provider==="google"&&(lower.includes("google_reauth_required")||lower.includes("401"));
-          const isMsAuth=provider==="microsoft"&&(lower.includes("401")||lower.includes("not signed in to microsoft"));
-          if(isGoogleAuth){
-            // Try one more time with interactive auth before giving up
-            if(force&&!reauthNeeded.has(acc.id)){
-              try{
-                log(acc.id,"🔄 Token expired, attempting automatic refresh...");
-                const freshToken=await ensureGoogleToken(acc,{interactive:true,forceRefresh:true});
-                if(freshToken){
-                  // Retry with fresh token
-                  const evidence=await fetchMessageEvidence(provider,freshToken,row.msgId);
-                  const items=await analyzeMessageEvidence(evidence);
-                  markProcessedMessage(acc.id,row.msgId);
-                  setAiPending(prev=>prev.filter(p=>p.id!==row.id));
-                  if(items.length){
-                    const queued=items.map(item=>({
-                      ...item,
-                      date:item.date||evidence.eDate||today(),
-                      source:"email",
-                      reviewStatus:"pending",
-                      emailProvider:provider,
-                      emailSubject:evidence.subject||"",
-                      emailFrom:evidence.from||"",
-                      emailAccountId:acc.id,
-                      emailMsgId:row.msgId,
-                    }));
-                    recovered+=queued.length;
-                    addInbox(queued);
-                    log(acc.id,`🤖 AI retry recovered ${queued.length} item(s) after token refresh.`);
-                  }
-                  continue; // Success! Move to next item
-                }
-              }catch(refreshErr){
-                // Fall through to normal error handling
-              }
-            }
-            reauthNeeded.add(acc.id);
-            if(force){
-              // User clicked "Retry AI Pending" — show them what happened
-              log(acc.id,"⚠ Google session expired. Click Connect Gmail to reconnect, then retry.");
-              setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,token:null,connected:true,userDisconnected:false,reauthRequired:true}:a));
-            }else{
-              // Background retry — silently skip, proactive refresh will handle it
-              log(acc.id,"⚠ Google token expired during AI retry — will retry automatically after token refresh.");
-            }
-            // Don't advance nextRetryAt — keep email immediately due so it retries right after token refresh
-            setAiPending(prev=>prev.map(p=>p.id===row.id?{
-              ...p,
-              lastTriedAt:new Date().toISOString(),
-              lastError:msg.slice(0,180),
-            }:p));
-          }else if(isMsAuth){
-            if(force){
-              log(acc.id,"⚠ Microsoft session expired. Click Connect Outlook to reconnect, then retry.");
-              setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,token:null,connected:true,userDisconnected:false,reauthRequired:true}:a));
-            }else{
-              log(acc.id,"⚠ Microsoft token expired during AI retry — will retry automatically.");
-            }
-            setAiPending(prev=>prev.map(p=>p.id===row.id?{
-              ...p,
-              attempts:(Number(p.attempts)||0)+1,
-              nextRetryAt:new Date(Date.now()+AI_RETRY_INTERVAL_MS).toISOString(),
-              lastTriedAt:new Date().toISOString(),
-              lastError:msg.slice(0,180),
-            }:p));
-          }else{
-            // Non-auth error - just queue for retry without requiring reconnect
-            log(acc.id,`⚠ AI processing error: ${msg.slice(0,100)}. Will retry.`);
-            setAiPending(prev=>prev.map(p=>p.id===row.id?{
-              ...p,
-              attempts:(Number(p.attempts)||0)+1,
-              nextRetryAt:new Date(Date.now()+AI_RETRY_INTERVAL_MS).toISOString(),
-              lastTriedAt:new Date().toISOString(),
-              lastError:msg.slice(0,180),
-            }:p));
+          let cloudQueued=false;
+          let cloudJobId=String(row.cloudJobId||"");
+          if(evidence){
+            try{
+              const cloud=await enqueueCloudRetryFromEvidence({acc,evidence,msgId:row.msgId,provider});
+              cloudQueued=Boolean(cloud?.ok);
+              if(cloudQueued)cloudJobId=String(cloud?.jobId||cloudJobId||"");
+            }catch{}
           }
+          if(provider==="google"&&isGoogleAuthFailure(lower)){
+            retryAccountErrors.set(acc.id,msg);
+            setAccountIssue(acc.id,"Google session needs refresh.",{token:null,connected:true,userDisconnected:false,reauthRequired:true});
+          }else if(provider==="microsoft"&&isMicrosoftAuthFailure(lower)){
+            retryAccountErrors.set(acc.id,msg);
+            setAccountIssue(acc.id,"Microsoft session expired. Reconnect required.",{token:null,connected:true,userDisconnected:false,reauthRequired:true});
+          }else if(force&&isDismissedAuthFlow(lower)){
+            retryAccountErrors.set(acc.id,msg);
+          }
+          addDiagnostic({level:"warn",scope:"email",event:"ai_retry_failed",message:msg.slice(0,180),accountId:acc.id,provider,context:{msgId:row.msgId,cloudQueued}});
+          const nextRetry=cloudQueued
+            ? new Date(Date.now()+Math.max(AI_RETRY_INTERVAL_MS,2*60*60*1000)).toISOString()
+            : new Date(Date.now()+AI_RETRY_INTERVAL_MS).toISOString();
+          setAiPending(prev=>prev.map(p=>p.id===row.id?{
+            ...p,
+            attempts:(Number(p.attempts)||0)+1,
+            nextRetryAt:nextRetry,
+            lastTriedAt:new Date().toISOString(),
+            lastError:cloudQueued?"queued_cloud_retry":msg.slice(0,180),
+            cloudQueued:cloudQueued||Boolean(p.cloudQueued),
+            cloudJobId:cloudJobId||p.cloudJobId||p.id,
+          }:p));
         }
       }
-      if(recovered>0)setToast(`🤖 AI retry queued ${recovered} item(s) for review (${toProcess.length} emails processed).`);
+      if(recovered>0)setToast(`🤖 AI retry queued ${recovered} item(s) for review.`);
     }finally{
       retryBusyRef.current=false;
       setRetryBusy(false);
       retryLastRunRef.current=Date.now();
+      pullCloudRetryResults({force:false}).catch(()=>{});
     }
   };
 
   useEffect(()=>{
     const runAutoSync=()=>{
-      // Don't run any auto-sync or retry while a connect/reconnect OAuth flow is in progress.
-      // The OAuth popup closing fires a "focus" event that would otherwise trigger a retry
-      // with a stale emails closure (token:null), immediately overwriting reauthRequired:false
-      // that connectGoogleAccount just set.
-      if(connectBusyRef.current)return;
+      pullCloudRetryResults({force:false}).catch(()=>{});
       runPendingAiRetry({force:false}).catch(()=>{});
       if(Object.values(syncingIds).some(Boolean))return;
       const now=Date.now();
@@ -3061,11 +4225,11 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
         .filter(acc=>{
           const last=Date.parse(acc.lastAutoSyncAt||acc.lastSync||"");
           if(!Number.isFinite(last))return true;
-          return (now-last)>=30*60*1000;
+          return (now-last)>=60*60*1000;
         });
       if(!due.length)return;
       due.forEach(acc=>{
-        log(acc.id,"⏱ Auto-sync started (new emails only)...");
+        log(acc.id,"⏱ Hourly auto-sync started (new emails only)...");
         setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,lastAutoSyncAt:new Date().toISOString()}:a));
         runSync(acc,{scanAll:false,auto:true,interactive:false,silent:true});
       });
@@ -3092,79 +4256,31 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
       <R style={{marginBottom:10}}>
         <h2 className="h2" style={{flex:1}}>Email Integration</h2>
         <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-          <button className="btn sm suc" disabled={Boolean(connectBusy)} onClick={()=>connectAccount("google",null)} data-testid="connect-gmail-btn">
-            {connectingGoogle?"⏳ Connecting…":"+ Connect Gmail"}
+          <button className="btn sm suc" disabled={Boolean(connectBusy)} onClick={()=>connectAccount("google",null)}>
+            {connectingGoogle?"⏳ Connecting Gmail…":"+ Connect Gmail Account"}
           </button>
-          <button className="btn sm pri" disabled={Boolean(connectBusy)} onClick={()=>connectAccount("microsoft",null)} data-testid="connect-outlook-btn">
-            {connectingMicrosoft?"⏳ Connecting…":"+ Connect Outlook"}
+          <button className="btn sm pri" disabled={Boolean(connectBusy)} onClick={()=>connectAccount("microsoft",null)}>
+            {connectingMicrosoft?"⏳ Connecting Outlook…":"+ Connect Outlook Account"}
           </button>
         </div>
       </R>
 
       {toast&&<div style={{background:"#052e16",border:"1px solid #34d399",borderRadius:10,padding:"10px 12px",fontSize:12,color:"#86efac",marginBottom:12}}>{toast}</div>}
 
-      {/* Control Bar */}
-      <div className="card" style={{marginBottom:14,background:"linear-gradient(135deg,#10192d,#0a1220)"}} data-testid="email-control-bar">
-        <R style={{flexWrap:"wrap",gap:12}}>
-          <div style={{fontSize:13,color:"#94a3b8",flex:1}}>
-            <span style={{marginRight:16}}>Connected: <b style={{color:connected>0?"#34d399":"#64748b"}}>{connected}</b>/{emails.length}</span>
-            {emailInbox>0&&<span style={{marginRight:16,color:"#86efac"}}>📥 {emailInbox} in Inbox</span>}
+      <div className="card" style={{marginBottom:14,background:"linear-gradient(135deg,#10192d,#0a1220)"}}>
+        <R>
+          <div style={{fontSize:13,color:"#94a3b8"}}>
+            Connected accounts: <b style={{color:"#e2e8f0"}}>{connected}</b> / {emails.length}
+            {emailInbox>0&&<span style={{marginLeft:10,color:"#f59e0b"}}>· {emailInbox} items pending in Inbox</span>}
+            {totalPendingAi>0&&<button className="btn sm ghost" style={{marginLeft:10,padding:"2px 8px",fontSize:12,color:"#c4b5fd",borderColor:"#3b2f66"}} onClick={()=>setPendingView({open:true,accountId:""})}>AI retry queue: {totalPendingAi}{duePendingAi>0?` (due ${duePendingAi})`:""}</button>}
           </div>
-          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-            {/* View AI Pending */}
-            {totalPendingAi>0&&(
-              <button 
-                className="btn sm ghost" 
-                onClick={()=>setPendingView({open:true,accountId:""})}
-                data-testid="view-ai-pending-btn"
-                style={{color:"#fbbf24",borderColor:"#78350f"}}
-              >
-                📋 View AI Pending ({totalPendingAi})
-              </button>
-            )}
-            
-            {/* Retry AI Pending */}
-            {totalPendingAi>0&&(
-              <button 
-                className="btn sm" 
-                style={{background:"#422006",color:"#fbbf24"}}
-                disabled={retryBusy||Boolean(connectBusy)} 
-                onClick={()=>runPendingAiRetry({force:true})}
-                data-testid="retry-ai-pending-btn"
-              >
-                {retryBusy?"⏳ Processing…":"🤖 Retry AI Pending"}
-              </button>
-            )}
-            
-            {/* Sync All Accounts */}
-            {syncableAccounts.length>0&&(
-              <button 
-                className="btn sm pri" 
-                disabled={anySyncing||Boolean(connectBusy)} 
-                onClick={()=>syncableAccounts.forEach(a=>startSync(a,false))}
-                data-testid="sync-all-btn"
-              >
-                {anySyncing?"⏳ Syncing…":"🔄 Sync All Accounts"}
-              </button>
-            )}
+          <div style={{display:"flex",gap:8,flexWrap:"wrap",justifyContent:"flex-end"}}>
+            {totalPendingAi>0&&<button className="btn sm ghost" disabled={Boolean(connectBusy)} onClick={()=>setPendingView({open:true,accountId:""})}>📋 View AI Pending</button>}
+            {totalPendingAi>0&&<button className="btn sm ghost" disabled={retryBusy||Boolean(connectBusy)} onClick={()=>runPendingAiRetry({force:true})}>{retryBusy?"⏳ Retrying AI…":"🤖 Retry AI Pending"}</button>}
+            {syncableAccounts.length>0&&<button className="btn sm pri" disabled={anySyncing||Boolean(connectBusy)} onClick={()=>syncableAccounts.forEach(a=>startSync(a,false))}>{anySyncing?"⏳ Syncing…":"🔄 Sync All Accounts"}</button>}
           </div>
         </R>
-        {totalPendingAi>0&&(
-          <div style={{fontSize:11,color:"#94a3b8",marginTop:8,paddingTop:8,borderTop:"1px solid #1e293b"}}>
-            💡 AI Pending: These emails will be automatically retried every 30 minutes, or click "Retry AI Pending" to process now.
-          </div>
-        )}
       </div>
-
-      {emails.length===0&&(
-        <div className="card" style={{textAlign:"center",padding:40}}>
-          <div style={{fontSize:48,marginBottom:16}}>📧</div>
-          <div style={{fontSize:16,fontWeight:600,color:"#e2e8f0",marginBottom:8}}>No Email Accounts Connected</div>
-          <div style={{fontSize:13,color:"#64748b",maxWidth:400,margin:"0 auto"}}>
-            Connect your Gmail or Outlook account to automatically extract financial transactions from your emails (receipts, invoices, bank alerts).
-          </div>
-        </div>
-      )}
 
       {emails.length===0&&(
           <div className="card" style={{textAlign:"center",padding:56,background:"linear-gradient(135deg,#0f1624,#081122)"}}>
@@ -3184,9 +4300,8 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
         const providerLabel=provider==="microsoft"?"Outlook":"Gmail";
         const linked=Boolean(acc.connected)&&!acc.userDisconnected;
         const needsReauth=Boolean(acc.reauthRequired)&&linked;
-        const needsFirstSync=linked&&!acc.firstSyncCompleted;
         return(
-        <div key={acc.id} className="card" style={{marginBottom:12,background:linked?"linear-gradient(135deg,#0f1c36,#0b1530)":"#0f1624"}} data-testid={`email-account-${acc.id}`}>
+        <div key={acc.id} className="card" style={{marginBottom:12,background:linked?"linear-gradient(135deg,#0f1c36,#0b1530)":"#0f1624"}}>
           <R style={{marginBottom:8}}>
             <div style={{display:"flex",gap:12,alignItems:"center",flex:1,minWidth:0}}>
               <div style={{width:40,height:40,borderRadius:20,display:"flex",alignItems:"center",justifyContent:"center",background:linked?"#052e16":"#1a1a2e"}}>{linked?"✅":provider==="microsoft"?"Ⓜ️":"📧"}</div>
@@ -3194,50 +4309,45 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
                 <div style={{fontWeight:700,fontSize:15,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{acc.email||acc.label||"Email account"}</div>
                 <div style={{fontSize:12,color:"#64748b"}}>
                   <span>{providerLabel} · </span>
-                  {linked&&!needsReauth&&!needsFirstSync&&<span style={{color:"#34d399"}}>Connected</span>}
-                  {linked&&!needsReauth&&needsFirstSync&&<span style={{color:"#fbbf24"}}>Connected · initial sync pending</span>}
-                  {linked&&needsReauth&&<span style={{color:"#f59e0b"}}>Re-authentication needed</span>}
+                  {linked&&!needsReauth&&<span style={{color:"#34d399"}}>Connected</span>}
+                  {linked&&needsReauth&&<span style={{color:"#f59e0b"}}>Connected · re-auth needed</span>}
                   {!linked&&<span style={{color:"#f87171"}}>Disconnected</span>}
-                  {acc.firstSyncCompleted&&acc.syncFromDate&&<span> · syncing from {fmtD(acc.syncFromDate)}</span>}
-                  {acc.lastSync&&<span> · last: {fmtDT(acc.lastSync)}</span>}
+                  {acc.firstSyncCompleted&&acc.syncFromDate&&<span> · first synced from {fmtD(acc.syncFromDate)}</span>}
+                  {acc.lastSync&&<span> · last sync {fmtDT(acc.lastSync)}</span>}
                   {pendingByAccount[acc.id]>0&&(
                     <button className="btn sm ghost" style={{marginLeft:8,padding:"2px 8px",fontSize:11,color:"#c4b5fd",borderColor:"#3b2f66"}} onClick={()=>setPendingView({open:true,accountId:acc.id})}>
-                      {pendingByAccount[acc.id]} pending
+                      AI retry pending {pendingByAccount[acc.id]}{duePendingByAccount[acc.id]?` (due ${duePendingByAccount[acc.id]})`:""}
                     </button>
                   )}
                 </div>
+                {acc.lastError&&<div style={{fontSize:11,color:"#fca5a5",marginTop:4}}>
+                  Last issue{acc.lastErrorAt?` · ${fmtDT(acc.lastErrorAt)}`:""}: {acc.lastError}
+                </div>}
               </div>
             </div>
             <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-              {/* Reconnect button - only shows when disconnected or needs reauth */}
-              {(!linked||needsReauth)&&<button className="btn sm pri" disabled={Boolean(connectBusy)} onClick={()=>connectAccount(provider,acc)} data-testid="reconnect-btn">
-                {provider==="google"&&connectingGoogle?"⏳ Connecting…":provider==="microsoft"&&connectingMicrosoft?"⏳ Connecting…":"🔗 Reconnect"}
+              {(!linked||needsReauth)&&<button className="btn sm pri" disabled={Boolean(connectBusy)} onClick={()=>connectAccount(provider,acc)}>
+                {provider==="google"&&connectingGoogle?"⏳ Connecting Gmail…":provider==="microsoft"&&connectingMicrosoft?"⏳ Connecting Outlook…":needsReauth?`Reconnect ${providerLabel}`:`Connect ${providerLabel}`}
               </button>}
-              
-              {/* Sync button - only when connected and first sync done */}
-              {linked&&acc.firstSyncCompleted&&<button className="btn sm" style={{background:"#1a2234",color:"#818cf8"}} disabled={Boolean(syncingIds[acc.id])||needsReauth} onClick={()=>startSync(acc,false)} data-testid="sync-btn">{syncingIds[acc.id]?"⏳ Syncing…":"🔄 Sync"}</button>}
-              
-              {/* Scan from Date - ONLY shows once before first sync, then disappears forever */}
-              {linked&&!acc.firstSyncCompleted&&<button className="btn sm suc" disabled={Boolean(syncingIds[acc.id])||needsReauth} onClick={()=>setFirstSyncPrompt({accId:acc.id,fromDate:acc.syncFromDate||new Date(Date.now()-90*24*60*60*1000).toISOString().slice(0,10),scanAll:true})} data-testid="scan-from-date-btn">📅 Set Sync Start Date</button>}
-              
-              {/* Settings toggle */}
-              <button className="btn sm ghost" onClick={()=>setEmails(p=>p.map(a=>a.id===acc.id?{...a,_open:!a._open}:a))} data-testid="settings-btn">⚙</button>
-              
-              {/* Remove button */}
-              <button className="btn sm dan" onClick={()=>removeAccount(acc)} data-testid="remove-btn">Remove</button>
+              {linked&&!needsReauth&&<button className="btn sm" style={{background:"#1a2234",color:"#818cf8"}} disabled={Boolean(syncingIds[acc.id])} onClick={()=>startSync(acc,false)}>{syncingIds[acc.id]?"⏳ Syncing…":"🔄 Sync"}</button>}
+              {linked&&!needsReauth&&<button className="btn sm ghost" disabled={Boolean(syncingIds[acc.id])} onClick={()=>setFirstSyncPrompt({accId:acc.id,fromDate:acc.syncFromDate||new Date(Date.now()-180*24*60*60*1000).toISOString().slice(0,10),scanAll:true})}>🧠 Scan From Date</button>}
+              {linked&&<button className="btn sm dan" onClick={()=>disconnectAccount(acc)}>Disconnect {providerLabel}</button>}
+              <button className="btn sm ghost" onClick={()=>setEmails(p=>p.map(a=>a.id===acc.id?{...a,_open:!a._open}:a))}>⚙</button>
+              <button className="btn sm ghost" onClick={()=>removeAccount(acc)}>Remove</button>
             </div>
           </R>
-          
-          {/* Progress indicator */}
           {syncProgress[acc.id]&&(
             <div style={{background:"#0a0f1d",border:"1px solid #1e293b",borderRadius:8,padding:"8px 12px",fontSize:12,color:"#c7d2fe",marginBottom:8}}>
               <div style={{display:"flex",justifyContent:"space-between",gap:10,marginBottom:6,flexWrap:"wrap"}}>
                 <span>
-                  {syncProgress[acc.id].phase==="fetching"&&"📧 Fetching emails…"}
-                  {syncProgress[acc.id].phase==="processing"&&`🤖 Processing ${syncProgress[acc.id].processed||0}/${syncProgress[acc.id].total||0}${syncProgress[acc.id].failed?` · failed ${syncProgress[acc.id].failed}`:""}${syncProgress[acc.id].skipped?` · skipped ${syncProgress[acc.id].skipped}`:""}${syncProgress[acc.id].pending?` · pending ${syncProgress[acc.id].pending}`:""}`}
-                  {syncProgress[acc.id].phase==="review"&&`✅ Scan complete. ${syncProgress[acc.id].found||0} transaction(s) ready for review.${syncProgress[acc.id].pending?` ${syncProgress[acc.id].pending} queued for retry.`:""}`}
-                  {syncProgress[acc.id].phase==="done"&&`✅ Sync completed.${Number(syncProgress[acc.id].found)>0?` ${syncProgress[acc.id].found} transaction(s) in review.`:" No new transactions."}${syncProgress[acc.id].pending?` ${syncProgress[acc.id].pending} queued for retry.`:""}`}
-                  {syncProgress[acc.id].phase==="error"&&`❌ Sync failed.${syncProgress[acc.id].pending?` ${syncProgress[acc.id].pending} queued for retry.`:""}`}
+                  {syncProgress[acc.id].phase==="fetching"&&"Fetching emails…"}
+                  {syncProgress[acc.id].phase==="processing"&&`Processed ${syncProgress[acc.id].processed||0}/${syncProgress[acc.id].total||0}${syncProgress[acc.id].failed?` · failed ${syncProgress[acc.id].failed}`:""}${syncProgress[acc.id].skipped?` · skipped ${syncProgress[acc.id].skipped}`:""}${syncProgress[acc.id].pending?` · pending AI ${syncProgress[acc.id].pending}`:""}`}
+                  {syncProgress[acc.id].phase==="review"&&`Scan complete. ${syncProgress[acc.id].found||0} item(s) awaiting review.${syncProgress[acc.id].pending?` Pending AI retry: ${syncProgress[acc.id].pending}.`:""}`}
+                  {syncProgress[acc.id].phase==="done"&&`Sync completed.${Number(syncProgress[acc.id].found)>0?` ${syncProgress[acc.id].found} transaction(s) in review queue.`:""}${syncProgress[acc.id].pending?` Pending AI retry: ${syncProgress[acc.id].pending}.`:""}`}
+                  {syncProgress[acc.id].phase==="error"&&`Sync failed.${syncProgress[acc.id].pending?` Pending AI retry: ${syncProgress[acc.id].pending}.`:""}`}
+                </span>
+                <span style={{color:"#94a3b8"}}>
+                  {(syncProgress[acc.id].phase==="processing"||syncProgress[acc.id].phase==="review"||syncProgress[acc.id].phase==="done")&&`Left ${Math.max(0,syncProgress[acc.id].remaining||0)}`}
                 </span>
               </div>
               {Number(syncProgress[acc.id].total)>0&&(
@@ -3245,29 +4355,32 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
                   <div style={{height:"100%",background:"#6366f1",width:`${Math.min(100,Math.round(((syncProgress[acc.id].processed||0)/(syncProgress[acc.id].total||1))*100))}%`,transition:"width .15s linear"}}/>
                 </div>
               )}
+              {(Number(syncProgress[acc.id].failed)>0||Number(syncProgress[acc.id].skipped)>0||Number(syncProgress[acc.id].pending)>0)&&<div style={{marginTop:6,fontSize:11,color:"#64748b"}}>Failed = processing/API error. Skipped = AI found no financial transaction. Pending AI = retry queue (next attempt in 30m).</div>}
+              {Number(syncProgress[acc.id].failed)>0&&formatFailureSummary(syncProgress[acc.id].failureReasons||{})&&(
+                <div style={{marginTop:4,fontSize:11,color:"#94a3b8"}}>
+                  Failure reasons: {formatFailureSummary(syncProgress[acc.id].failureReasons||{})}
+                </div>
+              )}
             </div>
           )}
-          
-          {/* Status log */}
           {logs[acc.id]&&<div style={{background:"#0a0f1d",border:"1px solid #1e293b",borderRadius:8,padding:"8px 12px",fontSize:12,color:"#c7d2fe",marginBottom:acc._open?10:0}}>{logs[acc.id]}</div>}
-          
-          {/* Settings panel */}
           {acc._open&&(
             <div style={{background:"#0a0f1d",border:"1px solid #1e293b",borderRadius:10,padding:14,marginTop:8}}>
-              <div style={{fontSize:11,fontWeight:700,color:"#475569",marginBottom:10,textTransform:"uppercase"}}>Account Settings</div>
+              <div style={{fontSize:11,fontWeight:700,color:"#475569",marginBottom:10,textTransform:"uppercase"}}>Sync Preferences</div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-                <div><label>Account Label</label><input value={acc.label||""} onChange={e=>setEmails(p=>p.map(a=>a.id===acc.id?{...a,label:e.target.value}:a))} placeholder="e.g., Business email"/></div>
+                <div><label>Account Label</label><input value={acc.label||""} onChange={e=>setEmails(p=>p.map(a=>a.id===acc.id?{...a,label:e.target.value}:a))} placeholder="Business email account"/></div>
                 <div><label>Max emails per sync</label><input type="number" min="1" max="5000" value={acc.maxEmails||100} onChange={e=>setEmails(p=>p.map(a=>a.id===acc.id?{...a,maxEmails:Number(e.target.value)}:a))}/></div>
-                {provider==="google"&&<div><label>Gmail Search Query</label><input value={acc.syncQuery||GMAIL_QUERY} onChange={e=>setEmails(p=>p.map(a=>a.id===acc.id?{...a,syncQuery:e.target.value}:a))}/></div>}
+                {provider==="google"&&<div><label>Search Query</label><input value={acc.syncQuery||GMAIL_QUERY} onChange={e=>setEmails(p=>p.map(a=>a.id===acc.id?{...a,syncQuery:e.target.value}:a))}/></div>}
                 <div>
-                  <label style={{display:"block",marginBottom:8}}>Auto-sync (every 30 minutes)</label>
+                  <label style={{display:"block",marginBottom:8}}>Auto sync</label>
                   <label style={{display:"flex",gap:8,alignItems:"center",fontSize:13,color:"#94a3b8"}}>
                     <input type="checkbox" checked={acc.autoSyncHourly!==false} onChange={e=>setEmails(p=>p.map(a=>a.id===acc.id?{...a,autoSyncHourly:e.target.checked}:a))}/>
-                    Enable automatic sync for new emails
+                    Run every hour (new emails only)
                   </label>
                 </div>
               </div>
-              {acc.firstSyncCompleted&&<div style={{fontSize:11,color:"#64748b",marginTop:8}}>First sync completed from {fmtD(acc.syncFromDate)}. New emails are synced automatically every 30 minutes.</div>}
+              {provider==="microsoft"&&<div style={{fontSize:11,color:"#64748b",marginTop:8}}>Outlook sync scans inbox messages from selected date. Search query is only for Gmail.</div>}
+              <div style={{fontSize:11,color:"#64748b",marginTop:8}}>All extracted transactions go to Inbox review queue. Approve/Reject/Edit from Inbox or Day Review.</div>
             </div>
           )}
         </div>
@@ -3275,44 +4388,33 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
 
       {pendingView.open&&(
         <div className="overlay"><div className="modal" style={{maxWidth:1020}}>
-          <MH title={`AI Pending Queue (${pendingRowsFiltered.length})`} onClose={()=>setPendingView({open:false,accountId:""})}/>
-          <div style={{fontSize:13,color:"#94a3b8",marginBottom:14}}>
-            These emails couldn't be processed yet and will retry automatically every 30 minutes. Click "Retry All Now" to process them immediately.
-          </div>
-          <div style={{display:"flex",gap:8,marginBottom:14}}>
-            <button className="btn sm pri" disabled={retryBusy||Boolean(connectBusy)} onClick={()=>{setPendingView({open:false,accountId:""});runPendingAiRetry({force:true});}} data-testid="retry-all-now-btn">
-              {retryBusy?"⏳ Processing…":"🤖 Retry All Now"}
-            </button>
-            <button className="btn sm dan" onClick={()=>{if(window.confirm(`Clear all ${pendingRowsFiltered.length} pending items?`)){setAiPending(prev=>prev.filter(p=>pendingView.accountId?p.accountId!==pendingView.accountId:false));}}}>
-              🗑 Clear All
-            </button>
+          <MH title={`AI Pending Retry (${pendingRowsFiltered.length})`} onClose={()=>setPendingView({open:false,accountId:""})}/>
+          <div style={{fontSize:12,color:"#94a3b8",marginBottom:10}}>
+            Emails listed below were not fully processed by AI yet. They stay here and retry automatically every 30 minutes until processing succeeds.
           </div>
           {pendingView.accountId&&<div style={{fontSize:12,color:"#c4b5fd",marginBottom:10}}>Filtered account: {pendingAccountName(pendingView.accountId)}</div>}
           {pendingRowsFiltered.length===0?(
-            <div className="card" style={{textAlign:"center",padding:26,color:"#64748b"}}>No pending items. All emails have been processed successfully.</div>
+            <div className="card" style={{textAlign:"center",padding:26,color:"#64748b"}}>No pending retry items.</div>
           ):(
             <div style={{maxHeight:"56vh",overflowY:"auto",border:"1px solid #1e293b",borderRadius:10}}>
               {pendingRowsFiltered.map(row=>{
                 const nextAt=Date.parse(row.nextRetryAt||"");
                 const due=!Number.isFinite(nextAt)||nextAt<=Date.now();
-                const humanError=getHumanReadableError(row.lastError);
                 return(
-                  <div key={row.id} style={{padding:"12px 14px",borderBottom:"1px solid #1e293b",background:due?"#0f172a":"transparent"}}>
-                    <div style={{display:"flex",justifyContent:"space-between",gap:10,flexWrap:"wrap",marginBottom:6}}>
-                      <div style={{fontSize:13,fontWeight:600,color:"#e2e8f0"}}>{row.subject||"(No subject)"}</div>
-                      <div style={{fontSize:11,padding:"2px 8px",borderRadius:4,background:due?"#422006":"#1e293b",color:due?"#fbbf24":"#94a3b8"}}>{due?"Ready to retry":"Scheduled"}</div>
+                  <div key={row.id} style={{padding:"10px 12px",borderBottom:"1px solid #1e293b",background:due?"#0f172a":"transparent"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",gap:10,flexWrap:"wrap",marginBottom:4}}>
+                      <div style={{fontSize:13,fontWeight:600,color:"#e2e8f0"}}>{row.subject||"(No subject captured)"}</div>
+                      <div style={{fontSize:11,color:due?"#fbbf24":"#64748b"}}>{due?"Due now":`Next retry ${fmtDT(row.nextRetryAt)}`}</div>
                     </div>
-                    <div style={{fontSize:12,color:"#94a3b8",marginBottom:6}}>
-                      <span style={{marginRight:12}}>{row.provider==="microsoft"?"📧 Outlook":"📧 Gmail"}</span>
-                      {row.from&&<span style={{marginRight:12}}>From: {row.from.slice(0,40)}</span>}
-                      {row.emailDate&&<span>Date: {fmtD(row.emailDate)}</span>}
+                    <div style={{fontSize:12,color:"#94a3b8",display:"flex",gap:10,flexWrap:"wrap"}}>
+                      <span>{row.provider==="microsoft"?"Outlook":"Gmail"} · {pendingAccountName(row.accountId)}</span>
+                      {row.from&&<span>From: {row.from}</span>}
+                      {row.emailDate&&<span>Email date: {fmtD(row.emailDate)}</span>}
+                      <span>Attempts: {row.attempts||0}</span>
+                      <span>Message ID: {row.msgId}</span>
                     </div>
-                    <div style={{display:"flex",alignItems:"center",gap:8,marginTop:8}}>
-                      <div style={{fontSize:12,color:"#fca5a5",background:"#450a0a",padding:"4px 10px",borderRadius:6}}>
-                        ⚠ {humanError}
-                      </div>
-                      <div style={{fontSize:11,color:"#64748b"}}>Attempt #{row.attempts||1}</div>
-                    </div>
+                    <div style={{fontSize:11,color:"#fca5a5",marginTop:6}}>Reason: {row.lastError||"unknown_error"}</div>
+                    {row.snippet&&<div style={{fontSize:11,color:"#64748b",marginTop:4,lineHeight:1.6}}>{row.snippet.slice(0,260)}</div>}
                   </div>
                 );
               })}
@@ -3327,47 +4429,9 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
 
       {firstSyncPrompt&&<EmailFirstSyncModal value={firstSyncPrompt.fromDate} onClose={()=>setFirstSyncPrompt(null)} onStart={(fromDate)=>{
         const acc=emails.find(a=>a.id===firstSyncPrompt.accId);
-        if(acc)runSync(acc,{scanAll:firstSyncPrompt.scanAll,fromDate,markFirstSync:!acc.firstSyncCompleted});
+        if(acc)runSync(acc,{scanAll:firstSyncPrompt.scanAll,fromDate,markFirstSync:!acc.firstSyncCompleted,interactive:true});
         setFirstSyncPrompt(null);
       }}/>}
-      
-      {/* Remove Account Confirmation Modal */}
-      {removeConfirm.open&&(
-        <div className="overlay" onClick={()=>setRemoveConfirm({open:false,acc:null,text:""})}>
-          <div className="modal" style={{maxWidth:450}} onClick={e=>e.stopPropagation()}>
-            <MH title="Remove Email Account" onClose={()=>setRemoveConfirm({open:false,acc:null,text:""})}/>
-            <div style={{fontSize:14,color:"#f87171",background:"#450a0a",padding:"12px 16px",borderRadius:8,marginBottom:16}}>
-              ⚠️ This action cannot be undone. All sync history for this account will be removed.
-            </div>
-            <div style={{fontSize:13,color:"#94a3b8",marginBottom:16}}>
-              You are about to remove: <b style={{color:"#e2e8f0"}}>{removeConfirm.acc?.email||removeConfirm.acc?.label||"this account"}</b>
-            </div>
-            <div style={{marginBottom:16}}>
-              <label style={{fontSize:12,color:"#64748b"}}>Type "remove" to confirm:</label>
-              <input 
-                type="text" 
-                value={removeConfirm.text} 
-                onChange={e=>setRemoveConfirm(prev=>({...prev,text:e.target.value}))}
-                placeholder="Type 'remove' here"
-                autoFocus
-                data-testid="remove-confirm-input"
-              />
-            </div>
-            <div style={{display:"flex",gap:10}}>
-              <button className="btn ghost" style={{flex:1}} onClick={()=>setRemoveConfirm({open:false,acc:null,text:""})}>Cancel</button>
-              <button 
-                className="btn dan" 
-                style={{flex:1}} 
-                disabled={removeConfirm.text.toLowerCase()!=="remove"}
-                onClick={confirmRemoveAccount}
-                data-testid="confirm-remove-btn"
-              >
-                Remove Account
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -3395,7 +4459,7 @@ function EmailReviewModal({initialItems,acts,cats,onClose,onSubmit}){
     const act=i.businessActivity||acts[0]||"Personal";
     const cat=i.category||cats[act]?.[0]||"Other";
     const rowType=i.type==="income"?"income":i.type==="transfer"?"transfer":"expense";
-    return{...i,type:rowType,businessActivity:act,category:cat,date:i.date||today(),amount:Number(i.amount)||0,description:i.description||i.vendor||cat,paymentMethod:i.paymentMethod||""};
+    return{...i,type:rowType,businessActivity:act,category:cat,subCategory:i.subCategory||"",date:i.date||today(),amount:Number(i.amount)||0,description:i.description||i.vendor||cat,paymentMethod:i.paymentMethod||""};
   };
   const[rows,setRows]=useState(()=>initialItems.map(normalize));
   const update=(idx,patch)=>setRows(p=>p.map((r,i)=>i===idx?{...r,...patch}:r));
@@ -3414,8 +4478,9 @@ function EmailReviewModal({initialItems,acts,cats,onClose,onSubmit}){
               <div><label>Business</label><select value={r.businessActivity||acts[0]||""} onChange={e=>update(i,{businessActivity:e.target.value,category:cats[e.target.value]?.[0]||r.category||"Other"})}>{acts.map(a=><option key={a} value={a}>{a}</option>)}</select></div>
               <div><label>Category</label><input list={`cat-${i}`} value={r.category||""} onChange={e=>update(i,{category:e.target.value})}/><datalist id={`cat-${i}`}>{(cats[r.businessActivity]||[]).map(c=><option key={c} value={c}/>)}</datalist></div>
             </div>
-            <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr auto",gap:8,alignItems:"end"}}>
+            <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr auto",gap:8,alignItems:"end"}}>
               <div><label>Description</label><input value={r.description||""} onChange={e=>update(i,{description:e.target.value})}/></div>
+              <div><label>Sub Category</label><input value={r.subCategory||""} onChange={e=>update(i,{subCategory:e.target.value})} placeholder="Optional"/></div>
               <div><label>Vendor</label><input value={r.vendor||""} onChange={e=>update(i,{vendor:e.target.value})}/></div>
               <div><label>Payment</label><select value={r.paymentMethod||""} onChange={e=>update(i,{paymentMethod:e.target.value})}><option value="">Select</option>{PAY_METHODS.map(m=><option key={m} value={m}>{m}</option>)}</select></div>
               <button className="btn sm dan" onClick={()=>remove(i)}>Remove</button>
@@ -3495,116 +4560,36 @@ function LedgerTab({txns,filter,setFilter,acts,onEdit,onDelete}){
 }
 
 // ── INBOX ─────────────────────────────────────────────────────────────────────
-function InboxTab({inbox,addInbox,acts,cats,onApprove,onEdit,onDiscard,txns}){
+function InboxTab({inbox,addInbox,acts,cats,onApprove,onEdit,onDiscard}){
   const[bulk,setBulk]=useState("");
   const[loading,setLoading]=useState(false);
-  const[docLoading,setDocLoading]=useState(false);
-  const[dragOver,setDragOver]=useState(false);
-  const fileInputRef=useRef(null);
-  
   const runBatch=async()=>{
     if(!bulk.trim())return;
     setLoading(true);
-    const items=await aiExtractBatch(bulk,acts,cats);
-    const{filtered,duplicateCount}=filterDuplicates(items,txns||[],inbox||[]);
-    if(filtered.length>0){
-      addInbox(filtered.map(i=>({...i,type:i.type||"expense",source:"paste"})));
-    }
-    if(duplicateCount>0)alert(`${duplicateCount} duplicate(s) skipped.`);
-    setBulk("");
-    setLoading(false);
-  };
-  
-  // Document/Receipt upload handler
-  const handleDocumentUpload=async(file)=>{
-    if(!file)return;
-    setDocLoading(true);
-    
     try{
-      const fileName=file.name;
-      const fileType=file.type;
-      let documentText="";
-      
-      if(fileType.startsWith("image/")){
-        // For images - read as base64 and extract text via AI
-        const base64=await new Promise((resolve,reject)=>{
-          const reader=new FileReader();
-          reader.onload=()=>resolve(reader.result);
-          reader.onerror=reject;
-          reader.readAsDataURL(file);
-        });
-        // Extract text from image
-        documentText=await extractTextFromImage(base64.split(",")[1]||base64,fileName);
-        if(!documentText||documentText==="UNREADABLE"){
-          alert("Could not read text from the image. Please ensure the image is clear and contains readable text.");
-          setDocLoading(false);
-          return;
-        }
-      }else if(fileType==="application/pdf"){
-        // For PDFs - read as text (basic extraction)
-        const text=await file.text();
-        documentText=text||"";
-        if(!documentText.trim()){
-          alert("Could not extract text from PDF. The PDF might be image-based or protected.");
-          setDocLoading(false);
-          return;
-        }
-      }else{
-        // For text files
-        documentText=await file.text();
-      }
-      
-      // Analyze document with AI
-      const result=await aiAnalyzeDocument(documentText,fileName,fileType,acts,cats);
-      
-      if(result.status==="success"&&result.transactions.length>0){
-        // Filter duplicates
-        const{filtered,duplicateCount}=filterDuplicates(result.transactions,txns||[],inbox||[]);
-        
-        if(filtered.length>0){
-          const items=filtered.map(tx=>({
-            ...tx,
-            type:tx.type||"expense",
-            source:"document",
-            documentName:fileName,
-            documentType:result.documentType,
-            txSignature:tx.txSignature||generateTxSignature(tx),
-          }));
-          addInbox(items);
-          alert(`✓ Extracted ${filtered.length} transaction(s) from "${fileName}".${duplicateCount>0?` (${duplicateCount} duplicate(s) skipped)`:""}\n\nCheck the review queue below.`);
-        }else{
-          alert(`All ${result.transactions.length} transaction(s) from this document already exist in your records.`);
-        }
-      }else if(result.status==="no_transaction"){
-        alert(`No financial transactions found in "${fileName}".`);
-      }else{
-        alert(`Could not process "${fileName}": ${result.reason||"Unknown error"}`);
-      }
-    }catch(err){
-      console.error("Document upload error:",err);
-      alert("Error processing document. Please try again.");
+      const raw=await aiExtractBatch(bulk,acts,cats);
+      const sanitized=sanitizeEmailTransactions(raw,{
+        acts,
+        cats,
+        baseCurrency:getBaseCurrency(),
+        eDate:today(),
+        subject:"Manual paste",
+        from:"",
+      });
+      const converted=await convertExtractedItemsToBaseCurrency(sanitized,{
+        baseCurrency:getBaseCurrency(),
+        fallbackCurrency:getBaseCurrency(),
+        dateFallback:today(),
+      });
+      addInbox(converted.map(i=>({...i,type:i.type||"expense"})));
+      setBulk("");
+    }finally{
+      setLoading(false);
     }
-    
-    setDocLoading(false);
   };
-  
-  const onFileSelect=(e)=>{
-    const file=e.target.files?.[0];
-    if(file)handleDocumentUpload(file);
-    e.target.value=""; // Reset input
-  };
-  
-  const onDrop=(e)=>{
-    e.preventDefault();
-    setDragOver(false);
-    const file=e.dataTransfer.files?.[0];
-    if(file)handleDocumentUpload(file);
-  };
-  
   const todItems=inbox.filter(i=>i.date===today());
   const oldItems=inbox.filter(i=>i.date!==today());
   const emailItems=inbox.filter(i=>i.source==="email");
-  const docItems=inbox.filter(i=>i.source==="document");
   const approveAll=(items=[])=>items.forEach(onApprove);
   const rejectAll=(items=[])=>{
     if(!items.length)return;
@@ -3613,71 +4598,23 @@ function InboxTab({inbox,addInbox,acts,cats,onApprove,onEdit,onDiscard,txns}){
   };
   return(<div>
     <h2 className="h2" style={{marginBottom:4}}>Inbox — Review & Approve</h2>
-    <p style={{fontSize:13,color:"#64748b",marginBottom:18}}>Transactions from email, SMS, documents, or manual entry appear here before entering the ledger.</p>
-    
-    {emailItems.length>0&&<div style={{background:"#052e16",border:"1px solid #34d399",borderRadius:8,padding:"10px 14px",marginBottom:12,fontSize:13,color:"#86efac"}}>📧 <b>{emailItems.length}</b> transaction(s) auto-extracted from email — review below.</div>}
-    {docItems.length>0&&<div style={{background:"#1e1b4b",border:"1px solid #818cf8",borderRadius:8,padding:"10px 14px",marginBottom:12,fontSize:13,color:"#c7d2fe"}}>📄 <b>{docItems.length}</b> transaction(s) from uploaded documents — review below.</div>}
-    
-    {/* Document Upload Section */}
-    <div className="card" style={{marginBottom:16}}>
-      <div style={{fontWeight:600,fontSize:14,marginBottom:10,color:"#94a3b8"}}>📄 Upload Receipt / Invoice / Document</div>
-      <div 
-        style={{
-          border:dragOver?"2px dashed #818cf8":"2px dashed #1e293b",
-          borderRadius:10,
-          padding:24,
-          textAlign:"center",
-          background:dragOver?"#1e1b4b":"#0a0d18",
-          cursor:"pointer",
-          transition:"all 0.2s",
-        }}
-        onClick={()=>fileInputRef.current?.click()}
-        onDragOver={(e)=>{e.preventDefault();setDragOver(true);}}
-        onDragLeave={()=>setDragOver(false)}
-        onDrop={onDrop}
-        data-testid="document-upload-zone"
-      >
-        {docLoading?(
-          <div style={{color:"#818cf8"}}>
-            <div style={{fontSize:24,marginBottom:8}}>🤖</div>
-            <div>Analyzing document with AI...</div>
-          </div>
-        ):(
-          <>
-            <div style={{fontSize:32,marginBottom:8}}>📤</div>
-            <div style={{fontSize:14,color:"#e2e8f0",marginBottom:4}}>Drop file here or click to upload</div>
-            <div style={{fontSize:12,color:"#64748b"}}>Supports: Images (JPG, PNG), PDF, Text files</div>
-            <div style={{fontSize:11,color:"#475569",marginTop:8}}>AI will extract transaction details automatically</div>
-          </>
-        )}
-      </div>
-      <input 
-        ref={fileInputRef}
-        type="file" 
-        accept="image/*,.pdf,.txt,.csv"
-        onChange={onFileSelect}
-        style={{display:"none"}}
-        data-testid="document-file-input"
-      />
-    </div>
-    
-    {/* Manual Paste Section */}
+    <p style={{fontSize:13,color:"#64748b",marginBottom:18}}>Transactions from email auto-import or statement reconciliation appear here before entering the ledger.</p>
+    {emailItems.length>0&&<div style={{background:"#052e16",border:"1px solid #34d399",borderRadius:8,padding:"10px 14px",marginBottom:16,fontSize:13,color:"#86efac"}}>📧 <b>{emailItems.length}</b> transaction(s) auto-extracted from email — review below.</div>}
     <div className="card" style={{marginBottom:22}}>
-      <div style={{fontWeight:600,fontSize:14,marginBottom:10,color:"#94a3b8"}}>📥 Manual Paste (Email / SMS / Bank Alert)</div>
-      <textarea rows={3} value={bulk} onChange={e=>setBulk(e.target.value)} placeholder="Paste email body, SMS text, invoice details, or bank alert…" data-testid="paste-textarea"/>
-      <button className="btn pri" style={{marginTop:10,width:"100%"}} onClick={runBatch} disabled={loading||!bulk.trim()} data-testid="extract-paste-btn">{loading?"🤖 Extracting…":"🤖 Extract & Queue for Review"}</button>
+      <div style={{fontWeight:600,fontSize:14,marginBottom:10,color:"#94a3b8"}}>📥 Manual Paste (Email / Bank Alert Text)</div>
+      <textarea rows={4} value={bulk} onChange={e=>setBulk(e.target.value)} placeholder="Paste email body, invoice text, or bank alert text…"/>
+      <button className="btn pri" style={{marginTop:10,width:"100%"}} onClick={runBatch} disabled={loading||!bulk.trim()}>{loading?"🤖 Extracting…":"🤖 Extract & Queue for Review"}</button>
     </div>
-    
     {inbox.length>0&&(
       <R style={{marginBottom:10}}>
         <div className="sh" style={{margin:0}}>Pending Queue ({inbox.length})</div>
         <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-          <button className="btn sm suc" onClick={()=>approveAll(inbox)} data-testid="accept-all-btn">✓ Accept All</button>
-          <button className="btn sm dan" onClick={()=>rejectAll(inbox)} data-testid="reject-all-btn">✕ Reject All</button>
+          <button className="btn sm suc" onClick={()=>approveAll(inbox)}>✓ Accept All</button>
+          <button className="btn sm dan" onClick={()=>rejectAll(inbox)}>✕ Reject All</button>
         </div>
       </R>
     )}
-    {inbox.length===0&&<div className="card" style={{textAlign:"center",color:"#475569",padding:40}}>No pending items. Sync email, upload documents, or paste messages above.</div>}
+    {inbox.length===0&&<div className="card" style={{textAlign:"center",color:"#475569",padding:40}}>No pending items. Sync email accounts or paste messages above.</div>}
     {todItems.length>0&&<><R style={{marginBottom:10}}><div className="sh">Today ({todItems.length})</div><div style={{display:"flex",gap:8}}><button className="btn sm suc" onClick={()=>approveAll(todItems)}>✓ Accept All Today</button><button className="btn sm dan" onClick={()=>rejectAll(todItems)}>✕ Reject All Today</button></div></R>{todItems.map(item=><ICard key={item._iid} item={item} onApprove={onApprove} onEdit={onEdit} onDiscard={onDiscard}/>)}</>}
     {oldItems.length>0&&<><div className="sh" style={{marginTop:20,marginBottom:10}}>Older ({oldItems.length})</div>{oldItems.map(item=><ICard key={item._iid} item={item} onApprove={onApprove} onEdit={onEdit} onDiscard={onDiscard}/>)}</>}
   </div>);
@@ -3686,7 +4623,6 @@ function InboxTab({inbox,addInbox,acts,cats,onApprove,onEdit,onDiscard,txns}){
 function ICard({item,onApprove,onEdit,onDiscard}){
   const[ex,setEx]=useState(false);
   const typeColor=item.type==="income"?"#34d399":item.type==="borrow"?"#f59e0b":item.type==="transfer"?"#38bdf8":"#f87171";
-  const missingFields=!item.businessActivity||!item.category||!item.amount;
   return(
     <div className="card" style={{marginBottom:8,borderLeft:`3px solid ${typeColor}`}}>
       <R style={{marginBottom:8}}>
@@ -3695,33 +4631,29 @@ function ICard({item,onApprove,onEdit,onDiscard}){
             <span className={`tag t${item.type}`}>{item.type}</span>
             {item.isNewCategory&&<span className="tag" style={{background:"#1e1b4b",color:"#a78bfa"}}>New Cat</span>}
             {item.source==="email"&&<span className="tag" style={{background:"#1a2010",color:"#86efac"}}>📧 Email</span>}
-            {item.source==="document"&&<span className="tag" style={{background:"#1e1b4b",color:"#c7d2fe"}}>📄 Document</span>}
-            {item.source==="sms"&&<span className="tag" style={{background:"#422006",color:"#fbbf24"}}>📱 SMS</span>}
             {item.source==="statement"&&<span className="tag" style={{background:"#052e16",color:"#34d399"}}>Stmt</span>}
-            {item.source==="auto"||item.source==="paste"?<span className="tag" style={{background:"#0d0d2b",color:"#818cf8"}}>AI</span>:null}
-            {missingFields&&<span className="tag" style={{background:"#450a0a",color:"#f87171"}}>⚠ Needs Edit</span>}
+            {item.source==="auto"&&<span className="tag" style={{background:"#0d0d2b",color:"#818cf8"}}>AI</span>}
             <span style={{fontSize:11,color:"#64748b"}}>{fmtD(item.date)}</span>
           </div>
-          <div style={{fontWeight:500,fontSize:14}}>{item.description||item.category||"Transaction detected"}</div>
+          <div style={{fontWeight:500,fontSize:14}}>{item.description||item.category}</div>
           <div style={{fontSize:12,color:"#475569"}}>
-            {item.businessActivity||"(Activity needed)"} · {item.category||"(Category needed)"}
+            {item.businessActivity} · {item.category}{item.subCategory?` · ${item.subCategory}`:""}
             {item.vendor?` · ${item.vendor}`:""}
             {item.paymentMethod?` · ${item.paymentMethod}`:""}
             {item.type==="transfer"&&item.accountName&&item.targetAccountName?` · ${item.accountName} → ${item.targetAccountName}`:(item.accountName?` · ${item.accountName}`:"")}
             {item.borrowSource?` · Borrowed from ${item.borrowSource}`:""}
           </div>
+          {currencyMetaLabel(item)&&<div style={{fontSize:11,color:"#64748b",marginTop:4}}>{currencyMetaLabel(item)}</div>}
           {item.emailSubject&&<div style={{fontSize:11,color:"#374151",marginTop:3,cursor:"pointer"}} onClick={()=>setEx(!ex)}>📧 {item.emailSubject.slice(0,60)}{item.emailSubject.length>60?"…":""} {ex?"▲":"▼"}</div>}
           {ex&&item.emailFrom&&<div style={{fontSize:11,color:"#374151",marginTop:2}}>From: {item.emailFrom}</div>}
-          {item.documentName&&<div style={{fontSize:11,color:"#374151",marginTop:3}}>📄 {item.documentName}</div>}
         </div>
-        <div className="mono" style={{fontSize:20,fontWeight:700,color:typeColor,whiteSpace:"nowrap",marginLeft:12}}>{item.amount?fmt(item.amount):"₹?"}</div>
+        <div className="mono" style={{fontSize:20,fontWeight:700,color:typeColor,whiteSpace:"nowrap",marginLeft:12}}>{fmt(item.amount)}</div>
       </R>
       <div style={{display:"flex",gap:8}}>
-        <button className="btn sm suc" onClick={()=>onApprove(item)} disabled={missingFields} title={missingFields?"Fill required fields first":"Approve transaction"} data-testid="approve-btn">✓ Approve</button>
-        <button className="btn sm ghost" onClick={()=>onEdit(item)} data-testid="edit-btn">✏ Edit</button>
-        <button className="btn sm dan" onClick={()=>onDiscard(item._iid)} data-testid="discard-btn">✕ Discard</button>
+        <button className="btn sm suc" onClick={()=>onApprove(item)}>✓ Approve</button>
+        <button className="btn sm ghost" onClick={()=>onEdit(item)}>✏ Edit</button>
+        <button className="btn sm dan" onClick={()=>onDiscard(item._iid)}>✕ Discard</button>
       </div>
-      {missingFields&&<div style={{fontSize:11,color:"#f87171",marginTop:6}}>⚠ Please click Edit to fill missing fields before approving.</div>}
     </div>
   );
 }
@@ -3744,6 +4676,7 @@ function JournalTab({txns}){
             {tx.source==="email"&&<span style={{fontSize:10,background:"#1a2010",color:"#86efac",padding:"1px 5px",borderRadius:3}}>📧</span>}
             {tx.source==="auto"&&<span style={{fontSize:10,background:"#1e1b4b",color:"#818cf8",padding:"1px 5px",borderRadius:3}}>AI</span>}
             {tx.source==="statement"&&<span style={{fontSize:10,background:"#052e16",color:"#34d399",padding:"1px 5px",borderRadius:3}}>Stmt</span>}
+            {currencyMetaLabel(tx)&&<span style={{fontSize:10,color:"#94a3b8"}}>{currencyMetaLabel(tx)}</span>}
           </div>
           {(tx.journalEntries||[]).map((e,i)=>(
             <div key={i} style={{display:"grid",gridTemplateColumns:"88px 1fr 90px 90px",gap:6,padding:"2px 14px",fontSize:12}}>
@@ -3759,9 +4692,8 @@ function JournalTab({txns}){
 }
 
 // ── ACCOUNTS ──────────────────────────────────────────────────────────────────
-function AccountsTab({accs,setAccs,txns,addInbox,acts,cats}){
+function AccountsTab({accs,setAccs,onOpenReconciliation=()=>{}}){
   const[showForm,setShowForm]=useState(false);
-  const[reconId,setReconId]=useState(null);
   const[editAccId,setEditAccId]=useState(null);
   const assets=accs.filter(a=>a.cls==="asset");
   const liabs=accs.filter(a=>a.cls==="liability");
@@ -3779,47 +4711,139 @@ function AccountsTab({accs,setAccs,txns,addInbox,acts,cats}){
         {list.length===0&&<div style={{color:"#475569",fontSize:13}}>No {lbl.toLowerCase()} yet.</div>}
         {list.map(acc=>(
           <div key={acc.id} className="card" style={{marginBottom:8,padding:"12px 16px"}}><R>
-            <div style={{flex:1}}><div style={{fontWeight:500,fontSize:14}}>{acc.name}</div><div style={{fontSize:12,color:"#475569"}}>{acc.typeName}{acc.bank?` · ${acc.bank}`:""}{acc.number?` · ···${acc.number.slice(-4)}`:""}</div></div>
+            <div style={{flex:1}}>
+              <div style={{fontWeight:500,fontSize:14}}>{acc.name}</div>
+              <div style={{fontSize:12,color:"#475569"}}>{acc.typeName}{acc.bank?` · ${acc.bank}`:""}{acc.number?` · ···${acc.number.slice(-4)}`:""}{acc.accountCurrency?` · ${acc.accountCurrency}`:""}</div>
+              {currencyMetaLabel(acc)&&<div style={{fontSize:11,color:"#64748b",marginTop:4}}>{currencyMetaLabel(acc)}</div>}
+            </div>
             <div className="mono" style={{fontSize:16,fontWeight:700,color:c,marginRight:12}}>{fmt(acc.balance||0)}</div>
             <button className="btn sm" style={{background:"#0f172a",color:"#93c5fd",marginRight:6}} onClick={()=>setEditAccId(acc.id)}>✏️ Edit Balance</button>
-            <button className="btn sm" style={{background:"#1a2234",color:"#818cf8",marginRight:6}} onClick={()=>setReconId(acc.id)}>📂 Reconcile</button>
+            <button className="btn sm" style={{background:"#1a2234",color:"#818cf8",marginRight:6}} onClick={()=>onOpenReconciliation(acc.id)}>📂 Reconcile</button>
             <button className="btn sm dan" onClick={()=>setAccs(p=>p.filter(a=>a.id!==acc.id))}>✕</button>
           </R></div>
         ))}
       </div>
     ))}
     {showForm&&<AddAccModal onSave={a=>{setAccs(p=>[...p,{...a,id:gid()}]);setShowForm(false);}} onClose={()=>setShowForm(false)}/>}
-    {editAcc&&<EditAccBalanceModal account={editAcc} onSave={bal=>{setAccs(p=>p.map(a=>a.id===editAcc.id?{...a,balance:bal}:a));setEditAccId(null);}} onClose={()=>setEditAccId(null)}/>}
-    {reconId&&<ReconModal account={accs.find(a=>a.id===reconId)} txns={txns} acts={acts} addInbox={addInbox} onClose={()=>setReconId(null)}/>}
+    {editAcc&&<EditAccBalanceModal account={editAcc} onSave={patch=>{setAccs(p=>p.map(a=>a.id===editAcc.id?{...a,...patch}:a));setEditAccId(null);}} onClose={()=>setEditAccId(null)}/>}
   </div>);
 }
 
 function AddAccModal({onSave,onClose}){
-  const[f,setF]=useState({name:"",type:"savings",number:"",bank:"",balance:""});
+  const baseCurrency=getBaseCurrency();
+  const[f,setF]=useState({name:"",type:"savings",number:"",bank:"",balance:"",accountCurrency:baseCurrency});
+  const[busy,setBusy]=useState(false);
   const t=ACC_TYPES.find(x=>x.key===f.type)||ACC_TYPES[0];
+  const submit=async()=>{
+    if(!f.name)return alert("Enter account name");
+    setBusy(true);
+    try{
+      const accountCurrency=normalizeCurrencyCode(f.accountCurrency||baseCurrency,baseCurrency);
+      const amount=Number(f.balance)||0;
+      const [converted]=await convertMoneyRows([{
+        balance:amount,
+        originalBalance:amount,
+        accountCurrency,
+      }],{
+        amountField:"balance",
+        originalField:"originalBalance",
+        currencyField:"accountCurrency",
+        baseAmountField:"balance",
+        baseCurrencyField:"balanceBaseCurrency",
+        fxDateField:"balanceFxDate",
+        fxRateField:"balanceFxRate",
+        fxRateDateField:"balanceRateDate",
+        fxSourceField:"balanceFxSource",
+        baseCurrency,
+        fallbackCurrency:accountCurrency,
+        dateResolver:()=>today(),
+      });
+      await onSave({
+        ...f,
+        cls:t.cls,
+        typeName:t.label,
+        accountCurrency,
+        balance:converted?.balance??amount,
+        originalBalance:converted?.originalBalance??amount,
+        balanceBaseCurrency:converted?.balanceBaseCurrency||baseCurrency,
+        balanceFxRate:converted?.balanceFxRate||1,
+        balanceFxDate:converted?.balanceFxDate||today(),
+        balanceRateDate:converted?.balanceRateDate||today(),
+        balanceFxSource:converted?.balanceFxSource||"manual",
+      });
+    }finally{
+      setBusy(false);
+    }
+  };
   return(<div className="overlay"><div className="modal" style={{maxWidth:440}}>
     <MH title="Add Account" onClose={onClose}/>
     <label>Account Type</label><select value={f.type} onChange={e=>setF(p=>({...p,type:e.target.value}))}>{ACC_TYPES.map(x=><option key={x.key} value={x.key}>{x.label} ({x.cls})</option>)}</select>
     <label>Account Name</label><input value={f.name} onChange={e=>setF(p=>({...p,name:e.target.value}))} placeholder="e.g. HDFC Savings"/>
     <label>Bank / Institution</label><input value={f.bank} onChange={e=>setF(p=>({...p,bank:e.target.value}))} placeholder="HDFC, Zerodha…"/>
     <label>Account Number (last 4)</label><input value={f.number} onChange={e=>setF(p=>({...p,number:e.target.value}))} placeholder="Optional"/>
-    <label>Opening Balance (₹)</label><input type="number" value={f.balance} onChange={e=>setF(p=>({...p,balance:e.target.value}))} placeholder="0"/>
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+      <div><label>Account Currency</label><select value={f.accountCurrency} onChange={e=>setF(p=>({...p,accountCurrency:e.target.value}))}>{CURRENCY_OPTIONS.map(code=><option key={code} value={code}>{code}</option>)}</select></div>
+      <div><label>Opening Balance</label><input type="number" value={f.balance} onChange={e=>setF(p=>({...p,balance:e.target.value}))} placeholder="0"/></div>
+    </div>
+    <div style={{fontSize:11,color:"#64748b",marginTop:8}}>LedgerAI converts the entered balance into {baseCurrency} for reporting while keeping the account currency as a reconciliation hint.</div>
     <div style={{display:"flex",gap:10,marginTop:18}}>
       <button className="btn ghost" onClick={onClose} style={{flex:1}}>Cancel</button>
-      <button className="btn pri" style={{flex:2}} onClick={()=>{if(!f.name)return alert("Enter account name");onSave({...f,cls:t.cls,typeName:t.label,balance:Number(f.balance)||0});}}>Add Account</button>
+      <button className="btn pri" style={{flex:2}} onClick={submit} disabled={busy}>{busy?"Saving…":"Add Account"}</button>
     </div>
   </div></div>);
 }
 
 function EditAccBalanceModal({account,onSave,onClose}){
-  const[balance,setBalance]=useState(String(account.balance??0));
+  const baseCurrency=getBaseCurrency();
+  const[balance,setBalance]=useState(String(account.originalBalance??account.balance??0));
+  const[currency,setCurrency]=useState(normalizeCurrencyCode(account.accountCurrency||baseCurrency,baseCurrency));
+  const[busy,setBusy]=useState(false);
+  const save=async()=>{
+    setBusy(true);
+    try{
+      const amount=Number(balance)||0;
+      const [converted]=await convertMoneyRows([{
+        balance:amount,
+        originalBalance:amount,
+        accountCurrency:currency,
+      }],{
+        amountField:"balance",
+        originalField:"originalBalance",
+        currencyField:"accountCurrency",
+        baseAmountField:"balance",
+        baseCurrencyField:"balanceBaseCurrency",
+        fxDateField:"balanceFxDate",
+        fxRateField:"balanceFxRate",
+        fxRateDateField:"balanceRateDate",
+        fxSourceField:"balanceFxSource",
+        baseCurrency,
+        fallbackCurrency:currency,
+        dateResolver:()=>today(),
+      });
+      await onSave({
+        balance:converted?.balance??amount,
+        originalBalance:converted?.originalBalance??amount,
+        accountCurrency:currency,
+        balanceBaseCurrency:converted?.balanceBaseCurrency||baseCurrency,
+        balanceFxRate:converted?.balanceFxRate||1,
+        balanceFxDate:converted?.balanceFxDate||today(),
+        balanceRateDate:converted?.balanceRateDate||today(),
+        balanceFxSource:converted?.balanceFxSource||"manual",
+      });
+    }finally{
+      setBusy(false);
+    }
+  };
   return(<div className="overlay"><div className="modal" style={{maxWidth:420}}>
     <MH title={`Edit Balance: ${account.name}`} onClose={onClose}/>
-    <label>Updated Balance (₹)</label>
-    <input type="number" value={balance} onChange={e=>setBalance(e.target.value)} placeholder="0"/>
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+      <div><label>Account Currency</label><select value={currency} onChange={e=>setCurrency(e.target.value)}>{CURRENCY_OPTIONS.map(code=><option key={code} value={code}>{code}</option>)}</select></div>
+      <div><label>Updated Balance</label><input type="number" value={balance} onChange={e=>setBalance(e.target.value)} placeholder="0"/></div>
+    </div>
+    <div style={{fontSize:11,color:"#64748b",marginTop:8}}>Displayed account balance is converted into {baseCurrency} for reports and reconciliation.</div>
     <div style={{display:"flex",gap:10,marginTop:18}}>
       <button className="btn ghost" onClick={onClose} style={{flex:1}}>Cancel</button>
-      <button className="btn pri" style={{flex:2}} onClick={()=>onSave(Number(balance)||0)}>Save Balance</button>
+      <button className="btn pri" style={{flex:2}} onClick={save} disabled={busy}>{busy?"Saving…":"Save Balance"}</button>
     </div>
   </div></div>);
 }
@@ -3867,1024 +4891,379 @@ function ReconModal({account,txns,acts,addInbox,onClose}){
   </div></div>);
 }
 
-// ── REPORTS ───────────────────────────────────────────────────────────────────
-// ── PIE CHART COMPONENT ─────────────────────────────────────────────────────────
-function PieChart({data,size=200,onSliceClick,chartId="pie"}){
-  if(!data||!data.length)return null;
-  const total=data.reduce((s,d)=>s+d.value,0);
-  if(total===0)return null;
-  const COLORS=["#f87171","#fb923c","#fbbf24","#a3e635","#34d399","#22d3ee","#818cf8","#c084fc","#f472b6","#94a3b8"];
-  let cumulative=0;
-  const slices=data.map((d,i)=>{
-    const pct=d.value/total;
-    const startAngle=cumulative*360;
-    cumulative+=pct;
-    const endAngle=cumulative*360;
-    const largeArc=pct>0.5?1:0;
-    const startRad=(startAngle-90)*Math.PI/180;
-    const endRad=(endAngle-90)*Math.PI/180;
-    const r=size/2-2;
-    const cx=size/2,cy=size/2;
-    const x1=cx+r*Math.cos(startRad),y1=cy+r*Math.sin(startRad);
-    const x2=cx+r*Math.cos(endRad),y2=cy+r*Math.sin(endRad);
-    const path=pct>=0.9999?`M ${cx},${cy-r} A ${r},${r} 0 1,1 ${cx-0.01},${cy-r} Z`:`M ${cx},${cy} L ${x1},${y1} A ${r},${r} 0 ${largeArc},1 ${x2},${y2} Z`;
-    return{...d,path,color:COLORS[i%COLORS.length],pct,startAngle,endAngle};
+function ReconciliationIssueEditorModal({account,row,acts,cats,onClose,onSave}){
+  const baseCurrency=getBaseCurrency();
+  const defaultAct=acts.includes("Personal")?"Personal":(acts[0]||"");
+  const initialAct=acts.includes(row?.businessActivity)?row.businessActivity:defaultAct;
+  const[form,setForm]=useState({
+    type:row?.type==="credit"?"income":"expense",
+    date:row?.date||today(),
+    description:row?.description||"",
+    originalAmount:row?.originalAmount??row?.amount??0,
+    currency:normalizeCurrencyCode(row?.currency||baseCurrency,baseCurrency),
+    businessActivity:initialAct,
+    category:row?.category||cats[initialAct]?.[0]||"Other",
+    subCategory:row?.subCategory||"",
+    vendor:row?.vendor||"",
+    paymentMethod:row?.paymentMethod||account?.typeName||"",
   });
+  const[busy,setBusy]=useState(false);
+  const clist=cats[form.businessActivity]||["Other"];
+  const save=async()=>{
+    setBusy(true);
+    try{
+      const [converted]=await convertExtractedItemsToBaseCurrency([{
+        type:form.type,
+        date:form.date,
+        description:form.description,
+        amount:Number(form.originalAmount)||0,
+        originalAmount:Number(form.originalAmount)||0,
+        currency:form.currency,
+        businessActivity:form.businessActivity,
+        category:form.category,
+        subCategory:form.subCategory,
+        vendor:form.vendor,
+        trackVendor:Boolean(form.vendor),
+        paymentMethod:form.paymentMethod||account?.typeName||"",
+      }],{
+        baseCurrency,
+        fallbackCurrency:form.currency||baseCurrency,
+        dateFallback:form.date||today(),
+      });
+      onSave({
+        ...converted,
+        accountId:account?.id||"",
+        accountName:account?.name||"",
+        source:"statement",
+      });
+    }finally{
+      setBusy(false);
+    }
+  };
   return(
-    <svg width={size} height={size} style={{display:"block"}} data-testid={`${chartId}-chart`}>
-      {slices.map((s,i)=>(
-        <path key={i} d={s.path} fill={s.color} stroke="#0f1624" strokeWidth="2" 
-          data-testid={`${chartId}-slice-${s.label.replace(/\s+/g,'-').toLowerCase()}`}
-          style={{cursor:onSliceClick?"pointer":"default",transition:"transform 0.15s",transformOrigin:"center"}}
-          onClick={()=>onSliceClick&&onSliceClick(s)}
-          onMouseEnter={e=>e.target.style.transform="scale(1.03)"}
-          onMouseLeave={e=>e.target.style.transform="scale(1)"}
-        >
-          <title>{s.label}: {fmt(s.value)} ({(s.pct*100).toFixed(1)}%)</title>
-        </path>
-      ))}
-      <circle cx={size/2} cy={size/2} r={size/4} fill="#0f1624"/>
-      <text x={size/2} y={size/2-8} textAnchor="middle" fill="#64748b" fontSize="10" fontWeight="600">TOTAL</text>
-      <text x={size/2} y={size/2+12} textAnchor="middle" fill="#f1f5f9" fontSize="14" fontWeight="700" fontFamily="'DM Mono',monospace">{fmt(total)}</text>
-    </svg>
-  );
-}
-
-// ── BAR CHART COMPONENT ─────────────────────────────────────────────────────────
-function BarChart({data,height=180,barColor="#f87171",onClick,chartId="bar"}){
-  if(!data||!data.length)return null;
-  const maxVal=Math.max(...data.map(d=>d.value),1);
-  const barWidth=Math.min(40,Math.floor((100/data.length)*0.7));
-  return(
-    <div style={{height,display:"flex",alignItems:"flex-end",gap:4,padding:"0 4px"}} data-testid={`${chartId}-chart`}>
-      {data.map((d,i)=>{
-        const h=Math.max(4,(d.value/maxVal)*(height-30));
-        return(
-          <div key={i} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",cursor:onClick?"pointer":"default"}} 
-            data-testid={`${chartId}-bar-${d.label.replace(/\s+/g,'-').toLowerCase()}`}
-            onClick={()=>onClick&&onClick(d)}>
-            <div style={{fontSize:9,color:"#64748b",marginBottom:2,whiteSpace:"nowrap"}}>{fmt(d.value)}</div>
-            <div style={{width:"100%",maxWidth:barWidth,height:h,background:barColor,borderRadius:"4px 4px 0 0",transition:"all 0.2s"}} 
-              onMouseEnter={e=>e.target.style.opacity=0.8} onMouseLeave={e=>e.target.style.opacity=1}/>
-            <div style={{fontSize:10,color:"#94a3b8",marginTop:4,textAlign:"center",lineHeight:1.1}}>{d.label}</div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-// ── DRILL-DOWN MODAL ────────────────────────────────────────────────────────────
-function DrillDownModal({title,transactions,onClose,color="#f87171"}){
-  const[sortBy,setSortBy]=useState("date");
-  const[sortDir,setSortDir]=useState("desc");
-  const sorted=[...transactions].sort((a,b)=>{
-    if(sortBy==="date")return sortDir==="desc"?(b.date||"").localeCompare(a.date||""):(a.date||"").localeCompare(b.date||"");
-    if(sortBy==="amount")return sortDir==="desc"?b.amount-a.amount:a.amount-b.amount;
-    if(sortBy==="vendor")return sortDir==="desc"?(b.vendor||"").localeCompare(a.vendor||""):(a.vendor||"").localeCompare(b.vendor||"");
-    return 0;
-  });
-  const total=transactions.reduce((s,t)=>s+t.amount,0);
-  const toggleSort=(col)=>{if(sortBy===col)setSortDir(d=>d==="desc"?"asc":"desc");else{setSortBy(col);setSortDir("desc");}};
-  return(
-    <div className="overlay" onClick={onClose} data-testid="drilldown-overlay">
-      <div className="modal" style={{maxWidth:720,maxHeight:"85vh"}} onClick={e=>e.stopPropagation()} data-testid="drilldown-modal">
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
-          <div>
-            <h3 style={{fontSize:18,fontWeight:700,color:"#f1f5f9",margin:0}} data-testid="drilldown-title">{title}</h3>
-            <div style={{fontSize:13,color:"#64748b",marginTop:4}} data-testid="drilldown-summary">{transactions.length} transactions · Total: <span className="mono" style={{color}}>{fmt(total)}</span></div>
-          </div>
-          <button className="btn ghost sm" onClick={onClose} data-testid="drilldown-close-btn">✕ Close</button>
-        </div>
-        <div style={{display:"flex",gap:8,marginBottom:12}}>
-          <button className={`btn sm ${sortBy==="date"?"pri":"ghost"}`} onClick={()=>toggleSort("date")} data-testid="sort-date-btn">Date {sortBy==="date"&&(sortDir==="desc"?"↓":"↑")}</button>
-          <button className={`btn sm ${sortBy==="amount"?"pri":"ghost"}`} onClick={()=>toggleSort("amount")} data-testid="sort-amount-btn">Amount {sortBy==="amount"&&(sortDir==="desc"?"↓":"↑")}</button>
-          <button className={`btn sm ${sortBy==="vendor"?"pri":"ghost"}`} onClick={()=>toggleSort("vendor")} data-testid="sort-vendor-btn">Vendor {sortBy==="vendor"&&(sortDir==="desc"?"↓":"↑")}</button>
-        </div>
-        <div style={{maxHeight:"55vh",overflowY:"auto"}} data-testid="drilldown-transactions">
-          {sorted.map((tx,i)=>(
-            <div key={tx.id||i} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 12px",background:i%2===0?"#0a0d18":"transparent",borderRadius:6,marginBottom:2}} data-testid={`transaction-row-${i}`}>
-              <div style={{width:70,fontSize:11,color:"#64748b"}}>{fmtD(tx.date)}</div>
-              <div style={{flex:1}}>
-                <div style={{fontSize:13,fontWeight:500,color:"#e2e8f0"}}>{tx.description||tx.category}</div>
-                <div style={{fontSize:11,color:"#64748b"}}>{tx.vendor&&<span>{tx.vendor} · </span>}{tx.paymentMethod&&<span>{tx.paymentMethod} · </span>}{tx.businessActivity}</div>
-              </div>
-              <div className="mono" style={{fontSize:14,fontWeight:600,color}}>{fmt(tx.amount)}</div>
-            </div>
-          ))}
-          {sorted.length===0&&<div style={{color:"#475569",textAlign:"center",padding:20}}>No transactions found.</div>}
-        </div>
+    <div className="overlay"><div className="modal" style={{maxWidth:720}}>
+      <MH title="Edit Reconciliation Item" onClose={onClose}/>
+      <div style={{fontSize:12,color:"#64748b",lineHeight:1.8,marginBottom:10}}>Adjust the statement item before sending it to Inbox. Amount entered here is the original statement amount; LedgerAI will convert it into {baseCurrency} in the background.</div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
+        <div><label>Type</label><select value={form.type} onChange={e=>setForm(p=>({...p,type:e.target.value}))}><option value="expense">Expense</option><option value="income">Income</option></select></div>
+        <div><label>Date</label><input type="date" value={form.date} onChange={e=>setForm(p=>({...p,date:e.target.value}))}/></div>
+        <div><label>Original Amount</label><input type="number" value={form.originalAmount} onChange={e=>setForm(p=>({...p,originalAmount:e.target.value}))}/></div>
       </div>
-    </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+        <div><label>Original Currency</label><select value={form.currency} onChange={e=>setForm(p=>({...p,currency:e.target.value}))}>{CURRENCY_OPTIONS.map(code=><option key={code} value={code}>{code}</option>)}</select></div>
+        <div><label>Payment Method</label><input value={form.paymentMethod||""} onChange={e=>setForm(p=>({...p,paymentMethod:e.target.value}))} placeholder={account?.typeName||"Optional"}/></div>
+      </div>
+      <label>Description</label><input value={form.description} onChange={e=>setForm(p=>({...p,description:e.target.value}))}/>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+        <div><label>Business Activity</label><select value={form.businessActivity} onChange={e=>setForm(p=>({...p,businessActivity:e.target.value,category:cats[e.target.value]?.[0]||p.category||"Other"}))}>{acts.map(a=><option key={a} value={a}>{a}</option>)}</select></div>
+        <div><label>Category</label><input list="recon-cats" value={form.category} onChange={e=>setForm(p=>({...p,category:e.target.value}))}/><datalist id="recon-cats">{clist.map(c=><option key={c} value={c}/>)}</datalist></div>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+        <div><label>Sub Category</label><input value={form.subCategory||""} onChange={e=>setForm(p=>({...p,subCategory:e.target.value}))}/></div>
+        <div><label>Vendor</label><input value={form.vendor||""} onChange={e=>setForm(p=>({...p,vendor:e.target.value}))}/></div>
+      </div>
+      <div style={{display:"flex",gap:10,marginTop:16}}>
+        <button className="btn ghost" style={{flex:1}} onClick={onClose}>Cancel</button>
+        <button className="btn pri" style={{flex:2}} onClick={save} disabled={busy}>{busy?"Converting…":"Save & Queue to Inbox"}</button>
+      </div>
+    </div></div>
   );
 }
 
-// ── ENHANCED REPORTS TAB ────────────────────────────────────────────────────────
-function ReportsTab({txns,acts,totInc,totExp}){
-  const[drillDown,setDrillDown]=useState(null);
-  const[activeView,setActiveView]=useState("overview");
-  const[dateFrom,setDateFrom]=useState("");
-  const[dateTo,setDateTo]=useState("");
-  const[selectedActivity,setSelectedActivity]=useState("all");
-  const[showExport,setShowExport]=useState(false);
-  
-  // Filter transactions by date range and activity
-  const filteredTxns=txns.filter(t=>{
-    const inDateRange=(!dateFrom||t.date>=dateFrom)&&(!dateTo||t.date<=dateTo);
-    const inActivity=selectedActivity==="all"||t.businessActivity===selectedActivity;
-    return inDateRange&&inActivity;
-  });
-  
-  // Recalculate totals based on filters
-  const filteredInc=filteredTxns.filter(t=>t.type==="income").reduce((s,t)=>s+t.amount,0);
-  const filteredExp=filteredTxns.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amount,0);
-  
-  // Expense calculations
-  const expenses=filteredTxns.filter(t=>t.type==="expense");
-  const dr=expenses.filter(t=>t.businessActivity==="Personal");
-  const drT=dr.reduce((s,t)=>s+t.amount,0);
-  
-  // Category breakdown
-  const catMap={};expenses.forEach(t=>{catMap[t.category]=(catMap[t.category]||0)+t.amount;});
-  const cats=Object.entries(catMap).sort((a,b)=>b[1]-a[1]);
-  const maxC=cats[0]?.[1]||1;
-  const catPieData=cats.slice(0,10).map(([label,value])=>({label,value}));
-  
-  // Vendor breakdown
-  const vendorMap={};expenses.forEach(t=>{const v=(t.vendor||"Unknown").trim()||"Unknown";vendorMap[v]=(vendorMap[v]||0)+t.amount;});
-  const vendors=Object.entries(vendorMap).sort((a,b)=>b[1]-a[1]);
-  const vendorPieData=vendors.slice(0,10).map(([label,value])=>({label,value}));
-  
-  // Monthly trend (last 6 months)
-  const monthMap={};expenses.forEach(t=>{if(!t.date)return;const m=t.date.slice(0,7);monthMap[m]=(monthMap[m]||0)+t.amount;});
-  const months=Object.keys(monthMap).sort().slice(-6);
-  const monthData=months.map(m=>({label:new Date(m+"-01").toLocaleDateString("en-IN",{month:"short"}),value:monthMap[m]||0,fullMonth:m}));
-  
-  // Activity breakdown
-  const actMap={};expenses.forEach(t=>{actMap[t.businessActivity]=(actMap[t.businessActivity]||0)+t.amount;});
-  const actData=Object.entries(actMap).sort((a,b)=>b[1]-a[1]).map(([label,value])=>({label,value}));
-  
-  // Payment method breakdown
-  const payMap={};expenses.forEach(t=>{const p=(t.paymentMethod||"Unknown").trim()||"Unknown";payMap[p]=(payMap[p]||0)+t.amount;});
-  const payData=Object.entries(payMap).sort((a,b)=>b[1]-a[1]).slice(0,8).map(([label,value])=>({label,value}));
-  
-  // Income by category/activity for activity analysis
-  const incomeByAct={};filteredTxns.filter(t=>t.type==="income").forEach(t=>{incomeByAct[t.businessActivity]=(incomeByAct[t.businessActivity]||0)+t.amount;});
-  const expByAct={};expenses.forEach(t=>{expByAct[t.businessActivity]=(expByAct[t.businessActivity]||0)+t.amount;});
-  
-  const emailTxns=filteredTxns.filter(t=>t.source==="email");
-  const hasFilters=dateFrom||dateTo||selectedActivity!=="all";
-  
-  // Drill-down handlers
-  const openCategoryDrill=(cat)=>{
-    const txs=expenses.filter(t=>t.category===cat);
-    setDrillDown({title:`Category: ${cat}`,transactions:txs,color:"#f87171"});
+function ReconciliationTab({accs,txns,acts,cats,addInbox,onEditLedger,preselectedAccountId=""}){
+  const baseCurrency=getBaseCurrency();
+  const[accountId,setAccountId]=useState(preselectedAccountId||accs[0]?.id||"");
+  const[fromDate,setFromDate]=useState(()=>new Date(Date.now()-30*24*60*60*1000).toISOString().slice(0,10));
+  const[toDate,setToDate]=useState(today());
+  const[sourceText,setSourceText]=useState("");
+  const[sourceLabel,setSourceLabel]=useState("");
+  const[busy,setBusy]=useState(false);
+  const[fileBusy,setFileBusy]=useState(false);
+  const[status,setStatus]=useState("");
+  const[result,setResult]=useState(null);
+  const[editorRow,setEditorRow]=useState(null);
+  const hiddenIssuesRef=useRef(new Set());
+  const account=accs.find(a=>a.id===accountId)||null;
+
+  useEffect(()=>{
+    if(preselectedAccountId)setAccountId(preselectedAccountId);
+  },[preselectedAccountId]);
+
+  useEffect(()=>{
+    if(!accountId&&accs[0]?.id)setAccountId(accs[0].id);
+  },[accountId,accs]);
+
+  const loadStatementFile=async(file)=>{
+    if(!file)return;
+    setFileBusy(true);
+    try{
+      const text=await readStatementFileText(file);
+      setSourceText(text);
+      setSourceLabel(file.name||"Uploaded statement");
+      setStatus(`Loaded statement file: ${file.name||"statement"}`);
+    }catch(error){
+      setStatus(error?.message||"Unable to read statement file.");
+    }finally{
+      setFileBusy(false);
+    }
   };
-  const openVendorDrill=(vendor)=>{
-    const v=vendor==="Unknown"?"":vendor;
-    const txs=expenses.filter(t=>(t.vendor||"").trim()===v||(v===""&&!(t.vendor||"").trim()));
-    setDrillDown({title:`Vendor: ${vendor}`,transactions:txs,color:"#fb923c"});
+
+  const queueStatementRow=(row)=>{
+    if(!account)return;
+    const txType=row.type==="credit"||row.type==="income"?"income":"expense";
+    addInbox([{
+      type:txType,
+      date:row.date,
+      description:row.description,
+      amount:row.amount,
+      originalAmount:row.originalAmount??row.amount,
+      currency:row.currency||baseCurrency,
+      baseAmount:row.baseAmount??row.amount,
+      baseCurrency:row.baseCurrency||baseCurrency,
+      fxRate:row.fxRate||1,
+      fxDate:row.fxDate||row.date,
+      fxRateDate:row.fxRateDate||row.date,
+      fxSource:row.fxSource||"",
+      vendor:row.vendor||"",
+      trackVendor:Boolean(row.vendor),
+      businessActivity:row.businessActivity||(acts.includes("Personal")?"Personal":(acts[0]||"")),
+      category:row.category||"Other",
+      subCategory:row.subCategory||"",
+      paymentMethod:row.paymentMethod||account.typeName||"",
+      accountId:account.id,
+      accountName:account.name,
+      source:"statement",
+    }]);
+    setStatus(`Queued "${row.description}" to Inbox for review.`);
   };
-  const openMonthDrill=(m)=>{
-    const txs=expenses.filter(t=>t.date&&t.date.startsWith(m));
-    const monthName=new Date(m+"-01").toLocaleDateString("en-IN",{month:"long",year:"numeric"});
-    setDrillDown({title:`Expenses: ${monthName}`,transactions:txs,color:"#818cf8"});
+
+  const hideIssue=(id)=>{
+    hiddenIssuesRef.current.add(id);
+    setResult(prev=>prev?{...prev}:prev);
   };
-  const openActivityDrill=(act)=>{
-    const txs=expenses.filter(t=>t.businessActivity===act);
-    setDrillDown({title:`Activity: ${act}`,transactions:txs,color:"#34d399"});
+
+  const runReconciliation=async()=>{
+    if(!account)return alert("Select an account first.");
+    if(!fromDate||!toDate)return alert("Select statement period.");
+    if(!sourceText.trim())return alert("Upload or paste the statement first.");
+    setBusy(true);
+    setStatus("Parsing statement and reconciling...");
+    hiddenIssuesRef.current=new Set();
+    try{
+      const parsed=await aiParseStatement(sourceText,account.name,account.typeName,account.accountCurrency||baseCurrency,baseCurrency);
+      const prepared=await prepareStatementRows(parsed,{
+        accountCurrency:account.accountCurrency||baseCurrency,
+        baseCurrency,
+        dateFallback:fromDate||today(),
+      });
+      const statementRows=prepared.filter(row=>inDateRange(row.date,fromDate,toDate));
+      const ledgerRows=(txns||[])
+        .filter(tx=>matchesAccountForReconciliation(tx,account.id,account.name))
+        .filter(tx=>inDateRange(tx.date,fromDate,toDate));
+      const ledgerRowsWithSide=ledgerRows.map(tx=>{
+        const isOutgoing=String(tx.accountId||"")===account.id||String(tx.accountName||"")===account.name;
+        const isIncoming=String(tx.targetAccountId||"")===account.id||String(tx.targetAccountName||"")===account.name;
+        const reconSide=tx.type==="transfer"
+          ? (isIncoming&&!isOutgoing?"credit":"debit")
+          : tx.type==="income"
+            ? "credit"
+            : "debit";
+        return{...tx,_reconSide:reconSide};
+      });
+      const next=buildReconciliationResult(statementRows,ledgerRowsWithSide);
+      setResult({
+        ...next,
+        statementRows,
+        ledgerRows:ledgerRowsWithSide,
+        accountId:account.id,
+        accountName:account.name,
+      });
+      setStatus(`Matched ${next.matched.length}. Statement only ${next.statementOnly.length}. Ledger only ${next.ledgerOnly.length}. Amount mismatches ${next.amountMismatches.length}.`);
+    }catch(error){
+      setStatus(error?.message||"Reconciliation failed.");
+      setResult(null);
+    }finally{
+      setBusy(false);
+    }
   };
-  
-  const clearFilters=()=>{setDateFrom("");setDateTo("");setSelectedActivity("all");};
-  
-  // Export handlers
-  const handleExport=(format)=>{
-    const data=prepareExportData(filteredTxns);
-    const dateStr=new Date().toISOString().slice(0,10);
-    const filename=`ledgerai_report_${dateStr}`;
-    if(format==="csv")exportToCSV(data,filename+".csv");
-    else if(format==="xls")exportToXLS(data,filename+".xls");
-    else if(format==="pdf")exportToPDF(data,"LedgerAI Financial Report",filename);
-    setShowExport(false);
-  };
-  
+
+  const visibleIssues=(items=[])=>items.filter(item=>!hiddenIssuesRef.current.has(item.id));
+  const statementOnly=visibleIssues(result?.statementOnly||[]);
+  const ledgerOnly=visibleIssues(result?.ledgerOnly||[]);
+  const mismatches=visibleIssues(result?.amountMismatches||[]);
+  const matched=result?.matched||[];
+
   return(<div>
-    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18,flexWrap:"wrap",gap:12}}>
-      <h2 className="h2" style={{marginBottom:0}}>Reports & Analytics</h2>
-      <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-        {[["overview","Overview"],["comparison","Month Comparison"],["expenses","Expense Deep Dive"],["activity","Activity Analysis"],["vendors","Vendor Analysis"]].map(([k,l])=>(
-          <button key={k} className={`btn sm ${activeView===k?"pri":"ghost"}`} onClick={()=>setActiveView(k)} data-testid={`view-${k}-btn`}>{l}</button>
-        ))}
+    <R style={{marginBottom:18,gap:10,flexWrap:"wrap"}}>
+      <h2 className="h2" style={{flex:1}}>Reconciliation</h2>
+      <div style={{fontSize:12,color:"#64748b"}}>All statement values are converted and shown in {baseCurrency}.</div>
+    </R>
+    <div className="card" style={{marginBottom:18}}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
+        <div><label>Account</label><select value={accountId} onChange={e=>setAccountId(e.target.value)}><option value="">Select account</option>{accs.map(acc=><option key={acc.id} value={acc.id}>{acc.name}</option>)}</select></div>
+        <div><label>Statement From</label><input type="date" value={fromDate} onChange={e=>setFromDate(e.target.value)}/></div>
+        <div><label>Statement To</label><input type="date" value={toDate} onChange={e=>setToDate(e.target.value)}/></div>
       </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr auto",gap:10,alignItems:"end",marginTop:12}}>
+        <div>
+          <label>Upload Statement</label>
+          <input type="file" accept=".csv,.txt,.pdf,.json,.xml,.log,.html" onChange={e=>loadStatementFile(e.target.files?.[0])}/>
+        </div>
+        <button className="btn ghost" onClick={()=>{setSourceText("");setSourceLabel("");setResult(null);setStatus("");}} disabled={busy||fileBusy}>Clear Statement</button>
+      </div>
+      {sourceLabel&&<div style={{fontSize:11,color:"#94a3b8",marginTop:8}}>Loaded source: {sourceLabel}</div>}
+      <label>Statement Text</label>
+      <textarea rows={8} value={sourceText} onChange={e=>setSourceText(e.target.value)} placeholder="Upload a file or paste bank / card / wallet statement text here…"/>
+      <div style={{display:"flex",gap:10,marginTop:12}}>
+        <button className="btn pri" onClick={runReconciliation} disabled={busy||fileBusy||!accountId||!sourceText.trim()}>{busy?"Reconciling…":"Run Reconciliation"}</button>
+      </div>
+      {status&&<div style={{fontSize:12,color:"#c7d2fe",marginTop:8}}>{status}</div>}
     </div>
-    
-    {/* Filters Bar */}
-    <div className="card" style={{marginBottom:18,padding:14}} data-testid="filters-bar">
-      <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
-        <div style={{display:"flex",alignItems:"center",gap:6}}>
-          <label style={{fontSize:12,color:"#94a3b8"}}>From:</label>
-          <input type="date" value={dateFrom} onChange={e=>setDateFrom(e.target.value)} className="inp" style={{width:140,padding:"6px 8px",fontSize:12}} data-testid="date-from-input"/>
-        </div>
-        <div style={{display:"flex",alignItems:"center",gap:6}}>
-          <label style={{fontSize:12,color:"#94a3b8"}}>To:</label>
-          <input type="date" value={dateTo} onChange={e=>setDateTo(e.target.value)} className="inp" style={{width:140,padding:"6px 8px",fontSize:12}} data-testid="date-to-input"/>
-        </div>
-        <div style={{display:"flex",alignItems:"center",gap:6}}>
-          <label style={{fontSize:12,color:"#94a3b8"}}>Activity:</label>
-          <select value={selectedActivity} onChange={e=>setSelectedActivity(e.target.value)} className="inp" style={{padding:"6px 8px",fontSize:12,minWidth:140}} data-testid="activity-filter-select">
-            <option value="all">All Activities</option>
-            {acts.map(a=><option key={a} value={a}>{a}</option>)}
-          </select>
-        </div>
-        {hasFilters&&<button className="btn ghost sm" onClick={clearFilters} data-testid="clear-filters-btn">✕ Clear Filters</button>}
-        <div style={{marginLeft:"auto",display:"flex",gap:6}}>
-          <button className="btn ghost sm" onClick={()=>setShowExport(!showExport)} data-testid="export-btn">📥 Export</button>
-        </div>
-      </div>
-      {hasFilters&&(
-        <div style={{marginTop:10,fontSize:12,color:"#818cf8",background:"#1e1b4b",padding:"8px 12px",borderRadius:6}}>
-          Showing filtered results: {filteredTxns.length} transactions · Income: {fmt(filteredInc)} · Expenses: {fmt(filteredExp)}
-        </div>
-      )}
-      {showExport&&(
-        <div style={{marginTop:12,padding:12,background:"#0a0d18",borderRadius:8,border:"1px solid #1a2438"}}>
-          <div style={{fontSize:13,fontWeight:600,color:"#e2e8f0",marginBottom:10}}>Export {filteredTxns.length} Transactions</div>
-          <div style={{display:"flex",gap:8}}>
-            <button className="btn ghost sm" onClick={()=>handleExport("csv")} data-testid="export-csv-btn">📄 CSV</button>
-            <button className="btn ghost sm" onClick={()=>handleExport("xls")} data-testid="export-xls-btn">📊 Excel</button>
-            <button className="btn ghost sm" onClick={()=>handleExport("pdf")} data-testid="export-pdf-btn">📑 PDF (Print)</button>
+
+    {result&&<div className="g4" style={{marginBottom:18}}>
+      {[{l:"Matched",v:matched.length,c:"#34d399"},{l:"Amount Mismatch",v:mismatches.length,c:"#f59e0b"},{l:"Statement Only",v:statementOnly.length,c:"#38bdf8"},{l:"Ledger Only",v:ledgerOnly.length,c:"#f87171"}].map(card=>(
+        <div key={card.l} className="sc"><div className="lxs">{card.l}</div><div className="mono" style={{fontSize:22,color:card.c,marginTop:6}}>{card.v}</div></div>
+      ))}
+    </div>}
+
+    {mismatches.length>0&&<div className="card" style={{marginBottom:16}}>
+      <div className="sh" style={{marginBottom:10}}>Amount Mismatches</div>
+      {mismatches.map(issue=>(
+        <div key={issue.id} style={{border:"1px solid #3f2d0d",borderRadius:10,padding:12,marginBottom:10,background:"#17110a"}}>
+          <div style={{fontWeight:600,marginBottom:6}}>{issue.statementRow.description}</div>
+          <div style={{fontSize:12,color:"#94a3b8",lineHeight:1.8}}>
+            Statement: {fmt(issue.statementRow.amount)} on {fmtD(issue.statementRow.date)}{currencyMetaLabel(issue.statementRow,baseCurrency)?` · ${currencyMetaLabel(issue.statementRow,baseCurrency)}`:""}
+            <br/>
+            Ledger: {fmt(issue.ledgerTx.amount)} on {fmtD(issue.ledgerTx.date)} · {issue.ledgerTx.description||issue.ledgerTx.category}
+          </div>
+          <div style={{display:"flex",gap:8,marginTop:10,flexWrap:"wrap"}}>
+            <button className="btn sm pri" onClick={()=>setEditorRow(issue.statementRow)}>Edit Statement Item</button>
+            <button className="btn sm ghost" onClick={()=>onEditLedger?.(issue.ledgerTx)}>Edit Ledger Entry</button>
+            <button className="btn sm" style={{background:"#052e16",color:"#34d399"}} onClick={()=>queueStatementRow(issue.statementRow)}>Queue Statement to Inbox</button>
+            <button className="btn sm ghost" onClick={()=>hideIssue(issue.id)}>Hide</button>
           </div>
         </div>
-      )}
-    </div>
-    
-    {activeView==="overview"&&(
-      <div className="g2" style={{gap:18}}>
-        {/* P&L Summary */}
-        <div className="card" data-testid="pnl-card">
-          <div style={{fontWeight:600,fontSize:14,marginBottom:14,color:"#94a3b8",borderBottom:"1px solid #1e293b",paddingBottom:10}}>Profit & Loss</div>
-          {acts.filter(a=>a!=="Personal").map(a=>{const inc=filteredTxns.filter(t=>t.type==="income"&&t.businessActivity===a).reduce((s,t)=>s+t.amount,0);const exp=filteredTxns.filter(t=>t.type==="expense"&&t.businessActivity===a).reduce((s,t)=>s+t.amount,0);if(!inc&&!exp)return null;return<div key={a} style={{marginBottom:8}}><div style={{fontSize:11,color:"#64748b",fontWeight:600}}>{a}</div><div style={{display:"flex",gap:12,paddingLeft:8,fontSize:12}}><span className="mono" style={{color:"#34d399"}}>Inc {fmt(inc)}</span><span className="mono" style={{color:"#f87171"}}>Exp {fmt(exp)}</span><span className="mono" style={{color:inc-exp>=0?"#818cf8":"#f59e0b"}}>Net {fmt(inc-exp)}</span></div></div>;})}
-          <div style={{borderTop:"1px solid #1e293b",marginTop:10,paddingTop:10}}>
-            <R style={{marginBottom:4}}><span style={{fontWeight:600,fontSize:13}}>Total Income</span><span className="mono" style={{color:"#34d399"}}>{fmt(filteredInc)}</span></R>
-            <R style={{marginBottom:4}}><span style={{fontWeight:600,fontSize:13}}>Total Expenses</span><span className="mono" style={{color:"#f87171"}}>{fmt(filteredExp)}</span></R>
-            <div style={{background:filteredInc-filteredExp>=0?"#052e16":"#450a0a",borderRadius:8,padding:"10px 12px",marginTop:8,display:"flex",justifyContent:"space-between",fontWeight:700}}>
-              <span>Net Profit / Loss</span><span className="mono" style={{color:filteredInc-filteredExp>=0?"#34d399":"#f87171"}}>{fmt(filteredInc-filteredExp)}</span>
-            </div>
-          </div>
-        </div>
-        
-        {/* Personal Drawings */}
-        <div className="card" data-testid="drawings-card">
-          <div style={{fontWeight:600,fontSize:14,marginBottom:14,color:"#94a3b8",borderBottom:"1px solid #1e293b",paddingBottom:10}}>Personal Drawings</div>
-          <div className="mono" style={{fontSize:28,fontWeight:700,color:"#c084fc",marginBottom:14}}>{fmt(drT)}</div>
-          {Object.entries(dr.reduce((m,t)=>{m[t.category]=(m[t.category]||0)+t.amount;return m;},{})).sort((a,b)=>b[1]-a[1]).slice(0,5).map(([cat,amt])=>(
-            <R key={cat} style={{padding:"3px 0",fontSize:13,cursor:"pointer"}} onClick={()=>openCategoryDrill(cat)}>
-              <span style={{color:"#94a3b8"}}>{cat}</span><span className="mono" style={{color:"#c084fc"}}>{fmt(amt)}</span>
-            </R>
-          ))}
-          {dr.length===0&&<div style={{color:"#475569",fontSize:13}}>No drawings yet.</div>}
-        </div>
-        
-        {/* Monthly Trend */}
-        <div className="card" style={{gridColumn:"1/-1"}} data-testid="monthly-trend-card">
-          <div style={{fontWeight:600,fontSize:14,marginBottom:14,color:"#94a3b8",borderBottom:"1px solid #1e293b",paddingBottom:10}}>Monthly Expense Trend</div>
-          {monthData.length>0?(
-            <BarChart data={monthData} height={160} barColor="#f87171" onClick={(d)=>openMonthDrill(d.fullMonth)} chartId="monthly-trend"/>
-          ):(
-            <div style={{color:"#475569",fontSize:13,textAlign:"center",padding:20}}>No expense data yet.</div>
-          )}
-          <div style={{fontSize:11,color:"#64748b",textAlign:"center",marginTop:8}}>Click on a bar to see transactions</div>
-        </div>
-      </div>
-    )}
-    
-    {activeView==="comparison"&&(
-      <div className="g2" style={{gap:18}}>
-        {/* Month-over-Month Comparison */}
-        {(() => {
-          // Get last 6 months data
-          const allExpenses=txns.filter(t=>t.type==="expense");
-          const monthMap={};
-          allExpenses.forEach(t=>{
-            if(!t.date)return;
-            const m=t.date.slice(0,7);
-            if(!monthMap[m])monthMap[m]={total:0,categories:{},vendors:{}};
-            monthMap[m].total+=t.amount;
-            monthMap[m].categories[t.category]=(monthMap[m].categories[t.category]||0)+t.amount;
-            const v=t.vendor||"Unknown";
-            monthMap[m].vendors[v]=(monthMap[m].vendors[v]||0)+t.amount;
-          });
-          const sortedMonths=Object.keys(monthMap).sort().slice(-6);
-          if(sortedMonths.length<2)return(
-            <div className="card" style={{gridColumn:"1/-1"}}>
-              <div style={{color:"#475569",fontSize:13,textAlign:"center",padding:40}}>
-                Need at least 2 months of data for comparison. Keep tracking your expenses!
-              </div>
-            </div>
-          );
-          
-          const currentMonth=sortedMonths[sortedMonths.length-1];
-          const prevMonth=sortedMonths[sortedMonths.length-2];
-          const currData=monthMap[currentMonth];
-          const prevData=monthMap[prevMonth];
-          
-          const currTotal=currData?.total||0;
-          const prevTotal=prevData?.total||0;
-          const totalChange=prevTotal>0?((currTotal-prevTotal)/prevTotal*100):0;
-          
-          // Category comparison
-          const allCats=[...new Set([...Object.keys(currData?.categories||{}), ...Object.keys(prevData?.categories||{})])];
-          const catComparison=allCats.map(cat=>{
-            const curr=currData?.categories?.[cat]||0;
-            const prev=prevData?.categories?.[cat]||0;
-            const change=prev>0?((curr-prev)/prev*100):curr>0?100:0;
-            return{cat,curr,prev,change,diff:curr-prev};
-          }).sort((a,b)=>Math.abs(b.diff)-Math.abs(a.diff));
-          
-          // Vendor comparison
-          const allVendors=[...new Set([...Object.keys(currData?.vendors||{}), ...Object.keys(prevData?.vendors||{})])];
-          const vendorComparison=allVendors.map(v=>{
-            const curr=currData?.vendors?.[v]||0;
-            const prev=prevData?.vendors?.[v]||0;
-            const change=prev>0?((curr-prev)/prev*100):curr>0?100:0;
-            return{vendor:v,curr,prev,change,diff:curr-prev};
-          }).sort((a,b)=>Math.abs(b.diff)-Math.abs(a.diff));
-          
-          const currMonthLabel=new Date(currentMonth+"-01").toLocaleDateString("en-IN",{month:"long",year:"numeric"});
-          const prevMonthLabel=new Date(prevMonth+"-01").toLocaleDateString("en-IN",{month:"long",year:"numeric"});
-          
-          return(
-            <>
-              {/* Overall Comparison */}
-              <div className="card" style={{gridColumn:"1/-1"}} data-testid="overall-comparison-card">
-                <div style={{fontWeight:600,fontSize:14,marginBottom:14,color:"#94a3b8",borderBottom:"1px solid #1e293b",paddingBottom:10}}>
-                  Overall Expense Comparison
-                </div>
-                <div style={{display:"flex",gap:20,justifyContent:"center",alignItems:"center",flexWrap:"wrap"}}>
-                  <div style={{textAlign:"center",minWidth:150}}>
-                    <div style={{fontSize:11,color:"#64748b",marginBottom:4}}>{prevMonthLabel}</div>
-                    <div className="mono" style={{fontSize:24,fontWeight:700,color:"#94a3b8"}}>{fmt(prevTotal)}</div>
-                  </div>
-                  <div style={{fontSize:32,color:totalChange>0?"#f87171":"#34d399"}}>→</div>
-                  <div style={{textAlign:"center",minWidth:150}}>
-                    <div style={{fontSize:11,color:"#64748b",marginBottom:4}}>{currMonthLabel}</div>
-                    <div className="mono" style={{fontSize:24,fontWeight:700,color:totalChange>0?"#f87171":"#34d399"}}>{fmt(currTotal)}</div>
-                  </div>
-                  <div style={{padding:"12px 20px",background:totalChange>0?"#450a0a":"#052e16",borderRadius:12,textAlign:"center"}}>
-                    <div style={{fontSize:24,fontWeight:700,color:totalChange>0?"#f87171":"#34d399"}}>
-                      {totalChange>0?"+":""}{totalChange.toFixed(1)}%
-                    </div>
-                    <div style={{fontSize:11,color:"#64748b",marginTop:2}}>
-                      {totalChange>0?"Spending increased":"Spending decreased"}
-                    </div>
-                  </div>
-                </div>
-              </div>
-              
-              {/* Category Changes */}
-              <div className="card" data-testid="category-comparison-card">
-                <div style={{fontWeight:600,fontSize:14,marginBottom:14,color:"#94a3b8",borderBottom:"1px solid #1e293b",paddingBottom:10}}>
-                  Category Changes (Top Movers)
-                </div>
-                <div style={{maxHeight:300,overflowY:"auto"}}>
-                  {catComparison.slice(0,10).map((c,i)=>(
-                    <div key={c.cat} style={{display:"flex",alignItems:"center",gap:12,padding:"8px 0",borderBottom:"1px solid #1a2438"}}>
-                      <div style={{flex:1}}>
-                        <div style={{fontSize:13,color:"#e2e8f0"}}>{c.cat}</div>
-                        <div style={{fontSize:11,color:"#64748b"}}>{fmt(c.prev)} → {fmt(c.curr)}</div>
-                      </div>
-                      <div style={{display:"flex",alignItems:"center",gap:8}}>
-                        <div className="mono" style={{fontSize:13,fontWeight:600,color:c.diff>0?"#f87171":"#34d399"}}>
-                          {c.diff>0?"+":""}{fmt(c.diff)}
-                        </div>
-                        <div style={{fontSize:11,padding:"2px 6px",borderRadius:4,background:c.change>0?"#450a0a":"#052e16",color:c.change>0?"#f87171":"#34d399"}}>
-                          {c.change>0?"+":""}{c.change.toFixed(0)}%
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-              
-              {/* Vendor Changes */}
-              <div className="card" data-testid="vendor-comparison-card">
-                <div style={{fontWeight:600,fontSize:14,marginBottom:14,color:"#94a3b8",borderBottom:"1px solid #1e293b",paddingBottom:10}}>
-                  Vendor Changes (Top Movers)
-                </div>
-                <div style={{maxHeight:300,overflowY:"auto"}}>
-                  {vendorComparison.slice(0,10).map((v,i)=>(
-                    <div key={v.vendor} style={{display:"flex",alignItems:"center",gap:12,padding:"8px 0",borderBottom:"1px solid #1a2438"}}>
-                      <div style={{flex:1}}>
-                        <div style={{fontSize:13,color:"#e2e8f0"}}>{v.vendor}</div>
-                        <div style={{fontSize:11,color:"#64748b"}}>{fmt(v.prev)} → {fmt(v.curr)}</div>
-                      </div>
-                      <div style={{display:"flex",alignItems:"center",gap:8}}>
-                        <div className="mono" style={{fontSize:13,fontWeight:600,color:v.diff>0?"#f87171":"#34d399"}}>
-                          {v.diff>0?"+":""}{fmt(v.diff)}
-                        </div>
-                        <div style={{fontSize:11,padding:"2px 6px",borderRadius:4,background:v.change>0?"#450a0a":"#052e16",color:v.change>0?"#f87171":"#34d399"}}>
-                          {v.change>0?"+":""}{v.change.toFixed(0)}%
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-              
-              {/* Monthly Trend (last 6 months) */}
-              <div className="card" style={{gridColumn:"1/-1"}} data-testid="monthly-comparison-chart">
-                <div style={{fontWeight:600,fontSize:14,marginBottom:14,color:"#94a3b8",borderBottom:"1px solid #1e293b",paddingBottom:10}}>
-                  6-Month Expense Trend
-                </div>
-                <div style={{display:"flex",alignItems:"flex-end",gap:12,height:180,justifyContent:"center"}}>
-                  {sortedMonths.map((m,i)=>{
-                    const val=monthMap[m]?.total||0;
-                    const maxVal=Math.max(...sortedMonths.map(mm=>monthMap[mm]?.total||0));
-                    const h=maxVal>0?Math.max(20,(val/maxVal)*140):20;
-                    const isLast=i===sortedMonths.length-1;
-                    const isPrev=i===sortedMonths.length-2;
-                    const monthLabel=new Date(m+"-01").toLocaleDateString("en-IN",{month:"short"});
-                    return(
-                      <div key={m} style={{display:"flex",flexDirection:"column",alignItems:"center",minWidth:60}}>
-                        <div className="mono" style={{fontSize:10,color:"#64748b",marginBottom:4}}>{fmt(val)}</div>
-                        <div style={{
-                          width:40,height:h,
-                          background:isLast?"linear-gradient(180deg, #f87171, #dc2626)":isPrev?"linear-gradient(180deg, #818cf8, #6366f1)":"linear-gradient(180deg, #475569, #334155)",
-                          borderRadius:"4px 4px 0 0",
-                          transition:"all 0.2s"
-                        }}/>
-                        <div style={{fontSize:11,color:isLast?"#f87171":isPrev?"#818cf8":"#94a3b8",marginTop:6,fontWeight:isLast||isPrev?600:400}}>{monthLabel}</div>
-                      </div>
-                    );
-                  })}
-                </div>
-                <div style={{display:"flex",justifyContent:"center",gap:16,marginTop:12,fontSize:11}}>
-                  <span style={{color:"#818cf8"}}>■ {prevMonthLabel}</span>
-                  <span style={{color:"#f87171"}}>■ {currMonthLabel}</span>
-                </div>
-              </div>
-            </>
-          );
-        })()}
-      </div>
-    )}
-    
-    {activeView==="activity"&&(
-      <div className="g2" style={{gap:18}}>
-        {/* Activity-wise P&L - use unique activities from transactions */}
-        {(() => {
-          const uniqueActs = [...new Set([...acts, ...filteredTxns.map(t => t.businessActivity).filter(Boolean)])];
-          const actCards = uniqueActs.map(act=>{
-            const actInc=filteredTxns.filter(t=>t.type==="income"&&t.businessActivity===act).reduce((s,t)=>s+t.amount,0);
-            const actExp=filteredTxns.filter(t=>t.type==="expense"&&t.businessActivity===act).reduce((s,t)=>s+t.amount,0);
-            if(!actInc&&!actExp)return null;
-            const actCatMap={};filteredTxns.filter(t=>t.type==="expense"&&t.businessActivity===act).forEach(t=>{actCatMap[t.category]=(actCatMap[t.category]||0)+t.amount;});
-            const actCats=Object.entries(actCatMap).sort((a,b)=>b[1]-a[1]);
-            const actCatPieData=actCats.slice(0,8).map(([label,value])=>({label,value}));
-            
-            return(
-              <div key={act} className="card" data-testid={`activity-card-${act.replace(/\s+/g,'-').toLowerCase()}`}>
-                <div style={{fontWeight:600,fontSize:14,marginBottom:14,color:"#94a3b8",borderBottom:"1px solid #1e293b",paddingBottom:10,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                  <span>{act}</span>
-                  <span className="mono" style={{color:actInc-actExp>=0?"#34d399":"#f87171",fontSize:16}}>{fmt(actInc-actExp)}</span>
-                </div>
-                <div style={{display:"flex",gap:16,marginBottom:16}}>
-                  <div style={{flex:1}}>
-                    <div style={{fontSize:11,color:"#64748b",marginBottom:4}}>Income</div>
-                    <div className="mono" style={{fontSize:20,fontWeight:700,color:"#34d399"}}>{fmt(actInc)}</div>
-                  </div>
-                  <div style={{flex:1}}>
-                    <div style={{fontSize:11,color:"#64748b",marginBottom:4}}>Expenses</div>
-                    <div className="mono" style={{fontSize:20,fontWeight:700,color:"#f87171"}}>{fmt(actExp)}</div>
-                  </div>
-                </div>
-                {actCatPieData.length>0&&(
-                  <div>
-                    <div style={{fontSize:11,color:"#64748b",marginBottom:8}}>Expense Breakdown</div>
-                    <div style={{display:"flex",gap:16,alignItems:"flex-start"}}>
-                      <PieChart data={actCatPieData} size={120} onSliceClick={(s)=>{
-                        const txs=filteredTxns.filter(t=>t.type==="expense"&&t.businessActivity===act&&t.category===s.label);
-                        setDrillDown({title:`${act} - ${s.label}`,transactions:txs,color:"#818cf8"});
-                      }} chartId={`activity-${act.replace(/\s+/g,'-').toLowerCase()}`}/>
-                      <div style={{flex:1,maxHeight:150,overflowY:"auto"}}>
-                        {actCats.slice(0,6).map(([cat,amt],i)=>{
-                          const COLORS=["#f87171","#fb923c","#fbbf24","#a3e635","#34d399","#22d3ee","#818cf8","#c084fc"];
-                          return(
-                            <div key={cat} style={{display:"flex",alignItems:"center",gap:6,padding:"4px 0",fontSize:11,cursor:"pointer"}} onClick={()=>{
-                              const txs=filteredTxns.filter(t=>t.type==="expense"&&t.businessActivity===act&&t.category===cat);
-                              setDrillDown({title:`${act} - ${cat}`,transactions:txs,color:COLORS[i%COLORS.length]});
-                            }}>
-                              <div style={{width:8,height:8,borderRadius:2,background:COLORS[i%COLORS.length]}}/>
-                              <span style={{flex:1,color:"#94a3b8"}}>{cat}</span>
-                              <span className="mono" style={{color:"#e2e8f0"}}>{fmt(amt)}</span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            );
-          }).filter(Boolean);
-          
-          return actCards.length > 0 ? actCards : (
-            <div className="card" style={{gridColumn:"1/-1"}}>
-              <div style={{color:"#475569",fontSize:13,textAlign:"center",padding:20}}>No activity data found for selected filters.</div>
-            </div>
-          );
-        })()}
-      </div>
-    )}
-    
-    {activeView==="expenses"&&(
-      <div className="g2" style={{gap:18}}>
-        {/* Pie Chart - Category */}
-        <div className="card" data-testid="category-pie-card">
-          <div style={{fontWeight:600,fontSize:14,marginBottom:14,color:"#94a3b8",borderBottom:"1px solid #1e293b",paddingBottom:10}}>Expenses by Category</div>
-          <div style={{display:"flex",justifyContent:"center",marginBottom:16}}>
-            <PieChart data={catPieData} size={200} onSliceClick={(s)=>openCategoryDrill(s.label)} chartId="category"/>
-          </div>
-          <div style={{fontSize:11,color:"#64748b",textAlign:"center",marginBottom:12}}>Click a slice to drill down</div>
-          <div style={{maxHeight:200,overflowY:"auto"}}>
-            {cats.map(([cat,amt],i)=>{
-              const COLORS=["#f87171","#fb923c","#fbbf24","#a3e635","#34d399","#22d3ee","#818cf8","#c084fc","#f472b6","#94a3b8"];
-              const pct=filteredExp>0?((amt/filteredExp)*100).toFixed(1):"0";
-              return(
-                <div key={cat} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 0",cursor:"pointer",borderBottom:"1px solid #1a2438"}} onClick={()=>openCategoryDrill(cat)} data-testid={`category-row-${cat.replace(/\s+/g,'-').toLowerCase()}`}>
-                  <div style={{width:12,height:12,borderRadius:2,background:COLORS[i%COLORS.length],flexShrink:0}}/>
-                  <div style={{flex:1,fontSize:12,color:"#e2e8f0"}}>{cat}</div>
-                  <div className="mono" style={{fontSize:11,color:"#64748b"}}>{pct}%</div>
-                  <div className="mono" style={{fontSize:12,color:"#f87171",fontWeight:600}}>{fmt(amt)}</div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-        
-        {/* Activity Breakdown */}
-        <div className="card" data-testid="activity-pie-card">
-          <div style={{fontWeight:600,fontSize:14,marginBottom:14,color:"#94a3b8",borderBottom:"1px solid #1e293b",paddingBottom:10}}>Expenses by Activity</div>
-          <div style={{display:"flex",justifyContent:"center",marginBottom:16}}>
-            <PieChart data={actData} size={200} onSliceClick={(s)=>openActivityDrill(s.label)} chartId="activity"/>
-          </div>
-          <div style={{maxHeight:200,overflowY:"auto"}}>
-            {actData.map((d,i)=>{
-              const COLORS=["#f87171","#fb923c","#fbbf24","#a3e635","#34d399","#22d3ee","#818cf8","#c084fc","#f472b6","#94a3b8"];
-              const pct=filteredExp>0?((d.value/filteredExp)*100).toFixed(1):"0";
-              return(
-                <div key={d.label} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 0",cursor:"pointer",borderBottom:"1px solid #1a2438"}} onClick={()=>openActivityDrill(d.label)}>
-                  <div style={{width:12,height:12,borderRadius:2,background:COLORS[i%COLORS.length],flexShrink:0}}/>
-                  <div style={{flex:1,fontSize:12,color:"#e2e8f0"}}>{d.label}</div>
-                  <div className="mono" style={{fontSize:11,color:"#64748b"}}>{pct}%</div>
-                  <div className="mono" style={{fontSize:12,color:"#34d399",fontWeight:600}}>{fmt(d.value)}</div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-        
-        {/* Payment Method */}
-        <div className="card" style={{gridColumn:"1/-1"}} data-testid="payment-method-card">
-          <div style={{fontWeight:600,fontSize:14,marginBottom:14,color:"#94a3b8",borderBottom:"1px solid #1e293b",paddingBottom:10}}>Expenses by Payment Method</div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:12}}>
-            {payData.map((d,i)=>{
-              const COLORS=["#818cf8","#34d399","#f87171","#fb923c","#fbbf24","#22d3ee","#c084fc","#f472b6"];
-              const pct=filteredExp>0?((d.value/filteredExp)*100).toFixed(1):"0";
-              return(
-                <div key={d.label} style={{background:"#0a0d18",borderRadius:8,padding:12,border:"1px solid #1a2438"}}>
-                  <div style={{fontSize:11,color:"#64748b",marginBottom:4}}>{d.label}</div>
-                  <div className="mono" style={{fontSize:18,fontWeight:700,color:COLORS[i%COLORS.length]}}>{fmt(d.value)}</div>
-                  <div style={{fontSize:10,color:"#475569"}}>{pct}% of total</div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      </div>
-    )}
-    
-    {activeView==="vendors"&&(
-      <div className="g2" style={{gap:18}}>
-        {/* Vendor Pie Chart */}
-        <div className="card" data-testid="vendor-pie-card">
-          <div style={{fontWeight:600,fontSize:14,marginBottom:14,color:"#94a3b8",borderBottom:"1px solid #1e293b",paddingBottom:10}}>Top Vendors (Pie)</div>
-          <div style={{display:"flex",justifyContent:"center",marginBottom:16}}>
-            <PieChart data={vendorPieData} size={200} onSliceClick={(s)=>openVendorDrill(s.label)} chartId="vendor"/>
-          </div>
-          <div style={{fontSize:11,color:"#64748b",textAlign:"center"}}>Click a slice to see all transactions</div>
-        </div>
-        
-        {/* Vendor List */}
-        <div className="card" data-testid="vendor-list-card">
-          <div style={{fontWeight:600,fontSize:14,marginBottom:14,color:"#94a3b8",borderBottom:"1px solid #1e293b",paddingBottom:10}}>
-            All Vendors ({vendors.length})
-          </div>
-          <div style={{maxHeight:350,overflowY:"auto"}}>
-            {vendors.map(([vendor,amt],i)=>{
-              const count=expenses.filter(t=>(t.vendor||"").trim()===(vendor==="Unknown"?"":(vendor||"").trim())||(vendor==="Unknown"&&!(t.vendor||"").trim())).length;
-              const pct=filteredExp>0?((amt/filteredExp)*100).toFixed(1):"0";
-              return(
-                <div key={vendor} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 8px",cursor:"pointer",background:i%2===0?"#0a0d18":"transparent",borderRadius:6}} onClick={()=>openVendorDrill(vendor)}>
-                  <div style={{flex:1}}>
-                    <div style={{fontSize:13,fontWeight:500,color:"#e2e8f0"}}>{vendor}</div>
-                    <div style={{fontSize:11,color:"#64748b"}}>{count} transaction{count!==1?"s":""} · {pct}% of expenses</div>
-                  </div>
-                  <div className="mono" style={{fontSize:14,fontWeight:600,color:"#fb923c"}}>{fmt(amt)}</div>
-                </div>
-              );
-            })}
-            {vendors.length===0&&<div style={{color:"#475569",fontSize:13,textAlign:"center",padding:20}}>No vendor data yet.</div>}
-          </div>
-        </div>
-        
-        {/* Top Spenders */}
-        <div className="card" style={{gridColumn:"1/-1"}} data-testid="top-vendors-card">
-          <div style={{fontWeight:600,fontSize:14,marginBottom:14,color:"#94a3b8",borderBottom:"1px solid #1e293b",paddingBottom:10}}>Top 10 Vendors by Spend</div>
-          {vendors.slice(0,10).length>0?(
+      ))}
+    </div>}
+
+    {statementOnly.length>0&&<div className="card" style={{marginBottom:16}}>
+      <div className="sh" style={{marginBottom:10}}>In Statement But Not In Ledger</div>
+      {statementOnly.map(issue=>(
+        <div key={issue.id} style={{border:"1px solid #0d2f3f",borderRadius:10,padding:12,marginBottom:10,background:"#09131a"}}>
+          <div style={{display:"flex",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
             <div>
-              {vendors.slice(0,10).map(([vendor,amt],i)=>{
-                const pct=filteredExp>0?(amt/filteredExp)*100:0;
-                return(
-                  <div key={vendor} style={{marginBottom:10,cursor:"pointer"}} onClick={()=>openVendorDrill(vendor)}>
-                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
-                      <span style={{fontSize:12,color:"#e2e8f0"}}>{i+1}. {vendor}</span>
-                      <span className="mono" style={{fontSize:12,color:"#fb923c"}}>{fmt(amt)}</span>
-                    </div>
-                    <div style={{background:"#1e293b",borderRadius:4,height:8,overflow:"hidden"}}>
-                      <div style={{height:"100%",background:`linear-gradient(90deg, #fb923c, #f97316)`,borderRadius:4,width:`${pct}%`,transition:"width 0.3s"}}/>
-                    </div>
-                  </div>
-                );
-              })}
+              <div style={{fontWeight:600}}>{issue.statementRow.description}</div>
+              <div style={{fontSize:12,color:"#94a3b8",marginTop:4}}>
+                {fmtD(issue.statementRow.date)} · {fmt(issue.statementRow.amount)}
+                {currencyMetaLabel(issue.statementRow,baseCurrency)?` · ${currencyMetaLabel(issue.statementRow,baseCurrency)}`:""}
+              </div>
             </div>
-          ):(
-            <div style={{color:"#475569",fontSize:13,textAlign:"center",padding:20}}>No vendor data yet.</div>
-          )}
+            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+              <button className="btn sm pri" onClick={()=>setEditorRow(issue.statementRow)}>Edit & Queue</button>
+              <button className="btn sm" style={{background:"#052e16",color:"#34d399"}} onClick={()=>queueStatementRow(issue.statementRow)}>Queue As-Is</button>
+              <button className="btn sm ghost" onClick={()=>hideIssue(issue.id)}>Hide</button>
+            </div>
+          </div>
         </div>
-      </div>
-    )}
-    
-    {/* Drill-Down Modal */}
-    {drillDown&&<DrillDownModal title={drillDown.title} transactions={drillDown.transactions} color={drillDown.color} onClose={()=>setDrillDown(null)}/>}
+      ))}
+    </div>}
+
+    {ledgerOnly.length>0&&<div className="card" style={{marginBottom:16}}>
+      <div className="sh" style={{marginBottom:10}}>In Ledger But Not In Statement</div>
+      {ledgerOnly.map(issue=>(
+        <div key={issue.id} style={{border:"1px solid #3f1010",borderRadius:10,padding:12,marginBottom:10,background:"#150505"}}>
+          <div style={{display:"flex",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
+            <div>
+              <div style={{fontWeight:600}}>{issue.ledgerTx.description||issue.ledgerTx.category}</div>
+              <div style={{fontSize:12,color:"#94a3b8",marginTop:4}}>
+                {fmtD(issue.ledgerTx.date)} · {fmt(issue.ledgerTx.amount)}
+                {currencyMetaLabel(issue.ledgerTx,baseCurrency)?` · ${currencyMetaLabel(issue.ledgerTx,baseCurrency)}`:""}
+              </div>
+            </div>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+              <button className="btn sm ghost" onClick={()=>onEditLedger?.(issue.ledgerTx)}>Edit Ledger Entry</button>
+              <button className="btn sm ghost" onClick={()=>hideIssue(issue.id)}>Hide</button>
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>}
+
+    {matched.length>0&&<div className="card">
+      <div className="sh" style={{marginBottom:10}}>Matched Transactions</div>
+      {matched.slice(0,30).map(pair=>(
+        <div key={pair.id} style={{display:"flex",justifyContent:"space-between",gap:10,padding:"8px 0",borderBottom:"1px solid #1e293b",fontSize:12}}>
+          <span style={{color:"#94a3b8"}}>{fmtD(pair.statementRow.date)} · {pair.statementRow.description}</span>
+          <span className="mono" style={{color:"#34d399"}}>{fmt(pair.statementRow.amount)}</span>
+        </div>
+      ))}
+      {matched.length>30&&<div style={{fontSize:11,color:"#64748b",marginTop:8}}>Showing first 30 matched rows.</div>}
+    </div>}
+
+    {editorRow&&<ReconciliationIssueEditorModal account={account} row={editorRow} acts={acts} cats={cats} onClose={()=>setEditorRow(null)} onSave={(nextRow)=>{queueStatementRow(nextRow);setEditorRow(null);}}/>}
   </div>);
 }
 
-// ── RECURRING EXPENSES TAB ──────────────────────────────────────────────────────
-function RecurringTab({txns,setTxns}){
-  const[showAdd,setShowAdd]=useState(false);
-  const[editItem,setEditItem]=useState(null);
-  const[newRecurring,setNewRecurring]=useState({vendor:"",amount:0,category:"",recurrenceType:"monthly",nextDueDate:"",description:"",businessActivity:"Personal"});
-  
-  // Get all recurring transactions
-  const recurringTxns=txns.filter(t=>t.isRecurring);
-  
-  // Auto-detect recurring patterns from transaction history
-  const detectRecurring=()=>{
-    const vendorGroups={};
-    txns.filter(t=>t.type==="expense").forEach(t=>{
-      const v=(t.vendor||"").toLowerCase().trim();
-      if(!v)return;
-      if(!vendorGroups[v])vendorGroups[v]=[];
-      vendorGroups[v].push(t);
+// ── REPORTS ───────────────────────────────────────────────────────────────────
+function ReportsTab({txns,acts,totInc,totExp}){
+  const dr=txns.filter(t=>t.type==="expense"&&t.businessActivity==="Personal");
+  const drT=dr.reduce((s,t)=>s+t.amount,0);
+  const catMap={};txns.filter(t=>t.type==="expense").forEach(t=>{catMap[t.category]=(catMap[t.category]||0)+t.amount;});
+  const cats=Object.entries(catMap).sort((a,b)=>b[1]-a[1]);
+  const maxC=cats[0]?.[1]||1;
+  const vendorMap={};
+  txns
+    .filter(t=>t.type==="expense"&&isVendorTracked(t)&&String(t.vendor||"").trim())
+    .forEach(t=>{
+      const key=String(t.vendor||"").trim();
+      vendorMap[key]=(vendorMap[key]||0)+Number(t.amount||0);
     });
-    
-    const detected=[];
-    Object.entries(vendorGroups).forEach(([vendor,vTxns])=>{
-      if(vTxns.length<2)return;
-      const amounts=vTxns.map(t=>t.amount);
-      const avgAmount=amounts.reduce((s,a)=>s+a,0)/amounts.length;
-      const amountVariance=Math.max(...amounts)-Math.min(...amounts);
-      
-      // If amounts are relatively consistent (within 20%)
-      if(amountVariance<avgAmount*0.2){
-        const dates=vTxns.map(t=>new Date(t.date).getTime()).sort((a,b)=>a-b);
-        const gaps=[];
-        for(let i=1;i<dates.length;i++)gaps.push((dates[i]-dates[i-1])/(1000*60*60*24));
-        const avgGap=gaps.length?gaps.reduce((s,g)=>s+g,0)/gaps.length:0;
-        
-        let recType="one-time";
-        if(avgGap>=25&&avgGap<=35)recType="monthly";
-        else if(avgGap>=85&&avgGap<=100)recType="quarterly";
-        else if(avgGap>=350&&avgGap<=380)recType="yearly";
-        
-        if(recType!=="one-time"){
-          detected.push({
-            vendor:vTxns[0].vendor,
-            amount:Math.round(avgAmount),
-            category:vTxns[0].category,
-            businessActivity:vTxns[0].businessActivity,
-            recurrenceType:recType,
-            lastDate:vTxns.sort((a,b)=>b.date.localeCompare(a.date))[0].date,
-            confidence:"high",
-            txCount:vTxns.length,
-          });
-        }
-      }
-    });
-    
-    // Also check known recurring vendors
-    const knownRecurring=RECURRING_VENDORS;
-    txns.filter(t=>t.type==="expense"&&!t.isRecurring).forEach(t=>{
-      const vLower=(t.vendor||"").toLowerCase();
-      if(knownRecurring.some(kr=>vLower.includes(kr))&&!detected.find(d=>d.vendor?.toLowerCase()===vLower)){
-        detected.push({
-          vendor:t.vendor,
-          amount:t.amount,
-          category:t.category,
-          businessActivity:t.businessActivity,
-          recurrenceType:"monthly",
-          lastDate:t.date,
-          confidence:"medium",
-          txCount:1,
-          source:"known_vendor",
-        });
-      }
-    });
-    
-    return detected.sort((a,b)=>b.amount-a.amount);
-  };
-  
-  const detectedRecurring=detectRecurring();
-  const untaggedRecurring=detectedRecurring.filter(d=>!recurringTxns.find(r=>r.vendor?.toLowerCase()===d.vendor?.toLowerCase()));
-  
-  // Mark transaction as recurring
-  const markAsRecurring=(tx,recType)=>{
-    const nextDue=calculateNextDueDate(tx.date||tx.lastDate,recType);
-    setTxns(prev=>prev.map(t=>{
-      if((t.vendor||"").toLowerCase()===(tx.vendor||"").toLowerCase()&&t.type==="expense"){
-        return{...t,isRecurring:true,recurrenceType:recType,nextDueDate:nextDue};
-      }
-      return t;
-    }));
-  };
-  
-  // Group recurring by type
-  const monthlyRec=recurringTxns.filter(t=>t.recurrenceType==="monthly");
-  const quarterlyRec=recurringTxns.filter(t=>t.recurrenceType==="quarterly");
-  const yearlyRec=recurringTxns.filter(t=>t.recurrenceType==="yearly");
-  
-  const monthlyTotal=monthlyRec.reduce((s,t)=>s+t.amount,0);
-  const quarterlyTotal=quarterlyRec.reduce((s,t)=>s+t.amount,0)/3;
-  const yearlyTotal=yearlyRec.reduce((s,t)=>s+t.amount,0)/12;
-  const estimatedMonthly=monthlyTotal+quarterlyTotal+yearlyTotal;
-  
-  return(
-    <div data-testid="recurring-tab">
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
-        <h2 className="h2" style={{marginBottom:0}}>Recurring Expenses</h2>
-        <button className="btn pri sm" onClick={()=>setShowAdd(true)} data-testid="add-recurring-btn">+ Add Recurring</button>
-      </div>
-      
-      {/* Summary Cards */}
-      <div className="g2" style={{marginBottom:20}}>
-        <div className="card" style={{textAlign:"center"}} data-testid="monthly-total-card">
-          <div style={{fontSize:11,color:"#64748b",marginBottom:6}}>Estimated Monthly Outflow</div>
-          <div className="mono" style={{fontSize:28,fontWeight:700,color:"#f87171"}}>{fmt(estimatedMonthly)}</div>
-          <div style={{fontSize:10,color:"#475569",marginTop:4}}>Based on {recurringTxns.length} recurring items</div>
-        </div>
-        <div className="card" data-testid="recurring-breakdown-card">
-          <div style={{fontSize:11,color:"#64748b",marginBottom:10}}>Breakdown by Frequency</div>
-          <R style={{marginBottom:6}}><span style={{color:"#94a3b8"}}>Monthly ({monthlyRec.length})</span><span className="mono" style={{color:"#f87171"}}>{fmt(monthlyTotal)}/mo</span></R>
-          <R style={{marginBottom:6}}><span style={{color:"#94a3b8"}}>Quarterly ({quarterlyRec.length})</span><span className="mono" style={{color:"#fb923c"}}>{fmt(quarterlyRec.reduce((s,t)=>s+t.amount,0))}/qtr</span></R>
-          <R><span style={{color:"#94a3b8"}}>Yearly ({yearlyRec.length})</span><span className="mono" style={{color:"#fbbf24"}}>{fmt(yearlyRec.reduce((s,t)=>s+t.amount,0))}/yr</span></R>
+  const vendors=Object.entries(vendorMap).sort((a,b)=>b[1]-a[1]);
+  const maxV=vendors[0]?.[1]||1;
+  const emailTxns=txns.filter(t=>t.source==="email");
+  return(<div>
+    <h2 className="h2" style={{marginBottom:18}}>Reports</h2>
+    <div className="g2" style={{gap:18}}>
+      <div className="card">
+        <div style={{fontWeight:600,fontSize:14,marginBottom:14,color:"#94a3b8",borderBottom:"1px solid #1e293b",paddingBottom:10}}>Profit & Loss</div>
+        {acts.filter(a=>a!=="Personal").map(a=>{const inc=txns.filter(t=>t.type==="income"&&t.businessActivity===a).reduce((s,t)=>s+t.amount,0);const exp=txns.filter(t=>t.type==="expense"&&t.businessActivity===a).reduce((s,t)=>s+t.amount,0);if(!inc&&!exp)return null;return<div key={a} style={{marginBottom:8}}><div style={{fontSize:11,color:"#64748b",fontWeight:600}}>{a}</div><div style={{display:"flex",gap:12,paddingLeft:8,fontSize:12}}><span className="mono" style={{color:"#34d399"}}>Inc {fmt(inc)}</span><span className="mono" style={{color:"#f87171"}}>Exp {fmt(exp)}</span><span className="mono" style={{color:inc-exp>=0?"#818cf8":"#f59e0b"}}>Net {fmt(inc-exp)}</span></div></div>;})}
+        <div style={{borderTop:"1px solid #1e293b",marginTop:10,paddingTop:10}}>
+          <R style={{marginBottom:4}}><span style={{fontWeight:600,fontSize:13}}>Total Income</span><span className="mono" style={{color:"#34d399"}}>{fmt(totInc)}</span></R>
+          <R style={{marginBottom:4}}><span style={{fontWeight:600,fontSize:13}}>Total Expenses</span><span className="mono" style={{color:"#f87171"}}>{fmt(totExp)}</span></R>
+          <div style={{background:totInc-totExp>=0?"#052e16":"#450a0a",borderRadius:8,padding:"10px 12px",marginTop:8,display:"flex",justifyContent:"space-between",fontWeight:700}}>
+            <span>Net Profit / Loss</span><span className="mono" style={{color:totInc-totExp>=0?"#34d399":"#f87171"}}>{fmt(totInc-totExp)}</span>
+          </div>
         </div>
       </div>
-      
-      {/* Auto-Detected Recurring */}
-      {untaggedRecurring.length>0&&(
-        <div className="card" style={{marginBottom:20,border:"1px solid #422006"}} data-testid="detected-recurring-card">
-          <div style={{fontWeight:600,fontSize:14,marginBottom:14,color:"#fbbf24",borderBottom:"1px solid #1e293b",paddingBottom:10}}>
-            🔍 Detected Recurring Expenses ({untaggedRecurring.length})
-          </div>
-          <div style={{fontSize:12,color:"#94a3b8",marginBottom:12}}>These expenses appear to be recurring based on your transaction history. Click to confirm.</div>
-          <div style={{maxHeight:250,overflowY:"auto"}}>
-            {untaggedRecurring.map((d,i)=>(
-              <div key={i} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 8px",background:i%2===0?"#0a0d18":"transparent",borderRadius:6}}>
-                <div style={{flex:1}}>
-                  <div style={{fontSize:13,fontWeight:500,color:"#e2e8f0"}}>{d.vendor}</div>
-                  <div style={{fontSize:11,color:"#64748b"}}>{d.category} · {d.businessActivity} · {d.txCount} transaction{d.txCount>1?"s":""}</div>
-                </div>
-                <div className="mono" style={{fontSize:14,fontWeight:600,color:"#f87171"}}>{fmt(d.amount)}</div>
-                <select 
-                  className="inp" 
-                  style={{padding:"4px 8px",fontSize:11,width:100}} 
-                  defaultValue={d.recurrenceType}
-                  onChange={e=>markAsRecurring(d,e.target.value)}
-                  data-testid={`mark-recurring-${i}`}
-                >
-                  <option value="">Mark as...</option>
-                  <option value="monthly">Monthly</option>
-                  <option value="quarterly">Quarterly</option>
-                  <option value="yearly">Yearly</option>
-                </select>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-      
-      {/* Confirmed Recurring List */}
-      <div className="card" data-testid="confirmed-recurring-card">
-        <div style={{fontWeight:600,fontSize:14,marginBottom:14,color:"#94a3b8",borderBottom:"1px solid #1e293b",paddingBottom:10}}>
-          Confirmed Recurring ({recurringTxns.length})
-        </div>
-        {recurringTxns.length>0?(
-          <div style={{maxHeight:400,overflowY:"auto"}}>
-            {recurringTxns.sort((a,b)=>(a.nextDueDate||"").localeCompare(b.nextDueDate||"")).map((tx,i)=>{
-              const isUpcoming=tx.nextDueDate&&tx.nextDueDate<=new Date(Date.now()+7*24*60*60*1000).toISOString().slice(0,10);
-              return(
-                <div key={tx.id||i} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 8px",background:i%2===0?"#0a0d18":"transparent",borderRadius:6,borderLeft:isUpcoming?"3px solid #f87171":"none"}}>
-                  <div style={{flex:1}}>
-                    <div style={{fontSize:13,fontWeight:500,color:"#e2e8f0"}}>{tx.vendor||tx.description||tx.category}</div>
-                    <div style={{fontSize:11,color:"#64748b"}}>
-                      {tx.category} · {tx.recurrenceType} · 
-                      {tx.nextDueDate&&<span style={{color:isUpcoming?"#f87171":"#818cf8"}}> Next: {fmtD(tx.nextDueDate)}</span>}
-                    </div>
-                  </div>
-                  <div className="mono" style={{fontSize:14,fontWeight:600,color:"#f87171"}}>{fmt(tx.amount)}</div>
-                  <button className="btn ghost sm" onClick={()=>{
-                    setTxns(prev=>prev.map(t=>t.id===tx.id?{...t,isRecurring:false,recurrenceType:"one-time",nextDueDate:null}:t));
-                  }} data-testid={`remove-recurring-${i}`}>✕</button>
-                </div>
-              );
-            })}
-          </div>
-        ):(
-          <div style={{color:"#475569",fontSize:13,textAlign:"center",padding:20}}>
-            No recurring expenses confirmed yet. Check the auto-detected section above or add manually.
-          </div>
-        )}
+      <div className="card">
+        <div style={{fontWeight:600,fontSize:14,marginBottom:14,color:"#94a3b8",borderBottom:"1px solid #1e293b",paddingBottom:10}}>Personal Drawings</div>
+        <div className="mono" style={{fontSize:28,fontWeight:700,color:"#c084fc",marginBottom:14}}>{fmt(drT)}</div>
+        {Object.entries(dr.reduce((m,t)=>{m[t.category]=(m[t.category]||0)+t.amount;return m;},{})).sort((a,b)=>b[1]-a[1]).map(([cat,amt])=><R key={cat} style={{padding:"3px 0",fontSize:13}}><span style={{color:"#94a3b8"}}>{cat}</span><span className="mono" style={{color:"#c084fc"}}>{fmt(amt)}</span></R>)}
+        {dr.length===0&&<div style={{color:"#475569",fontSize:13}}>No drawings yet.</div>}
+      </div>
+      <div className="card">
+        <div style={{fontWeight:600,fontSize:14,marginBottom:14,color:"#94a3b8",borderBottom:"1px solid #1e293b",paddingBottom:10}}>Email Auto-Imports</div>
+        <div className="mono" style={{fontSize:28,fontWeight:700,color:"#86efac",marginBottom:8}}>{emailTxns.length}</div>
+        <div style={{fontSize:13,color:"#64748b",marginBottom:10}}>transactions from email</div>
+        <R style={{fontSize:13}}><span style={{color:"#94a3b8"}}>Expenses</span><span className="mono" style={{color:"#f87171"}}>{fmt(emailTxns.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amount,0))}</span></R>
+        <R style={{fontSize:13}}><span style={{color:"#94a3b8"}}>Income</span><span className="mono" style={{color:"#34d399"}}>{fmt(emailTxns.filter(t=>t.type==="income").reduce((s,t)=>s+t.amount,0))}</span></R>
+      </div>
+      <div className="card" style={{gridColumn:"1/-1"}}>
+        <div style={{fontWeight:600,fontSize:14,marginBottom:14,color:"#94a3b8",borderBottom:"1px solid #1e293b",paddingBottom:10}}>Expenses by Category</div>
+        {cats.map(([cat,amt])=><div key={cat} style={{marginBottom:8}}><R style={{marginBottom:3}}><span style={{fontSize:12,color:"#94a3b8"}}>{cat}</span><span className="mono" style={{fontSize:12,color:"#f87171"}}>{fmt(amt)}</span></R><div style={{background:"#1e293b",borderRadius:3,height:5,overflow:"hidden"}}><div style={{height:"100%",background:"#f87171",borderRadius:3,width:`${(amt/maxC)*100}%`}}/></div></div>)}
+        {cats.length===0&&<div style={{color:"#475569",fontSize:13}}>No expenses yet.</div>}
+      </div>
+      <div className="card" style={{gridColumn:"1/-1"}}>
+        <div style={{fontWeight:600,fontSize:14,marginBottom:14,color:"#94a3b8",borderBottom:"1px solid #1e293b",paddingBottom:10}}>Expenses by Vendor</div>
+        {vendors.map(([vendor,amt])=><div key={vendor} style={{marginBottom:8}}><R style={{marginBottom:3}}><span style={{fontSize:12,color:"#94a3b8"}}>{vendor}</span><span className="mono" style={{fontSize:12,color:"#f59e0b"}}>{fmt(amt)}</span></R><div style={{background:"#1e293b",borderRadius:3,height:5,overflow:"hidden"}}><div style={{height:"100%",background:"#f59e0b",borderRadius:3,width:`${(amt/maxV)*100}%`}}/></div></div>)}
+        {vendors.length===0&&<div style={{color:"#475569",fontSize:13}}>No tracked vendor expenses yet.</div>}
       </div>
     </div>
-  );
-}
-
-// ── FUTURE CASHFLOW TAB ─────────────────────────────────────────────────────────
-function CashflowTab({txns}){
-  const[months,setMonths]=useState(12);
-  const[showDetails,setShowDetails]=useState(null);
-  
-  // Get recurring expenses
-  const recurringExpenses=txns.filter(t=>t.isRecurring&&t.type==="expense");
-  const{projections,monthlyTotals}=generateFutureCashflow(recurringExpenses,months);
-  
-  // Generate month labels for next N months
-  const monthLabels=[];
-  const now=new Date();
-  for(let i=0;i<months;i++){
-    const d=new Date(now.getFullYear(),now.getMonth()+i,1);
-    monthLabels.push({
-      key:d.toISOString().slice(0,7),
-      label:d.toLocaleDateString("en-IN",{month:"short",year:"2-digit"}),
-      fullLabel:d.toLocaleDateString("en-IN",{month:"long",year:"numeric"}),
-    });
-  }
-  
-  // Calculate totals
-  const totalProjected=Object.values(monthlyTotals).reduce((s,v)=>s+v,0);
-  const avgMonthly=months>0?totalProjected/months:0;
-  const maxMonth=Math.max(...Object.values(monthlyTotals),1);
-  
-  // Group projections by vendor for summary
-  const byVendor={};
-  projections.forEach(p=>{
-    const v=p.vendor||p.description||p.category;
-    if(!byVendor[v])byVendor[v]={total:0,count:0,recurrence:p.recurrenceType,amount:p.amount};
-    byVendor[v].total+=p.amount;
-    byVendor[v].count++;
-  });
-  const vendorSummary=Object.entries(byVendor).sort((a,b)=>b[1].total-a[1].total);
-  
-  return(
-    <div data-testid="cashflow-tab">
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18,flexWrap:"wrap",gap:12}}>
-        <h2 className="h2" style={{marginBottom:0}}>Future Cashflow Projection</h2>
-        <div style={{display:"flex",alignItems:"center",gap:8}}>
-          <label style={{fontSize:12,color:"#94a3b8"}}>Forecast:</label>
-          <select value={months} onChange={e=>setMonths(Number(e.target.value))} className="inp" style={{padding:"6px 10px",fontSize:12}} data-testid="forecast-months-select">
-            <option value={3}>3 Months</option>
-            <option value={6}>6 Months</option>
-            <option value={12}>12 Months</option>
-            <option value={24}>24 Months</option>
-          </select>
-        </div>
-      </div>
-      
-      {recurringExpenses.length===0?(
-        <div className="card" style={{textAlign:"center",padding:40}}>
-          <div style={{fontSize:48,marginBottom:16}}>📊</div>
-          <div style={{fontSize:16,fontWeight:600,color:"#e2e8f0",marginBottom:8}}>No Recurring Expenses Found</div>
-          <div style={{fontSize:13,color:"#64748b",maxWidth:400,margin:"0 auto"}}>
-            To see future cashflow projections, first mark some expenses as recurring in the "Recurring" tab, 
-            or sync your emails to let AI automatically detect subscriptions and recurring payments.
-          </div>
-        </div>
-      ):(
-        <>
-          {/* Summary Cards */}
-          <div className="g2" style={{marginBottom:20}}>
-            <div className="card" style={{textAlign:"center"}} data-testid="total-projected-card">
-              <div style={{fontSize:11,color:"#64748b",marginBottom:6}}>Total Projected ({months} months)</div>
-              <div className="mono" style={{fontSize:28,fontWeight:700,color:"#f87171"}}>{fmt(totalProjected)}</div>
-              <div style={{fontSize:10,color:"#475569",marginTop:4}}>{projections.length} scheduled payments</div>
-            </div>
-            <div className="card" style={{textAlign:"center"}} data-testid="avg-monthly-card">
-              <div style={{fontSize:11,color:"#64748b",marginBottom:6}}>Average Monthly Outflow</div>
-              <div className="mono" style={{fontSize:28,fontWeight:700,color:"#fb923c"}}>{fmt(avgMonthly)}</div>
-              <div style={{fontSize:10,color:"#475569",marginTop:4}}>Based on {recurringExpenses.length} recurring items</div>
-            </div>
-          </div>
-          
-          {/* Monthly Breakdown Chart */}
-          <div className="card" style={{marginBottom:20}} data-testid="monthly-projection-chart">
-            <div style={{fontWeight:600,fontSize:14,marginBottom:14,color:"#94a3b8",borderBottom:"1px solid #1e293b",paddingBottom:10}}>
-              Monthly Projection
-            </div>
-            <div style={{display:"flex",alignItems:"flex-end",gap:8,height:180,padding:"0 8px",overflowX:"auto"}}>
-              {monthLabels.map((m,i)=>{
-                const val=monthlyTotals[m.key]||0;
-                const h=maxMonth>0?Math.max(4,(val/maxMonth)*140):4;
-                const isCurrentMonth=m.key===now.toISOString().slice(0,7);
-                return(
-                  <div key={m.key} style={{minWidth:50,display:"flex",flexDirection:"column",alignItems:"center",cursor:"pointer"}} onClick={()=>setShowDetails(m.key)} data-testid={`month-bar-${m.key}`}>
-                    <div className="mono" style={{fontSize:9,color:"#64748b",marginBottom:4,whiteSpace:"nowrap"}}>{val>0?fmt(val):"-"}</div>
-                    <div style={{width:36,height:h,background:isCurrentMonth?"linear-gradient(180deg, #818cf8, #6366f1)":"linear-gradient(180deg, #f87171, #dc2626)",borderRadius:"4px 4px 0 0",transition:"all 0.2s"}}/>
-                    <div style={{fontSize:10,color:isCurrentMonth?"#818cf8":"#94a3b8",marginTop:6,fontWeight:isCurrentMonth?600:400}}>{m.label}</div>
-                  </div>
-                );
-              })}
-            </div>
-            <div style={{fontSize:11,color:"#64748b",textAlign:"center",marginTop:12}}>Click on a month to see detailed breakdown</div>
-          </div>
-          
-          {/* Top Recurring by Projected Total */}
-          <div className="card" data-testid="top-recurring-projected">
-            <div style={{fontWeight:600,fontSize:14,marginBottom:14,color:"#94a3b8",borderBottom:"1px solid #1e293b",paddingBottom:10}}>
-              Projected Expenses by Vendor ({months} months)
-            </div>
-            <div style={{maxHeight:300,overflowY:"auto"}}>
-              {vendorSummary.map(([vendor,data],i)=>{
-                const pct=totalProjected>0?(data.total/totalProjected)*100:0;
-                return(
-                  <div key={vendor} style={{marginBottom:12}}>
-                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
-                      <div>
-                        <span style={{fontSize:12,color:"#e2e8f0"}}>{vendor}</span>
-                        <span style={{fontSize:10,color:"#64748b",marginLeft:8}}>{data.recurrence} · {data.count} payments</span>
-                      </div>
-                      <span className="mono" style={{fontSize:12,color:"#f87171"}}>{fmt(data.total)}</span>
-                    </div>
-                    <div style={{background:"#1e293b",borderRadius:4,height:6,overflow:"hidden"}}>
-                      <div style={{height:"100%",background:"linear-gradient(90deg, #f87171, #dc2626)",borderRadius:4,width:`${pct}%`,transition:"width 0.3s"}}/>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-          
-          {/* Month Detail Modal */}
-          {showDetails&&(
-            <div className="overlay" onClick={()=>setShowDetails(null)}>
-              <div className="modal" style={{maxWidth:600}} onClick={e=>e.stopPropagation()} data-testid="month-detail-modal">
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
-                  <div>
-                    <h3 style={{fontSize:18,fontWeight:700,color:"#f1f5f9",margin:0}}>
-                      {monthLabels.find(m=>m.key===showDetails)?.fullLabel||showDetails}
-                    </h3>
-                    <div style={{fontSize:13,color:"#64748b",marginTop:4}}>
-                      Total: <span className="mono" style={{color:"#f87171"}}>{fmt(monthlyTotals[showDetails]||0)}</span>
-                    </div>
-                  </div>
-                  <button className="btn ghost sm" onClick={()=>setShowDetails(null)}>✕ Close</button>
-                </div>
-                <div style={{maxHeight:"60vh",overflowY:"auto"}}>
-                  {projections.filter(p=>p.monthKey===showDetails).sort((a,b)=>a.projectedDate.localeCompare(b.projectedDate)).map((p,i)=>(
-                    <div key={i} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 8px",background:i%2===0?"#0a0d18":"transparent",borderRadius:6}}>
-                      <div style={{width:70,fontSize:11,color:"#64748b"}}>{fmtD(p.projectedDate)}</div>
-                      <div style={{flex:1}}>
-                        <div style={{fontSize:13,fontWeight:500,color:"#e2e8f0"}}>{p.vendor||p.description||p.category}</div>
-                        <div style={{fontSize:11,color:"#64748b"}}>{p.category} · {p.recurrenceType}</div>
-                      </div>
-                      <div className="mono" style={{fontSize:14,fontWeight:600,color:"#f87171"}}>{fmt(p.amount)}</div>
-                    </div>
-                  ))}
-                  {projections.filter(p=>p.monthKey===showDetails).length===0&&(
-                    <div style={{color:"#475569",textAlign:"center",padding:20}}>No projected expenses for this month.</div>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-        </>
-      )}
-    </div>
-  );
+  </div>);
 }
 
 // ── CLOUD BACKUP TAB (OneDrive) ───────────────────────────────────────────────
-function CloudTab({sbCfg,setSbCfg,syncStatus,lastSync,onSync,onLoad,txns,setTxns,inbox,setInbox,accs,setAccs,acts,setActs,cats,setCats,smsNums,setSmsNums,emails,setEmails}){
+function CloudTab({sbCfg,setSbCfg,syncStatus,lastSync,onSync,onLoad,txns,setTxns,inbox,setInbox,accs,setAccs,acts,setActs,cats,setCats,smsNums,setSmsNums,emails,setEmails,addDiagnostic=()=>{}}){
   const[clientId,setClientId]=useState(sbCfg.clientId||"");
   const[connecting,setConnecting]=useState(false);
   const[showGuide,setShowGuide]=useState(false);
@@ -4897,20 +5276,25 @@ function CloudTab({sbCfg,setSbCfg,syncStatus,lastSync,onSync,onLoad,txns,setTxns
   const connect=async()=>{
     const resolvedClientId=sanitizeMsClientId((clientId||sbCfg.clientId||DEFAULT_MICROSOFT_CLIENT_ID||"").trim());
     if(!resolvedClientId){
+      addDiagnostic({level:"warn",scope:"cloud",event:"onedrive_connect_missing_client_id",message:"OneDrive connect was attempted without a Microsoft client ID."});
       alert("Microsoft connector is not configured. Paste your own Azure Application (client) ID here once.");
       return;
     }
     // Persist client ID even if auth popup fails, so Email->Connect Outlook can still use it.
-    setSbCfg(p=>({...p,clientId:resolvedClientId}));
+    setSbCfg(p=>({...p,clientId:resolvedClientId,lastError:"",lastErrorAt:""}));
     setConnecting(true);
+    addDiagnostic({level:"info",scope:"cloud",event:"onedrive_connect_started",message:"Starting OneDrive OAuth flow."});
     try{
       const account=await odLogin(resolvedClientId);
       const profile=await odGetProfile(resolvedClientId);
       setClientId(resolvedClientId);
-      setSbCfg({clientId:resolvedClientId,email:profile.mail||profile.userPrincipalName,name:profile.displayName,enabled:true,needsReconnect:false});
+      setSbCfg({clientId:resolvedClientId,email:profile.mail||profile.userPrincipalName,name:profile.displayName,enabled:true,needsReconnect:false,lastError:"",lastErrorAt:""});
+      addDiagnostic({level:"info",scope:"cloud",event:"onedrive_connect_success",message:"OneDrive account connected.",context:{email:profile.mail||profile.userPrincipalName||""}});
       // Attempt first sync
       await onSync({});
     }catch(e){
+      setSbCfg(p=>({...p,lastError:redactSensitiveText(String(e?.message||"Connection failed.")).slice(0,180),lastErrorAt:new Date().toISOString()}));
+      addDiagnostic({level:"error",scope:"cloud",event:"onedrive_connect_failed",message:e?.message||"OneDrive connection failed.",context:{error:e}});
       alert("Connection failed: "+e.message);
     }
     setConnecting(false);
@@ -4919,14 +5303,22 @@ function CloudTab({sbCfg,setSbCfg,syncStatus,lastSync,onSync,onLoad,txns,setTxns
   const disconnect=async()=>{
     if(!window.confirm("Disconnect OneDrive? Your data stays in OneDrive — you can reconnect anytime."))return;
     try{if(sbCfg.clientId)await odSignOut(sbCfg.clientId);}catch{}
-    setSbCfg({clientId:"",email:"",name:"",enabled:false});
+    setSbCfg({clientId:"",email:"",name:"",enabled:false,needsReconnect:false,lastError:"",lastErrorAt:""});
+    addDiagnostic({level:"info",scope:"cloud",event:"onedrive_disconnect",message:"OneDrive was disconnected."});
   };
 
   const loadVersionHistory=async()=>{
     if(!sbCfg.clientId)return;
     setLoadingVer(true);
-    try{const v=await odListVersions(sbCfg.clientId);setVersions(v);}
-    catch{setVersions([]);}
+    try{
+      const v=await odListVersions(sbCfg.clientId);
+      setVersions(v);
+      addDiagnostic({level:"info",scope:"cloud",event:"onedrive_version_history_loaded",message:`Loaded ${v.length} OneDrive file version(s).`,context:{versions:v.length}});
+    }
+    catch(e){
+      setVersions([]);
+      addDiagnostic({level:"warn",scope:"cloud",event:"onedrive_version_history_failed",message:e?.message||"Unable to load OneDrive version history.",context:{error:e}});
+    }
     setLoadingVer(false);
   };
 
@@ -4935,12 +5327,21 @@ function CloudTab({sbCfg,setSbCfg,syncStatus,lastSync,onSync,onLoad,txns,setTxns
     const blob=new Blob([JSON.stringify(payload,null,2)],{type:"application/json"});
     const a=document.createElement("a");a.href=URL.createObjectURL(blob);
     a.download=`ledgerai-backup-${today()}.json`;a.click();
+    addDiagnostic({level:"info",scope:"backup",event:"manual_backup_exported",message:"Manual JSON backup was downloaded.",context:{txns:txns.length,inbox:inbox.length,accounts:accs.length}});
   };
 
   const importJSON=(e)=>{
     const file=e.target.files?.[0];if(!file)return;
     const reader=new FileReader();
-    reader.onload=ev=>{try{setExportPrev(JSON.parse(ev.target.result));}catch{alert("Invalid backup file.");}};
+    reader.onload=ev=>{
+      try{
+        setExportPrev(JSON.parse(ev.target.result));
+        addDiagnostic({level:"info",scope:"backup",event:"manual_backup_selected",message:"Backup file selected for restore review.",context:{file:file.name||"",size:file.size||0}});
+      }catch{
+        addDiagnostic({level:"warn",scope:"backup",event:"manual_backup_invalid",message:"Selected backup file was invalid JSON.",context:{file:file.name||"",size:file.size||0}});
+        alert("Invalid backup file.");
+      }
+    };
     reader.readAsText(file);e.target.value="";
   };
 
@@ -4952,8 +5353,9 @@ function CloudTab({sbCfg,setSbCfg,syncStatus,lastSync,onSync,onLoad,txns,setTxns
     if(exportPrev.acts)setActs(exportPrev.acts);
     if(exportPrev.cats)setCats(exportPrev.cats);
     if(exportPrev.smsNums)setSmsNums(exportPrev.smsNums);
-    if(exportPrev.emailAccounts)setEmails(exportPrev.emailAccounts.map(a=>({...a,token:undefined})));
+    if(exportPrev.emailAccounts)setEmails(prev=>mergeLoadedEmailsWithLocalTokens(exportPrev.emailAccounts,prev));
     setExportPrev(null);
+    addDiagnostic({level:"warn",scope:"backup",event:"manual_backup_restored",message:"Manual backup file restored into the app.",context:{txns:exportPrev.txns?.length||0,inbox:exportPrev.inbox?.length||0,accounts:exportPrev.accs?.length||0}});
     alert("✓ Restored from backup.");
   };
 
@@ -4988,6 +5390,11 @@ function CloudTab({sbCfg,setSbCfg,syncStatus,lastSync,onSync,onLoad,txns,setTxns
       {sbCfg.needsReconnect&&(
         <div style={{background:"#450a0a",border:"1px solid #f87171",borderRadius:10,padding:"12px 16px",marginBottom:16,fontSize:13,color:"#fca5a5"}}>
           ⚠ Microsoft token expired — click <b>Reconnect</b> to restore auto-sync.
+        </div>
+      )}
+      {sbCfg.lastError&&(
+        <div style={{background:"#1f0b12",border:"1px solid #7f1d1d",borderRadius:10,padding:"12px 16px",marginBottom:16,fontSize:12,color:"#fda4af"}}>
+          Last cloud issue{sbCfg.lastErrorAt?` · ${fmtDT(sbCfg.lastErrorAt)}`:""}: {sbCfg.lastError}
         </div>
       )}
 
@@ -5168,19 +5575,25 @@ function AzureGuideModal({onClose}){
   );
 }
 // ── SETTINGS ──────────────────────────────────────────────────────────────────
-function SettingsTab({acts,setActs,cats,setCats,backups,onBackupNow,onRestoreBackup,onFactoryReset,onRenameActivity}){
+function SettingsTab({acts,setActs,cats,setCats,backups,onBackupNow,onRestoreBackup,onFactoryReset,onRenameActivity,currencyCfg=defaultCurrencyCfg(),onSaveCurrencyCfg=async()=>({ok:true}),diagnostics=[],onClearDiagnostics=()=>{},buildSupportBundle=()=>null,addDiagnostic=()=>{}}){
   const[newAct,setNewAct]=useState("");const[selAct,setSelAct]=useState(acts[0]||"");
   const[newCN,setNewCN]=useState("");const[newCD,setNewCD]=useState("");
   const[aiLoad,setAiLoad]=useState(false);const[aiSug,setAiSug]=useState(null);
   const[resetOpen,setResetOpen]=useState(false);
   const[resetText,setResetText]=useState("");
   const[safetyStatus,setSafetyStatus]=useState("");
+  const[diagStatus,setDiagStatus]=useState("");
   const[restoreId,setRestoreId]=useState("");
-  const savedAICfg=LS.get("ledger_ai_cfg",{endpoint:"",secret:"",model:DEFAULT_AI_MODEL});
+  const savedAICfg=loadAICfg();
   const[aiEndpoint,setAiEndpoint]=useState(savedAICfg.endpoint||"");
   const[aiSecret,setAiSecret]=useState(savedAICfg.secret||"");
   const[aiModel,setAiModel]=useState(savedAICfg.model||DEFAULT_AI_MODEL);
   const[aiStatus,setAiStatus]=useState("");
+  const[selectedBaseCurrency,setSelectedBaseCurrency]=useState(normalizeCurrencyCode(currencyCfg?.baseCurrency||DEFAULT_BASE_CURRENCY,DEFAULT_BASE_CURRENCY));
+  const[currencyStatus,setCurrencyStatus]=useState("");
+  const[currencyBusy,setCurrencyBusy]=useState(false);
+  const diagCounts=summarizeDiagnostics(diagnostics);
+  const recentDiagnostics=[...(diagnostics||[])].slice(-18).reverse();
   const addAct=()=>{if(!newAct.trim())return;const n=newAct.trim();setActs(p=>[...p,n]);setCats(p=>({...p,[n]:[...NEW_ACTIVITY_DEFAULT_CATS]}));setNewAct("");};
   const renameAct=(act)=>{
     const next=window.prompt("Rename business activity",act);
@@ -5208,9 +5621,30 @@ function SettingsTab({acts,setActs,cats,setCats,backups,onBackupNow,onRestoreBac
     setAiLoad(false);
   };
   const addCat=n=>{if(!n||!selAct)return;setCats(p=>({...p,[selAct]:[...(p[selAct]||[]).filter(c=>c!==n),n]}));setNewCN("");setNewCD("");setAiSug(null);};
+  useEffect(()=>{
+    saveAICfgToStorage({endpoint:aiEndpoint,secret:aiSecret,model:aiModel});
+  },[aiEndpoint,aiSecret,aiModel]);
+  useEffect(()=>{
+    setSelectedBaseCurrency(normalizeCurrencyCode(currencyCfg?.baseCurrency||DEFAULT_BASE_CURRENCY,DEFAULT_BASE_CURRENCY));
+  },[currencyCfg?.baseCurrency]);
   const saveAICfg=()=>{
-    LS.set("ledger_ai_cfg",{endpoint:(aiEndpoint||"").trim(),secret:(aiSecret||"").trim(),model:(aiModel||DEFAULT_AI_MODEL).trim()||DEFAULT_AI_MODEL});
+    saveAICfgToStorage({endpoint:aiEndpoint,secret:aiSecret,model:aiModel});
     setAiStatus("Saved AI backend settings.");
+    addDiagnostic({level:"info",scope:"ai",event:"ai_config_saved",message:"AI backend settings were saved.",context:{endpoint:safeOrigin(aiEndpoint),sharedKeyConfigured:Boolean(aiSecret),model:aiModel||DEFAULT_AI_MODEL}});
+  };
+  const saveBaseCurrency=async()=>{
+    setCurrencyBusy(true);
+    setCurrencyStatus("Saving base currency...");
+    try{
+      const res=await onSaveCurrencyCfg(normalizeCurrencyCode(selectedBaseCurrency,DEFAULT_BASE_CURRENCY));
+      if(res?.ok){
+        setCurrencyStatus(res?.changed===false?`Base currency remains ${normalizeCurrencyCode(selectedBaseCurrency,DEFAULT_BASE_CURRENCY)}.`:`Base currency saved as ${normalizeCurrencyCode(selectedBaseCurrency,DEFAULT_BASE_CURRENCY)}.`);
+      }else{
+        setCurrencyStatus(res?.error||"Unable to save base currency.");
+      }
+    }finally{
+      setCurrencyBusy(false);
+    }
   };
   const testAICfg=async()=>{
     saveAICfg();
@@ -5218,8 +5652,10 @@ function SettingsTab({acts,setActs,cats,setCats,backups,onBackupNow,onRestoreBac
     try{
       const out=await callAI([{role:"user",content:'Reply ONLY this JSON: {"ok":true}'}],120);
       setAiStatus(`AI backend OK: ${out.slice(0,120)}`);
+      addDiagnostic({level:"info",scope:"ai",event:"ai_backend_test_success",message:"AI backend test succeeded.",context:{endpoint:safeOrigin(aiEndpoint),model:aiModel||DEFAULT_AI_MODEL}});
     }catch(e){
       setAiStatus(`AI backend error: ${e.message||"unknown error"}`);
+      addDiagnostic({level:"error",scope:"ai",event:"ai_backend_test_failed",message:e?.message||"AI backend test failed.",context:{endpoint:safeOrigin(aiEndpoint),model:aiModel||DEFAULT_AI_MODEL,error:e}});
     }
   };
   const canReset=resetText.trim().toLowerCase()==="reset";
@@ -5233,11 +5669,37 @@ function SettingsTab({acts,setActs,cats,setCats,backups,onBackupNow,onRestoreBac
   useEffect(()=>{
     if(!restoreId&&latestBackups[0]?.id)setRestoreId(latestBackups[0].id);
   },[latestBackups,restoreId]);
+  const copySupportReport=async()=>{
+    const bundle=buildSupportBundle?.();
+    if(!bundle){
+      setDiagStatus("Support bundle unavailable.");
+      return;
+    }
+    const ok=await copyTextToClipboard(buildSupportReportText(bundle));
+    setDiagStatus(ok?"Support report copied to clipboard.":"Unable to copy support report.");
+    if(ok)addDiagnostic({level:"info",scope:"support",event:"support_report_copied",message:"Support report copied to clipboard."});
+  };
+  const downloadSupportBundle=()=>{
+    const bundle=buildSupportBundle?.();
+    if(!bundle){
+      setDiagStatus("Support bundle unavailable.");
+      return;
+    }
+    downloadJsonFile(`ledgerai-support-${today()}.json`,bundle);
+    setDiagStatus("Support bundle downloaded.");
+    addDiagnostic({level:"info",scope:"support",event:"support_bundle_downloaded",message:"Support bundle downloaded from Settings."});
+  };
+  const clearSupportLogs=()=>{
+    if(!window.confirm("Clear all stored diagnostics logs? This removes recent support history from this browser."))return;
+    onClearDiagnostics?.();
+    setDiagStatus("Diagnostics cleared from this browser.");
+  };
   const restoreSelected=()=>{
     if(!restoreId){setSafetyStatus("Select a backup snapshot first.");return;}
     if(!window.confirm("Restore selected snapshot? Current data will be replaced."))return;
     const ok=onRestoreBackup?.(restoreId);
     setSafetyStatus(ok?"Backup restored successfully.":"Backup restore failed.");
+    addDiagnostic({level:ok?"warn":"error",scope:"backup",event:"snapshot_restore_action",message:ok?"Backup snapshot restored from Settings.":"Backup snapshot restore failed from Settings.",context:{snapshotId:restoreId}});
   };
   return(<div>
     <h2 className="h2" style={{marginBottom:18}}>Settings</h2>
@@ -5266,6 +5728,72 @@ function SettingsTab({acts,setActs,cats,setCats,backups,onBackupNow,onRestoreBac
       </div>
       {aiStatus&&<div style={{fontSize:12,color:"#c7d2fe",marginTop:8}}>{aiStatus}</div>}
       <div style={{fontSize:11,color:"#475569",marginTop:8}}>Email sync uses AI-only processing for body + attachments. If AI cannot process an email, it stays in AI Pending Retry until resolved.</div>
+    </div>
+    <div className="card" style={{marginBottom:16}}>
+      <div style={{fontWeight:600,fontSize:14,marginBottom:10,color:"#94a3b8"}}>Currency & FX</div>
+      <div style={{fontSize:12,color:"#64748b",lineHeight:1.8,marginBottom:10}}>
+        LedgerAI detects source currency from emails, receipts, SMS, and statements, then converts everything into your base currency using daily FX rates. Changing base currency will rebase the amounts already stored in this browser and cloud snapshot.
+      </div>
+      <label>Base Currency</label>
+      <select value={selectedBaseCurrency} onChange={e=>setSelectedBaseCurrency(e.target.value)}>
+        {CURRENCY_OPTIONS.map(code=><option key={code} value={code}>{code}</option>)}
+      </select>
+      <button className="btn pri" style={{marginTop:10}} onClick={saveBaseCurrency} disabled={currencyBusy}>{currencyBusy?"Saving…":"Save Base Currency"}</button>
+      {currencyStatus&&<div style={{fontSize:12,color:"#c7d2fe",marginTop:8}}>{currencyStatus}</div>}
+      <div style={{fontSize:11,color:"#475569",marginTop:8}}>Current base currency: {normalizeCurrencyCode(currencyCfg?.baseCurrency||DEFAULT_BASE_CURRENCY,DEFAULT_BASE_CURRENCY)}. Foreign-currency metadata is kept in the background for support and reconciliation.</div>
+    </div>
+    <div className="card" style={{marginBottom:16,background:"linear-gradient(135deg,#0f172a,#09111f)"}}>
+      <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"center",marginBottom:10,flexWrap:"wrap"}}>
+        <div>
+          <div style={{fontWeight:700,fontSize:14,color:"#dbeafe"}}>Diagnostics & Support</div>
+          <div style={{fontSize:12,color:"#64748b",lineHeight:1.7,marginTop:4}}>
+            LedgerAI now keeps a persistent, redacted diagnostics trail in this browser so you can send support logs without reproducing the bug from memory.
+          </div>
+        </div>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          <button className="btn ghost" onClick={copySupportReport}>Copy Support Report</button>
+          <button className="btn pri" onClick={downloadSupportBundle}>Download Support Bundle</button>
+          <button className="btn sm dan" onClick={clearSupportLogs}>Clear Logs</button>
+        </div>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(110px,1fr))",gap:10,marginBottom:12}}>
+        {[
+          ["Events",diagCounts.total,"#c7d2fe"],
+          ["Errors",diagCounts.errors,"#fca5a5"],
+          ["Warnings",diagCounts.warnings,"#fcd34d"],
+          ["Info",diagCounts.info,"#86efac"],
+        ].map(([label,value,color])=>(
+          <div key={label} style={{background:"#0a0f1d",border:"1px solid #1e293b",borderRadius:10,padding:"10px 12px"}}>
+            <div style={{fontSize:11,color:"#64748b",marginBottom:4,textTransform:"uppercase",letterSpacing:".5px"}}>{label}</div>
+            <div style={{fontSize:18,fontWeight:700,color}}>{value}</div>
+          </div>
+        ))}
+      </div>
+      <div style={{fontSize:11,color:"#475569",marginBottom:10}}>
+        Support bundle includes runtime state, connector status, AI settings status, pending retry summary, and recent diagnostics events. Tokens and secrets are redacted automatically.
+      </div>
+      {diagStatus&&<div style={{fontSize:12,color:"#c7d2fe",marginBottom:10}}>{diagStatus}</div>}
+      <div style={{fontSize:11,fontWeight:700,color:"#64748b",marginBottom:8,textTransform:"uppercase",letterSpacing:".5px"}}>Recent Events</div>
+      {recentDiagnostics.length===0?(
+        <div style={{fontSize:12,color:"#475569"}}>No diagnostics recorded yet. Once you connect, sync, test AI, or hit an error, entries will appear here.</div>
+      ):(
+        <div style={{maxHeight:260,overflowY:"auto",border:"1px solid #1e293b",borderRadius:10}}>
+          {recentDiagnostics.map(item=>(
+            <div key={item.id} style={{padding:"10px 12px",borderBottom:"1px solid #1e293b",background:item.level==="error"?"#1f0b12":item.level==="warn"?"#1f1505":"transparent"}}>
+              <div style={{display:"flex",justifyContent:"space-between",gap:10,flexWrap:"wrap",marginBottom:4}}>
+                <div style={{fontSize:12,fontWeight:700,color:item.level==="error"?"#fca5a5":item.level==="warn"?"#fcd34d":"#c7d2fe"}}>
+                  {String(item.level||"info").toUpperCase()} · {item.scope}/{item.event}
+                </div>
+                <div style={{fontSize:11,color:"#64748b"}}>{fmtDT(item.ts)}{(item.repeat||1)>1?` · x${item.repeat}`:""}</div>
+              </div>
+              <div style={{fontSize:12,color:"#e2e8f0",lineHeight:1.6}}>{item.message}</div>
+              {(item.accountId||item.provider)&&<div style={{fontSize:11,color:"#64748b",marginTop:4}}>
+                {item.accountId&&<span>Account: {item.accountId}</span>}{item.accountId&&item.provider&&<span> · </span>}{item.provider&&<span>Provider: {item.provider}</span>}
+              </div>}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
     <div className="g2" style={{gap:18}}>
       <div className="card">
@@ -5307,6 +5835,7 @@ function SettingsTab({acts,setActs,cats,setCats,backups,onBackupNow,onRestoreBac
         <button className="btn ghost" onClick={()=>{
           const ok=onBackupNow?.();
           setSafetyStatus(ok?"Backup created.":"No data change since last snapshot.");
+          addDiagnostic({level:ok?"info":"warn",scope:"backup",event:"manual_snapshot_created",message:ok?"Manual local snapshot created.":"Manual local snapshot skipped because nothing changed."});
         }}>Create Backup Now</button>
       </div>
       {latestBackups.length>0?(
@@ -5324,7 +5853,7 @@ function SettingsTab({acts,setActs,cats,setCats,backups,onBackupNow,onRestoreBac
     <div className="card" style={{marginTop:18,border:"1px solid #7f1d1d",background:"#22090b"}}>
       <div style={{fontWeight:700,fontSize:14,color:"#fca5a5",marginBottom:8}}>Danger Zone</div>
       <div style={{fontSize:12,color:"#fda4af",lineHeight:1.8,marginBottom:12}}>
-        Factory Reset clears all transactions, inbox queue, accounts, email connections, and sync caches.
+        Factory Reset clears transactions, inbox queue, accounts, and sync caches. Email connectors, AI backend settings, and OneDrive connector settings are preserved.
       </div>
       <button className="btn dan" onClick={()=>setResetOpen(true)}>Reset Dashboard</button>
     </div>
@@ -5333,7 +5862,7 @@ function SettingsTab({acts,setActs,cats,setCats,backups,onBackupNow,onRestoreBac
         <div className="modal" style={{maxWidth:520}}>
           <MH title="Factory Reset" onClose={()=>{setResetOpen(false);setResetText("");}}/>
           <div style={{fontSize:13,color:"#fca5a5",lineHeight:1.8,marginBottom:10}}>
-            This will permanently remove all current LedgerAI data and disconnect all connected accounts.
+            This will permanently remove current ledger data (transactions, inbox, accounts, sync caches) while keeping connected email/cloud configuration.
           </div>
           <div style={{fontSize:12,color:"#94a3b8",marginBottom:8}}>
             Type <code style={{background:"#0a0c12",padding:"2px 6px",borderRadius:4}}>reset</code> and press <b>Enter</b> to confirm.
@@ -5356,42 +5885,18 @@ function SettingsTab({acts,setActs,cats,setCats,backups,onBackupNow,onRestoreBac
 }
 
 // ── DAILY REVIEW ──────────────────────────────────────────────────────────────
-function DailyTab({todayTxns,todInc,todExp,summary,sumLoad,getSummary,onEdit,onDelete,inbox,onApprove,onDiscard,onEditPending}){
-  const todInbox=inbox.filter(i=>i.date===today());
-  const pendingEmail=inbox.filter(i=>i.source==="email");
-  const approveAll=()=>pendingEmail.forEach(onApprove);
-  const rejectAll=()=>{
-    if(!pendingEmail.length)return;
-    if(!window.confirm(`Reject ${pendingEmail.length} pending email transaction(s)?`))return;
-    pendingEmail.forEach(i=>onDiscard(i._iid));
-  };
+function DailyTab({todayTxns,todInc,todExp,summary,sumLoad,getSummary,onEdit,onDelete}){
   return(<div>
     <R style={{marginBottom:18,gap:10}}>
       <h2 className="h2" style={{flex:1}}>Day Review — {fmtD(today())}</h2>
       <button className="btn sm pri" onClick={getSummary} disabled={sumLoad}>{sumLoad?"🤖 Generating…":"🤖 AI Summary"}</button>
     </R>
-    {todInbox.length>0&&<div style={{background:"#0d0d2b",border:"1px solid #818cf8",borderRadius:10,padding:"12px 16px",marginBottom:18,fontSize:13,color:"#c7d2fe"}}>⏳ <b>{todInbox.length}</b> item(s) still in Inbox — approve or reject to complete today's review.</div>}
-    {pendingEmail.length>0&&(
-      <div className="card" style={{marginBottom:18}}>
-        <R style={{marginBottom:10}}>
-          <div className="sh" style={{margin:0}}>Email Review Queue ({pendingEmail.length})</div>
-          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-            <button className="btn sm suc" onClick={approveAll}>✓ Accept All</button>
-            <button className="btn sm dan" onClick={rejectAll}>✕ Reject All</button>
-          </div>
-        </R>
-        <div style={{fontSize:12,color:"#64748b",marginBottom:10}}>Only unreviewed items appear here. Accepted items move to Ledger. Rejected items are removed.</div>
-        <div style={{maxHeight:360,overflowY:"auto",paddingRight:2}}>
-          {pendingEmail.map(item=><ICard key={item._iid} item={item} onApprove={onApprove} onEdit={onEditPending} onDiscard={onDiscard}/>)}
-        </div>
-      </div>
-    )}
-    {summary&&<div style={{background:"#0a0c1e",border:"1px solid #6366f1",borderRadius:12,padding:18,marginBottom:18}}><div style={{fontSize:10,color:"#818cf8",fontWeight:700,letterSpacing:".5px",marginBottom:8}}>✦ AI INSIGHT</div><div style={{fontSize:13,color:"#c7d2fe",lineHeight:1.8,whiteSpace:"pre-wrap"}}>{summary}</div></div>}
     <div className="g4" style={{marginBottom:18}}>
       {[{l:"Today Income",v:todInc,c:"#34d399"},{l:"Today Expense",v:todExp,c:"#f87171"},{l:"Net Today",v:todInc-todExp,c:todInc-todExp>=0?"#34d399":"#f87171"},{l:"Entries",v:todayTxns.length,c:"#818cf8",nf:true}].map(s=>(
         <div key={s.l} className="sc"><div className="lxs">{s.l}</div><div className="mono" style={{fontSize:22,color:s.c,marginTop:6}}>{s.nf?s.v:fmt(s.v)}</div></div>
       ))}
     </div>
+    {summary&&<div style={{background:"#0a0c1e",border:"1px solid #6366f1",borderRadius:12,padding:18,marginBottom:18}}><div style={{fontSize:10,color:"#818cf8",fontWeight:700,letterSpacing:".5px",marginBottom:8}}>✦ AI INSIGHT</div><div style={{fontSize:13,color:"#c7d2fe",lineHeight:1.8,whiteSpace:"pre-wrap"}}>{summary}</div></div>}
     <div className="sh" style={{marginBottom:10}}>Today's Transactions</div>
     {todayTxns.length===0?<div className="card" style={{textAlign:"center",color:"#475569",padding:40}}>No transactions today.</div>:<TxTable txns={todayTxns} onEdit={onEdit} onDelete={onDelete}/>}
   </div>);
@@ -5400,10 +5905,21 @@ function DailyTab({todayTxns,todInc,todExp,summary,sumLoad,getSummary,onEdit,onD
 // ── ADD/EDIT MODAL ────────────────────────────────────────────────────────────
 function AddModal({type,existing,acts,cats,accs,onAddAccount,onAddActivity,onSave,onClose}){
   const defaultAct=acts.includes("Personal")?"Personal":(acts[0]||"");
+  const baseCurrency=getBaseCurrency();
   const[form,setForm]=useState({
     type,date:today(),description:"",vendor:"",amount:"",
+    currency:baseCurrency,
+    originalAmount:"",
+    baseAmount:"",
+    baseCurrency,
+    fxRate:1,
+    fxDate:today(),
+    fxRateDate:today(),
+    fxSource:"",
+    trackVendor:Boolean(existing?.trackVendor ?? existing?.vendor),
     businessActivity:type==="borrow"||type==="transfer"?defaultAct:(acts[0]||""),
     category:type==="borrow"?"Borrowed Cash":type==="transfer"?"Account Transfer":"",
+    subCategory:"",
     paymentMethod:type==="borrow"?"Cash":type==="transfer"?"Account Transfer":"UPI",
     accountId:"",targetAccountId:"",liabilityAccountId:"",borrowSource:"",
     notes:"",
@@ -5416,6 +5932,22 @@ function AddModal({type,existing,acts,cats,accs,onAddAccount,onAddActivity,onSav
   const[quickAcc,setQuickAcc]=useState({name:"",type:"savings",number:"",bank:"",balance:""});
   const fref=useRef();
   const set=(k,v)=>setForm(p=>({...p,[k]:v}));
+  const setAmountValue=v=>setForm(p=>{
+    const foreign=normalizeCurrencyCode(p.currency||baseCurrency,baseCurrency)!==baseCurrency;
+    return{
+      ...p,
+      amount:v,
+      baseAmount:v,
+      originalAmount:foreign?v:(p.originalAmount||v),
+      ...(foreign?{
+        currency:baseCurrency,
+        fxRate:1,
+        fxDate:p.date||today(),
+        fxRateDate:p.date||today(),
+        fxSource:"manual override",
+      }:{}),
+    };
+  });
   const clist=cats[form.businessActivity]||["Other"];
   const assetAccs=accs.filter(a=>a.cls==="asset");
   const liabAccs=accs.filter(a=>a.cls==="liability");
@@ -5462,26 +5994,63 @@ function AddModal({type,existing,acts,cats,accs,onAddAccount,onAddActivity,onSav
   const setType=t=>setForm(p=>{
     if(t==="borrow"){
       const src=(p.borrowSource||p.vendor||"").trim();
-      return {...p,type:t,businessActivity:defaultAct,category:"Borrowed Cash",paymentMethod:p.paymentMethod||"Cash",borrowSource:src,vendor:src||p.vendor};
+      return {...p,type:t,businessActivity:defaultAct,category:"Borrowed Cash",subCategory:"",paymentMethod:p.paymentMethod||"Cash",borrowSource:src,vendor:src||p.vendor,trackVendor:false};
     }
     if(t==="transfer"){
       const desc=(p.description||"").trim()||"Account transfer";
-      return {...p,type:t,businessActivity:defaultAct,category:"Account Transfer",paymentMethod:"Account Transfer",description:desc,liabilityAccountId:"",borrowSource:"",vendor:""};
+      return {...p,type:t,businessActivity:defaultAct,category:"Account Transfer",subCategory:"",paymentMethod:"Account Transfer",description:desc,liabilityAccountId:"",borrowSource:"",vendor:"",trackVendor:false};
     }
     const nextAct=p.businessActivity||acts[0]||"";
     const nextCats=cats[nextAct]||["Other"];
     const nextCat=p.category&&p.category!=="Borrowed Cash"?p.category:(nextCats[0]||"Other");
     return {...p,type:t,businessActivity:nextAct,category:nextCat};
   });
-  const apply=r=>{if(!r)return;setForm(p=>({...p,description:r.description||p.description,vendor:r.vendor||p.vendor,amount:r.amount||p.amount,businessActivity:acts.includes(r.businessActivity)?r.businessActivity:p.businessActivity,category:r.category||p.category,date:r.date||p.date,paymentMethod:r.paymentMethod||p.paymentMethod,isNewCategory:r.isNewCategory||false,aiGenerated:true}));setSub("form");};
-  const runText=async()=>{setLoad(true);apply(await aiClassify(raw,acts,cats,form.type));setLoad(false);};
+  const apply=async(r)=>{
+    if(!r)return;
+    const normalized={
+      ...r,
+      type:form.type,
+      date:r.date||form.date||today(),
+      amount:Number(r.amount)||0,
+      currency:normalizeCurrencyCode(r.currency||baseCurrency,baseCurrency),
+    };
+    const [converted]=await convertExtractedItemsToBaseCurrency([normalized],{
+      baseCurrency,
+      fallbackCurrency:baseCurrency,
+      dateFallback:normalized.date||today(),
+    });
+    setForm(p=>({
+      ...p,
+      description:converted?.description||r.description||p.description,
+      vendor:converted?.vendor||r.vendor||p.vendor,
+      trackVendor:typeof converted?.trackVendor==="boolean"?converted.trackVendor:(typeof r.trackVendor==="boolean"?r.trackVendor:(p.trackVendor||Boolean((converted?.vendor||r.vendor||p.vendor)||""))),
+      amount:converted?.amount??r.amount??p.amount,
+      originalAmount:converted?.originalAmount??r.amount??p.originalAmount,
+      baseAmount:converted?.baseAmount??converted?.amount??r.amount??p.baseAmount,
+      currency:converted?.currency||normalizeCurrencyCode(r.currency||p.currency||baseCurrency,baseCurrency),
+      baseCurrency:converted?.baseCurrency||baseCurrency,
+      fxRate:converted?.fxRate??p.fxRate,
+      fxDate:converted?.fxDate||converted?.date||p.fxDate,
+      fxRateDate:converted?.fxRateDate||p.fxRateDate,
+      fxSource:converted?.fxSource||p.fxSource,
+      businessActivity:acts.includes(converted?.businessActivity||r.businessActivity)?(converted?.businessActivity||r.businessActivity):p.businessActivity,
+      category:converted?.category||r.category||p.category,
+      subCategory:converted?.subCategory||r.subCategory||p.subCategory||"",
+      date:converted?.date||r.date||p.date,
+      paymentMethod:converted?.paymentMethod||r.paymentMethod||p.paymentMethod,
+      isNewCategory:converted?.isNewCategory||r.isNewCategory||false,
+      aiGenerated:true,
+    }));
+    setSub("form");
+  };
+  const runText=async()=>{setLoad(true);try{await apply(await aiClassify(raw,acts,cats,form.type));}finally{setLoad(false);}};
   const runImg=async()=>{
     if(!imgB64)return;
     setLoad(true);
     const c2=Object.entries(cats).map(([a,cs])=>`${a}: ${cs.join(", ")}`).join("\n");
     try{
-      const raw2=await callAI([{role:"user",content:[{type:"image",source:{type:"base64",media_type:"image/jpeg",data:imgB64}},{type:"text",text:`Extract expense. Activities: ${acts.join(", ")}\n${c2}\nReturn ONLY JSON: {"businessActivity":"","category":"","isNewCategory":false,"description":"","amount":0,"date":"YYYY-MM-DD","vendor":"","paymentMethod":""}`}]}],500);
-      try{apply(JSON.parse(raw2.replace(/```json|```/g,"").trim()));}
+      const raw2=await callAI([{role:"user",content:[{type:"image",source:{type:"base64",media_type:"image/jpeg",data:imgB64}},{type:"text",text:`Extract expense for bookkeeping. Activities: ${acts.join(", ")}\n${c2}\nDetect the original currency explicitly and return ISO currency code. Ledger base currency: ${baseCurrency}\nReturn ONLY JSON: {"businessActivity":"","category":"","isNewCategory":false,"description":"","amount":0,"currency":"","date":"YYYY-MM-DD","vendor":"","paymentMethod":""}`}]}],500);
+      try{await apply(JSON.parse(raw2.replace(/```json|```/g,"").trim()));}
       catch{alert("AI returned invalid JSON for invoice image.");}
     }catch(e){
       alert(`AI image extraction failed: ${e.message||"backend unavailable"}`);
@@ -5515,8 +6084,9 @@ function AddModal({type,existing,acts,cats,accs,onAddAccount,onAddActivity,onSav
         {form.isNewCategory&&<div style={{background:"#0d0920",border:"1px solid #a855f7",borderRadius:8,padding:"5px 12px",marginBottom:8,fontSize:12,color:"#d8b4fe"}}>🆕 New category "{form.category}" will be created</div>}
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
           <div><label>Date</label><input type="date" value={form.date} onChange={e=>set("date",e.target.value)}/></div>
-          <div><label>Amount (₹)</label><input type="number" value={form.amount} onChange={e=>set("amount",e.target.value)} placeholder="0"/></div>
+          <div><label>{`Amount (${baseCurrency})`}</label><input type="number" value={form.amount} onChange={e=>setAmountValue(e.target.value)} placeholder="0"/></div>
         </div>
+        {currencyMetaLabel(form,baseCurrency)&&<div style={{fontSize:11,color:"#94a3b8",marginTop:8}}>{currencyMetaLabel(form,baseCurrency)}</div>}
         {form.type!=="borrow"&&form.type!=="transfer"&&<>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:2}}>
             <label style={{margin:0}}>Business Activity</label>
@@ -5530,6 +6100,7 @@ function AddModal({type,existing,acts,cats,accs,onAddAccount,onAddActivity,onSav
           </div>}
         </>}
         {form.type!=="borrow"&&form.type!=="transfer"&&<><label>Category</label><select value={form.category} onChange={e=>set("category",e.target.value)}>{clist.map(c=><option key={c}>{c}</option>)}</select></>}
+        {form.type!=="borrow"&&form.type!=="transfer"&&<><label>Sub Category</label><input value={form.subCategory||""} onChange={e=>set("subCategory",e.target.value)} placeholder="Optional"/></>}
         {form.type==="borrow"&&<><label>Borrowed From Source</label><input value={form.borrowSource||""} onChange={e=>set("borrowSource",e.target.value)} placeholder="e.g. Rahul, Family, NBFC, Friend"/></>}
         {form.type==="borrow"&&liabAccs.length>0&&<><label>Liability Account (Optional)</label><select value={form.liabilityAccountId||""} onChange={e=>set("liabilityAccountId",e.target.value)}><option value="">— Select liability source —</option>{liabAccs.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select></>}
         {form.type==="transfer"&&<>
@@ -5555,7 +6126,7 @@ function AddModal({type,existing,acts,cats,accs,onAddAccount,onAddActivity,onSav
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginTop:8}}>
               <div><label>Bank / Institution</label><input value={quickAcc.bank} onChange={e=>setQuickAcc(p=>({...p,bank:e.target.value}))} placeholder="Optional"/></div>
               <div><label>Last 4</label><input value={quickAcc.number} onChange={e=>setQuickAcc(p=>({...p,number:e.target.value}))} placeholder="Optional"/></div>
-              <div><label>Opening Balance (₹)</label><input type="number" value={quickAcc.balance} onChange={e=>setQuickAcc(p=>({...p,balance:e.target.value}))} placeholder="0"/></div>
+              <div><label>{`Opening Balance (${baseCurrency})`}</label><input type="number" value={quickAcc.balance} onChange={e=>setQuickAcc(p=>({...p,balance:e.target.value}))} placeholder="0"/></div>
             </div>
             <button className="btn pri" type="button" style={{marginTop:10,width:"100%"}} onClick={addQuickAccount}>Add Account</button>
           </div>}
@@ -5577,16 +6148,28 @@ function AddModal({type,existing,acts,cats,accs,onAddAccount,onAddActivity,onSav
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginTop:8}}>
               <div><label>Bank / Institution</label><input value={quickAcc.bank} onChange={e=>setQuickAcc(p=>({...p,bank:e.target.value}))} placeholder="Optional"/></div>
               <div><label>Last 4</label><input value={quickAcc.number} onChange={e=>setQuickAcc(p=>({...p,number:e.target.value}))} placeholder="Optional"/></div>
-              <div><label>Opening Balance (₹)</label><input type="number" value={quickAcc.balance} onChange={e=>setQuickAcc(p=>({...p,balance:e.target.value}))} placeholder="0"/></div>
+              <div><label>{`Opening Balance (${baseCurrency})`}</label><input type="number" value={quickAcc.balance} onChange={e=>setQuickAcc(p=>({...p,balance:e.target.value}))} placeholder="0"/></div>
             </div>
             <button className="btn pri" type="button" style={{marginTop:10,width:"100%"}} onClick={addQuickAccount}>Add Account</button>
           </div>}
         </>}
         <label>Description</label><input value={form.description} onChange={e=>set("description",e.target.value)} placeholder="Brief description"/>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-          <div><label>Vendor</label><input value={form.vendor||""} onChange={e=>set("vendor",e.target.value)} placeholder="Optional"/></div>
+          <div>
+            <label>Vendor</label>
+            <input value={form.vendor||""} onChange={e=>set("vendor",e.target.value)} placeholder={form.trackVendor?"Vendor name required":"Optional"}/>
+          </div>
           <div><label>Payment Method</label><select value={form.paymentMethod} onChange={e=>set("paymentMethod",e.target.value)}>{PAY_METHODS.map(m=><option key={m}>{m}</option>)}</select></div>
         </div>
+        {(form.type==="income"||form.type==="expense")&&<div style={{marginTop:10}}>
+          <label style={{display:"flex",gap:8,alignItems:"center",fontSize:13,color:"#94a3b8",textTransform:"none",letterSpacing:0,marginTop:0}}>
+            <input type="checkbox" checked={Boolean(form.trackVendor)} onChange={e=>set("trackVendor",e.target.checked)}/>
+            Track this vendor in vendor-wise reports
+          </label>
+          <div style={{fontSize:11,color:"#64748b",marginTop:6}}>
+            If enabled, vendor name becomes mandatory and the expense can appear in vendor-wise reporting. If disabled, vendor remains optional and is excluded from vendor-wise reports.
+          </div>
+        </div>}
         <label>Notes</label><textarea rows={2} value={form.notes||""} onChange={e=>set("notes",e.target.value)} placeholder="Optional"/>
         {Number(form.amount)>0&&<div style={{marginTop:12,background:"#0a0c12",border:"1px solid #1e293b",borderRadius:8,padding:12}}><div className="lxs" style={{marginBottom:8}}>Journal Preview</div>
           {je.map((e,i)=><div key={i} style={{display:"grid",gridTemplateColumns:"1fr 90px 90px",gap:6,fontSize:12,color:"#94a3b8",padding:"2px 0"}}><span style={{color:e.dr>0?"#e2e8f0":"#64748b",paddingLeft:e.dr===0?16:0}}>{e.account}</span><span className="mono" style={{textAlign:"right",color:"#34d399"}}>{e.dr>0?fmt(e.dr):""}</span><span className="mono" style={{textAlign:"right",color:"#f87171"}}>{e.cr>0?fmt(e.cr):""}</span></div>)}
@@ -5594,28 +6177,34 @@ function AddModal({type,existing,acts,cats,accs,onAddAccount,onAddActivity,onSav
         <div style={{display:"flex",gap:10,marginTop:16}}>
           <button className="btn ghost" onClick={onClose} style={{flex:1}}>Cancel</button>
           <button className="btn pri" style={{flex:2}} onClick={()=>{
-            if(!form.amount||isNaN(Number(form.amount)))return alert("Enter a valid amount");
-            if(form.type==="transfer"&&accs.length<2)return alert("Add at least two accounts before saving a transfer.");
-            if(form.type!=="transfer"&&accs.length===0)return alert("Add at least one account in Accounts tab.");
-            if(!form.accountId)return alert(form.type==="transfer"?"Select Transfer From account.":"Select which account this transaction used.");
-            if(form.type==="transfer"&&!form.targetAccountId)return alert("Select Transfer To account.");
-            if(form.type==="transfer"&&form.accountId===form.targetAccountId)return alert("Transfer From and To accounts must be different.");
-            if(form.type==="borrow"&&!form.liabilityAccountId&&!(form.borrowSource||"").trim())return alert("Select liability account or enter borrowed source.");
             const amt=Number(form.amount);
+            const sourceCurrency=normalizeCurrencyCode(form.currency||baseCurrency,baseCurrency);
+            const currencyPatch={
+              currency:sourceCurrency,
+              originalAmount:roundMoney(Number(form.originalAmount??amt)||amt),
+              baseAmount:roundMoney(amt),
+              baseCurrency,
+              fxRate:Number(form.fxRate)||1,
+              fxDate:normalizeFxDate(form.fxDate||form.date||today()),
+              fxRateDate:normalizeFxDate(form.fxRateDate||form.fxDate||form.date||today()),
+              fxSource:String(form.fxSource||"manual"),
+            };
+            const validationMsg=getAccountingValidationMessage({...form,amount:amt},accs);
+            if(validationMsg)return alert(validationMsg);
             if(form.type==="transfer"){
               const fromName=accs.find(a=>a.id===form.accountId)?.name||"Source";
               const toName=accs.find(a=>a.id===form.targetAccountId)?.name||"Destination";
               const desc=(form.description||"").trim()||`Transfer: ${fromName} → ${toName}`;
-              onSave({...form,amount:amt,type:"transfer",description:desc,businessActivity:defaultAct,category:"Account Transfer",paymentMethod:"Account Transfer",isNewCategory:false,vendor:form.vendor||""});
+              onSave({...form,...currencyPatch,amount:amt,type:"transfer",description:desc,businessActivity:defaultAct,category:"Account Transfer",paymentMethod:"Account Transfer",isNewCategory:false,vendor:form.vendor||""});
               return;
             }
             if(form.type==="borrow"){
               const src=(form.borrowSource||form.vendor||"").trim();
               const desc=(form.description||"").trim()||`Cash borrowed from ${src||"Other source"}`;
-              onSave({...form,amount:amt,type:"borrow",description:desc,borrowSource:src,vendor:src||form.vendor||"",businessActivity:defaultAct,category:"Borrowed Cash",isNewCategory:false});
+              onSave({...form,...currencyPatch,amount:amt,type:"borrow",description:desc,borrowSource:src,vendor:src||form.vendor||"",businessActivity:defaultAct,category:"Borrowed Cash",isNewCategory:false});
               return;
             }
-            onSave({...form,amount:amt,type:form.type});
+            onSave({...form,...currencyPatch,amount:amt,type:form.type});
           }}>{existing?"Update Entry":`Save ${form.type==="income"?"Income":form.type==="expense"?"Expense":form.type==="transfer"?"Transfer":"Borrowed Cash"}`}</button>
         </div>
       </>}
@@ -5635,19 +6224,21 @@ function TxTable({txns,onEdit,onDelete}){
         <span style={{color:"#475569",fontFamily:"DM Mono",fontSize:11}}>{fmtD(tx.date)}</span>
         <div><div style={{fontWeight:500}}>{tx.description||tx.category}</div>
           <div style={{fontSize:11,color:"#475569",display:"flex",gap:5,marginTop:1,flexWrap:"wrap"}}>
+            {tx.subCategory&&<span>{tx.subCategory}</span>}
             {tx.vendor&&<span>{tx.vendor}</span>}
             {tx.paymentMethod&&<span>· {tx.paymentMethod}</span>}
             {tx.type==="transfer"
               ? <span>· {tx.accountName||"From"} → {tx.targetAccountName||"To"}</span>
               : tx.accountName&&<span>· {tx.accountName}</span>}
             {tx.borrowSource&&<span>· from {tx.borrowSource}</span>}
+            {currencyMetaLabel(tx)&&<span>· {currencyMetaLabel(tx)}</span>}
             {tx.source==="email"&&<span style={{background:"#1a2010",color:"#86efac",padding:"0 4px",borderRadius:3,fontSize:10}}>📧</span>}
             {tx.source==="auto"&&<span style={{background:"#1e1b4b",color:"#818cf8",padding:"0 4px",borderRadius:3,fontSize:10}}>AI</span>}
             {tx.source==="statement"&&<span style={{background:"#052e16",color:"#34d399",padding:"0 4px",borderRadius:3,fontSize:10}}>Stmt</span>}
           </div>
         </div>
         <span style={{fontSize:11,color:tx.businessActivity==="Personal"?"#c084fc":"#64748b"}}>{tx.businessActivity}</span>
-        <span style={{fontSize:11,color:"#64748b"}}>{tx.category}</span>
+        <span style={{fontSize:11,color:"#64748b"}}>{tx.category}{tx.subCategory?` / ${tx.subCategory}`:""}</span>
         <span className="mono" style={{fontWeight:700,color:tx.type==="income"?"#34d399":tx.type==="borrow"?"#f59e0b":tx.type==="transfer"?"#38bdf8":"#f87171"}}>{tx.type==="income"?"+":tx.type==="borrow"?"↘":tx.type==="transfer"?"⇄":"−"}{fmt(tx.amount)}</span>
         <button className="btn sm dan" style={{padding:"2px 6px"}} onClick={e=>{e.stopPropagation();onDelete(tx.id);}}>✕</button>
       </div>

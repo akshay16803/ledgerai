@@ -28,12 +28,15 @@ Use the included Cloudflare Worker:
    - `LEDGERAI_SHARED_KEY` (optional, recommended)
 4. Set optional Worker variable:
    - `ALLOWED_ORIGIN=https://accounts.niprasha.com`
-5. Deploy worker and copy URL (for example `https://ledgerai-ai.your-subdomain.workers.dev`).
-6. In app Settings, set:
+5. (Recommended for true background AI retry) add a KV binding named `LEDGERAI_RETRY_KV` and add a cron trigger (for example every 5 minutes).
+6. Deploy worker and copy URL (for example `https://ledgerai-ai.your-subdomain.workers.dev`).
+7. In app Settings, set:
    - `AI Endpoint URL` = worker URL
    - `Shared Key` = same as `LEDGERAI_SHARED_KEY` (if used)
    - `Model` = `claude-sonnet-4-20250514` or `gpt-4.1-mini`
-7. Click **Save AI Config** then **Test AI Backend**.
+8. Click **Save AI Config** then **Test AI Backend**.
+
+When KV + cron are configured, AI pending retry items are processed in cloud (`/retry/enqueue`, `/retry/pull`) even when the browser is closed.
 
 If AI backend is not configured, LedgerAI falls back to heuristic parsing with lower accuracy.
 

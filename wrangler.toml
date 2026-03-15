@@ -1,0 +1,16 @@
+name = "ledgerai-ai"
+main = "scripts/cloudflare-ai-worker.js"
+compatibility_date = "2026-03-04"
+account_id = "e6511c5ef79d9196449f976a22317eb7"
+
+workers_dev = true
+
+[vars]
+ALLOWED_ORIGIN = "*"
+
+[[kv_namespaces]]
+binding = "LEDGERAI_RETRY_KV"
+id = "a69469191b6242df8bd51da9ccecb0ca"
+
+[triggers]
+crons = ["*/5 * * * *"]
