@@ -86,6 +86,11 @@ const AI_CLOUD_CLIENT_LEGACY_KEY = "ledger_ai_cloud_client_legacy";
 const AI_RETRY_INTERVAL_MS = 30 * 60 * 1000;
 const AI_RETRY_BATCH_SIZE = 20;
 const AI_CLOUD_PULL_LIMIT = 40;
+const DIAG_LOG_KEY = "ledger_diag_log_v1";
+const DIAG_MAX_EVENTS = 400;
+const DIAG_EXPORT_LIMIT = 180;
+const DIAG_REPEAT_WINDOW_MS = 4000;
+const REDACTED = "[redacted]";
 
 function aiPendingId(accountId="",msgId=""){
   return `${String(accountId||"").trim()}::${String(msgId||"").trim()}`;
@@ -146,6 +151,8 @@ function defaultCloudCfg(){
     url:"",
     key:"",
     needsReconnect:false,
+    lastError:"",
+    lastErrorAt:"",
   };
 }
 
@@ -190,6 +197,328 @@ function sanitizeEmailsForCloud(list=[]){
 
 function persistEmailsLocally(list=[]){
   return (list||[]).map(a=>({...a}));
+}
+
+function maskEmailForDiagnostics(value=""){
+  const raw=String(value||"").trim();
+  const at=raw.indexOf("@");
+  if(at<=0)return raw?`${raw.slice(0,2)}***`:"";
+  const local=raw.slice(0,at);
+  const domain=raw.slice(at+1);
+  const head=local.length<=2?local[0]||"":local.slice(0,2);
+  return `${head}***@${domain}`;
+}
+
+function redactSensitiveText(value=""){
+  let text=String(value??"");
+  if(!text)return "";
+  text=text.replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi,"Bearer [redacted]");
+  text=text.replace(/\b(?:sk|rk)-[A-Za-z0-9_-]{12,}\b/g,REDACTED);
+  text=text.replace(/\beyJ[A-Za-z0-9._-]{20,}\b/g,"[redacted-jwt]");
+  text=text.replace(/(x-ledgerai-key["']?\s*[:=]\s*["']?)[^"'\s,]+/gi,`$1${REDACTED}`);
+  text=text.replace(/(authorization["']?\s*[:=]\s*["']?)[^"'\s,]+/gi,`$1${REDACTED}`);
+  return text;
+}
+
+function sanitizeDiagnosticValue(value,depth=0,seen=new WeakSet()){
+  if(value===null||value===undefined)return value;
+  if(depth>4)return "[truncated]";
+  if(value instanceof Error){
+    return{
+      name:String(value.name||"Error"),
+      message:redactSensitiveText(value.message||""),
+      stack:redactSensitiveText(String(value.stack||"")).split("\n").slice(0,8).join("\n"),
+    };
+  }
+  const t=typeof value;
+  if(t==="string")return redactSensitiveText(value).slice(0,1200);
+  if(t==="number"||t==="boolean")return value;
+  if(t==="function")return `[function ${value.name||"anonymous"}]`;
+  if(Array.isArray(value)){
+    const items=value.slice(0,12).map(v=>sanitizeDiagnosticValue(v,depth+1,seen));
+    if(value.length>12)items.push(`[+${value.length-12} more]`);
+    return items;
+  }
+  if(t==="object"){
+    if(seen.has(value))return "[circular]";
+    seen.add(value);
+    const out={};
+    const entries=Object.entries(value);
+    for(const [idx,[k,v]] of entries.entries()){
+      if(idx>=16){
+        out.__truncated__=`+${entries.length-16} more`;
+        break;
+      }
+      const key=String(k||"");
+      if(/token|secret|password|authorization|cookie|api[_-]?key|shared[_-]?key/i.test(key)){
+        out[key]=REDACTED;
+      }else if(/(^|_)email$|mail|ownerEmail|userPrincipalName/i.test(key)&&typeof v==="string"){
+        out[key]=maskEmailForDiagnostics(v);
+      }else{
+        out[key]=sanitizeDiagnosticValue(v,depth+1,seen);
+      }
+    }
+    seen.delete(value);
+    return out;
+  }
+  return redactSensitiveText(String(value)).slice(0,1200);
+}
+
+function formatDiagnosticArgs(args=[]){
+  return redactSensitiveText(args.map(arg=>{
+    if(arg instanceof Error)return arg.message||arg.name||"Error";
+    if(typeof arg==="string")return arg;
+    try{return JSON.stringify(sanitizeDiagnosticValue(arg));}
+    catch{return String(arg);}
+  }).join(" ")).slice(0,220);
+}
+
+function normalizeDiagnosticEntry(entry={}){
+  const level=["info","warn","error"].includes(entry.level)?entry.level:"info";
+  const scope=String(entry.scope||"app").trim().slice(0,40)||"app";
+  const event=String(entry.event||"event").trim().slice(0,80)||"event";
+  const message=redactSensitiveText(String(entry.message||event||"")).slice(0,220)||event;
+  return{
+    id:String(entry.id||gid()),
+    ts:String(entry.ts||new Date().toISOString()),
+    level,
+    scope,
+    event,
+    accountId:String(entry.accountId||"").trim(),
+    provider:String(entry.provider||"").trim(),
+    message,
+    context:sanitizeDiagnosticValue(entry.context||{}),
+    repeat:Math.max(1,Number(entry.repeat)||1),
+  };
+}
+
+function appendDiagnosticEntry(list=[],entry={}){
+  const next=normalizeDiagnosticEntry(entry);
+  const prev=Array.isArray(list)?list:[];
+  const last=prev[prev.length-1];
+  if(last&&last.level===next.level&&last.scope===next.scope&&last.event===next.event&&last.message===next.message&&last.accountId===next.accountId&&last.provider===next.provider){
+    const delta=Math.abs(Date.parse(next.ts)-Date.parse(last.ts));
+    if(Number.isFinite(delta)&&delta<=DIAG_REPEAT_WINDOW_MS){
+      return [
+        ...prev.slice(0,-1),
+        {
+          ...last,
+          ts:next.ts,
+          repeat:(last.repeat||1)+1,
+          context:Object.keys(next.context||{}).length?next.context:last.context,
+        },
+      ];
+    }
+  }
+  return [...prev,next].slice(-DIAG_MAX_EVENTS);
+}
+
+function loadDiagnostics(){
+  const raw=LS.get(DIAG_LOG_KEY,[]);
+  return Array.isArray(raw)?raw.map(item=>normalizeDiagnosticEntry(item)).slice(-DIAG_MAX_EVENTS):[];
+}
+
+function copyTextToClipboard(text=""){
+  const value=String(text||"");
+  if(!value)return Promise.resolve(false);
+  if(navigator?.clipboard?.writeText){
+    return navigator.clipboard.writeText(value).then(()=>true).catch(()=>false);
+  }
+  try{
+    const ta=document.createElement("textarea");
+    ta.value=value;
+    ta.setAttribute("readonly","readonly");
+    ta.style.position="fixed";
+    ta.style.opacity="0";
+    document.body.appendChild(ta);
+    ta.select();
+    const ok=document.execCommand("copy");
+    document.body.removeChild(ta);
+    return Promise.resolve(Boolean(ok));
+  }catch{
+    return Promise.resolve(false);
+  }
+}
+
+function downloadJsonFile(filename,data){
+  const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);
+  a.download=filename;
+  a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),1500);
+}
+
+function safeOrigin(value=""){
+  const raw=String(value||"").trim();
+  if(!raw)return "";
+  try{
+    const url=new URL(raw);
+    return `${url.origin}${url.pathname}`;
+  }catch{
+    return raw;
+  }
+}
+
+function summarizeDiagnostics(entries=[]){
+  return (entries||[]).reduce((acc,item)=>{
+    const level=item?.level||"info";
+    acc.total+=Number(item?.repeat)||1;
+    if(level==="error")acc.errors+=Number(item?.repeat)||1;
+    else if(level==="warn")acc.warnings+=Number(item?.repeat)||1;
+    else acc.info+=Number(item?.repeat)||1;
+    return acc;
+  },{total:0,errors:0,warnings:0,info:0});
+}
+
+function buildSupportBundle({
+  diagnostics=[],
+  authCfg={},
+  authUser=null,
+  txns=[],
+  inbox=[],
+  accs=[],
+  acts=[],
+  smsNums=[],
+  emails=[],
+  sbCfg={},
+  syncStatus="idle",
+  lastSync="",
+  aiPending=[],
+  backups=[],
+}={}){
+  const aiCfg=loadAICfg();
+  const counts=summarizeDiagnostics(diagnostics);
+  const pendingRows=(aiPending||[]).map(normalizeAiPendingEntry);
+  const pendingByAccount=pendingRows.reduce((map,row)=>{
+    map[row.accountId]=(map[row.accountId]||0)+1;
+    return map;
+  },{});
+  const latestBackups=[...(backups||[])].slice(-5).reverse().map(b=>({
+    ts:String(b?.ts||""),
+    reason:String(b?.reason||""),
+    meta:sanitizeDiagnosticValue(b?.meta||{}),
+  }));
+  const emailAccounts=(emails||[]).map(item=>{
+    const acc=hydrateEmailAccount(item);
+    return{
+      id:String(acc.id||""),
+      provider:String(acc.provider||"google"),
+      email:maskEmailForDiagnostics(acc.email||acc.label||""),
+      connected:Boolean(acc.connected),
+      userDisconnected:Boolean(acc.userDisconnected),
+      reauthRequired:Boolean(acc.reauthRequired),
+      firstSyncCompleted:Boolean(acc.firstSyncCompleted),
+      syncFromDate:String(acc.syncFromDate||""),
+      lastSync:String(acc.lastSync||""),
+      lastAuthAt:String(acc.lastAuthAt||""),
+      lastError:redactSensitiveText(String(acc.lastError||"")).slice(0,180),
+      lastErrorAt:String(acc.lastErrorAt||""),
+      pendingAi:pendingByAccount[acc.id]||0,
+    };
+  });
+  return{
+    exportedAt:new Date().toISOString(),
+    diagnosticsVersion:1,
+    app:{
+      origin:window.location.origin,
+      path:window.location.pathname,
+      href:window.location.href,
+      userAgent:navigator.userAgent,
+      language:navigator.language||"",
+      online:Boolean(navigator.onLine),
+      visibility:document.visibilityState||"",
+      timeZone:Intl.DateTimeFormat().resolvedOptions().timeZone||"",
+    },
+    auth:{
+      enabled:Boolean(authCfg?.enabled),
+      signedIn:Boolean(authUser?.email),
+      ownerEmail:maskEmailForDiagnostics(authCfg?.ownerEmail||""),
+      userEmail:maskEmailForDiagnostics(authUser?.email||""),
+    },
+    dataCounts:{
+      transactions:(txns||[]).length,
+      inbox:(inbox||[]).length,
+      inboxEmail:(inbox||[]).filter(i=>i?.source==="email").length,
+      inboxSms:(inbox||[]).filter(i=>i?.source==="sms").length,
+      accounts:(accs||[]).length,
+      activities:(acts||[]).length,
+      smsNumbers:(smsNums||[]).length,
+      emailAccounts:emailAccounts.length,
+      aiPending:pendingRows.length,
+      backups:(backups||[]).length,
+    },
+    aiBackend:{
+      configured:Boolean(aiCfg.endpoint),
+      endpoint:safeOrigin(aiCfg.endpoint),
+      sharedKeyConfigured:Boolean(aiCfg.secret),
+      model:String(aiCfg.model||DEFAULT_AI_MODEL),
+    },
+    cloud:{
+      enabled:Boolean(sbCfg?.enabled),
+      needsReconnect:Boolean(sbCfg?.needsReconnect),
+      syncStatus:String(syncStatus||"idle"),
+      lastSync:String(lastSync||""),
+      accountEmail:maskEmailForDiagnostics(sbCfg?.email||""),
+      clientIdConfigured:Boolean((sbCfg?.clientId||DEFAULT_MICROSOFT_CLIENT_ID||"").trim()),
+      lastError:redactSensitiveText(String(sbCfg?.lastError||"")).slice(0,180),
+      lastErrorAt:String(sbCfg?.lastErrorAt||""),
+    },
+    email:{
+      accounts:emailAccounts,
+      pendingRetryRows:pendingRows.slice(0,40).map(row=>({
+        id:row.id,
+        accountId:row.accountId,
+        provider:row.provider,
+        msgId:row.msgId,
+        emailDate:row.emailDate,
+        attempts:row.attempts,
+        nextRetryAt:row.nextRetryAt,
+        lastTriedAt:row.lastTriedAt,
+        lastError:redactSensitiveText(String(row.lastError||"")).slice(0,180),
+        cloudQueued:Boolean(row.cloudQueued),
+      })),
+    },
+    backups:latestBackups,
+    diagnostics:{
+      counts,
+      recentEvents:(diagnostics||[]).slice(-DIAG_EXPORT_LIMIT),
+    },
+    notes:[
+      "Secrets and tokens are redacted in this bundle.",
+      "Emails are masked in support exports.",
+      "Recent diagnostics are kept locally in browser storage until cleared.",
+    ],
+  };
+}
+
+function buildSupportReportText(bundle={}){
+  const counts=bundle?.diagnostics?.counts||{total:0,errors:0,warnings:0,info:0};
+  const lines=[
+    "LedgerAI Support Report",
+    `Exported: ${bundle.exportedAt||""}`,
+    `URL: ${bundle?.app?.href||""}`,
+    `Browser: ${bundle?.app?.userAgent||""}`,
+    `Time zone: ${bundle?.app?.timeZone||""}`,
+    `Online: ${bundle?.app?.online?"yes":"no"} | Visibility: ${bundle?.app?.visibility||""}`,
+    "",
+    `Auth: enabled=${bundle?.auth?.enabled?"yes":"no"} signedIn=${bundle?.auth?.signedIn?"yes":"no"} user=${bundle?.auth?.userEmail||""}`,
+    `AI backend: configured=${bundle?.aiBackend?.configured?"yes":"no"} endpoint=${bundle?.aiBackend?.endpoint||""} sharedKey=${bundle?.aiBackend?.sharedKeyConfigured?"yes":"no"} model=${bundle?.aiBackend?.model||""}`,
+    `Cloud: enabled=${bundle?.cloud?.enabled?"yes":"no"} reconnect=${bundle?.cloud?.needsReconnect?"yes":"no"} syncStatus=${bundle?.cloud?.syncStatus||"idle"} lastSync=${bundle?.cloud?.lastSync||""}`,
+    `Data counts: txns=${bundle?.dataCounts?.transactions||0} inbox=${bundle?.dataCounts?.inbox||0} emailAccounts=${bundle?.dataCounts?.emailAccounts||0} aiPending=${bundle?.dataCounts?.aiPending||0}`,
+    "",
+    "Email accounts:",
+    ...(bundle?.email?.accounts?.length?bundle.email.accounts.map(acc=>`- ${acc.provider} ${acc.email} connected=${acc.connected?"yes":"no"} reauth=${acc.reauthRequired?"yes":"no"} pendingAi=${acc.pendingAi||0} lastSync=${acc.lastSync||""}${acc.lastError?` lastError=${acc.lastError}`:""}`):["- none"]),
+    "",
+    `Diagnostics: total=${counts.total||0} errors=${counts.errors||0} warnings=${counts.warnings||0} info=${counts.info||0}`,
+    "Recent events:",
+    ...(bundle?.diagnostics?.recentEvents?.length?bundle.diagnostics.recentEvents.slice(-40).map(item=>{
+      const repeat=(item?.repeat||1)>1?` x${item.repeat}`:"";
+      const account=item?.accountId?` account=${item.accountId}`:"";
+      return `- [${item.ts||""}] ${String(item.level||"info").toUpperCase()} ${item.scope||"app"}/${item.event||"event"}${account}: ${item.message||""}${repeat}`;
+    }):["- none"]),
+  ];
+  return lines.join("\n");
 }
 
 if(typeof window!=="undefined"){
@@ -289,6 +618,7 @@ function sanitizeEmailTransactions(items=[],ctx={}){
     const baseCategory=rawType==="transfer"?"Account Transfer":"Other";
     const requestedCategory=String(x?.category||"").trim();
     const category=requestedCategory||baseCategory;
+    const subCategory=String(x?.subCategory||"").trim();
     const desc=String(x?.description||"").trim()||String(ctx.subject||`Email ${rawType}`).trim()||`${rawType} from email`;
     const vendor=String(x?.vendor||"").trim()||String(ctx.from||"").trim();
     const paymentMethod=String(x?.paymentMethod||"").trim()||(rawType==="transfer"?"Account Transfer":"");
@@ -303,15 +633,56 @@ function sanitizeEmailTransactions(items=[],ctx={}){
       amount,
       businessActivity,
       category,
+      subCategory:subCategory.slice(0,120),
       isNewCategory,
       description:desc.slice(0,180),
       vendor:vendor.slice(0,140),
+      trackVendor:Boolean(vendor),
       paymentMethod:paymentMethod.slice(0,80),
       date:date||today(),
       accountName:accountName.slice(0,120),
       targetAccountName:targetAccountName.slice(0,120),
     };
   }).filter(Boolean);
+}
+
+function isVendorTracked(entry={}){
+  if(entry?.trackVendor===true)return true;
+  if(entry?.trackVendor===false)return false;
+  return Boolean(String(entry?.vendor||"").trim());
+}
+
+function normalizeTrackedVendor(entry={}){
+  const vendor=String(entry?.vendor||"").trim();
+  return{
+    ...entry,
+    vendor:vendor.slice(0,140),
+    trackVendor:isVendorTracked({...entry,vendor}),
+  };
+}
+
+function getAccountingValidationMessage(entry={},accs=[]){
+  const tx=normalizeTrackedVendor(entry);
+  const errors=[];
+  const amt=Number(tx.amount);
+  if(!(amt>0))errors.push("enter a valid amount");
+  if(tx.type==="transfer"){
+    if((accs||[]).length<2)errors.push("add at least two accounts before approving a transfer");
+    if(!tx.accountId)errors.push("select the transfer from account");
+    if(!tx.targetAccountId)errors.push("select the transfer to account");
+    if(tx.accountId&&tx.targetAccountId&&tx.accountId===tx.targetAccountId)errors.push("choose different transfer from and to accounts");
+  }else{
+    if((accs||[]).length===0)errors.push("add at least one account before approving");
+    if(!tx.accountId)errors.push(tx.type==="income"?"select the receiving account":"select the account used");
+  }
+  if(tx.type==="borrow"&&!tx.liabilityAccountId&&!(tx.borrowSource||"").trim())errors.push("select a liability account or enter the borrowed source");
+  if(tx.type!=="transfer"&&tx.type!=="borrow"){
+    if(!String(tx.businessActivity||"").trim())errors.push("select the business activity");
+    if(!String(tx.category||"").trim())errors.push("select the category");
+  }
+  if(tx.trackVendor&&!String(tx.vendor||"").trim())errors.push("enter the vendor name or turn off vendor tracking");
+  if(!errors.length)return "";
+  return `Update the mandatory fields before saving or approving: ${errors.join(", ")}.`;
 }
 
 async function withTimeout(promise,ms,label="request"){
@@ -1167,6 +1538,30 @@ export default function App(){
   const canUseAuthBypass=typeof window!=="undefined"&&(window.location.hostname==="localhost"||window.location.hostname==="127.0.0.1");
   const bypassActive=Boolean(authCfg.enabled&&authBypass&&canUseAuthBypass);
   const[backups,setBackups]=useState(()=>LS.get(BACKUP_KEY,[]));
+  const[diagnostics,setDiagnostics]=useState(()=>loadDiagnostics());
+  const diagnosticsRef=useRef(diagnostics);
+
+  useEffect(()=>{
+    diagnosticsRef.current=diagnostics;
+  },[diagnostics]);
+
+  const addDiagnostic=useCallback((entry={})=>{
+    setDiagnostics(prev=>appendDiagnosticEntry(prev,entry));
+  },[]);
+
+  const clearDiagnostics=useCallback(()=>{
+    setDiagnostics([]);
+  },[]);
+
+  const setCloudIssue=useCallback((message="",patch={})=>{
+    const detail=redactSensitiveText(String(message||"")).slice(0,180);
+    setSbCfg(prev=>({
+      ...prev,
+      ...patch,
+      lastError:detail,
+      lastErrorAt:detail?new Date().toISOString():"",
+    }));
+  },[]);
 
   const buildBackupSnapshot=useCallback((reason="auto")=>{
     const payload={
@@ -1210,7 +1605,10 @@ export default function App(){
   const restoreBackupSnapshot=useCallback((id)=>{
     const list=LS.get(BACKUP_KEY,[]);
     const snap=list.find(s=>s.id===id);
-    if(!snap?.data)return false;
+    if(!snap?.data){
+      addDiagnostic({level:"warn",scope:"backup",event:"restore_snapshot_missing",message:"Backup restore failed because the snapshot was not found.",context:{snapshotId:id}});
+      return false;
+    }
     const d=snap.data;
     setTxns(Array.isArray(d.txns)?d.txns:[]);
     setInbox(Array.isArray(d.inbox)?d.inbox:[]);
@@ -1224,8 +1622,9 @@ export default function App(){
     setSummary("");
     setSumLoad(false);
     setTab("dashboard");
+    addDiagnostic({level:"info",scope:"backup",event:"restore_snapshot",message:"Local backup snapshot restored.",context:{snapshotId:id,reason:snap.reason||"",meta:sanitizeDiagnosticValue(snap.meta||{})}});
     return true;
-  },[]);
+  },[addDiagnostic]);
 
   const factoryReset=useCallback(()=>{
     const preservedMsClientId=sanitizeMsClientId((sbCfg?.clientId||DEFAULT_MICROSOFT_CLIENT_ID||"").trim());
@@ -1282,8 +1681,9 @@ export default function App(){
     setTab("dashboard");
     setAuthBypass(false);
     setBackups(LS.get(BACKUP_KEY,[]));
+    addDiagnostic({level:"warn",scope:"app",event:"factory_reset",message:"Factory reset completed. Connectors and AI settings were preserved.",context:{preservedEmails:(preservedEmails||[]).length,preservedCloud:Boolean(preservedCloudCfg?.enabled),preservedAiEndpoint:Boolean(preservedAICfg?.endpoint)}});
     alert("Reset complete. LedgerAI is now fresh. Email + cloud connectors were preserved.");
-  },[buildBackupSnapshot,emails,pushBackupSnapshot,sbCfg]);
+  },[addDiagnostic,buildBackupSnapshot,emails,pushBackupSnapshot,sbCfg]);
 
   const onGoogleCredential=useCallback((resp)=>{
     let payload=decodeGoogleCredential(resp?.credential||"");
@@ -1294,19 +1694,29 @@ export default function App(){
         picture:String(resp.picture||""),
       };
     }
-    if(!payload?.email){setAuthMsg("Google login failed. Please try again.");return;}
+    if(!payload?.email){
+      addDiagnostic({level:"warn",scope:"auth",event:"google_login_failed",message:"Google login failed because profile email was missing."});
+      setAuthMsg("Google login failed. Please try again.");
+      return;
+    }
     const email=(payload.email||"").toLowerCase();
     const owner=LOCKED_OWNER_EMAIL.toLowerCase();
-    if(owner!==email){setAuthMsg(`Access denied. This dashboard is locked to ${LOCKED_OWNER_EMAIL}.`);return;}
+    if(owner!==email){
+      addDiagnostic({level:"warn",scope:"auth",event:"owner_mismatch",message:"Google login was rejected because it did not match the locked owner account.",context:{email:payload.email}});
+      setAuthMsg(`Access denied. This dashboard is locked to ${LOCKED_OWNER_EMAIL}.`);
+      return;
+    }
     setAuthCfg(p=>({...p,ownerEmail:LOCKED_OWNER_EMAIL}));
     setAuthUser({email:payload.email,name:payload.name||payload.email,picture:payload.picture||"",lastLoginAt:new Date().toISOString()});
     setAuthBypass(false);
     setAuthMsg("");
-  },[]);
+    addDiagnostic({level:"info",scope:"auth",event:"google_login_success",message:"Owner login succeeded.",context:{email:payload.email}});
+  },[addDiagnostic]);
 
   const signOut=()=>{
     setAuthUser(null);
     try{window.google?.accounts?.id?.disableAutoSelect();}catch{}
+    addDiagnostic({level:"info",scope:"auth",event:"sign_out",message:"User signed out of LedgerAI."});
   };
 
   // ── localStorage mirrors ─────────────────────────────────────────────────
@@ -1327,6 +1737,7 @@ export default function App(){
   useEffect(()=>LS.set("ledger_sms",smsNums),[smsNums]);
   useEffect(()=>LS.set("ledger_odcfg",sbCfg),[sbCfg]);
   useEffect(()=>LS.set("ledger_lastsync",lastSync),[lastSync]);
+  useEffect(()=>LS.set(DIAG_LOG_KEY,diagnostics),[diagnostics]);
 
   useEffect(()=>{
     const t=setTimeout(()=>{pushBackupSnapshot("auto");},1200);
@@ -1345,6 +1756,72 @@ export default function App(){
     if(authCfg.ownerEmail!==LOCKED_OWNER_EMAIL)setAuthCfg(p=>({...p,ownerEmail:LOCKED_OWNER_EMAIL}));
   },[authCfg.ownerEmail]);
 
+  useEffect(()=>{
+    const onError=(event)=>{
+      addDiagnostic({
+        level:"error",
+        scope:"window",
+        event:"unhandled_error",
+        message:event?.message||"Unhandled window error",
+        context:{
+          source:event?.filename||"",
+          line:event?.lineno||0,
+          column:event?.colno||0,
+          error:event?.error||null,
+        },
+      });
+    };
+    const onRejection=(event)=>{
+      addDiagnostic({
+        level:"error",
+        scope:"window",
+        event:"unhandled_rejection",
+        message:event?.reason?.message||String(event?.reason||"Unhandled promise rejection"),
+        context:{reason:event?.reason||null},
+      });
+    };
+    window.addEventListener("error",onError);
+    window.addEventListener("unhandledrejection",onRejection);
+    return()=>{
+      window.removeEventListener("error",onError);
+      window.removeEventListener("unhandledrejection",onRejection);
+    };
+  },[addDiagnostic]);
+
+  useEffect(()=>{
+    const baseError=console.error.bind(console);
+    const baseWarn=console.warn.bind(console);
+    console.error=(...args)=>{
+      addDiagnostic({level:"error",scope:"console",event:"console.error",message:formatDiagnosticArgs(args),context:{args:sanitizeDiagnosticValue(args)}});
+      baseError(...args);
+    };
+    console.warn=(...args)=>{
+      addDiagnostic({level:"warn",scope:"console",event:"console.warn",message:formatDiagnosticArgs(args),context:{args:sanitizeDiagnosticValue(args)}});
+      baseWarn(...args);
+    };
+    return()=>{
+      console.error=baseError;
+      console.warn=baseWarn;
+    };
+  },[addDiagnostic]);
+
+  const makeSupportBundle=useCallback(()=>buildSupportBundle({
+    diagnostics:diagnosticsRef.current,
+    authCfg,
+    authUser,
+    txns,
+    inbox,
+    accs,
+    acts,
+    smsNums,
+    emails,
+    sbCfg,
+    syncStatus,
+    lastSync,
+    aiPending:LS.get(AI_PENDING_EMAIL_KEY,[]),
+    backups,
+  }),[authCfg,authUser,txns,inbox,accs,acts,smsNums,emails,sbCfg,syncStatus,lastSync,backups]);
+
   // ── OneDrive sync helpers ────────────────────────────────────────────────
   const pushToCloud=useCallback(async(state={})=>{
     if(!sbCfg.enabled||!sbCfg.clientId)return;
@@ -1362,15 +1839,19 @@ export default function App(){
       await odSave(sbCfg.clientId,payload);
       const ts=new Date().toISOString();
       setLastSync(ts);setSyncStatus("ok");
+      setCloudIssue("");
+      addDiagnostic({level:"info",scope:"cloud",event:"onedrive_sync_success",message:"OneDrive sync completed.",context:{txns:(payload.txns||[]).length,inbox:(payload.inbox||[]).length,accounts:(payload.accs||[]).length,emails:(payload.emails||[]).length}});
       setTimeout(()=>setSyncStatus("idle"),3000);
     }catch(e){
       console.error("OneDrive sync error",e);
       setSyncStatus("error");
+      setCloudIssue(e?.message||"OneDrive sync failed.");
+      addDiagnostic({level:"error",scope:"cloud",event:"onedrive_sync_error",message:e?.message||"OneDrive sync failed.",context:{error:e}});
       // If token expired, mark as needing reconnect
       if(e.message.includes("Not signed in")||e.message.includes("401"))
         setSbCfg(p=>({...p,enabled:false,needsReconnect:true}));
     }
-  },[sbCfg,txns,inbox,accs,acts,cats,smsNums,emails]);
+  },[addDiagnostic,sbCfg,txns,inbox,accs,acts,cats,smsNums,emails,setCloudIssue]);
 
   const debouncedSync=useCallback((state={})=>{
     if(!sbCfg.enabled)return;
@@ -1393,15 +1874,19 @@ export default function App(){
       if(d.smsNums)setSmsNums(d.smsNums);
       if(d.emails)setEmails(prev=>mergeLoadedEmailsWithLocalTokens(d.emails,prev));
       setLastSync(new Date().toISOString());setSyncStatus("ok");
+      setCloudIssue("");
+      addDiagnostic({level:"info",scope:"cloud",event:"onedrive_load_success",message:"OneDrive restore completed.",context:{txns:(d?.txns||[]).length,inbox:(d?.inbox||[]).length,accounts:(d?.accs||[]).length,emails:(d?.emails||[]).length}});
       setTimeout(()=>setSyncStatus("idle"),3000);
     }catch(e){
       console.error("OneDrive load error",e);
       setSyncStatus("error");
+      setCloudIssue(e?.message||"OneDrive restore failed.");
+      addDiagnostic({level:"error",scope:"cloud",event:"onedrive_load_error",message:e?.message||"OneDrive restore failed.",context:{error:e}});
       if(e?.message?.includes?.("Not signed in")||e?.message?.includes?.("401")){
         setSbCfg(p=>({...p,enabled:false,needsReconnect:true}));
       }
     }
-  },[sbCfg,setSbCfg]);
+  },[addDiagnostic,sbCfg,setSbCfg,setCloudIssue]);
 
   // Auto-load from cloud once when connected and local ledger is empty.
   useEffect(()=>{
@@ -1472,11 +1957,29 @@ export default function App(){
     return created;
   },[]);
   const saveTx=useCallback((tx)=>{
-    if(tx.isNewCategory)ensureCat(tx.businessActivity,tx.category);
-    const accName=tx.accountId?accs.find(a=>a.id===tx.accountId)?.name||"":tx.accountName||"";
-    const liabName=tx.liabilityAccountId?accs.find(a=>a.id===tx.liabilityAccountId)?.name||"":tx.liabilityAccountName||"";
-    const targetAccName=tx.targetAccountId?accs.find(a=>a.id===tx.targetAccountId)?.name||"":tx.targetAccountName||"";
-    const je=buildJE(tx,accs);const full={...tx,accountName:accName,liabilityAccountName:liabName,targetAccountName:targetAccName,journalEntries:je};
+    const normalizedTx=normalizeTrackedVendor(tx);
+    const isPendingInboxEdit=!tx.id&&Boolean(tx._iid);
+    if(normalizedTx.isNewCategory&&!isPendingInboxEdit)ensureCat(normalizedTx.businessActivity,normalizedTx.category);
+    const accName=normalizedTx.accountId?accs.find(a=>a.id===normalizedTx.accountId)?.name||"":normalizedTx.accountName||"";
+    const liabName=normalizedTx.liabilityAccountId?accs.find(a=>a.id===normalizedTx.liabilityAccountId)?.name||"":normalizedTx.liabilityAccountName||"";
+    const targetAccName=normalizedTx.targetAccountId?accs.find(a=>a.id===normalizedTx.targetAccountId)?.name||"":normalizedTx.targetAccountName||"";
+    const {_iid,_ts,...txBase}=normalizedTx;
+    if(isPendingInboxEdit){
+      setInbox(p=>p.map(item=>item._iid===_iid?{
+        ...item,
+        ...txBase,
+        accountName:accName,
+        liabilityAccountName:liabName,
+        targetAccountName:targetAccName,
+        _iid:item._iid,
+        _ts:item._ts,
+      }:item));
+      setShowAdd(false);
+      setEditTx(null);
+      return;
+    }
+    const je=buildJE(txBase,accs);
+    const full={...txBase,accountName:accName,liabilityAccountName:liabName,targetAccountName:targetAccName,journalEntries:je};
     if(tx.id&&txns.find(t=>t.id===tx.id))setTxns(p=>p.map(t=>t.id===tx.id?full:t));
     else setTxns(p=>[{...full,id:gid(),createdAt:new Date().toISOString()},...p]);
     setShowAdd(false);setEditTx(null);
@@ -1484,15 +1987,21 @@ export default function App(){
   const delTx=id=>setTxns(p=>p.filter(t=>t.id!==id));
   const addInbox=items=>setInbox(p=>[...items.map(i=>({...i,_iid:gid(),_ts:Date.now()})),...p]);
   const approveInbox=item=>{
+    const validationMsg=getAccountingValidationMessage(item,accs);
+    if(validationMsg){
+      alert(validationMsg);
+      return;
+    }
     if(item.isNewCategory)ensureCat(item.businessActivity,item.category);
-    const tx={...item,id:gid(),createdAt:new Date().toISOString(),source:item.source||"auto"};
+    const {_iid,_ts,...itemBase}=normalizeTrackedVendor(item);
+    const tx={...itemBase,id:gid(),createdAt:new Date().toISOString(),source:item.source||"auto"};
     const accName=tx.accountId?accs.find(a=>a.id===tx.accountId)?.name||"":tx.accountName||"";
     const liabName=tx.liabilityAccountId?accs.find(a=>a.id===tx.liabilityAccountId)?.name||"":tx.liabilityAccountName||"";
     const targetAccName=tx.targetAccountId?accs.find(a=>a.id===tx.targetAccountId)?.name||"":tx.targetAccountName||"";
     setTxns(p=>[{...tx,accountName:accName,liabilityAccountName:liabName,targetAccountName:targetAccName,journalEntries:buildJE(tx,accs)},...p]);
     setInbox(p=>p.filter(i=>i._iid!==item._iid));
   };
-  const editInbox=item=>{setEditTx({...item,id:undefined});setAddType(item.type||"expense");setShowAdd(true);setInbox(p=>p.filter(i=>i._iid!==item._iid));};
+  const editInbox=item=>{setEditTx({...item,id:undefined});setAddType(item.type||"expense");setShowAdd(true);};
   const discardInbox=iid=>setInbox(p=>p.filter(i=>i._iid!==iid));
 
   const todayTxns=txns.filter(t=>t.date===today());
@@ -1508,7 +2017,7 @@ export default function App(){
     if(filter.to&&t.date>filter.to)return false;
     return true;
   });
-  const TABS=[["dashboard","Dashboard"],["transactions","Ledger"],["inbox",`Inbox${inbox.length?` (${inbox.length})`:""}`],["email",`Email${emails.length?` (${emails.length})`:""}`],["journal","Journal"],["accounts","Accounts"],["reports","Reports"],["settings","Settings"],["daily",`Day Review${inbox.length?` (${inbox.length})`:""}`]];
+  const TABS=[["dashboard","Dashboard"],["transactions","Ledger"],["inbox",`Inbox${inbox.length?` (${inbox.length})`:""}`],["email",`Email${emails.length?` (${emails.length})`:""}`],["journal","Journal"],["accounts","Accounts"],["reports","Reports"],["settings","Settings"],["daily","Day Review"]];
 
   if(authCfg.enabled&&!authCfg.googleClientId){
     return <AuthSetupScreen authCfg={authCfg} setAuthCfg={setAuthCfg}/>;
@@ -1550,14 +2059,14 @@ export default function App(){
         {tab==="transactions"&&<LedgerTab txns={filtered} filter={filter} setFilter={setFilter} acts={acts} onEdit={tx=>{setEditTx(tx);setAddType(tx.type);setShowAdd(true);}} onDelete={delTx}/>}
         {tab==="inbox"&&<InboxTab inbox={inbox} addInbox={addInbox} acts={acts} cats={cats} onApprove={approveInbox} onEdit={editInbox} onDiscard={discardInbox}/>}
         <div style={{display:tab==="email"?"block":"none"}} aria-hidden={tab!=="email"}>
-          <EmailTab emails={emails} setEmails={setEmails} inbox={inbox} addInbox={addInbox} acts={acts} cats={cats} accs={accs} defaultGoogleClientId={authCfg.googleClientId||DEFAULT_GOOGLE_CLIENT_ID} defaultMicrosoftClientId={sbCfg.clientId||DEFAULT_MICROSOFT_CLIENT_ID||""}/>
+          <EmailTab emails={emails} setEmails={setEmails} inbox={inbox} addInbox={addInbox} acts={acts} cats={cats} accs={accs} defaultGoogleClientId={authCfg.googleClientId||DEFAULT_GOOGLE_CLIENT_ID} defaultMicrosoftClientId={sbCfg.clientId||DEFAULT_MICROSOFT_CLIENT_ID||""} addDiagnostic={addDiagnostic}/>
         </div>
         {tab==="journal"&&<JournalTab txns={txns}/>}
         {tab==="accounts"&&<AccountsTab accs={accs} setAccs={setAccs} txns={txns} addInbox={addInbox} acts={acts} cats={cats}/>}
         {tab==="reports"&&<ReportsTab txns={txns} acts={acts} totInc={totInc} totExp={totExp}/>}
-        {tab==="settings"&&<SettingsTab acts={acts} setActs={setActs} cats={cats} setCats={setCats} backups={backups} onBackupNow={()=>pushBackupSnapshot("manual")} onRestoreBackup={restoreBackupSnapshot} onFactoryReset={factoryReset} onRenameActivity={renameBusinessActivity}/>}
-        {tab==="cloud"&&<CloudTab sbCfg={sbCfg} setSbCfg={setSbCfg} syncStatus={syncStatus} lastSync={lastSync} onSync={pushToCloud} onLoad={loadFromCloud} txns={txns} setTxns={setTxns} inbox={inbox} setInbox={setInbox} accs={accs} setAccs={setAccs} acts={acts} setActs={setActs} cats={cats} setCats={setCats} smsNums={smsNums} setSmsNums={setSmsNums} emails={emails} setEmails={setEmails}/>}
-        {tab==="daily"&&<DailyTab todayTxns={todayTxns} todInc={todInc} todExp={todExp} summary={summary} sumLoad={sumLoad} getSummary={async()=>{setSumLoad(true);setSummary(await aiSummarize(todayTxns));setSumLoad(false);}} onEdit={tx=>{setEditTx(tx);setAddType(tx.type);setShowAdd(true);}} onDelete={delTx} inbox={inbox} onApprove={approveInbox} onDiscard={discardInbox} onEditPending={editInbox}/>}
+        {tab==="settings"&&<SettingsTab acts={acts} setActs={setActs} cats={cats} setCats={setCats} backups={backups} onBackupNow={()=>pushBackupSnapshot("manual")} onRestoreBackup={restoreBackupSnapshot} onFactoryReset={factoryReset} onRenameActivity={renameBusinessActivity} diagnostics={diagnostics} onClearDiagnostics={clearDiagnostics} buildSupportBundle={makeSupportBundle} addDiagnostic={addDiagnostic}/>}
+        {tab==="cloud"&&<CloudTab sbCfg={sbCfg} setSbCfg={setSbCfg} syncStatus={syncStatus} lastSync={lastSync} onSync={pushToCloud} onLoad={loadFromCloud} txns={txns} setTxns={setTxns} inbox={inbox} setInbox={setInbox} accs={accs} setAccs={setAccs} acts={acts} setActs={setActs} cats={cats} setCats={setCats} smsNums={smsNums} setSmsNums={setSmsNums} emails={emails} setEmails={setEmails} addDiagnostic={addDiagnostic}/>}
+        {tab==="daily"&&<DailyTab todayTxns={todayTxns} todInc={todInc} todExp={todExp} summary={summary} sumLoad={sumLoad} getSummary={async()=>{setSumLoad(true);setSummary(await aiSummarize(todayTxns));setSumLoad(false);}} onEdit={tx=>{setEditTx(tx);setAddType(tx.type);setShowAdd(true);}} onDelete={delTx}/>}
       </div>
       {showAdd&&<AddModal type={addType} existing={editTx} acts={acts} cats={cats} accs={accs} onAddAccount={addAccountFromModal} onAddActivity={addBusinessActivity} onSave={saveTx} onClose={()=>{setShowAdd(false);setEditTx(null);}}/>}
     </div>
@@ -2096,7 +2605,7 @@ function SmsOverviewModal({onClose}){
 }
 
 // ── EMAIL TAB ─────────────────────────────────────────────────────────────────
-function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleClientId,defaultMicrosoftClientId}){
+function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleClientId,defaultMicrosoftClientId,addDiagnostic=()=>{}}){
   const[syncingIds,setSyncingIds]=useState({});
   const[syncProgress,setSyncProgress]=useState({});
   const[logs,setLogs]=useState({});
@@ -2112,6 +2621,23 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
   const cloudPullLastRunRef=useRef(0);
   const cloudRetryUnsupportedRef=useRef(false);
   const log=(id,msg)=>setLogs(p=>({...p,[id]:msg}));
+  const setAccountIssue=(accId,message="",patch={})=>{
+    const detail=redactSensitiveText(String(message||"")).slice(0,180);
+    setEmails(prev=>prev.map(a=>a.id===accId?{
+      ...a,
+      ...patch,
+      lastError:detail,
+      lastErrorAt:detail?new Date().toISOString():"",
+    }:a));
+  };
+  const clearAccountIssue=(accId,patch={})=>{
+    setEmails(prev=>prev.map(a=>a.id===accId?{
+      ...a,
+      ...patch,
+      lastError:"",
+      lastErrorAt:"",
+    }:a));
+  };
   const googleClientId=(defaultGoogleClientId||DEFAULT_GOOGLE_CLIENT_ID||"").trim();
   const microsoftClientId=(defaultMicrosoftClientId||DEFAULT_MICROSOFT_CLIENT_ID||"").trim();
   const cloudRetryClientId=getAiCloudClientId();
@@ -2221,7 +2747,15 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
       queuedAt,
     };
     const out=await enqueueCloudAiRetryJob(payload,cfg);
-    if(out?.unsupported)cloudRetryUnsupportedRef.current=true;
+    if(out?.unsupported){
+      cloudRetryUnsupportedRef.current=true;
+      addDiagnostic({level:"warn",scope:"email",event:"cloud_retry_unsupported",message:"Cloud AI retry is not supported by the current AI backend.",accountId:acc.id,provider,context:{msgId}});
+    }
+    if(out?.ok){
+      addDiagnostic({level:"info",scope:"email",event:"cloud_retry_enqueued",message:"Cloud AI retry job was queued.",accountId:acc.id,provider,context:{msgId,jobId:out.jobId||""}});
+    }else if(out?.error){
+      addDiagnostic({level:"warn",scope:"email",event:"cloud_retry_enqueue_failed",message:out.error,accountId:acc.id,provider,context:{msgId}});
+    }
     if(!out?.ok)return out;
     return{ok:true,jobId};
   };
@@ -2241,6 +2775,9 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
         const out=await pullCloudAiRetryJobs(clientId,AI_CLOUD_PULL_LIMIT,loadAICfg());
         if(!out?.ok){
           if(out?.unsupported)cloudRetryUnsupportedRef.current=true;
+          if(out?.error){
+            addDiagnostic({level:"warn",scope:"email",event:"cloud_retry_pull_failed",message:out.error,context:{clientId}});
+          }
           continue;
         }
         const jobs=(out.jobs||[]).filter(j=>j&&j.accountId&&j.msgId);
@@ -2253,6 +2790,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
       }
       const jobs=pulledJobs;
       if(!jobs.length)return;
+      addDiagnostic({level:"info",scope:"email",event:"cloud_retry_pull_success",message:`Pulled ${jobs.length} completed cloud AI retry job(s).`,context:{jobs:jobs.length}});
       const rowIds=new Set();
       const cloudJobIds=new Set();
       const msgKeys=new Set();
@@ -2298,6 +2836,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
       if(queued.length){
         addInbox(queued);
         setToast(`🤖 Cloud AI retry queued ${recovered} item(s) for review.`);
+        addDiagnostic({level:"info",scope:"email",event:"cloud_retry_recovered",message:`Cloud AI retry recovered ${recovered} item(s).`,context:{items:recovered}});
       }
       setAiPending(prev=>prev.filter(p=>{
         const key=`${p.accountId}::${p.msgId}`;
@@ -2435,6 +2974,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
     if(!googleClientId){alert("Google OAuth is not configured for this app yet.");return;}
     if(!window.google?.accounts?.oauth2){alert("Google Identity Services loading… please wait a moment and try again.");return;}
     setConnectBusy("google");
+    addDiagnostic({level:"info",scope:"auth",event:"gmail_connect_started",message:"Starting Gmail OAuth flow.",accountId:existing?.id||"",provider:"google"});
     try{
       let authResp;
       const loginHint=(existing?.email||"").trim();
@@ -2459,15 +2999,18 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
         const base=hydrateEmailAccount({id:gid(),provider:"google",label:mail.split("@")[0],email:mail,syncQuery:GMAIL_QUERY,maxEmails:100,autoPost:false,enabled:true,firstSyncCompleted:false,syncFromDate:"",autoSyncHourly:true});
         if(ix>=0){
           const cur=hydrateEmailAccount(next[ix]);
-          next[ix]={...cur,provider:"google",email:mail,token,tokenExpiresAt:googleTokenExpiryIso(authResp),connected:true,userDisconnected:false,reauthRequired:false,enabled:true,clientId:googleClientId,autoSyncHourly:cur.autoSyncHourly!==false,lastAuthAt:new Date().toISOString()};
+          next[ix]={...cur,provider:"google",email:mail,token,tokenExpiresAt:googleTokenExpiryIso(authResp),connected:true,userDisconnected:false,reauthRequired:false,enabled:true,clientId:googleClientId,autoSyncHourly:cur.autoSyncHourly!==false,lastAuthAt:new Date().toISOString(),lastError:"",lastErrorAt:""};
         }else{
-          next.unshift({...base,token,tokenExpiresAt:googleTokenExpiryIso(authResp),connected:true,userDisconnected:false,reauthRequired:false,clientId:googleClientId,lastAuthAt:new Date().toISOString()});
+          next.unshift({...base,token,tokenExpiresAt:googleTokenExpiryIso(authResp),connected:true,userDisconnected:false,reauthRequired:false,clientId:googleClientId,lastAuthAt:new Date().toISOString(),lastError:"",lastErrorAt:""});
         }
         return next;
       });
       setToast(`✅ Gmail connected: ${mail}`);
+      addDiagnostic({level:"info",scope:"auth",event:"gmail_connect_success",message:"Gmail account connected.",provider:"google",context:{email:mail,existing:Boolean(existing?.id)}});
     }catch(err){
       const msg=String(err?.message||"");
+      addDiagnostic({level:"error",scope:"auth",event:"gmail_connect_failed",message:msg||"Gmail OAuth failed.",accountId:existing?.id||"",provider:"google",context:{error:err}});
+      if(existing?.id)setAccountIssue(existing.id,msg);
       if(msg.includes("access_denied")){
         alert("Access denied by Google OAuth. Add your email as a Test User in Google Auth Platform, or publish the OAuth app to production.");
       }else if(msg.includes("redirect_uri_mismatch")){
@@ -2488,6 +3031,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
       return;
     }
     setConnectBusy("microsoft");
+    addDiagnostic({level:"info",scope:"auth",event:"outlook_connect_started",message:"Starting Outlook OAuth flow.",accountId:existing?.id||"",provider:"microsoft"});
     try{
       const login=await msLoginMail(msClient);
       const account=login.account||{};
@@ -2502,14 +3046,17 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
         const base=hydrateEmailAccount({id:gid(),provider:"microsoft",label:mail.split("@")[0],email:mail,syncQuery:"",maxEmails:100,autoPost:false,autoSyncHourly:true,enabled:true,firstSyncCompleted:false,syncFromDate:"",msClientId:msClient,msAccountId:account.homeAccountId||"",msUsername:account.username||mail});
         if(ix>=0){
           const cur=hydrateEmailAccount(next[ix]);
-          next[ix]={...cur,provider:"microsoft",email:mail,token:login.accessToken,connected:true,userDisconnected:false,reauthRequired:false,enabled:true,autoSyncHourly:cur.autoSyncHourly!==false,msClientId:msClient,msAccountId:account.homeAccountId||cur.msAccountId||"",msUsername:account.username||cur.msUsername||mail,lastAuthAt:new Date().toISOString()};
+          next[ix]={...cur,provider:"microsoft",email:mail,token:login.accessToken,connected:true,userDisconnected:false,reauthRequired:false,enabled:true,autoSyncHourly:cur.autoSyncHourly!==false,msClientId:msClient,msAccountId:account.homeAccountId||cur.msAccountId||"",msUsername:account.username||cur.msUsername||mail,lastAuthAt:new Date().toISOString(),lastError:"",lastErrorAt:""};
         }else{
-          next.unshift({...base,token:login.accessToken,connected:true,userDisconnected:false,reauthRequired:false,lastAuthAt:new Date().toISOString()});
+          next.unshift({...base,token:login.accessToken,connected:true,userDisconnected:false,reauthRequired:false,lastAuthAt:new Date().toISOString(),lastError:"",lastErrorAt:""});
         }
         return next;
       });
       setToast(`✅ Outlook connected: ${mail}`);
+      addDiagnostic({level:"info",scope:"auth",event:"outlook_connect_success",message:"Outlook account connected.",provider:"microsoft",context:{email:mail,existing:Boolean(existing?.id)}});
     }catch(e){
+      addDiagnostic({level:"error",scope:"auth",event:"outlook_connect_failed",message:e?.message||"Outlook OAuth failed.",accountId:existing?.id||"",provider:"microsoft",context:{error:e}});
+      if(existing?.id)setAccountIssue(existing.id,e?.message||"Outlook OAuth failed.");
       alert(`Microsoft OAuth error: ${friendlyMicrosoftAuthError(e)}`);
     }finally{
       setConnectBusy("");
@@ -2524,14 +3071,16 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
 
   const disconnectAccount=(acc)=>{
     const provider=providerOf(acc);
-    setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,token:null,connected:false,userDisconnected:true,reauthRequired:false}:a));
+    setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,token:null,connected:false,userDisconnected:true,reauthRequired:false,lastError:"",lastErrorAt:""}:a));
     setToast(`${provider==="microsoft"?"Outlook":"Gmail"} disconnected: ${acc.email||acc.label||"account"}`);
+    addDiagnostic({level:"info",scope:"email",event:"account_disconnected",message:`${provider==="microsoft"?"Outlook":"Gmail"} account disconnected.`,accountId:acc.id,provider,context:{email:acc.email||acc.label||""}});
   };
 
   const removeAccount=(acc)=>{
     if(!window.confirm(`Remove ${acc.email||acc.label||"this account"} from Email Integration?`))return;
     setEmails(prev=>prev.filter(a=>a.id!==acc.id));
     setAiPending(prev=>prev.filter(p=>p.accountId!==acc.id));
+    addDiagnostic({level:"warn",scope:"email",event:"account_removed",message:"Email account removed from integration.",accountId:acc.id,provider:providerOf(acc),context:{email:acc.email||acc.label||""}});
   };
 
   const fetchMessageEvidence=async(provider,token,msgId)=>{
@@ -2632,6 +3181,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
     const markFirst=opts.markFirstSync===true;
     setSyncing(acc.id,true);
     setProgress(acc.id,{phase:"fetching",processed:0,total:0,remaining:0,matched:0,newCount:0,found:0,pending:0});
+    addDiagnostic({level:"info",scope:"email",event:"sync_started",message:`${provider==="microsoft"?"Outlook":"Gmail"} sync started.`,accountId:acc.id,provider,context:{scanAll,interactive,silent,fromDate}});
     try{
       const requestedMax=scanAll?50000:Math.max(1,Math.min(Number(acc.maxEmails)||100,5000));
       let token=acc.token||"";
@@ -2661,6 +3211,8 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
       }
       if(!messages.length){
         log(acc.id,"✓ No matching emails found.");
+        clearAccountIssue(acc.id);
+        addDiagnostic({level:"info",scope:"email",event:"sync_no_messages",message:"No matching emails were found for sync.",accountId:acc.id,provider,context:{scanAll,fromDate}});
         setProgress(acc.id,{phase:"done",processed:0,total:0,remaining:0,matched:0,newCount:0,found:0,pending:0});
         setSyncing(acc.id,false);
         return;
@@ -2670,6 +3222,8 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
       const fresh=messages.filter(m=>!processed.has(m.id));
       if(!fresh.length){
         log(acc.id,"✓ All emails already processed.");
+        clearAccountIssue(acc.id);
+        addDiagnostic({level:"info",scope:"email",event:"sync_no_new_messages",message:"All matching emails were already processed.",accountId:acc.id,provider,context:{matched:messages.length}});
         setProgress(acc.id,{phase:"done",processed:0,total:0,remaining:0,matched:messages.length,newCount:0,found:0,pending:0});
         setSyncing(acc.id,false);
         return;
@@ -2794,15 +3348,21 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
         syncFromDate:fromDate||a.syncFromDate||"",
         lastAutoSyncAt:opts.auto===true?syncStamp:(a.lastAutoSyncAt||""),
         msClientId:provider==="microsoft"?(a.msClientId||msClient):a.msClientId,
+        lastError:"",
+        lastErrorAt:"",
       }:a));
       if(!valid.length){
         if(failed===toProcess.length&&!pendingQueued){
           log(acc.id,"⚠ Sync finished, but all emails failed extraction. Check network/auth and retry.");
+          setAccountIssue(acc.id,"All emails failed extraction during sync.");
+          addDiagnostic({level:"error",scope:"email",event:"sync_all_failed",message:"Sync completed but every email failed extraction.",accountId:acc.id,provider,context:{matched:messages.length,total:toProcess.length,failed,skipped,pendingQueued,failureReasons}});
           setProgress(acc.id,{phase:"error",processed:toProcess.length,total:toProcess.length,remaining:0,matched:messages.length,newCount:fresh.length,found:0,failed,skipped,pending:pendingQueued,failureReasons:{...failureReasons}});
           setSyncing(acc.id,false);
           return;
         }
         log(acc.id,`✓ Done — no cashflow transaction found.${failed?` Failed: ${failed}.`:""}${skipped?` Skipped: ${skipped}.`:""}${pendingQueued?` Pending AI retry: ${pendingQueued}.`:""}`);
+        clearAccountIssue(acc.id);
+        addDiagnostic({level:failed>0?"warn":"info",scope:"email",event:"sync_completed_no_transactions",message:"Sync completed with no cashflow transactions.",accountId:acc.id,provider,context:{matched:messages.length,total:toProcess.length,failed,skipped,pendingQueued,failureReasons}});
         setProgress(acc.id,{phase:"done",processed:toProcess.length,total:toProcess.length,remaining:0,matched:messages.length,newCount:fresh.length,found:0,failed,skipped,pending:pendingQueued,failureReasons:{...failureReasons}});
         setSyncing(acc.id,false);
         return;
@@ -2810,27 +3370,37 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
       const queued=valid.map(i=>({...i,source:"email",reviewStatus:"pending"}));
       addInbox(queued);
       log(acc.id,`AI found ${valid.length} transaction item(s). Added to Review queue.${pendingQueued?` Pending AI retry: ${pendingQueued}.`:""}`);
+      clearAccountIssue(acc.id);
+      addDiagnostic({level:"info",scope:"email",event:"sync_completed",message:`Sync completed and queued ${valid.length} transaction item(s).`,accountId:acc.id,provider,context:{matched:messages.length,total:toProcess.length,queued:valid.length,failed,skipped,pendingQueued,failureReasons}});
       setProgress(acc.id,{phase:"done",processed:toProcess.length,total:toProcess.length,remaining:0,matched:messages.length,newCount:fresh.length,found:valid.length,failed,skipped,pending:pendingQueued,failureReasons:{...failureReasons}});
       setToast(`📥 ${valid.length} item(s) queued for review.`);
     }catch(e){
       const msg=String(e.message||"");
       if(provider==="google"&&msg.includes("google_silent_refresh_unavailable")){
         log(acc.id,"ℹ Gmail auto-sync is paused until browser allows a silent token refresh. Keep this tab active or click Sync once.");
+        setAccountIssue(acc.id,"Google silent refresh unavailable. Manual reconnect may be needed.");
+        addDiagnostic({level:"warn",scope:"email",event:"google_silent_refresh_unavailable",message:"Google silent refresh is unavailable for background sync.",accountId:acc.id,provider,context:{error:e}});
         setProgress(acc.id,{phase:"done",pending:0});
       }else if(msg.includes("ai_config_error")){
         const detail=msg.replace("ai_config_error:","").trim();
         log(acc.id,`⚠ AI backend config issue: ${detail}`);
+        setAccountIssue(acc.id,detail);
+        addDiagnostic({level:"error",scope:"ai",event:"ai_config_error",message:detail||"AI backend config issue.",accountId:acc.id,provider,context:{error:e}});
         if(!silent)alert(`AI backend config issue:\n${detail}\n\nGo to Settings → AI Backend and click Test AI Backend.`);
         setProgress(acc.id,{phase:"error",pending:0,failureReasons:{config:1}});
       }else if(provider==="google"&&isGoogleAuthFailure(msg)){
         log(acc.id,"⚠ Google session needs refresh. Click Connect Gmail once to re-authorize if sync keeps failing.");
-        setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,token:null,connected:true,userDisconnected:false,reauthRequired:true}:a));
+        setAccountIssue(acc.id,"Google session needs refresh.",{token:null,connected:true,userDisconnected:false,reauthRequired:true});
+        addDiagnostic({level:"warn",scope:"auth",event:"gmail_reauth_required",message:"Google session needs refresh.",accountId:acc.id,provider,context:{error:e}});
         if(interactive&&!silent)alert("Google session needs refresh. Click Connect Gmail once, then sync will continue automatically.");
       }else if(provider==="microsoft"&&isMicrosoftAuthFailure(msg)){
         log(acc.id,provider==="microsoft"?"⚠ Microsoft session expired — reconnect required.":"⚠ Token expired — reconnect required.");
-        setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,token:null,connected:true,userDisconnected:false,reauthRequired:true}:a));
+        setAccountIssue(acc.id,"Microsoft session expired. Reconnect required.",{token:null,connected:true,userDisconnected:false,reauthRequired:true});
+        addDiagnostic({level:"warn",scope:"auth",event:"outlook_reauth_required",message:"Microsoft session expired and requires reconnect.",accountId:acc.id,provider,context:{error:e}});
       }else{
         log(acc.id,"Error: "+msg);
+        setAccountIssue(acc.id,msg);
+        addDiagnostic({level:"error",scope:"email",event:"sync_failed",message:msg||"Email sync failed.",accountId:acc.id,provider,context:{error:e,scanAll,interactive,silent}});
         setProgress(acc.id,{phase:"error",pending:0});
       }
     }
@@ -2964,6 +3534,8 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
             recovered+=queued.length;
             addInbox(queued);
             log(acc.id,`🤖 AI retry recovered ${queued.length} item(s) from pending queue.`);
+            clearAccountIssue(acc.id);
+            addDiagnostic({level:"info",scope:"email",event:"ai_retry_recovered",message:`AI retry recovered ${queued.length} item(s).`,accountId:acc.id,provider,context:{items:queued.length,msgId:row.msgId}});
           }
         }catch(err){
           const msg=String(err?.message||"unknown_error");
@@ -2979,13 +3551,14 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
           }
           if(provider==="google"&&isGoogleAuthFailure(lower)){
             retryAccountErrors.set(acc.id,msg);
-            setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,token:null,connected:true,userDisconnected:false,reauthRequired:true}:a));
+            setAccountIssue(acc.id,"Google session needs refresh.",{token:null,connected:true,userDisconnected:false,reauthRequired:true});
           }else if(provider==="microsoft"&&isMicrosoftAuthFailure(lower)){
             retryAccountErrors.set(acc.id,msg);
-            setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,token:null,connected:true,userDisconnected:false,reauthRequired:true}:a));
+            setAccountIssue(acc.id,"Microsoft session expired. Reconnect required.",{token:null,connected:true,userDisconnected:false,reauthRequired:true});
           }else if(force&&isDismissedAuthFlow(lower)){
             retryAccountErrors.set(acc.id,msg);
           }
+          addDiagnostic({level:"warn",scope:"email",event:"ai_retry_failed",message:msg.slice(0,180),accountId:acc.id,provider,context:{msgId:row.msgId,cloudQueued}});
           const nextRetry=cloudQueued
             ? new Date(Date.now()+Math.max(AI_RETRY_INTERVAL_MS,2*60*60*1000)).toISOString()
             : new Date(Date.now()+AI_RETRY_INTERVAL_MS).toISOString();
@@ -3118,6 +3691,9 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
                     </button>
                   )}
                 </div>
+                {acc.lastError&&<div style={{fontSize:11,color:"#fca5a5",marginTop:4}}>
+                  Last issue{acc.lastErrorAt?` · ${fmtDT(acc.lastErrorAt)}`:""}: {acc.lastError}
+                </div>}
               </div>
             </div>
             <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
@@ -3254,7 +3830,7 @@ function EmailReviewModal({initialItems,acts,cats,onClose,onSubmit}){
     const act=i.businessActivity||acts[0]||"Personal";
     const cat=i.category||cats[act]?.[0]||"Other";
     const rowType=i.type==="income"?"income":i.type==="transfer"?"transfer":"expense";
-    return{...i,type:rowType,businessActivity:act,category:cat,date:i.date||today(),amount:Number(i.amount)||0,description:i.description||i.vendor||cat,paymentMethod:i.paymentMethod||""};
+    return{...i,type:rowType,businessActivity:act,category:cat,subCategory:i.subCategory||"",date:i.date||today(),amount:Number(i.amount)||0,description:i.description||i.vendor||cat,paymentMethod:i.paymentMethod||""};
   };
   const[rows,setRows]=useState(()=>initialItems.map(normalize));
   const update=(idx,patch)=>setRows(p=>p.map((r,i)=>i===idx?{...r,...patch}:r));
@@ -3273,8 +3849,9 @@ function EmailReviewModal({initialItems,acts,cats,onClose,onSubmit}){
               <div><label>Business</label><select value={r.businessActivity||acts[0]||""} onChange={e=>update(i,{businessActivity:e.target.value,category:cats[e.target.value]?.[0]||r.category||"Other"})}>{acts.map(a=><option key={a} value={a}>{a}</option>)}</select></div>
               <div><label>Category</label><input list={`cat-${i}`} value={r.category||""} onChange={e=>update(i,{category:e.target.value})}/><datalist id={`cat-${i}`}>{(cats[r.businessActivity]||[]).map(c=><option key={c} value={c}/>)}</datalist></div>
             </div>
-            <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr auto",gap:8,alignItems:"end"}}>
+            <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr auto",gap:8,alignItems:"end"}}>
               <div><label>Description</label><input value={r.description||""} onChange={e=>update(i,{description:e.target.value})}/></div>
+              <div><label>Sub Category</label><input value={r.subCategory||""} onChange={e=>update(i,{subCategory:e.target.value})} placeholder="Optional"/></div>
               <div><label>Vendor</label><input value={r.vendor||""} onChange={e=>update(i,{vendor:e.target.value})}/></div>
               <div><label>Payment</label><select value={r.paymentMethod||""} onChange={e=>update(i,{paymentMethod:e.target.value})}><option value="">Select</option>{PAY_METHODS.map(m=><option key={m} value={m}>{m}</option>)}</select></div>
               <button className="btn sm dan" onClick={()=>remove(i)}>Remove</button>
@@ -3408,7 +3985,7 @@ function ICard({item,onApprove,onEdit,onDiscard}){
           </div>
           <div style={{fontWeight:500,fontSize:14}}>{item.description||item.category}</div>
           <div style={{fontSize:12,color:"#475569"}}>
-            {item.businessActivity} · {item.category}
+            {item.businessActivity} · {item.category}{item.subCategory?` · ${item.subCategory}`:""}
             {item.vendor?` · ${item.vendor}`:""}
             {item.paymentMethod?` · ${item.paymentMethod}`:""}
             {item.type==="transfer"&&item.accountName&&item.targetAccountName?` · ${item.accountName} → ${item.targetAccountName}`:(item.accountName?` · ${item.accountName}`:"")}
@@ -3576,6 +4153,15 @@ function ReportsTab({txns,acts,totInc,totExp}){
   const catMap={};txns.filter(t=>t.type==="expense").forEach(t=>{catMap[t.category]=(catMap[t.category]||0)+t.amount;});
   const cats=Object.entries(catMap).sort((a,b)=>b[1]-a[1]);
   const maxC=cats[0]?.[1]||1;
+  const vendorMap={};
+  txns
+    .filter(t=>t.type==="expense"&&isVendorTracked(t)&&String(t.vendor||"").trim())
+    .forEach(t=>{
+      const key=String(t.vendor||"").trim();
+      vendorMap[key]=(vendorMap[key]||0)+Number(t.amount||0);
+    });
+  const vendors=Object.entries(vendorMap).sort((a,b)=>b[1]-a[1]);
+  const maxV=vendors[0]?.[1]||1;
   const emailTxns=txns.filter(t=>t.source==="email");
   return(<div>
     <h2 className="h2" style={{marginBottom:18}}>Reports</h2>
@@ -3609,12 +4195,17 @@ function ReportsTab({txns,acts,totInc,totExp}){
         {cats.map(([cat,amt])=><div key={cat} style={{marginBottom:8}}><R style={{marginBottom:3}}><span style={{fontSize:12,color:"#94a3b8"}}>{cat}</span><span className="mono" style={{fontSize:12,color:"#f87171"}}>{fmt(amt)}</span></R><div style={{background:"#1e293b",borderRadius:3,height:5,overflow:"hidden"}}><div style={{height:"100%",background:"#f87171",borderRadius:3,width:`${(amt/maxC)*100}%`}}/></div></div>)}
         {cats.length===0&&<div style={{color:"#475569",fontSize:13}}>No expenses yet.</div>}
       </div>
+      <div className="card" style={{gridColumn:"1/-1"}}>
+        <div style={{fontWeight:600,fontSize:14,marginBottom:14,color:"#94a3b8",borderBottom:"1px solid #1e293b",paddingBottom:10}}>Expenses by Vendor</div>
+        {vendors.map(([vendor,amt])=><div key={vendor} style={{marginBottom:8}}><R style={{marginBottom:3}}><span style={{fontSize:12,color:"#94a3b8"}}>{vendor}</span><span className="mono" style={{fontSize:12,color:"#f59e0b"}}>{fmt(amt)}</span></R><div style={{background:"#1e293b",borderRadius:3,height:5,overflow:"hidden"}}><div style={{height:"100%",background:"#f59e0b",borderRadius:3,width:`${(amt/maxV)*100}%`}}/></div></div>)}
+        {vendors.length===0&&<div style={{color:"#475569",fontSize:13}}>No tracked vendor expenses yet.</div>}
+      </div>
     </div>
   </div>);
 }
 
 // ── CLOUD BACKUP TAB (OneDrive) ───────────────────────────────────────────────
-function CloudTab({sbCfg,setSbCfg,syncStatus,lastSync,onSync,onLoad,txns,setTxns,inbox,setInbox,accs,setAccs,acts,setActs,cats,setCats,smsNums,setSmsNums,emails,setEmails}){
+function CloudTab({sbCfg,setSbCfg,syncStatus,lastSync,onSync,onLoad,txns,setTxns,inbox,setInbox,accs,setAccs,acts,setActs,cats,setCats,smsNums,setSmsNums,emails,setEmails,addDiagnostic=()=>{}}){
   const[clientId,setClientId]=useState(sbCfg.clientId||"");
   const[connecting,setConnecting]=useState(false);
   const[showGuide,setShowGuide]=useState(false);
@@ -3627,20 +4218,25 @@ function CloudTab({sbCfg,setSbCfg,syncStatus,lastSync,onSync,onLoad,txns,setTxns
   const connect=async()=>{
     const resolvedClientId=sanitizeMsClientId((clientId||sbCfg.clientId||DEFAULT_MICROSOFT_CLIENT_ID||"").trim());
     if(!resolvedClientId){
+      addDiagnostic({level:"warn",scope:"cloud",event:"onedrive_connect_missing_client_id",message:"OneDrive connect was attempted without a Microsoft client ID."});
       alert("Microsoft connector is not configured. Paste your own Azure Application (client) ID here once.");
       return;
     }
     // Persist client ID even if auth popup fails, so Email->Connect Outlook can still use it.
-    setSbCfg(p=>({...p,clientId:resolvedClientId}));
+    setSbCfg(p=>({...p,clientId:resolvedClientId,lastError:"",lastErrorAt:""}));
     setConnecting(true);
+    addDiagnostic({level:"info",scope:"cloud",event:"onedrive_connect_started",message:"Starting OneDrive OAuth flow."});
     try{
       const account=await odLogin(resolvedClientId);
       const profile=await odGetProfile(resolvedClientId);
       setClientId(resolvedClientId);
-      setSbCfg({clientId:resolvedClientId,email:profile.mail||profile.userPrincipalName,name:profile.displayName,enabled:true,needsReconnect:false});
+      setSbCfg({clientId:resolvedClientId,email:profile.mail||profile.userPrincipalName,name:profile.displayName,enabled:true,needsReconnect:false,lastError:"",lastErrorAt:""});
+      addDiagnostic({level:"info",scope:"cloud",event:"onedrive_connect_success",message:"OneDrive account connected.",context:{email:profile.mail||profile.userPrincipalName||""}});
       // Attempt first sync
       await onSync({});
     }catch(e){
+      setSbCfg(p=>({...p,lastError:redactSensitiveText(String(e?.message||"Connection failed.")).slice(0,180),lastErrorAt:new Date().toISOString()}));
+      addDiagnostic({level:"error",scope:"cloud",event:"onedrive_connect_failed",message:e?.message||"OneDrive connection failed.",context:{error:e}});
       alert("Connection failed: "+e.message);
     }
     setConnecting(false);
@@ -3649,14 +4245,22 @@ function CloudTab({sbCfg,setSbCfg,syncStatus,lastSync,onSync,onLoad,txns,setTxns
   const disconnect=async()=>{
     if(!window.confirm("Disconnect OneDrive? Your data stays in OneDrive — you can reconnect anytime."))return;
     try{if(sbCfg.clientId)await odSignOut(sbCfg.clientId);}catch{}
-    setSbCfg({clientId:"",email:"",name:"",enabled:false});
+    setSbCfg({clientId:"",email:"",name:"",enabled:false,needsReconnect:false,lastError:"",lastErrorAt:""});
+    addDiagnostic({level:"info",scope:"cloud",event:"onedrive_disconnect",message:"OneDrive was disconnected."});
   };
 
   const loadVersionHistory=async()=>{
     if(!sbCfg.clientId)return;
     setLoadingVer(true);
-    try{const v=await odListVersions(sbCfg.clientId);setVersions(v);}
-    catch{setVersions([]);}
+    try{
+      const v=await odListVersions(sbCfg.clientId);
+      setVersions(v);
+      addDiagnostic({level:"info",scope:"cloud",event:"onedrive_version_history_loaded",message:`Loaded ${v.length} OneDrive file version(s).`,context:{versions:v.length}});
+    }
+    catch(e){
+      setVersions([]);
+      addDiagnostic({level:"warn",scope:"cloud",event:"onedrive_version_history_failed",message:e?.message||"Unable to load OneDrive version history.",context:{error:e}});
+    }
     setLoadingVer(false);
   };
 
@@ -3665,12 +4269,21 @@ function CloudTab({sbCfg,setSbCfg,syncStatus,lastSync,onSync,onLoad,txns,setTxns
     const blob=new Blob([JSON.stringify(payload,null,2)],{type:"application/json"});
     const a=document.createElement("a");a.href=URL.createObjectURL(blob);
     a.download=`ledgerai-backup-${today()}.json`;a.click();
+    addDiagnostic({level:"info",scope:"backup",event:"manual_backup_exported",message:"Manual JSON backup was downloaded.",context:{txns:txns.length,inbox:inbox.length,accounts:accs.length}});
   };
 
   const importJSON=(e)=>{
     const file=e.target.files?.[0];if(!file)return;
     const reader=new FileReader();
-    reader.onload=ev=>{try{setExportPrev(JSON.parse(ev.target.result));}catch{alert("Invalid backup file.");}};
+    reader.onload=ev=>{
+      try{
+        setExportPrev(JSON.parse(ev.target.result));
+        addDiagnostic({level:"info",scope:"backup",event:"manual_backup_selected",message:"Backup file selected for restore review.",context:{file:file.name||"",size:file.size||0}});
+      }catch{
+        addDiagnostic({level:"warn",scope:"backup",event:"manual_backup_invalid",message:"Selected backup file was invalid JSON.",context:{file:file.name||"",size:file.size||0}});
+        alert("Invalid backup file.");
+      }
+    };
     reader.readAsText(file);e.target.value="";
   };
 
@@ -3684,6 +4297,7 @@ function CloudTab({sbCfg,setSbCfg,syncStatus,lastSync,onSync,onLoad,txns,setTxns
     if(exportPrev.smsNums)setSmsNums(exportPrev.smsNums);
     if(exportPrev.emailAccounts)setEmails(prev=>mergeLoadedEmailsWithLocalTokens(exportPrev.emailAccounts,prev));
     setExportPrev(null);
+    addDiagnostic({level:"warn",scope:"backup",event:"manual_backup_restored",message:"Manual backup file restored into the app.",context:{txns:exportPrev.txns?.length||0,inbox:exportPrev.inbox?.length||0,accounts:exportPrev.accs?.length||0}});
     alert("✓ Restored from backup.");
   };
 
@@ -3718,6 +4332,11 @@ function CloudTab({sbCfg,setSbCfg,syncStatus,lastSync,onSync,onLoad,txns,setTxns
       {sbCfg.needsReconnect&&(
         <div style={{background:"#450a0a",border:"1px solid #f87171",borderRadius:10,padding:"12px 16px",marginBottom:16,fontSize:13,color:"#fca5a5"}}>
           ⚠ Microsoft token expired — click <b>Reconnect</b> to restore auto-sync.
+        </div>
+      )}
+      {sbCfg.lastError&&(
+        <div style={{background:"#1f0b12",border:"1px solid #7f1d1d",borderRadius:10,padding:"12px 16px",marginBottom:16,fontSize:12,color:"#fda4af"}}>
+          Last cloud issue{sbCfg.lastErrorAt?` · ${fmtDT(sbCfg.lastErrorAt)}`:""}: {sbCfg.lastError}
         </div>
       )}
 
@@ -3898,19 +4517,22 @@ function AzureGuideModal({onClose}){
   );
 }
 // ── SETTINGS ──────────────────────────────────────────────────────────────────
-function SettingsTab({acts,setActs,cats,setCats,backups,onBackupNow,onRestoreBackup,onFactoryReset,onRenameActivity}){
+function SettingsTab({acts,setActs,cats,setCats,backups,onBackupNow,onRestoreBackup,onFactoryReset,onRenameActivity,diagnostics=[],onClearDiagnostics=()=>{},buildSupportBundle=()=>null,addDiagnostic=()=>{}}){
   const[newAct,setNewAct]=useState("");const[selAct,setSelAct]=useState(acts[0]||"");
   const[newCN,setNewCN]=useState("");const[newCD,setNewCD]=useState("");
   const[aiLoad,setAiLoad]=useState(false);const[aiSug,setAiSug]=useState(null);
   const[resetOpen,setResetOpen]=useState(false);
   const[resetText,setResetText]=useState("");
   const[safetyStatus,setSafetyStatus]=useState("");
+  const[diagStatus,setDiagStatus]=useState("");
   const[restoreId,setRestoreId]=useState("");
   const savedAICfg=loadAICfg();
   const[aiEndpoint,setAiEndpoint]=useState(savedAICfg.endpoint||"");
   const[aiSecret,setAiSecret]=useState(savedAICfg.secret||"");
   const[aiModel,setAiModel]=useState(savedAICfg.model||DEFAULT_AI_MODEL);
   const[aiStatus,setAiStatus]=useState("");
+  const diagCounts=summarizeDiagnostics(diagnostics);
+  const recentDiagnostics=[...(diagnostics||[])].slice(-18).reverse();
   const addAct=()=>{if(!newAct.trim())return;const n=newAct.trim();setActs(p=>[...p,n]);setCats(p=>({...p,[n]:[...NEW_ACTIVITY_DEFAULT_CATS]}));setNewAct("");};
   const renameAct=(act)=>{
     const next=window.prompt("Rename business activity",act);
@@ -3944,6 +4566,7 @@ function SettingsTab({acts,setActs,cats,setCats,backups,onBackupNow,onRestoreBac
   const saveAICfg=()=>{
     saveAICfgToStorage({endpoint:aiEndpoint,secret:aiSecret,model:aiModel});
     setAiStatus("Saved AI backend settings.");
+    addDiagnostic({level:"info",scope:"ai",event:"ai_config_saved",message:"AI backend settings were saved.",context:{endpoint:safeOrigin(aiEndpoint),sharedKeyConfigured:Boolean(aiSecret),model:aiModel||DEFAULT_AI_MODEL}});
   };
   const testAICfg=async()=>{
     saveAICfg();
@@ -3951,8 +4574,10 @@ function SettingsTab({acts,setActs,cats,setCats,backups,onBackupNow,onRestoreBac
     try{
       const out=await callAI([{role:"user",content:'Reply ONLY this JSON: {"ok":true}'}],120);
       setAiStatus(`AI backend OK: ${out.slice(0,120)}`);
+      addDiagnostic({level:"info",scope:"ai",event:"ai_backend_test_success",message:"AI backend test succeeded.",context:{endpoint:safeOrigin(aiEndpoint),model:aiModel||DEFAULT_AI_MODEL}});
     }catch(e){
       setAiStatus(`AI backend error: ${e.message||"unknown error"}`);
+      addDiagnostic({level:"error",scope:"ai",event:"ai_backend_test_failed",message:e?.message||"AI backend test failed.",context:{endpoint:safeOrigin(aiEndpoint),model:aiModel||DEFAULT_AI_MODEL,error:e}});
     }
   };
   const canReset=resetText.trim().toLowerCase()==="reset";
@@ -3966,11 +4591,37 @@ function SettingsTab({acts,setActs,cats,setCats,backups,onBackupNow,onRestoreBac
   useEffect(()=>{
     if(!restoreId&&latestBackups[0]?.id)setRestoreId(latestBackups[0].id);
   },[latestBackups,restoreId]);
+  const copySupportReport=async()=>{
+    const bundle=buildSupportBundle?.();
+    if(!bundle){
+      setDiagStatus("Support bundle unavailable.");
+      return;
+    }
+    const ok=await copyTextToClipboard(buildSupportReportText(bundle));
+    setDiagStatus(ok?"Support report copied to clipboard.":"Unable to copy support report.");
+    if(ok)addDiagnostic({level:"info",scope:"support",event:"support_report_copied",message:"Support report copied to clipboard."});
+  };
+  const downloadSupportBundle=()=>{
+    const bundle=buildSupportBundle?.();
+    if(!bundle){
+      setDiagStatus("Support bundle unavailable.");
+      return;
+    }
+    downloadJsonFile(`ledgerai-support-${today()}.json`,bundle);
+    setDiagStatus("Support bundle downloaded.");
+    addDiagnostic({level:"info",scope:"support",event:"support_bundle_downloaded",message:"Support bundle downloaded from Settings."});
+  };
+  const clearSupportLogs=()=>{
+    if(!window.confirm("Clear all stored diagnostics logs? This removes recent support history from this browser."))return;
+    onClearDiagnostics?.();
+    setDiagStatus("Diagnostics cleared from this browser.");
+  };
   const restoreSelected=()=>{
     if(!restoreId){setSafetyStatus("Select a backup snapshot first.");return;}
     if(!window.confirm("Restore selected snapshot? Current data will be replaced."))return;
     const ok=onRestoreBackup?.(restoreId);
     setSafetyStatus(ok?"Backup restored successfully.":"Backup restore failed.");
+    addDiagnostic({level:ok?"warn":"error",scope:"backup",event:"snapshot_restore_action",message:ok?"Backup snapshot restored from Settings.":"Backup snapshot restore failed from Settings.",context:{snapshotId:restoreId}});
   };
   return(<div>
     <h2 className="h2" style={{marginBottom:18}}>Settings</h2>
@@ -3999,6 +4650,59 @@ function SettingsTab({acts,setActs,cats,setCats,backups,onBackupNow,onRestoreBac
       </div>
       {aiStatus&&<div style={{fontSize:12,color:"#c7d2fe",marginTop:8}}>{aiStatus}</div>}
       <div style={{fontSize:11,color:"#475569",marginTop:8}}>Email sync uses AI-only processing for body + attachments. If AI cannot process an email, it stays in AI Pending Retry until resolved.</div>
+    </div>
+    <div className="card" style={{marginBottom:16,background:"linear-gradient(135deg,#0f172a,#09111f)"}}>
+      <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"center",marginBottom:10,flexWrap:"wrap"}}>
+        <div>
+          <div style={{fontWeight:700,fontSize:14,color:"#dbeafe"}}>Diagnostics & Support</div>
+          <div style={{fontSize:12,color:"#64748b",lineHeight:1.7,marginTop:4}}>
+            LedgerAI now keeps a persistent, redacted diagnostics trail in this browser so you can send support logs without reproducing the bug from memory.
+          </div>
+        </div>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          <button className="btn ghost" onClick={copySupportReport}>Copy Support Report</button>
+          <button className="btn pri" onClick={downloadSupportBundle}>Download Support Bundle</button>
+          <button className="btn sm dan" onClick={clearSupportLogs}>Clear Logs</button>
+        </div>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(110px,1fr))",gap:10,marginBottom:12}}>
+        {[
+          ["Events",diagCounts.total,"#c7d2fe"],
+          ["Errors",diagCounts.errors,"#fca5a5"],
+          ["Warnings",diagCounts.warnings,"#fcd34d"],
+          ["Info",diagCounts.info,"#86efac"],
+        ].map(([label,value,color])=>(
+          <div key={label} style={{background:"#0a0f1d",border:"1px solid #1e293b",borderRadius:10,padding:"10px 12px"}}>
+            <div style={{fontSize:11,color:"#64748b",marginBottom:4,textTransform:"uppercase",letterSpacing:".5px"}}>{label}</div>
+            <div style={{fontSize:18,fontWeight:700,color}}>{value}</div>
+          </div>
+        ))}
+      </div>
+      <div style={{fontSize:11,color:"#475569",marginBottom:10}}>
+        Support bundle includes runtime state, connector status, AI settings status, pending retry summary, and recent diagnostics events. Tokens and secrets are redacted automatically.
+      </div>
+      {diagStatus&&<div style={{fontSize:12,color:"#c7d2fe",marginBottom:10}}>{diagStatus}</div>}
+      <div style={{fontSize:11,fontWeight:700,color:"#64748b",marginBottom:8,textTransform:"uppercase",letterSpacing:".5px"}}>Recent Events</div>
+      {recentDiagnostics.length===0?(
+        <div style={{fontSize:12,color:"#475569"}}>No diagnostics recorded yet. Once you connect, sync, test AI, or hit an error, entries will appear here.</div>
+      ):(
+        <div style={{maxHeight:260,overflowY:"auto",border:"1px solid #1e293b",borderRadius:10}}>
+          {recentDiagnostics.map(item=>(
+            <div key={item.id} style={{padding:"10px 12px",borderBottom:"1px solid #1e293b",background:item.level==="error"?"#1f0b12":item.level==="warn"?"#1f1505":"transparent"}}>
+              <div style={{display:"flex",justifyContent:"space-between",gap:10,flexWrap:"wrap",marginBottom:4}}>
+                <div style={{fontSize:12,fontWeight:700,color:item.level==="error"?"#fca5a5":item.level==="warn"?"#fcd34d":"#c7d2fe"}}>
+                  {String(item.level||"info").toUpperCase()} · {item.scope}/{item.event}
+                </div>
+                <div style={{fontSize:11,color:"#64748b"}}>{fmtDT(item.ts)}{(item.repeat||1)>1?` · x${item.repeat}`:""}</div>
+              </div>
+              <div style={{fontSize:12,color:"#e2e8f0",lineHeight:1.6}}>{item.message}</div>
+              {(item.accountId||item.provider)&&<div style={{fontSize:11,color:"#64748b",marginTop:4}}>
+                {item.accountId&&<span>Account: {item.accountId}</span>}{item.accountId&&item.provider&&<span> · </span>}{item.provider&&<span>Provider: {item.provider}</span>}
+              </div>}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
     <div className="g2" style={{gap:18}}>
       <div className="card">
@@ -4040,6 +4744,7 @@ function SettingsTab({acts,setActs,cats,setCats,backups,onBackupNow,onRestoreBac
         <button className="btn ghost" onClick={()=>{
           const ok=onBackupNow?.();
           setSafetyStatus(ok?"Backup created.":"No data change since last snapshot.");
+          addDiagnostic({level:ok?"info":"warn",scope:"backup",event:"manual_snapshot_created",message:ok?"Manual local snapshot created.":"Manual local snapshot skipped because nothing changed."});
         }}>Create Backup Now</button>
       </div>
       {latestBackups.length>0?(
@@ -4089,42 +4794,18 @@ function SettingsTab({acts,setActs,cats,setCats,backups,onBackupNow,onRestoreBac
 }
 
 // ── DAILY REVIEW ──────────────────────────────────────────────────────────────
-function DailyTab({todayTxns,todInc,todExp,summary,sumLoad,getSummary,onEdit,onDelete,inbox,onApprove,onDiscard,onEditPending}){
-  const todInbox=inbox.filter(i=>i.date===today());
-  const pendingEmail=inbox.filter(i=>i.source==="email");
-  const approveAll=()=>pendingEmail.forEach(onApprove);
-  const rejectAll=()=>{
-    if(!pendingEmail.length)return;
-    if(!window.confirm(`Reject ${pendingEmail.length} pending email transaction(s)?`))return;
-    pendingEmail.forEach(i=>onDiscard(i._iid));
-  };
+function DailyTab({todayTxns,todInc,todExp,summary,sumLoad,getSummary,onEdit,onDelete}){
   return(<div>
     <R style={{marginBottom:18,gap:10}}>
       <h2 className="h2" style={{flex:1}}>Day Review — {fmtD(today())}</h2>
       <button className="btn sm pri" onClick={getSummary} disabled={sumLoad}>{sumLoad?"🤖 Generating…":"🤖 AI Summary"}</button>
     </R>
-    {todInbox.length>0&&<div style={{background:"#0d0d2b",border:"1px solid #818cf8",borderRadius:10,padding:"12px 16px",marginBottom:18,fontSize:13,color:"#c7d2fe"}}>⏳ <b>{todInbox.length}</b> item(s) still in Inbox — approve or reject to complete today's review.</div>}
-    {pendingEmail.length>0&&(
-      <div className="card" style={{marginBottom:18}}>
-        <R style={{marginBottom:10}}>
-          <div className="sh" style={{margin:0}}>Email Review Queue ({pendingEmail.length})</div>
-          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-            <button className="btn sm suc" onClick={approveAll}>✓ Accept All</button>
-            <button className="btn sm dan" onClick={rejectAll}>✕ Reject All</button>
-          </div>
-        </R>
-        <div style={{fontSize:12,color:"#64748b",marginBottom:10}}>Only unreviewed items appear here. Accepted items move to Ledger. Rejected items are removed.</div>
-        <div style={{maxHeight:360,overflowY:"auto",paddingRight:2}}>
-          {pendingEmail.map(item=><ICard key={item._iid} item={item} onApprove={onApprove} onEdit={onEditPending} onDiscard={onDiscard}/>)}
-        </div>
-      </div>
-    )}
-    {summary&&<div style={{background:"#0a0c1e",border:"1px solid #6366f1",borderRadius:12,padding:18,marginBottom:18}}><div style={{fontSize:10,color:"#818cf8",fontWeight:700,letterSpacing:".5px",marginBottom:8}}>✦ AI INSIGHT</div><div style={{fontSize:13,color:"#c7d2fe",lineHeight:1.8,whiteSpace:"pre-wrap"}}>{summary}</div></div>}
     <div className="g4" style={{marginBottom:18}}>
       {[{l:"Today Income",v:todInc,c:"#34d399"},{l:"Today Expense",v:todExp,c:"#f87171"},{l:"Net Today",v:todInc-todExp,c:todInc-todExp>=0?"#34d399":"#f87171"},{l:"Entries",v:todayTxns.length,c:"#818cf8",nf:true}].map(s=>(
         <div key={s.l} className="sc"><div className="lxs">{s.l}</div><div className="mono" style={{fontSize:22,color:s.c,marginTop:6}}>{s.nf?s.v:fmt(s.v)}</div></div>
       ))}
     </div>
+    {summary&&<div style={{background:"#0a0c1e",border:"1px solid #6366f1",borderRadius:12,padding:18,marginBottom:18}}><div style={{fontSize:10,color:"#818cf8",fontWeight:700,letterSpacing:".5px",marginBottom:8}}>✦ AI INSIGHT</div><div style={{fontSize:13,color:"#c7d2fe",lineHeight:1.8,whiteSpace:"pre-wrap"}}>{summary}</div></div>}
     <div className="sh" style={{marginBottom:10}}>Today's Transactions</div>
     {todayTxns.length===0?<div className="card" style={{textAlign:"center",color:"#475569",padding:40}}>No transactions today.</div>:<TxTable txns={todayTxns} onEdit={onEdit} onDelete={onDelete}/>}
   </div>);
@@ -4135,8 +4816,10 @@ function AddModal({type,existing,acts,cats,accs,onAddAccount,onAddActivity,onSav
   const defaultAct=acts.includes("Personal")?"Personal":(acts[0]||"");
   const[form,setForm]=useState({
     type,date:today(),description:"",vendor:"",amount:"",
+    trackVendor:Boolean(existing?.trackVendor ?? existing?.vendor),
     businessActivity:type==="borrow"||type==="transfer"?defaultAct:(acts[0]||""),
     category:type==="borrow"?"Borrowed Cash":type==="transfer"?"Account Transfer":"",
+    subCategory:"",
     paymentMethod:type==="borrow"?"Cash":type==="transfer"?"Account Transfer":"UPI",
     accountId:"",targetAccountId:"",liabilityAccountId:"",borrowSource:"",
     notes:"",
@@ -4195,18 +4878,18 @@ function AddModal({type,existing,acts,cats,accs,onAddAccount,onAddActivity,onSav
   const setType=t=>setForm(p=>{
     if(t==="borrow"){
       const src=(p.borrowSource||p.vendor||"").trim();
-      return {...p,type:t,businessActivity:defaultAct,category:"Borrowed Cash",paymentMethod:p.paymentMethod||"Cash",borrowSource:src,vendor:src||p.vendor};
+      return {...p,type:t,businessActivity:defaultAct,category:"Borrowed Cash",subCategory:"",paymentMethod:p.paymentMethod||"Cash",borrowSource:src,vendor:src||p.vendor,trackVendor:false};
     }
     if(t==="transfer"){
       const desc=(p.description||"").trim()||"Account transfer";
-      return {...p,type:t,businessActivity:defaultAct,category:"Account Transfer",paymentMethod:"Account Transfer",description:desc,liabilityAccountId:"",borrowSource:"",vendor:""};
+      return {...p,type:t,businessActivity:defaultAct,category:"Account Transfer",subCategory:"",paymentMethod:"Account Transfer",description:desc,liabilityAccountId:"",borrowSource:"",vendor:"",trackVendor:false};
     }
     const nextAct=p.businessActivity||acts[0]||"";
     const nextCats=cats[nextAct]||["Other"];
     const nextCat=p.category&&p.category!=="Borrowed Cash"?p.category:(nextCats[0]||"Other");
     return {...p,type:t,businessActivity:nextAct,category:nextCat};
   });
-  const apply=r=>{if(!r)return;setForm(p=>({...p,description:r.description||p.description,vendor:r.vendor||p.vendor,amount:r.amount||p.amount,businessActivity:acts.includes(r.businessActivity)?r.businessActivity:p.businessActivity,category:r.category||p.category,date:r.date||p.date,paymentMethod:r.paymentMethod||p.paymentMethod,isNewCategory:r.isNewCategory||false,aiGenerated:true}));setSub("form");};
+  const apply=r=>{if(!r)return;setForm(p=>({...p,description:r.description||p.description,vendor:r.vendor||p.vendor,trackVendor:typeof r.trackVendor==="boolean"?r.trackVendor:(p.trackVendor||Boolean(r.vendor||p.vendor)),amount:r.amount||p.amount,businessActivity:acts.includes(r.businessActivity)?r.businessActivity:p.businessActivity,category:r.category||p.category,subCategory:r.subCategory||p.subCategory||"",date:r.date||p.date,paymentMethod:r.paymentMethod||p.paymentMethod,isNewCategory:r.isNewCategory||false,aiGenerated:true}));setSub("form");};
   const runText=async()=>{setLoad(true);apply(await aiClassify(raw,acts,cats,form.type));setLoad(false);};
   const runImg=async()=>{
     if(!imgB64)return;
@@ -4263,6 +4946,7 @@ function AddModal({type,existing,acts,cats,accs,onAddAccount,onAddActivity,onSav
           </div>}
         </>}
         {form.type!=="borrow"&&form.type!=="transfer"&&<><label>Category</label><select value={form.category} onChange={e=>set("category",e.target.value)}>{clist.map(c=><option key={c}>{c}</option>)}</select></>}
+        {form.type!=="borrow"&&form.type!=="transfer"&&<><label>Sub Category</label><input value={form.subCategory||""} onChange={e=>set("subCategory",e.target.value)} placeholder="Optional"/></>}
         {form.type==="borrow"&&<><label>Borrowed From Source</label><input value={form.borrowSource||""} onChange={e=>set("borrowSource",e.target.value)} placeholder="e.g. Rahul, Family, NBFC, Friend"/></>}
         {form.type==="borrow"&&liabAccs.length>0&&<><label>Liability Account (Optional)</label><select value={form.liabilityAccountId||""} onChange={e=>set("liabilityAccountId",e.target.value)}><option value="">— Select liability source —</option>{liabAccs.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select></>}
         {form.type==="transfer"&&<>
@@ -4317,9 +5001,21 @@ function AddModal({type,existing,acts,cats,accs,onAddAccount,onAddActivity,onSav
         </>}
         <label>Description</label><input value={form.description} onChange={e=>set("description",e.target.value)} placeholder="Brief description"/>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-          <div><label>Vendor</label><input value={form.vendor||""} onChange={e=>set("vendor",e.target.value)} placeholder="Optional"/></div>
+          <div>
+            <label>Vendor</label>
+            <input value={form.vendor||""} onChange={e=>set("vendor",e.target.value)} placeholder={form.trackVendor?"Vendor name required":"Optional"}/>
+          </div>
           <div><label>Payment Method</label><select value={form.paymentMethod} onChange={e=>set("paymentMethod",e.target.value)}>{PAY_METHODS.map(m=><option key={m}>{m}</option>)}</select></div>
         </div>
+        {(form.type==="income"||form.type==="expense")&&<div style={{marginTop:10}}>
+          <label style={{display:"flex",gap:8,alignItems:"center",fontSize:13,color:"#94a3b8",textTransform:"none",letterSpacing:0,marginTop:0}}>
+            <input type="checkbox" checked={Boolean(form.trackVendor)} onChange={e=>set("trackVendor",e.target.checked)}/>
+            Track this vendor in vendor-wise reports
+          </label>
+          <div style={{fontSize:11,color:"#64748b",marginTop:6}}>
+            If enabled, vendor name becomes mandatory and the expense can appear in vendor-wise reporting. If disabled, vendor remains optional and is excluded from vendor-wise reports.
+          </div>
+        </div>}
         <label>Notes</label><textarea rows={2} value={form.notes||""} onChange={e=>set("notes",e.target.value)} placeholder="Optional"/>
         {Number(form.amount)>0&&<div style={{marginTop:12,background:"#0a0c12",border:"1px solid #1e293b",borderRadius:8,padding:12}}><div className="lxs" style={{marginBottom:8}}>Journal Preview</div>
           {je.map((e,i)=><div key={i} style={{display:"grid",gridTemplateColumns:"1fr 90px 90px",gap:6,fontSize:12,color:"#94a3b8",padding:"2px 0"}}><span style={{color:e.dr>0?"#e2e8f0":"#64748b",paddingLeft:e.dr===0?16:0}}>{e.account}</span><span className="mono" style={{textAlign:"right",color:"#34d399"}}>{e.dr>0?fmt(e.dr):""}</span><span className="mono" style={{textAlign:"right",color:"#f87171"}}>{e.cr>0?fmt(e.cr):""}</span></div>)}
@@ -4327,14 +5023,9 @@ function AddModal({type,existing,acts,cats,accs,onAddAccount,onAddActivity,onSav
         <div style={{display:"flex",gap:10,marginTop:16}}>
           <button className="btn ghost" onClick={onClose} style={{flex:1}}>Cancel</button>
           <button className="btn pri" style={{flex:2}} onClick={()=>{
-            if(!form.amount||isNaN(Number(form.amount)))return alert("Enter a valid amount");
-            if(form.type==="transfer"&&accs.length<2)return alert("Add at least two accounts before saving a transfer.");
-            if(form.type!=="transfer"&&accs.length===0)return alert("Add at least one account in Accounts tab.");
-            if(!form.accountId)return alert(form.type==="transfer"?"Select Transfer From account.":"Select which account this transaction used.");
-            if(form.type==="transfer"&&!form.targetAccountId)return alert("Select Transfer To account.");
-            if(form.type==="transfer"&&form.accountId===form.targetAccountId)return alert("Transfer From and To accounts must be different.");
-            if(form.type==="borrow"&&!form.liabilityAccountId&&!(form.borrowSource||"").trim())return alert("Select liability account or enter borrowed source.");
             const amt=Number(form.amount);
+            const validationMsg=getAccountingValidationMessage({...form,amount:amt},accs);
+            if(validationMsg)return alert(validationMsg);
             if(form.type==="transfer"){
               const fromName=accs.find(a=>a.id===form.accountId)?.name||"Source";
               const toName=accs.find(a=>a.id===form.targetAccountId)?.name||"Destination";
@@ -4368,6 +5059,7 @@ function TxTable({txns,onEdit,onDelete}){
         <span style={{color:"#475569",fontFamily:"DM Mono",fontSize:11}}>{fmtD(tx.date)}</span>
         <div><div style={{fontWeight:500}}>{tx.description||tx.category}</div>
           <div style={{fontSize:11,color:"#475569",display:"flex",gap:5,marginTop:1,flexWrap:"wrap"}}>
+            {tx.subCategory&&<span>{tx.subCategory}</span>}
             {tx.vendor&&<span>{tx.vendor}</span>}
             {tx.paymentMethod&&<span>· {tx.paymentMethod}</span>}
             {tx.type==="transfer"
@@ -4380,7 +5072,7 @@ function TxTable({txns,onEdit,onDelete}){
           </div>
         </div>
         <span style={{fontSize:11,color:tx.businessActivity==="Personal"?"#c084fc":"#64748b"}}>{tx.businessActivity}</span>
-        <span style={{fontSize:11,color:"#64748b"}}>{tx.category}</span>
+        <span style={{fontSize:11,color:"#64748b"}}>{tx.category}{tx.subCategory?` / ${tx.subCategory}`:""}</span>
         <span className="mono" style={{fontWeight:700,color:tx.type==="income"?"#34d399":tx.type==="borrow"?"#f59e0b":tx.type==="transfer"?"#38bdf8":"#f87171"}}>{tx.type==="income"?"+":tx.type==="borrow"?"↘":tx.type==="transfer"?"⇄":"−"}{fmt(tx.amount)}</span>
         <button className="btn sm dan" style={{padding:"2px 6px"}} onClick={e=>{e.stopPropagation();onDelete(tx.id);}}>✕</button>
       </div>
