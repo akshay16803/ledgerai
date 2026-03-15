@@ -26,6 +26,39 @@ const MIN_TOKENS = 64;
 const RETRY_PREFIX = "retry:";
 const MAX_RETRY_ATTEMPTS = 10;
 const JOB_TTL_SECONDS = 14 * 24 * 60 * 60;
+const FX_API_BASE = "https://api.frankfurter.dev/v1";
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const CURRENCY_ALIASES = {
+  "₹": "INR",
+  RS: "INR",
+  INR: "INR",
+  RUPEE: "INR",
+  RUPEES: "INR",
+  "$": "USD",
+  USD: "USD",
+  DOLLAR: "USD",
+  DOLLARS: "USD",
+  "€": "EUR",
+  EUR: "EUR",
+  EURO: "EUR",
+  EUROS: "EUR",
+  "£": "GBP",
+  GBP: "GBP",
+  POUND: "GBP",
+  POUNDS: "GBP",
+  AED: "AED",
+  DIRHAM: "AED",
+  DIRHAMS: "AED",
+  AUD: "AUD",
+  CAD: "CAD",
+  SGD: "SGD",
+  JPY: "JPY",
+  YEN: "JPY",
+  CNY: "CNY",
+  RMB: "CNY",
+  HKD: "HKD",
+  CHF: "CHF",
+};
 
 function json(body, status = 200, extra = {}) {
   return new Response(JSON.stringify(body), {
@@ -64,6 +97,24 @@ function normalizeModel(model) {
 
 function normalizeMaxTokens(value) {
   return Math.max(MIN_TOKENS, Math.min(Number(value) || 800, MAX_TOKENS));
+}
+
+function normalizeCurrencyCode(value = "", fallback = "") {
+  const raw = String(value || "").trim().toUpperCase();
+  if (!raw) return fallback;
+  if (CURRENCY_ALIASES[raw]) return CURRENCY_ALIASES[raw];
+  const letters = raw.replace(/[^A-Z]/g, "");
+  if (CURRENCY_ALIASES[letters]) return CURRENCY_ALIASES[letters];
+  if (/^[A-Z]{3}$/.test(letters)) return letters;
+  return fallback;
+}
+
+function normalizeFxDate(value = "") {
+  const raw = String(value || "").trim();
+  if (ISO_DATE_RE.test(raw)) return raw;
+  const ts = Date.parse(raw);
+  if (Number.isFinite(ts)) return new Date(ts).toISOString().slice(0, 10);
+  return new Date().toISOString().slice(0, 10);
 }
 
 function normalizeMessages(messages) {
@@ -169,6 +220,116 @@ async function callAiProvider(env, payload = {}) {
   return {
     text: String(text || ""),
     usage: data?.usage || null,
+  };
+}
+
+async function fetchFxRate(from = "", to = "", date = "") {
+  const source = normalizeCurrencyCode(from, "");
+  const target = normalizeCurrencyCode(to, "");
+  const requestedDate = normalizeFxDate(date);
+  if (!source || !target) {
+    const err = new Error("from/to currency is required");
+    err.status = 400;
+    throw err;
+  }
+  if (source === target) {
+    return {
+      from: source,
+      to: target,
+      requestedDate,
+      rateDate: requestedDate,
+      rate: 1,
+      provider: "identity",
+    };
+  }
+
+  const url = `${FX_API_BASE}/${requestedDate}?base=${encodeURIComponent(source)}&symbols=${encodeURIComponent(target)}`;
+  const upstream = await fetch(url, { headers: { Accept: "application/json" } });
+  const raw = await upstream.text();
+  let data = {};
+  try {
+    data = JSON.parse(raw || "{}");
+  } catch {}
+
+  if (!upstream.ok) {
+    const err = new Error(data?.message || raw.slice(0, 300) || `FX upstream ${upstream.status}`);
+    err.status = upstream.status;
+    throw err;
+  }
+
+  const rate = Number(data?.rates?.[target]);
+  if (!(rate > 0)) {
+    const err = new Error(`FX rate unavailable for ${source}/${target}`);
+    err.status = 502;
+    throw err;
+  }
+
+  return {
+    from: source,
+    to: target,
+    requestedDate,
+    rateDate: String(data?.date || requestedDate),
+    rate,
+    provider: "ECB via Frankfurter",
+  };
+}
+
+async function convertFxItems(payload = {}) {
+  const items = Array.isArray(payload?.items) ? payload.items : [];
+  if (!items.length) {
+    return { ok: false, status: 400, error: "items[] is required" };
+  }
+
+  const clean = items
+    .slice(0, 250)
+    .map((item, idx) => {
+      const amount = Number(item?.amount);
+      if (!Number.isFinite(amount)) return null;
+      const from = normalizeCurrencyCode(item?.from || item?.currency || "", "");
+      const to = normalizeCurrencyCode(item?.to || item?.baseCurrency || "", "");
+      if (!from || !to) return null;
+      return {
+        id: String(item?.id || idx),
+        amount,
+        from,
+        to,
+        date: normalizeFxDate(item?.date || item?.fxDate || ""),
+      };
+    })
+    .filter(Boolean);
+
+  if (!clean.length) {
+    return { ok: false, status: 400, error: "No valid FX conversion items were provided" };
+  }
+
+  const rateCache = new Map();
+  await Promise.all(
+    clean.map(async (item) => {
+      const key = `${item.from}:${item.to}:${item.date}`;
+      if (rateCache.has(key)) return;
+      const rate = await fetchFxRate(item.from, item.to, item.date);
+      rateCache.set(key, rate);
+    }),
+  );
+
+  return {
+    ok: true,
+    results: clean.map((item) => {
+      const key = `${item.from}:${item.to}:${item.date}`;
+      const fx = rateCache.get(key);
+      const converted = Number((item.amount * fx.rate).toFixed(2));
+      return {
+        id: item.id,
+        amount: item.amount,
+        from: fx.from,
+        to: fx.to,
+        requestedDate: fx.requestedDate,
+        rateDate: fx.rateDate,
+        rate: fx.rate,
+        converted,
+        provider: fx.provider,
+      };
+    }),
   };
 }
 
@@ -380,6 +541,23 @@ export default {
       }
       const out = await enqueueRetryJob(env, payload || {});
       return json(out.ok ? { ok: true, jobId: out.jobId } : { error: out.error }, out.status || 200, cors);
+    }
+
+    if (path === "/fx/convert") {
+      if (request.method !== "POST") return json({ error: "Method not allowed" }, 405, cors);
+      let payload = null;
+      try {
+        payload = await request.json();
+      } catch {
+        return json({ error: "Invalid JSON body" }, 400, cors);
+      }
+      try {
+        const out = await convertFxItems(payload || {});
+        return json(out.ok ? { ok: true, results: out.results } : { error: out.error }, out.status || 200, cors);
+      } catch (err) {
+        const status = Math.max(400, Math.min(Number(err?.status) || 500, 599));
+        return json({ error: String(err?.message || "FX conversion failed").slice(0, 300) }, status, cors);
+      }
     }
 
     if (path === "/retry/pull") {

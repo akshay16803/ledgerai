@@ -59,7 +59,289 @@ const KNOWN_SENDERS = [
 
 const gid   = () => Math.random().toString(36).slice(2,10);
 const today = () => new Date().toISOString().slice(0,10);
-const fmt   = n  => new Intl.NumberFormat("en-IN",{style:"currency",currency:"INR",minimumFractionDigits:0}).format(n||0);
+
+function normalizeCurrencyCode(value="",fallback=DEFAULT_BASE_CURRENCY){
+  const raw=String(value||"").trim().toUpperCase();
+  if(!raw)return fallback;
+  if(CURRENCY_ALIASES[raw])return CURRENCY_ALIASES[raw];
+  const letters=raw.replace(/[^A-Z]/g,"");
+  if(CURRENCY_ALIASES[letters])return CURRENCY_ALIASES[letters];
+  if(/^[A-Z]{3}$/.test(letters))return letters;
+  return fallback;
+}
+
+function defaultCurrencyCfg(){
+  return{baseCurrency:DEFAULT_BASE_CURRENCY};
+}
+
+function normalizeCurrencyCfg(cfg={}){
+  return{
+    baseCurrency:normalizeCurrencyCode(cfg?.baseCurrency||DEFAULT_BASE_CURRENCY,DEFAULT_BASE_CURRENCY),
+  };
+}
+
+function loadCurrencyCfg(){
+  return normalizeCurrencyCfg(LS.get(CURRENCY_CFG_KEY,defaultCurrencyCfg()));
+}
+
+function saveCurrencyCfgToStorage(cfg={}){
+  const next=normalizeCurrencyCfg(cfg);
+  LS.set(CURRENCY_CFG_KEY,next);
+  return next;
+}
+
+function getBaseCurrency(){
+  return loadCurrencyCfg().baseCurrency||DEFAULT_BASE_CURRENCY;
+}
+
+function roundMoney(value){
+  const n=Number(value);
+  if(!Number.isFinite(n))return 0;
+  return Math.round(n*100)/100;
+}
+
+function normalizeFxDate(value=""){
+  const raw=String(value||"").trim();
+  if(ISO_DATE_RE.test(raw))return raw;
+  const ts=Date.parse(raw);
+  if(Number.isFinite(ts))return new Date(ts).toISOString().slice(0,10);
+  return today();
+}
+
+function formatMoney(value,currency=getBaseCurrency()){
+  const amount=Number(value)||0;
+  const code=normalizeCurrencyCode(currency,DEFAULT_BASE_CURRENCY);
+  try{
+    return new Intl.NumberFormat("en-IN",{style:"currency",currency:code,minimumFractionDigits:Number.isInteger(amount)?0:2,maximumFractionDigits:2}).format(amount);
+  }catch{
+    return `${code} ${amount.toFixed(Number.isInteger(amount)?0:2)}`;
+  }
+}
+
+function loadFxCache(){
+  const raw=LS.get(FX_CACHE_KEY,{});
+  return raw&&typeof raw==="object"&&!Array.isArray(raw)?raw:{};
+}
+
+function saveFxCache(cache={}){
+  const entries=Object.entries(cache||{})
+    .filter(([,v])=>v&&typeof v==="object")
+    .sort((a,b)=>Date.parse(b[1]?.savedAt||"")-Date.parse(a[1]?.savedAt||""))
+    .slice(0,FX_CACHE_MAX);
+  const next=Object.fromEntries(entries);
+  LS.set(FX_CACHE_KEY,next);
+  return next;
+}
+
+function fxCacheKey(from="",to="",date=""){
+  return `${normalizeCurrencyCode(from,"")}::${normalizeCurrencyCode(to,"")}::${normalizeFxDate(date)}`;
+}
+
+function identityFxResult(item={},baseCurrency=getBaseCurrency()){
+  const from=normalizeCurrencyCode(item.from||item.currency||baseCurrency,baseCurrency);
+  const to=normalizeCurrencyCode(item.to||item.baseCurrency||baseCurrency,baseCurrency);
+  const requestedDate=normalizeFxDate(item.date||item.fxDate||today());
+  return{
+    id:String(item.id||""),
+    amount:roundMoney(item.amount),
+    from,
+    to,
+    requestedDate,
+    rateDate:requestedDate,
+    rate:1,
+    converted:roundMoney(item.amount),
+    provider:"identity",
+  };
+}
+
+async function fetchDirectFxRate(item={}){
+  const from=normalizeCurrencyCode(item.from||item.currency||"",DEFAULT_BASE_CURRENCY);
+  const to=normalizeCurrencyCode(item.to||item.baseCurrency||"",DEFAULT_BASE_CURRENCY);
+  const requestedDate=normalizeFxDate(item.date||item.fxDate||today());
+  if(from===to)return identityFxResult({...item,from,to,date:requestedDate},to);
+  const url=`https://api.frankfurter.dev/v1/${requestedDate}?base=${encodeURIComponent(from)}&symbols=${encodeURIComponent(to)}`;
+  const data=await withTimeout(fetch(url,{headers:{Accept:"application/json"}}).then(async(r)=>{
+    const txt=await r.text();
+    let parsed={};
+    try{parsed=JSON.parse(txt||"{}");}catch{}
+    if(!r.ok)throw new Error(parsed?.message||txt?.slice?.(0,180)||`FX ${r.status}`);
+    return parsed;
+  }),12000,"FX conversion");
+  const rate=Number(data?.rates?.[to]);
+  if(!(rate>0))throw new Error(`FX rate unavailable for ${from}/${to}`);
+  return{
+    id:String(item.id||""),
+    amount:roundMoney(item.amount),
+    from,
+    to,
+    requestedDate,
+    rateDate:String(data?.date||requestedDate),
+    rate,
+    converted:roundMoney((Number(item.amount)||0)*rate),
+    provider:"ECB via Frankfurter",
+  };
+}
+
+async function fetchFxConversions(items=[],cfg=loadAICfg()){
+  const clean=(items||[]).map((item,idx)=>{
+    const amount=Number(item?.amount);
+    const from=normalizeCurrencyCode(item?.from||item?.currency||"",DEFAULT_BASE_CURRENCY);
+    const to=normalizeCurrencyCode(item?.to||item?.baseCurrency||getBaseCurrency(),getBaseCurrency());
+    if(!Number.isFinite(amount)||!from||!to)return null;
+    return{
+      id:String(item?.id||idx),
+      amount,
+      from,
+      to,
+      date:normalizeFxDate(item?.date||item?.fxDate||today()),
+    };
+  }).filter(Boolean);
+  if(!clean.length)return[];
+
+  const cached=loadFxCache();
+  const results=new Map();
+  const misses=[];
+  clean.forEach(item=>{
+    const key=fxCacheKey(item.from,item.to,item.date);
+    const hit=cached[key];
+    if(hit&&Number.isFinite(Number(hit?.rate))){
+      results.set(item.id,{
+        id:item.id,
+        amount:roundMoney(item.amount),
+        from:item.from,
+        to:item.to,
+        requestedDate:item.date,
+        rateDate:String(hit.rateDate||item.date),
+        rate:Number(hit.rate)||1,
+        converted:roundMoney(item.amount*(Number(hit.rate)||1)),
+        provider:String(hit.provider||"cache"),
+      });
+    }else{
+      misses.push(item);
+    }
+  });
+
+  if(misses.length){
+    const endpoint=String(cfg?.endpoint||"").trim();
+    const secret=String(cfg?.secret||"").trim();
+    let fetched=[];
+    if(endpoint){
+      try{
+        const url=aiCloudRetryUrl(endpoint,"/fx/convert");
+        const ctrl=new AbortController();
+        const timer=setTimeout(()=>ctrl.abort(),15000);
+        try{
+          const r=await fetch(url,{
+            method:"POST",
+            headers:{"Content-Type":"application/json",...(secret?{"x-ledgerai-key":secret}:{})},
+            body:JSON.stringify({items:misses}),
+            signal:ctrl.signal,
+          });
+          const txt=await r.text();
+          let data={};
+          try{data=JSON.parse(txt||"{}");}catch{}
+          if(!r.ok)throw new Error(data?.error||txt?.slice?.(0,180)||`FX ${r.status}`);
+          fetched=Array.isArray(data?.results)?data.results:[];
+        }finally{
+          clearTimeout(timer);
+        }
+      }catch{
+        fetched=await Promise.all(misses.map(item=>fetchDirectFxRate(item)));
+      }
+    }else{
+      fetched=await Promise.all(misses.map(item=>fetchDirectFxRate(item)));
+    }
+    const nextCache={...cached};
+    fetched.forEach(row=>{
+      const id=String(row?.id||"");
+      if(!id)return;
+      results.set(id,{
+        id,
+        amount:roundMoney(row.amount),
+        from:normalizeCurrencyCode(row.from||"",DEFAULT_BASE_CURRENCY),
+        to:normalizeCurrencyCode(row.to||"",getBaseCurrency()),
+        requestedDate:normalizeFxDate(row.requestedDate||today()),
+        rateDate:normalizeFxDate(row.rateDate||row.requestedDate||today()),
+        rate:Number(row.rate)||1,
+        converted:roundMoney(row.converted),
+        provider:String(row.provider||"ECB via Frankfurter"),
+      });
+      nextCache[fxCacheKey(row.from,row.to,row.requestedDate||today())]={
+        rate:Number(row.rate)||1,
+        rateDate:normalizeFxDate(row.rateDate||row.requestedDate||today()),
+        provider:String(row.provider||"ECB via Frankfurter"),
+        savedAt:new Date().toISOString(),
+      };
+    });
+    saveFxCache(nextCache);
+  }
+
+  return clean.map(item=>results.get(item.id)||identityFxResult(item,item.to));
+}
+
+async function convertMoneyRows(rows=[],{
+  amountField="amount",
+  originalField=amountField==="balance"?"originalBalance":"originalAmount",
+  currencyField=amountField==="balance"?"accountCurrency":"currency",
+  baseAmountField=amountField==="balance"?"balance":"baseAmount",
+  baseCurrencyField=amountField==="balance"?"balanceBaseCurrency":"baseCurrency",
+  fxDateField=amountField==="balance"?"balanceFxDate":"fxDate",
+  fxRateField=amountField==="balance"?"balanceFxRate":"fxRate",
+  fxRateDateField=amountField==="balance"?"balanceRateDate":"fxRateDate",
+  fxSourceField=amountField==="balance"?"balanceFxSource":"fxSource",
+  fallbackCurrency=getBaseCurrency(),
+  baseCurrency=getBaseCurrency(),
+  dateResolver=(row)=>row?.[fxDateField]||row?.date||today(),
+}={}){
+  const prepared=(rows||[]).map((row,idx)=>{
+    const amount=Number(row?.[originalField]??row?.[amountField]??0);
+    const currency=normalizeCurrencyCode(row?.[currencyField]||"",fallbackCurrency||LEGACY_DEFAULT_CURRENCY);
+    return{
+      idx,
+      id:String(row?.id||row?._iid||`row-${idx}`),
+      amount:Number.isFinite(amount)?amount:0,
+      from:currency,
+      to:baseCurrency,
+      date:normalizeFxDate(dateResolver(row)),
+      row,
+    };
+  });
+  const converted=await fetchFxConversions(prepared.map(({id,amount,from,to,date})=>({id,amount,from,to,date})));
+  const fxById=new Map(converted.map(item=>[String(item.id||""),item]));
+  return prepared.map(item=>{
+    const fx=fxById.get(item.id)||identityFxResult(item,baseCurrency);
+    const originalAmount=roundMoney(item.amount);
+    const convertedAmount=roundMoney(fx.converted);
+    return{
+      ...item.row,
+      [currencyField]:item.from,
+      [originalField]:originalAmount,
+      [amountField]:convertedAmount,
+      [baseAmountField]:convertedAmount,
+      [baseCurrencyField]:baseCurrency,
+      [fxDateField]:item.date,
+      [fxRateField]:Number(fx.rate)||1,
+      [fxRateDateField]:normalizeFxDate(fx.rateDate||item.date),
+      [fxSourceField]:String(fx.provider||"ECB via Frankfurter"),
+    };
+  });
+}
+
+function currencyMetaLabel(entry={},baseCurrency=getBaseCurrency()){
+  const source=normalizeCurrencyCode(entry?.currency||entry?.accountCurrency||"",baseCurrency);
+  const original=Number(entry?.originalAmount??entry?.originalBalance);
+  const baseAmount=Number(entry?.baseAmount??entry?.balance??entry?.amount);
+  const rate=Number(entry?.fxRate??entry?.balanceFxRate);
+  const rateDate=entry?.fxRateDate||entry?.balanceRateDate||entry?.fxDate||entry?.balanceFxDate||"";
+  if(!Number.isFinite(original)||source===baseCurrency)return "";
+  const parts=[`${formatMoney(original,source)} original`];
+  if(Number.isFinite(baseAmount))parts.push(`→ ${formatMoney(baseAmount,baseCurrency)}`);
+  if(Number.isFinite(rate)&&rate>0)parts.push(`@ ${rate.toFixed(4)}`);
+  if(rateDate)parts.push(fmtD(rateDate));
+  return parts.join(" ");
+}
+
+const fmt   = (n,currency=getBaseCurrency()) => formatMoney(n,currency);
 const fmtD  = d  => d?new Date(d).toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"}):"";
 const fmtDT = d  => d?new Date(d).toLocaleString("en-IN",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"}):"";
 const amtClose=(a,b)=>Math.abs(a-b)<2;
@@ -76,10 +358,15 @@ const sanitizeMsClientId = (id="") => {
 };
 const DEFAULT_MICROSOFT_CLIENT_ID = sanitizeMsClientId(import.meta.env.VITE_MICROSOFT_CLIENT_ID || "");
 const DEFAULT_AI_MODEL = "gpt-4.1-mini";
+const DEFAULT_BASE_CURRENCY = "INR";
+const LEGACY_DEFAULT_CURRENCY = "INR";
 const AI_CFG_KEY = "ledger_ai_cfg";
+const CURRENCY_CFG_KEY = "ledger_currency_cfg";
+const FX_CACHE_KEY = "ledger_fx_cache_v1";
 const EMAIL_SYNC_CACHE_VERSION = "v5";
 const BACKUP_KEY = "ledger_backups";
 const MAX_BACKUPS = 50;
+const FX_CACHE_MAX = 800;
 const AI_PENDING_EMAIL_KEY = "ledger_ai_pending_email";
 const AI_PENDING_RESET_KEY = "ledger_ai_pending_reset_at";
 const AI_CLOUD_CLIENT_KEY = "ledger_ai_cloud_client";
@@ -92,6 +379,41 @@ const DIAG_MAX_EVENTS = 400;
 const DIAG_EXPORT_LIMIT = 180;
 const DIAG_REPEAT_WINDOW_MS = 4000;
 const REDACTED = "[redacted]";
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const CURRENCY_OPTIONS = ["INR","USD","EUR","GBP","AED","AUD","CAD","SGD","JPY","CNY","HKD","CHF"];
+const CURRENCY_ALIASES = {
+  "₹":"INR",
+  "RS":"INR",
+  "RS.":"INR",
+  "RUPEE":"INR",
+  "RUPEES":"INR",
+  "INR":"INR",
+  "$":"USD",
+  "US$":"USD",
+  "USD":"USD",
+  "DOLLAR":"USD",
+  "DOLLARS":"USD",
+  "€":"EUR",
+  "EUR":"EUR",
+  "EURO":"EUR",
+  "EUROS":"EUR",
+  "£":"GBP",
+  "GBP":"GBP",
+  "POUND":"GBP",
+  "POUNDS":"GBP",
+  "AED":"AED",
+  "DIRHAM":"AED",
+  "DIRHAMS":"AED",
+  "AUD":"AUD",
+  "CAD":"CAD",
+  "SGD":"SGD",
+  "JPY":"JPY",
+  "YEN":"JPY",
+  "CNY":"CNY",
+  "RMB":"CNY",
+  "HKD":"HKD",
+  "CHF":"CHF",
+};
 
 function aiPendingId(accountId="",msgId=""){
   return `${String(accountId||"").trim()}::${String(msgId||"").trim()}`;
@@ -393,6 +715,7 @@ function buildSupportBundle({
   diagnostics=[],
   authCfg={},
   authUser=null,
+  currencyCfg={},
   txns=[],
   inbox=[],
   accs=[],
@@ -472,6 +795,10 @@ function buildSupportBundle({
       sharedKeyConfigured:Boolean(aiCfg.secret),
       model:String(aiCfg.model||DEFAULT_AI_MODEL),
     },
+    currency:{
+      baseCurrency:normalizeCurrencyCode(currencyCfg?.baseCurrency||getBaseCurrency(),getBaseCurrency()),
+      fxCacheEntries:Object.keys(loadFxCache()).length,
+    },
     cloud:{
       enabled:Boolean(sbCfg?.enabled),
       needsReconnect:Boolean(sbCfg?.needsReconnect),
@@ -522,6 +849,7 @@ function buildSupportReportText(bundle={}){
     "",
     `Auth: enabled=${bundle?.auth?.enabled?"yes":"no"} signedIn=${bundle?.auth?.signedIn?"yes":"no"} user=${bundle?.auth?.userEmail||""}`,
     `AI backend: configured=${bundle?.aiBackend?.configured?"yes":"no"} endpoint=${bundle?.aiBackend?.endpoint||""} sharedKey=${bundle?.aiBackend?.sharedKeyConfigured?"yes":"no"} model=${bundle?.aiBackend?.model||""}`,
+    `Currency: base=${bundle?.currency?.baseCurrency||DEFAULT_BASE_CURRENCY} fxCache=${bundle?.currency?.fxCacheEntries||0}`,
     `Cloud: enabled=${bundle?.cloud?.enabled?"yes":"no"} reconnect=${bundle?.cloud?.needsReconnect?"yes":"no"} syncStatus=${bundle?.cloud?.syncStatus||"idle"} lastSync=${bundle?.cloud?.lastSync||""}`,
     `Data counts: txns=${bundle?.dataCounts?.transactions||0} inbox=${bundle?.dataCounts?.inbox||0} emailAccounts=${bundle?.dataCounts?.emailAccounts||0} aiPending=${bundle?.dataCounts?.aiPending||0}`,
     "",
@@ -625,6 +953,7 @@ function sanitizeEmailTransactions(items=[],ctx={}){
   const activities=Array.isArray(ctx.acts)?ctx.acts:[];
   const categories=(ctx.cats&&typeof ctx.cats==="object")?ctx.cats:{};
   const fallbackAct=activities.includes("Personal")?"Personal":(activities[0]||"Personal");
+  const fallbackCurrency=normalizeCurrencyCode(ctx.baseCurrency||getBaseCurrency(),getBaseCurrency());
   return items.map((x,idx)=>{
     const rawType=String(x?.type||"").trim().toLowerCase();
     if(!["income","expense","transfer"].includes(rawType))return null;
@@ -643,12 +972,15 @@ function sanitizeEmailTransactions(items=[],ctx={}){
     const date=String(x?.date||ctx.eDate||today()).trim();
     const accountName=String(x?.accountName||x?.fromAccountName||"").trim();
     const targetAccountName=String(x?.targetAccountName||x?.toAccountName||"").trim();
+    const currency=normalizeCurrencyCode(x?.currency||x?.currencyCode||"",fallbackCurrency);
     const isNewCategory=rawType==="transfer"?false:(Boolean(x?.isNewCategory)||Boolean(category&&!catList.includes(category)));
     return{
       ...x,
       _aiIndex:idx,
       type:rawType,
       amount,
+      originalAmount:roundMoney(Number(x?.originalAmount??amount)),
+      currency,
       businessActivity,
       category,
       subCategory:subCategory.slice(0,120),
@@ -662,6 +994,18 @@ function sanitizeEmailTransactions(items=[],ctx={}){
       targetAccountName:targetAccountName.slice(0,120),
     };
   }).filter(Boolean);
+}
+
+async function convertExtractedItemsToBaseCurrency(items=[],{
+  baseCurrency=getBaseCurrency(),
+  fallbackCurrency=baseCurrency,
+  dateFallback=today(),
+}={}){
+  return convertMoneyRows(items,{
+    baseCurrency:normalizeCurrencyCode(baseCurrency,getBaseCurrency()),
+    fallbackCurrency:normalizeCurrencyCode(fallbackCurrency,baseCurrency),
+    dateResolver:(row)=>row?.date||dateFallback,
+  });
 }
 
 function isVendorTracked(entry={}){
@@ -882,15 +1226,17 @@ async function callAI(messages,max_tokens=800){
 }
 async function aiClassify(text,acts,cats,type="expense"){
   const c=Object.entries(cats).map(([a,cs])=>`${a}: ${cs.join(", ")}`).join("\n");
+  const baseCurrency=getBaseCurrency();
   try{
-    const raw=await callAI([{role:"user",content:`Classify this ${type} for Indian trader.\nText: "${text.slice(0,800)}"\nActivities: ${acts.join(", ")}\nCategories:\n${c}\nReturn ONLY JSON: {"businessActivity":"","category":"","isNewCategory":false,"description":"","amount":null,"date":"YYYY-MM-DD","vendor":"","paymentMethod":""}`}]);
+    const raw=await callAI([{role:"user",content:`Classify this ${type} for bookkeeping.\nText: "${text.slice(0,800)}"\nActivities: ${acts.join(", ")}\nCategories:\n${c}\nDetect the transaction currency explicitly. Use ISO currency code like INR, USD, EUR, GBP, AED.\nLedger base currency: ${baseCurrency}\nReturn ONLY JSON: {"businessActivity":"","category":"","isNewCategory":false,"description":"","amount":null,"currency":"","date":"YYYY-MM-DD","vendor":"","paymentMethod":""}`}]);
     try{return JSON.parse(raw.replace(/```json|```/g,"").trim());}catch{return {};}
   }catch{return {};}
 }
 async function aiExtractBatch(text,acts,cats){
   const c=Object.entries(cats).map(([a,cs])=>`${a}: ${cs.join(", ")}`).join("\n");
+  const baseCurrency=getBaseCurrency();
   try{
-    const raw=await callAI([{role:"user",content:`Extract ALL financial transactions from text. Indian context.\nText:\n${text.slice(0,3000)}\nActivities: ${acts.join(", ")}\nCategories:\n${c}\nReturn ONLY JSON array: [{"type":"expense|income","businessActivity":"","category":"","isNewCategory":false,"description":"","amount":0,"date":"YYYY-MM-DD","vendor":"","paymentMethod":""}]`}],1400);
+    const raw=await callAI([{role:"user",content:`Extract ALL financial transactions from text.\nText:\n${text.slice(0,3000)}\nActivities: ${acts.join(", ")}\nCategories:\n${c}\nDetect the original transaction currency explicitly for every row and return ISO currency code.\nLedger base currency: ${baseCurrency}\nReturn ONLY JSON array: [{"type":"expense|income","businessActivity":"","category":"","isNewCategory":false,"description":"","amount":0,"currency":"","date":"YYYY-MM-DD","vendor":"","paymentMethod":""}]`}],1400);
     try{const a=JSON.parse(raw.replace(/```json|```/g,"").trim());return Array.isArray(a)?a:[];}catch{return[];}
   }catch{return[];}
 }
@@ -902,6 +1248,7 @@ function buildAiEmailAnalysisMessages(subject,from,body,acts,cats,meta={}){
   const attachmentText=clipTextForAI((meta.attachmentText||"")+"",11000);
   const emailBody=clipTextForAI((body||"")+"",11000);
   const hasAttachment=meta.hasAttachment?"yes":"no";
+  const baseCurrency=normalizeCurrencyCode(meta.baseCurrency||getBaseCurrency(),getBaseCurrency());
   return [{role:"user",content:`You are a cashflow extraction engine for bookkeeping.
 Analyze this ENTIRE email body and ENTIRE attachment text.
 You must decide cashflow directly from the content without relying on external rules.
@@ -912,6 +1259,7 @@ Tasks:
 3) Transaction type can be expense, income, or transfer.
 4) For transfer, populate accountName (from) and targetAccountName (to) when inferable.
 5) If account cannot be inferred, keep accountName/targetAccountName blank and still extract.
+6) Detect the original currency explicitly for every transaction and return ISO currency code such as INR, USD, EUR, GBP, AED.
 
 Output status:
 - "success" when at least one valid transaction is extracted.
@@ -932,13 +1280,14 @@ Categories:
 ${c}
 Known ledger account names (optional):
 ${accountsLine}
+Ledger base currency: ${baseCurrency}
 
 Return ONLY JSON:
 {
   "status": "success|no_transaction|retry",
   "reason": "",
   "transactions": [
-    {"type":"expense|income|transfer","businessActivity":"","category":"","isNewCategory":false,"description":"","amount":0,"date":"YYYY-MM-DD","vendor":"","paymentMethod":"","accountName":"","targetAccountName":""}
+    {"type":"expense|income|transfer","businessActivity":"","category":"","isNewCategory":false,"description":"","amount":0,"currency":"","date":"YYYY-MM-DD","vendor":"","paymentMethod":"","accountName":"","targetAccountName":""}
   ]
 }`}];
 }
@@ -962,6 +1311,16 @@ async function aiAnalyzeEmail(subject,from,body,acts,cats,meta={}){
   const messages=buildAiEmailAnalysisMessages(subject,from,body,acts,cats,meta);
   const raw=await callAI(messages,1600);
   return parseAiEmailAnalysisRaw(raw);
+}
+
+function matchesAccountForReconciliation(tx={},accountId="",accountName=""){
+  const id=String(accountId||"").trim();
+  const name=String(accountName||"").trim();
+  if(!id&&!name)return false;
+  return String(tx?.accountId||"")===id
+    || String(tx?.targetAccountId||"")===id
+    || (name&&String(tx?.accountName||"")===name)
+    || (name&&String(tx?.targetAccountName||"")===name);
 }
 
 function aiCloudRetryUrl(endpoint="",path="/"){
@@ -1041,9 +1400,9 @@ async function pullCloudAiRetryJobs(clientId,limit=AI_CLOUD_PULL_LIMIT,cfg=loadA
     clearTimeout(timer);
   }
 }
-async function aiParseStatement(text,name,type){
+async function aiParseStatement(text,name,type,accountCurrency="",baseCurrency=getBaseCurrency()){
   try{
-    const raw=await callAI([{role:"user",content:`Parse bank/card statement. Account: ${name} (${type}).\n${text.slice(0,5000)}\nReturn ONLY JSON array: [{"date":"YYYY-MM-DD","description":"","amount":0,"type":"debit|credit","reference":"","balance":null}]`}],1500);
+    const raw=await callAI([{role:"user",content:`Parse bank/card statement.\nAccount: ${name} (${type})\nAccount currency hint: ${accountCurrency||"unknown"}\nLedger base currency: ${baseCurrency}\nStatement text:\n${text.slice(0,7000)}\nDetect the currency for every transaction row and return ISO currency code.\nReturn ONLY JSON array: [{"date":"YYYY-MM-DD","description":"","amount":0,"currency":"","type":"debit|credit","reference":"","balance":null,"balanceCurrency":""}]`}],1800);
     try{const a=JSON.parse(raw.replace(/```json|```/g,"").trim());return Array.isArray(a)?a:[];}catch{return[];}
   }catch{return[];}
 }
@@ -1053,6 +1412,140 @@ async function aiSummarize(txns){
   }catch{
     return "AI summary unavailable right now. Configure AI backend in Settings or try again later.";
   }
+}
+
+function arrayBufferToBinaryString(buffer){
+  const bytes=new Uint8Array(buffer||new ArrayBuffer(0));
+  const chunk=0x8000;
+  let out="";
+  for(let i=0;i<bytes.length;i+=chunk){
+    out+=String.fromCharCode(...bytes.subarray(i,i+chunk));
+  }
+  return out;
+}
+
+function readFileAsText(file){
+  return new Promise((resolve,reject)=>{
+    const reader=new FileReader();
+    reader.onerror=()=>reject(new Error(`Unable to read ${file?.name||"file"}`));
+    reader.onload=()=>resolve(String(reader.result||""));
+    reader.readAsText(file);
+  });
+}
+
+function readFileAsArrayBuffer(file){
+  return new Promise((resolve,reject)=>{
+    const reader=new FileReader();
+    reader.onerror=()=>reject(new Error(`Unable to read ${file?.name||"file"}`));
+    reader.onload=()=>resolve(reader.result);
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+async function readStatementFileText(file){
+  const name=String(file?.name||"").toLowerCase();
+  const type=String(file?.type||"").toLowerCase();
+  if(type.startsWith("text/")||type.includes("json")||type.includes("xml")||type.includes("csv")||/\.(txt|csv|json|xml|html?|md|log)$/i.test(name)){
+    return await readFileAsText(file);
+  }
+  const raw=await readFileAsArrayBuffer(file);
+  return extractAttachmentTextByType(arrayBufferToBinaryString(raw),type,name);
+}
+
+function sanitizeStatementRows(rows=[],ctx={}){
+  const fallbackCurrency=normalizeCurrencyCode(ctx.accountCurrency||ctx.baseCurrency||getBaseCurrency(),getBaseCurrency());
+  return (rows||[]).map((row,idx)=>{
+    const amount=Number(row?.amount);
+    if(!(amount>0))return null;
+    const rawType=String(row?.type||"").trim().toLowerCase();
+    const type=rawType==="credit"?"credit":"debit";
+    const date=String(row?.date||ctx.dateFallback||today()).trim()||today();
+    const description=String(row?.description||row?.reference||`Statement ${type}`).trim()||`Statement ${type}`;
+    return{
+      ...row,
+      _sid:String(row?._sid||`stmt-${idx}`),
+      amount,
+      originalAmount:roundMoney(Number(row?.originalAmount??amount)||amount),
+      currency:normalizeCurrencyCode(row?.currency||row?.balanceCurrency||"",fallbackCurrency),
+      balance:Number.isFinite(Number(row?.balance))?Number(row.balance):null,
+      balanceCurrency:normalizeCurrencyCode(row?.balanceCurrency||row?.currency||"",fallbackCurrency),
+      type,
+      date,
+      description:description.slice(0,220),
+      reference:String(row?.reference||"").trim().slice(0,120),
+    };
+  }).filter(Boolean);
+}
+
+async function prepareStatementRows(rows=[],ctx={}){
+  const sanitized=sanitizeStatementRows(rows,ctx);
+  return await convertMoneyRows(sanitized,{
+    baseCurrency:normalizeCurrencyCode(ctx.baseCurrency||getBaseCurrency(),getBaseCurrency()),
+    fallbackCurrency:normalizeCurrencyCode(ctx.accountCurrency||ctx.baseCurrency||getBaseCurrency(),getBaseCurrency()),
+    dateResolver:(row)=>row?.date||ctx.dateFallback||today(),
+  });
+}
+
+function inDateRange(date="",from="",to=""){
+  const value=String(date||"").trim();
+  if(!value)return true;
+  if(from&&value<from)return false;
+  if(to&&value>to)return false;
+  return true;
+}
+
+function reconciliationScore(statementRow={},ledgerTx={}){
+  const days=Math.abs((Date.parse(statementRow?.date||"")-Date.parse(ledgerTx?.date||""))/86400000||0);
+  const amountGap=Math.abs((Number(statementRow?.amount)||0)-(Number(ledgerTx?.amount)||0));
+  const desc=strSim(statementRow?.description||"",ledgerTx?.description||ledgerTx?.category||"");
+  return Math.max(0,(1/(1+days))*30 + Math.max(0,25-amountGap*4) + desc*45);
+}
+
+function buildReconciliationResult(statementRows=[],ledgerRows=[]){
+  const unmatchedLedger=new Set((ledgerRows||[]).map(tx=>tx.id));
+  const matched=[];
+  const amountMismatches=[];
+  const statementOnly=[];
+  const ledgerOnly=[];
+
+  (statementRows||[]).forEach((row,idx)=>{
+    const candidates=(ledgerRows||[])
+      .filter(tx=>unmatchedLedger.has(tx.id))
+      .map(tx=>({
+        tx,
+        days:Math.abs((Date.parse(row.date||"")-Date.parse(tx.date||""))/86400000||0),
+        amountGap:Math.abs((Number(row.amount)||0)-(Number(tx.amount)||0)),
+        desc:strSim(row.description||"",tx.description||tx.category||""),
+        score:reconciliationScore(row,tx),
+      }))
+      .filter(c=>c.days<=5||c.desc>=0.3)
+      .sort((a,b)=>b.score-a.score);
+    const best=candidates[0]||null;
+    const txDirection=best?.tx?._reconSide||(best?.tx?.type==="income"?"credit":best?.tx?.type==="expense"||best?.tx?.type==="borrow"?"debit":"");
+    const sameDirection=row.type===txDirection;
+    if(best&&sameDirection&&best.amountGap<2&&best.days<=3){
+      unmatchedLedger.delete(best.tx.id);
+      matched.push({id:`match-${idx}`,statementRow:row,ledgerTx:best.tx,score:best.score});
+      return;
+    }
+    if(best&&sameDirection&&best.days<=5&&best.desc>=0.25){
+      unmatchedLedger.delete(best.tx.id);
+      amountMismatches.push({id:`mismatch-${idx}`,statementRow:row,ledgerTx:best.tx,score:best.score,amountGap:best.amountGap,dayGap:best.days});
+      return;
+    }
+    statementOnly.push({id:`stmt-${idx}`,statementRow:row});
+  });
+
+  (ledgerRows||[]).forEach(tx=>{
+    if(unmatchedLedger.has(tx.id))ledgerOnly.push({id:`ledger-${tx.id}`,ledgerTx:tx});
+  });
+
+  return{
+    matched,
+    amountMismatches,
+    statementOnly,
+    ledgerOnly,
+  };
 }
 
 // ── ONEDRIVE / MICROSOFT GRAPH HELPERS ────────────────────────────────────────
@@ -1529,6 +2022,8 @@ export default function App(){
   const[authBypass,setAuthBypass]=useState(()=>LS.get("ledger_auth_bypass",false));
   const[authMsg,setAuthMsg]=useState("");
   const[tab,setTab]=useState("dashboard");
+  const[currencyCfg,setCurrencyCfg]=useState(()=>loadCurrencyCfg());
+  const[reconAccountId,setReconAccountId]=useState("");
   const[txns,setTxns]=useState(()=>LS.get("ledger_txns",[]));
   const[acts,setActs]=useState(()=>LS.get("ledger_acts",DEF_ACTS));
   const[cats,setCats]=useState(()=>LS.get("ledger_cats",DEF_CATS));
@@ -1584,6 +2079,7 @@ export default function App(){
 
   const buildBackupSnapshot=useCallback((reason="auto")=>{
     const payload={
+      currencyCfg,
       txns,
       inbox,
       accs,
@@ -1607,7 +2103,7 @@ export default function App(){
       },
       data:payload,
     };
-  },[txns,inbox,accs,acts,cats,smsNums,emails]);
+  },[currencyCfg,txns,inbox,accs,acts,cats,smsNums,emails]);
 
   const pushBackupSnapshot=useCallback((reason="auto")=>{
     const snap=buildBackupSnapshot(reason);
@@ -1621,6 +2117,54 @@ export default function App(){
     return true;
   },[buildBackupSnapshot]);
 
+  const applyBaseCurrencyChange=useCallback(async(nextCurrency)=>{
+    const nextBase=normalizeCurrencyCode(nextCurrency||currencyCfg.baseCurrency,DEFAULT_BASE_CURRENCY);
+    const prevBase=normalizeCurrencyCode(currencyCfg.baseCurrency||DEFAULT_BASE_CURRENCY,DEFAULT_BASE_CURRENCY);
+    if(nextBase===prevBase){
+      saveCurrencyCfgToStorage({baseCurrency:nextBase});
+      setCurrencyCfg({baseCurrency:nextBase});
+      return{ok:true,baseCurrency:nextBase,changed:false};
+    }
+    try{
+      const [nextTxns,nextInbox,nextAccs]=await Promise.all([
+        convertMoneyRows(txns,{
+          baseCurrency:nextBase,
+          fallbackCurrency:prevBase||LEGACY_DEFAULT_CURRENCY,
+          dateResolver:(row)=>row?.date||row?.fxDate||today(),
+        }),
+        convertMoneyRows(inbox,{
+          baseCurrency:nextBase,
+          fallbackCurrency:prevBase||LEGACY_DEFAULT_CURRENCY,
+          dateResolver:(row)=>row?.date||row?.fxDate||today(),
+        }),
+        convertMoneyRows(accs,{
+          amountField:"balance",
+          originalField:"originalBalance",
+          currencyField:"accountCurrency",
+          baseAmountField:"balance",
+          baseCurrencyField:"balanceBaseCurrency",
+          fxDateField:"balanceFxDate",
+          fxRateField:"balanceFxRate",
+          fxRateDateField:"balanceRateDate",
+          fxSourceField:"balanceFxSource",
+          baseCurrency:nextBase,
+          fallbackCurrency:prevBase||LEGACY_DEFAULT_CURRENCY,
+          dateResolver:(row)=>row?.balanceFxDate||today(),
+        }),
+      ]);
+      saveCurrencyCfgToStorage({baseCurrency:nextBase});
+      setCurrencyCfg({baseCurrency:nextBase});
+      setAccs(nextAccs);
+      setInbox(nextInbox);
+      setTxns(nextTxns.map(tx=>({...tx,journalEntries:buildJE(tx,nextAccs)})));
+      addDiagnostic({level:"info",scope:"currency",event:"base_currency_changed",message:`Base currency changed from ${prevBase} to ${nextBase}.`,context:{from:prevBase,to:nextBase,transactions:nextTxns.length,inbox:nextInbox.length,accounts:nextAccs.length}});
+      return{ok:true,baseCurrency:nextBase,changed:true};
+    }catch(error){
+      addDiagnostic({level:"error",scope:"currency",event:"base_currency_change_failed",message:error?.message||"Base currency change failed.",context:{from:prevBase,to:nextBase,error}});
+      return{ok:false,error:error?.message||"Base currency change failed."};
+    }
+  },[currencyCfg.baseCurrency,txns,inbox,accs,addDiagnostic]);
+
   const restoreBackupSnapshot=useCallback((id)=>{
     const list=LS.get(BACKUP_KEY,[]);
     const snap=list.find(s=>s.id===id);
@@ -1629,6 +2173,7 @@ export default function App(){
       return false;
     }
     const d=snap.data;
+    setCurrencyCfg(normalizeCurrencyCfg(d.currencyCfg||loadCurrencyCfg()));
     setTxns(Array.isArray(d.txns)?d.txns:[]);
     setInbox(Array.isArray(d.inbox)?d.inbox:[]);
     setAccs(Array.isArray(d.accs)?d.accs:[]);
@@ -1658,6 +2203,7 @@ export default function App(){
       needsReconnect:Boolean(sbCfg?.needsReconnect),
     };
     const preservedAICfg=loadAICfg();
+    const preservedCurrencyCfg=loadCurrencyCfg();
     const preservedEmails=(emails||[]).map(a=>({
       ...hydrateEmailAccount(a),
       reauthRequired:false,
@@ -1682,6 +2228,8 @@ export default function App(){
       if(preservedMsClientId)clearStaleMsalInteractionState(preservedMsClientId);
     }catch{}
     saveAICfgToStorage(preservedAICfg);
+    saveCurrencyCfgToStorage(preservedCurrencyCfg);
+    setCurrencyCfg(preservedCurrencyCfg);
     setTxns([]);
     setActs([...DEF_ACTS]);
     setCats(JSON.parse(JSON.stringify(DEF_CATS)));
@@ -1703,7 +2251,7 @@ export default function App(){
     setResetVersion(v=>v+1);
     setAuthBypass(false);
     setBackups(LS.get(BACKUP_KEY,[]));
-    addDiagnostic({level:"warn",scope:"app",event:"factory_reset",message:"Factory reset completed. Connectors and AI settings were preserved.",context:{preservedEmails:(preservedEmails||[]).length,preservedCloud:Boolean(preservedCloudCfg?.enabled),preservedAiEndpoint:Boolean(preservedAICfg?.endpoint)}});
+    addDiagnostic({level:"warn",scope:"app",event:"factory_reset",message:"Factory reset completed. Connectors, AI settings, and currency settings were preserved.",context:{preservedEmails:(preservedEmails||[]).length,preservedCloud:Boolean(preservedCloudCfg?.enabled),preservedAiEndpoint:Boolean(preservedAICfg?.endpoint),baseCurrency:preservedCurrencyCfg?.baseCurrency||DEFAULT_BASE_CURRENCY}});
     alert("Reset complete. LedgerAI is now fresh. Email + cloud connectors were preserved.");
   },[addDiagnostic,buildBackupSnapshot,emails,pushBackupSnapshot,sbCfg]);
 
@@ -1744,6 +2292,7 @@ export default function App(){
   // ── localStorage mirrors ─────────────────────────────────────────────────
   useEffect(()=>LS.set("ledger_auth_cfg",authCfg),[authCfg]);
   useEffect(()=>LS.set("ledger_auth_bypass",authBypass),[authBypass]);
+  useEffect(()=>saveCurrencyCfgToStorage(currencyCfg),[currencyCfg]);
   useEffect(()=>{
     try{
       if(authUser)localStorage.setItem("ledger_auth_user",JSON.stringify(authUser));
@@ -1831,6 +2380,7 @@ export default function App(){
     diagnostics:diagnosticsRef.current,
     authCfg,
     authUser,
+    currencyCfg,
     txns,
     inbox,
     accs,
@@ -1842,7 +2392,7 @@ export default function App(){
     lastSync,
     aiPending:LS.get(AI_PENDING_EMAIL_KEY,[]),
     backups,
-  }),[authCfg,authUser,txns,inbox,accs,acts,smsNums,emails,sbCfg,syncStatus,lastSync,backups]);
+  }),[authCfg,authUser,currencyCfg,txns,inbox,accs,acts,smsNums,emails,sbCfg,syncStatus,lastSync,backups]);
 
   // ── OneDrive sync helpers ────────────────────────────────────────────────
   const pushToCloud=useCallback(async(state={})=>{
@@ -1850,6 +2400,7 @@ export default function App(){
     setSyncStatus("syncing");
     try{
       const payload={
+        currencyCfg:state.currencyCfg??currencyCfg,
         txns:state.txns??txns,
         inbox:state.inbox??inbox,
         accs:state.accs??accs,
@@ -1862,7 +2413,7 @@ export default function App(){
       const ts=new Date().toISOString();
       setLastSync(ts);setSyncStatus("ok");
       setCloudIssue("");
-      addDiagnostic({level:"info",scope:"cloud",event:"onedrive_sync_success",message:"OneDrive sync completed.",context:{txns:(payload.txns||[]).length,inbox:(payload.inbox||[]).length,accounts:(payload.accs||[]).length,emails:(payload.emails||[]).length}});
+      addDiagnostic({level:"info",scope:"cloud",event:"onedrive_sync_success",message:"OneDrive sync completed.",context:{txns:(payload.txns||[]).length,inbox:(payload.inbox||[]).length,accounts:(payload.accs||[]).length,emails:(payload.emails||[]).length,baseCurrency:payload.currencyCfg?.baseCurrency||currencyCfg.baseCurrency||DEFAULT_BASE_CURRENCY}});
       setTimeout(()=>setSyncStatus("idle"),3000);
     }catch(e){
       console.error("OneDrive sync error",e);
@@ -1873,7 +2424,7 @@ export default function App(){
       if(e.message.includes("Not signed in")||e.message.includes("401"))
         setSbCfg(p=>({...p,enabled:false,needsReconnect:true}));
     }
-  },[addDiagnostic,sbCfg,txns,inbox,accs,acts,cats,smsNums,emails,setCloudIssue]);
+  },[addDiagnostic,sbCfg,txns,inbox,accs,acts,cats,smsNums,emails,currencyCfg,setCloudIssue]);
 
   const debouncedSync=useCallback((state={})=>{
     if(!sbCfg.enabled)return;
@@ -1888,6 +2439,7 @@ export default function App(){
     try{
       const d=await odLoad(sbCfg.clientId);
       if(!d){setSyncStatus("idle");return;}
+      if(d.currencyCfg)setCurrencyCfg(normalizeCurrencyCfg(d.currencyCfg));
       if(d.txns)setTxns(d.txns);
       if(d.inbox)setInbox(d.inbox);
       if(d.accs)setAccs(d.accs);
@@ -1897,7 +2449,7 @@ export default function App(){
       if(d.emails)setEmails(prev=>mergeLoadedEmailsWithLocalTokens(d.emails,prev));
       setLastSync(new Date().toISOString());setSyncStatus("ok");
       setCloudIssue("");
-      addDiagnostic({level:"info",scope:"cloud",event:"onedrive_load_success",message:"OneDrive restore completed.",context:{txns:(d?.txns||[]).length,inbox:(d?.inbox||[]).length,accounts:(d?.accs||[]).length,emails:(d?.emails||[]).length}});
+      addDiagnostic({level:"info",scope:"cloud",event:"onedrive_load_success",message:"OneDrive restore completed.",context:{txns:(d?.txns||[]).length,inbox:(d?.inbox||[]).length,accounts:(d?.accs||[]).length,emails:(d?.emails||[]).length,baseCurrency:d?.currencyCfg?.baseCurrency||currencyCfg.baseCurrency||DEFAULT_BASE_CURRENCY}});
       setTimeout(()=>setSyncStatus("idle"),3000);
     }catch(e){
       console.error("OneDrive load error",e);
@@ -1908,7 +2460,7 @@ export default function App(){
         setSbCfg(p=>({...p,enabled:false,needsReconnect:true}));
       }
     }
-  },[addDiagnostic,sbCfg,setSbCfg,setCloudIssue]);
+  },[addDiagnostic,sbCfg,setSbCfg,currencyCfg.baseCurrency,setCloudIssue]);
 
   // Auto-load from cloud once when connected and local ledger is empty.
   useEffect(()=>{
@@ -1934,6 +2486,7 @@ export default function App(){
   useEffect(()=>{debouncedSync({txns});},[txns]);
   useEffect(()=>{debouncedSync({inbox});},[inbox]);
   useEffect(()=>{debouncedSync({accs});},[accs]);
+  useEffect(()=>{debouncedSync({currencyCfg});},[currencyCfg]);
   useEffect(()=>{debouncedSync({acts,cats});},[acts,cats]);
 
   const ensureCat=(act,cat)=>setCats(p=>({...p,[act]:(p[act]||[]).includes(cat)?p[act]:[...(p[act]||[]),cat]}));
@@ -1973,13 +2526,40 @@ export default function App(){
     setFilter(prev=>prev.activity===oldName?{...prev,activity:nextName}:prev);
     return{ok:true,name:nextName};
   },[acts]);
+  const attachTxnCurrencyMeta=useCallback((entry={})=>{
+    const amount=roundMoney(Number(entry?.amount)||0);
+    const sourceCurrency=normalizeCurrencyCode(entry?.currency||entry?.baseCurrency||currencyCfg.baseCurrency,currencyCfg.baseCurrency);
+    return{
+      ...entry,
+      currency:sourceCurrency,
+      originalAmount:roundMoney(Number(entry?.originalAmount??amount)||amount),
+      baseAmount:amount,
+      baseCurrency:currencyCfg.baseCurrency,
+      fxRate:Number(entry?.fxRate)||1,
+      fxDate:normalizeFxDate(entry?.fxDate||entry?.date||today()),
+      fxRateDate:normalizeFxDate(entry?.fxRateDate||entry?.fxDate||entry?.date||today()),
+      fxSource:String(entry?.fxSource||"manual"),
+    };
+  },[currencyCfg.baseCurrency]);
   const addAccountFromModal=useCallback((a)=>{
-    const created={...a,id:gid()};
+    const currency=normalizeCurrencyCode(a?.accountCurrency||currencyCfg.baseCurrency,currencyCfg.baseCurrency);
+    const created={
+      ...a,
+      id:gid(),
+      accountCurrency:currency,
+      originalBalance:roundMoney(Number(a?.originalBalance??a?.balance)||0),
+      balance:roundMoney(Number(a?.balance)||0),
+      balanceBaseCurrency:currencyCfg.baseCurrency,
+      balanceFxRate:Number(a?.balanceFxRate)||1,
+      balanceFxDate:normalizeFxDate(a?.balanceFxDate||today()),
+      balanceRateDate:normalizeFxDate(a?.balanceRateDate||a?.balanceFxDate||today()),
+      balanceFxSource:String(a?.balanceFxSource||"manual"),
+    };
     setAccs(p=>[...p,created]);
     return created;
-  },[]);
+  },[currencyCfg.baseCurrency]);
   const saveTx=useCallback((tx)=>{
-    const normalizedTx=normalizeTrackedVendor(tx);
+    const normalizedTx=attachTxnCurrencyMeta(normalizeTrackedVendor(tx));
     const isPendingInboxEdit=!tx.id&&Boolean(tx._iid);
     if(normalizedTx.isNewCategory&&!isPendingInboxEdit)ensureCat(normalizedTx.businessActivity,normalizedTx.category);
     const accName=normalizedTx.accountId?accs.find(a=>a.id===normalizedTx.accountId)?.name||"":normalizedTx.accountName||"";
@@ -2005,9 +2585,9 @@ export default function App(){
     if(tx.id&&txns.find(t=>t.id===tx.id))setTxns(p=>p.map(t=>t.id===tx.id?full:t));
     else setTxns(p=>[{...full,id:gid(),createdAt:new Date().toISOString()},...p]);
     setShowAdd(false);setEditTx(null);
-  },[txns,accs]);
+  },[txns,accs,attachTxnCurrencyMeta]);
   const delTx=id=>setTxns(p=>p.filter(t=>t.id!==id));
-  const addInbox=items=>setInbox(p=>[...items.map(i=>({...i,_iid:gid(),_ts:Date.now()})),...p]);
+  const addInbox=items=>setInbox(p=>[...(items||[]).map(i=>({...attachTxnCurrencyMeta(i),_iid:gid(),_ts:Date.now()})),...p]);
   const approveInbox=item=>{
     const validationMsg=getAccountingValidationMessage(item,accs);
     if(validationMsg){
@@ -2015,7 +2595,7 @@ export default function App(){
       return;
     }
     if(item.isNewCategory)ensureCat(item.businessActivity,item.category);
-    const {_iid,_ts,...itemBase}=normalizeTrackedVendor(item);
+    const {_iid,_ts,...itemBase}=attachTxnCurrencyMeta(normalizeTrackedVendor(item));
     const tx={...itemBase,id:gid(),createdAt:new Date().toISOString(),source:item.source||"auto"};
     const accName=tx.accountId?accs.find(a=>a.id===tx.accountId)?.name||"":tx.accountName||"";
     const liabName=tx.liabilityAccountId?accs.find(a=>a.id===tx.liabilityAccountId)?.name||"":tx.liabilityAccountName||"";
@@ -2039,7 +2619,7 @@ export default function App(){
     if(filter.to&&t.date>filter.to)return false;
     return true;
   });
-  const TABS=[["dashboard","Dashboard"],["transactions","Ledger"],["inbox",`Inbox${inbox.length?` (${inbox.length})`:""}`],["email",`Email${emails.length?` (${emails.length})`:""}`],["journal","Journal"],["accounts","Accounts"],["reports","Reports"],["settings","Settings"],["daily","Day Review"]];
+  const TABS=[["dashboard","Dashboard"],["transactions","Ledger"],["inbox",`Inbox${inbox.length?` (${inbox.length})`:""}`],["email",`Email${emails.length?` (${emails.length})`:""}`],["journal","Journal"],["accounts","Accounts"],["reconciliation","Reconciliation"],["reports","Reports"],["settings","Settings"],["daily","Day Review"]];
 
   if(authCfg.enabled&&!authCfg.googleClientId){
     return <AuthSetupScreen authCfg={authCfg} setAuthCfg={setAuthCfg}/>;
@@ -2084,9 +2664,10 @@ export default function App(){
           <EmailTab emails={emails} setEmails={setEmails} inbox={inbox} addInbox={addInbox} acts={acts} cats={cats} accs={accs} defaultGoogleClientId={authCfg.googleClientId||DEFAULT_GOOGLE_CLIENT_ID} defaultMicrosoftClientId={sbCfg.clientId||DEFAULT_MICROSOFT_CLIENT_ID||""} addDiagnostic={addDiagnostic} resetVersion={resetVersion}/>
         </div>
         {tab==="journal"&&<JournalTab txns={txns}/>}
-        {tab==="accounts"&&<AccountsTab accs={accs} setAccs={setAccs} txns={txns} addInbox={addInbox} acts={acts} cats={cats}/>}
+        {tab==="accounts"&&<AccountsTab accs={accs} setAccs={setAccs} onOpenReconciliation={(id)=>{setReconAccountId(id);setTab("reconciliation");}}/>}
+        {tab==="reconciliation"&&<ReconciliationTab accs={accs} txns={txns} acts={acts} cats={cats} addInbox={addInbox} onEditLedger={tx=>{setEditTx(tx);setAddType(tx.type);setShowAdd(true);}} preselectedAccountId={reconAccountId}/>}
         {tab==="reports"&&<ReportsTab txns={txns} acts={acts} totInc={totInc} totExp={totExp}/>}
-        {tab==="settings"&&<SettingsTab acts={acts} setActs={setActs} cats={cats} setCats={setCats} backups={backups} onBackupNow={()=>pushBackupSnapshot("manual")} onRestoreBackup={restoreBackupSnapshot} onFactoryReset={factoryReset} onRenameActivity={renameBusinessActivity} diagnostics={diagnostics} onClearDiagnostics={clearDiagnostics} buildSupportBundle={makeSupportBundle} addDiagnostic={addDiagnostic}/>}
+        {tab==="settings"&&<SettingsTab acts={acts} setActs={setActs} cats={cats} setCats={setCats} backups={backups} onBackupNow={()=>pushBackupSnapshot("manual")} onRestoreBackup={restoreBackupSnapshot} onFactoryReset={factoryReset} onRenameActivity={renameBusinessActivity} currencyCfg={currencyCfg} onSaveCurrencyCfg={applyBaseCurrencyChange} diagnostics={diagnostics} onClearDiagnostics={clearDiagnostics} buildSupportBundle={makeSupportBundle} addDiagnostic={addDiagnostic}/>}
         {tab==="cloud"&&<CloudTab sbCfg={sbCfg} setSbCfg={setSbCfg} syncStatus={syncStatus} lastSync={lastSync} onSync={pushToCloud} onLoad={loadFromCloud} txns={txns} setTxns={setTxns} inbox={inbox} setInbox={setInbox} accs={accs} setAccs={setAccs} acts={acts} setActs={setActs} cats={cats} setCats={setCats} smsNums={smsNums} setSmsNums={setSmsNums} emails={emails} setEmails={setEmails} addDiagnostic={addDiagnostic}/>}
         {tab==="daily"&&<DailyTab todayTxns={todayTxns} todInc={todInc} todExp={todExp} summary={summary} sumLoad={sumLoad} getSummary={async()=>{setSumLoad(true);setSummary(await aiSummarize(todayTxns));setSumLoad(false);}} onEdit={tx=>{setEditTx(tx);setAddType(tx.type);setShowAdd(true);}} onDelete={delTx}/>}
       </div>
@@ -3175,6 +3756,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
   };
 
   const analyzeMessageEvidence=async(evidence)=>{
+    const baseCurrency=getBaseCurrency();
     const aiResult=await withTimeout(
       aiAnalyzeEmail(
         evidence.subject||"",
@@ -3187,6 +3769,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
           attachmentText:evidence.attachmentText||"",
           hasAttachment:Boolean(evidence.hasAttachment),
           accountNames:accs.map(a=>a.name).filter(Boolean),
+          baseCurrency,
         },
       ),
       35000,
@@ -3199,13 +3782,18 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
     items=sanitizeEmailTransactions(items,{
       acts,
       cats,
+      baseCurrency,
       eDate:evidence.eDate||today(),
       subject:evidence.subject||"",
       from:evidence.from||"",
     });
     if(String(aiResult?.status||"").toLowerCase()!=="success")return[];
     if(!Array.isArray(items)||!items.length)return[];
-    return items;
+    return await convertExtractedItemsToBaseCurrency(items,{
+      baseCurrency,
+      fallbackCurrency:baseCurrency,
+      dateFallback:evidence.eDate||today(),
+    });
   };
 
   const runSync=async(acc,opts={})=>{
@@ -3975,7 +4563,30 @@ function LedgerTab({txns,filter,setFilter,acts,onEdit,onDelete}){
 function InboxTab({inbox,addInbox,acts,cats,onApprove,onEdit,onDiscard}){
   const[bulk,setBulk]=useState("");
   const[loading,setLoading]=useState(false);
-  const runBatch=async()=>{if(!bulk.trim())return;setLoading(true);const items=await aiExtractBatch(bulk,acts,cats);addInbox(items.map(i=>({...i,type:i.type||"expense"})));setBulk("");setLoading(false);};
+  const runBatch=async()=>{
+    if(!bulk.trim())return;
+    setLoading(true);
+    try{
+      const raw=await aiExtractBatch(bulk,acts,cats);
+      const sanitized=sanitizeEmailTransactions(raw,{
+        acts,
+        cats,
+        baseCurrency:getBaseCurrency(),
+        eDate:today(),
+        subject:"Manual paste",
+        from:"",
+      });
+      const converted=await convertExtractedItemsToBaseCurrency(sanitized,{
+        baseCurrency:getBaseCurrency(),
+        fallbackCurrency:getBaseCurrency(),
+        dateFallback:today(),
+      });
+      addInbox(converted.map(i=>({...i,type:i.type||"expense"})));
+      setBulk("");
+    }finally{
+      setLoading(false);
+    }
+  };
   const todItems=inbox.filter(i=>i.date===today());
   const oldItems=inbox.filter(i=>i.date!==today());
   const emailItems=inbox.filter(i=>i.source==="email");
@@ -4032,6 +4643,7 @@ function ICard({item,onApprove,onEdit,onDiscard}){
             {item.type==="transfer"&&item.accountName&&item.targetAccountName?` · ${item.accountName} → ${item.targetAccountName}`:(item.accountName?` · ${item.accountName}`:"")}
             {item.borrowSource?` · Borrowed from ${item.borrowSource}`:""}
           </div>
+          {currencyMetaLabel(item)&&<div style={{fontSize:11,color:"#64748b",marginTop:4}}>{currencyMetaLabel(item)}</div>}
           {item.emailSubject&&<div style={{fontSize:11,color:"#374151",marginTop:3,cursor:"pointer"}} onClick={()=>setEx(!ex)}>📧 {item.emailSubject.slice(0,60)}{item.emailSubject.length>60?"…":""} {ex?"▲":"▼"}</div>}
           {ex&&item.emailFrom&&<div style={{fontSize:11,color:"#374151",marginTop:2}}>From: {item.emailFrom}</div>}
         </div>
@@ -4064,6 +4676,7 @@ function JournalTab({txns}){
             {tx.source==="email"&&<span style={{fontSize:10,background:"#1a2010",color:"#86efac",padding:"1px 5px",borderRadius:3}}>📧</span>}
             {tx.source==="auto"&&<span style={{fontSize:10,background:"#1e1b4b",color:"#818cf8",padding:"1px 5px",borderRadius:3}}>AI</span>}
             {tx.source==="statement"&&<span style={{fontSize:10,background:"#052e16",color:"#34d399",padding:"1px 5px",borderRadius:3}}>Stmt</span>}
+            {currencyMetaLabel(tx)&&<span style={{fontSize:10,color:"#94a3b8"}}>{currencyMetaLabel(tx)}</span>}
           </div>
           {(tx.journalEntries||[]).map((e,i)=>(
             <div key={i} style={{display:"grid",gridTemplateColumns:"88px 1fr 90px 90px",gap:6,padding:"2px 14px",fontSize:12}}>
@@ -4079,9 +4692,8 @@ function JournalTab({txns}){
 }
 
 // ── ACCOUNTS ──────────────────────────────────────────────────────────────────
-function AccountsTab({accs,setAccs,txns,addInbox,acts,cats}){
+function AccountsTab({accs,setAccs,onOpenReconciliation=()=>{}}){
   const[showForm,setShowForm]=useState(false);
-  const[reconId,setReconId]=useState(null);
   const[editAccId,setEditAccId]=useState(null);
   const assets=accs.filter(a=>a.cls==="asset");
   const liabs=accs.filter(a=>a.cls==="liability");
@@ -4099,47 +4711,139 @@ function AccountsTab({accs,setAccs,txns,addInbox,acts,cats}){
         {list.length===0&&<div style={{color:"#475569",fontSize:13}}>No {lbl.toLowerCase()} yet.</div>}
         {list.map(acc=>(
           <div key={acc.id} className="card" style={{marginBottom:8,padding:"12px 16px"}}><R>
-            <div style={{flex:1}}><div style={{fontWeight:500,fontSize:14}}>{acc.name}</div><div style={{fontSize:12,color:"#475569"}}>{acc.typeName}{acc.bank?` · ${acc.bank}`:""}{acc.number?` · ···${acc.number.slice(-4)}`:""}</div></div>
+            <div style={{flex:1}}>
+              <div style={{fontWeight:500,fontSize:14}}>{acc.name}</div>
+              <div style={{fontSize:12,color:"#475569"}}>{acc.typeName}{acc.bank?` · ${acc.bank}`:""}{acc.number?` · ···${acc.number.slice(-4)}`:""}{acc.accountCurrency?` · ${acc.accountCurrency}`:""}</div>
+              {currencyMetaLabel(acc)&&<div style={{fontSize:11,color:"#64748b",marginTop:4}}>{currencyMetaLabel(acc)}</div>}
+            </div>
             <div className="mono" style={{fontSize:16,fontWeight:700,color:c,marginRight:12}}>{fmt(acc.balance||0)}</div>
             <button className="btn sm" style={{background:"#0f172a",color:"#93c5fd",marginRight:6}} onClick={()=>setEditAccId(acc.id)}>✏️ Edit Balance</button>
-            <button className="btn sm" style={{background:"#1a2234",color:"#818cf8",marginRight:6}} onClick={()=>setReconId(acc.id)}>📂 Reconcile</button>
+            <button className="btn sm" style={{background:"#1a2234",color:"#818cf8",marginRight:6}} onClick={()=>onOpenReconciliation(acc.id)}>📂 Reconcile</button>
             <button className="btn sm dan" onClick={()=>setAccs(p=>p.filter(a=>a.id!==acc.id))}>✕</button>
           </R></div>
         ))}
       </div>
     ))}
     {showForm&&<AddAccModal onSave={a=>{setAccs(p=>[...p,{...a,id:gid()}]);setShowForm(false);}} onClose={()=>setShowForm(false)}/>}
-    {editAcc&&<EditAccBalanceModal account={editAcc} onSave={bal=>{setAccs(p=>p.map(a=>a.id===editAcc.id?{...a,balance:bal}:a));setEditAccId(null);}} onClose={()=>setEditAccId(null)}/>}
-    {reconId&&<ReconModal account={accs.find(a=>a.id===reconId)} txns={txns} acts={acts} addInbox={addInbox} onClose={()=>setReconId(null)}/>}
+    {editAcc&&<EditAccBalanceModal account={editAcc} onSave={patch=>{setAccs(p=>p.map(a=>a.id===editAcc.id?{...a,...patch}:a));setEditAccId(null);}} onClose={()=>setEditAccId(null)}/>}
   </div>);
 }
 
 function AddAccModal({onSave,onClose}){
-  const[f,setF]=useState({name:"",type:"savings",number:"",bank:"",balance:""});
+  const baseCurrency=getBaseCurrency();
+  const[f,setF]=useState({name:"",type:"savings",number:"",bank:"",balance:"",accountCurrency:baseCurrency});
+  const[busy,setBusy]=useState(false);
   const t=ACC_TYPES.find(x=>x.key===f.type)||ACC_TYPES[0];
+  const submit=async()=>{
+    if(!f.name)return alert("Enter account name");
+    setBusy(true);
+    try{
+      const accountCurrency=normalizeCurrencyCode(f.accountCurrency||baseCurrency,baseCurrency);
+      const amount=Number(f.balance)||0;
+      const [converted]=await convertMoneyRows([{
+        balance:amount,
+        originalBalance:amount,
+        accountCurrency,
+      }],{
+        amountField:"balance",
+        originalField:"originalBalance",
+        currencyField:"accountCurrency",
+        baseAmountField:"balance",
+        baseCurrencyField:"balanceBaseCurrency",
+        fxDateField:"balanceFxDate",
+        fxRateField:"balanceFxRate",
+        fxRateDateField:"balanceRateDate",
+        fxSourceField:"balanceFxSource",
+        baseCurrency,
+        fallbackCurrency:accountCurrency,
+        dateResolver:()=>today(),
+      });
+      await onSave({
+        ...f,
+        cls:t.cls,
+        typeName:t.label,
+        accountCurrency,
+        balance:converted?.balance??amount,
+        originalBalance:converted?.originalBalance??amount,
+        balanceBaseCurrency:converted?.balanceBaseCurrency||baseCurrency,
+        balanceFxRate:converted?.balanceFxRate||1,
+        balanceFxDate:converted?.balanceFxDate||today(),
+        balanceRateDate:converted?.balanceRateDate||today(),
+        balanceFxSource:converted?.balanceFxSource||"manual",
+      });
+    }finally{
+      setBusy(false);
+    }
+  };
   return(<div className="overlay"><div className="modal" style={{maxWidth:440}}>
     <MH title="Add Account" onClose={onClose}/>
     <label>Account Type</label><select value={f.type} onChange={e=>setF(p=>({...p,type:e.target.value}))}>{ACC_TYPES.map(x=><option key={x.key} value={x.key}>{x.label} ({x.cls})</option>)}</select>
     <label>Account Name</label><input value={f.name} onChange={e=>setF(p=>({...p,name:e.target.value}))} placeholder="e.g. HDFC Savings"/>
     <label>Bank / Institution</label><input value={f.bank} onChange={e=>setF(p=>({...p,bank:e.target.value}))} placeholder="HDFC, Zerodha…"/>
     <label>Account Number (last 4)</label><input value={f.number} onChange={e=>setF(p=>({...p,number:e.target.value}))} placeholder="Optional"/>
-    <label>Opening Balance (₹)</label><input type="number" value={f.balance} onChange={e=>setF(p=>({...p,balance:e.target.value}))} placeholder="0"/>
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+      <div><label>Account Currency</label><select value={f.accountCurrency} onChange={e=>setF(p=>({...p,accountCurrency:e.target.value}))}>{CURRENCY_OPTIONS.map(code=><option key={code} value={code}>{code}</option>)}</select></div>
+      <div><label>Opening Balance</label><input type="number" value={f.balance} onChange={e=>setF(p=>({...p,balance:e.target.value}))} placeholder="0"/></div>
+    </div>
+    <div style={{fontSize:11,color:"#64748b",marginTop:8}}>LedgerAI converts the entered balance into {baseCurrency} for reporting while keeping the account currency as a reconciliation hint.</div>
     <div style={{display:"flex",gap:10,marginTop:18}}>
       <button className="btn ghost" onClick={onClose} style={{flex:1}}>Cancel</button>
-      <button className="btn pri" style={{flex:2}} onClick={()=>{if(!f.name)return alert("Enter account name");onSave({...f,cls:t.cls,typeName:t.label,balance:Number(f.balance)||0});}}>Add Account</button>
+      <button className="btn pri" style={{flex:2}} onClick={submit} disabled={busy}>{busy?"Saving…":"Add Account"}</button>
     </div>
   </div></div>);
 }
 
 function EditAccBalanceModal({account,onSave,onClose}){
-  const[balance,setBalance]=useState(String(account.balance??0));
+  const baseCurrency=getBaseCurrency();
+  const[balance,setBalance]=useState(String(account.originalBalance??account.balance??0));
+  const[currency,setCurrency]=useState(normalizeCurrencyCode(account.accountCurrency||baseCurrency,baseCurrency));
+  const[busy,setBusy]=useState(false);
+  const save=async()=>{
+    setBusy(true);
+    try{
+      const amount=Number(balance)||0;
+      const [converted]=await convertMoneyRows([{
+        balance:amount,
+        originalBalance:amount,
+        accountCurrency:currency,
+      }],{
+        amountField:"balance",
+        originalField:"originalBalance",
+        currencyField:"accountCurrency",
+        baseAmountField:"balance",
+        baseCurrencyField:"balanceBaseCurrency",
+        fxDateField:"balanceFxDate",
+        fxRateField:"balanceFxRate",
+        fxRateDateField:"balanceRateDate",
+        fxSourceField:"balanceFxSource",
+        baseCurrency,
+        fallbackCurrency:currency,
+        dateResolver:()=>today(),
+      });
+      await onSave({
+        balance:converted?.balance??amount,
+        originalBalance:converted?.originalBalance??amount,
+        accountCurrency:currency,
+        balanceBaseCurrency:converted?.balanceBaseCurrency||baseCurrency,
+        balanceFxRate:converted?.balanceFxRate||1,
+        balanceFxDate:converted?.balanceFxDate||today(),
+        balanceRateDate:converted?.balanceRateDate||today(),
+        balanceFxSource:converted?.balanceFxSource||"manual",
+      });
+    }finally{
+      setBusy(false);
+    }
+  };
   return(<div className="overlay"><div className="modal" style={{maxWidth:420}}>
     <MH title={`Edit Balance: ${account.name}`} onClose={onClose}/>
-    <label>Updated Balance (₹)</label>
-    <input type="number" value={balance} onChange={e=>setBalance(e.target.value)} placeholder="0"/>
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+      <div><label>Account Currency</label><select value={currency} onChange={e=>setCurrency(e.target.value)}>{CURRENCY_OPTIONS.map(code=><option key={code} value={code}>{code}</option>)}</select></div>
+      <div><label>Updated Balance</label><input type="number" value={balance} onChange={e=>setBalance(e.target.value)} placeholder="0"/></div>
+    </div>
+    <div style={{fontSize:11,color:"#64748b",marginTop:8}}>Displayed account balance is converted into {baseCurrency} for reports and reconciliation.</div>
     <div style={{display:"flex",gap:10,marginTop:18}}>
       <button className="btn ghost" onClick={onClose} style={{flex:1}}>Cancel</button>
-      <button className="btn pri" style={{flex:2}} onClick={()=>onSave(Number(balance)||0)}>Save Balance</button>
+      <button className="btn pri" style={{flex:2}} onClick={save} disabled={busy}>{busy?"Saving…":"Save Balance"}</button>
     </div>
   </div></div>);
 }
@@ -4185,6 +4889,319 @@ function ReconModal({account,txns,acts,addInbox,onClose}){
       </div>
     </>}
   </div></div>);
+}
+
+function ReconciliationIssueEditorModal({account,row,acts,cats,onClose,onSave}){
+  const baseCurrency=getBaseCurrency();
+  const defaultAct=acts.includes("Personal")?"Personal":(acts[0]||"");
+  const initialAct=acts.includes(row?.businessActivity)?row.businessActivity:defaultAct;
+  const[form,setForm]=useState({
+    type:row?.type==="credit"?"income":"expense",
+    date:row?.date||today(),
+    description:row?.description||"",
+    originalAmount:row?.originalAmount??row?.amount??0,
+    currency:normalizeCurrencyCode(row?.currency||baseCurrency,baseCurrency),
+    businessActivity:initialAct,
+    category:row?.category||cats[initialAct]?.[0]||"Other",
+    subCategory:row?.subCategory||"",
+    vendor:row?.vendor||"",
+    paymentMethod:row?.paymentMethod||account?.typeName||"",
+  });
+  const[busy,setBusy]=useState(false);
+  const clist=cats[form.businessActivity]||["Other"];
+  const save=async()=>{
+    setBusy(true);
+    try{
+      const [converted]=await convertExtractedItemsToBaseCurrency([{
+        type:form.type,
+        date:form.date,
+        description:form.description,
+        amount:Number(form.originalAmount)||0,
+        originalAmount:Number(form.originalAmount)||0,
+        currency:form.currency,
+        businessActivity:form.businessActivity,
+        category:form.category,
+        subCategory:form.subCategory,
+        vendor:form.vendor,
+        trackVendor:Boolean(form.vendor),
+        paymentMethod:form.paymentMethod||account?.typeName||"",
+      }],{
+        baseCurrency,
+        fallbackCurrency:form.currency||baseCurrency,
+        dateFallback:form.date||today(),
+      });
+      onSave({
+        ...converted,
+        accountId:account?.id||"",
+        accountName:account?.name||"",
+        source:"statement",
+      });
+    }finally{
+      setBusy(false);
+    }
+  };
+  return(
+    <div className="overlay"><div className="modal" style={{maxWidth:720}}>
+      <MH title="Edit Reconciliation Item" onClose={onClose}/>
+      <div style={{fontSize:12,color:"#64748b",lineHeight:1.8,marginBottom:10}}>Adjust the statement item before sending it to Inbox. Amount entered here is the original statement amount; LedgerAI will convert it into {baseCurrency} in the background.</div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
+        <div><label>Type</label><select value={form.type} onChange={e=>setForm(p=>({...p,type:e.target.value}))}><option value="expense">Expense</option><option value="income">Income</option></select></div>
+        <div><label>Date</label><input type="date" value={form.date} onChange={e=>setForm(p=>({...p,date:e.target.value}))}/></div>
+        <div><label>Original Amount</label><input type="number" value={form.originalAmount} onChange={e=>setForm(p=>({...p,originalAmount:e.target.value}))}/></div>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+        <div><label>Original Currency</label><select value={form.currency} onChange={e=>setForm(p=>({...p,currency:e.target.value}))}>{CURRENCY_OPTIONS.map(code=><option key={code} value={code}>{code}</option>)}</select></div>
+        <div><label>Payment Method</label><input value={form.paymentMethod||""} onChange={e=>setForm(p=>({...p,paymentMethod:e.target.value}))} placeholder={account?.typeName||"Optional"}/></div>
+      </div>
+      <label>Description</label><input value={form.description} onChange={e=>setForm(p=>({...p,description:e.target.value}))}/>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+        <div><label>Business Activity</label><select value={form.businessActivity} onChange={e=>setForm(p=>({...p,businessActivity:e.target.value,category:cats[e.target.value]?.[0]||p.category||"Other"}))}>{acts.map(a=><option key={a} value={a}>{a}</option>)}</select></div>
+        <div><label>Category</label><input list="recon-cats" value={form.category} onChange={e=>setForm(p=>({...p,category:e.target.value}))}/><datalist id="recon-cats">{clist.map(c=><option key={c} value={c}/>)}</datalist></div>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+        <div><label>Sub Category</label><input value={form.subCategory||""} onChange={e=>setForm(p=>({...p,subCategory:e.target.value}))}/></div>
+        <div><label>Vendor</label><input value={form.vendor||""} onChange={e=>setForm(p=>({...p,vendor:e.target.value}))}/></div>
+      </div>
+      <div style={{display:"flex",gap:10,marginTop:16}}>
+        <button className="btn ghost" style={{flex:1}} onClick={onClose}>Cancel</button>
+        <button className="btn pri" style={{flex:2}} onClick={save} disabled={busy}>{busy?"Converting…":"Save & Queue to Inbox"}</button>
+      </div>
+    </div></div>
+  );
+}
+
+function ReconciliationTab({accs,txns,acts,cats,addInbox,onEditLedger,preselectedAccountId=""}){
+  const baseCurrency=getBaseCurrency();
+  const[accountId,setAccountId]=useState(preselectedAccountId||accs[0]?.id||"");
+  const[fromDate,setFromDate]=useState(()=>new Date(Date.now()-30*24*60*60*1000).toISOString().slice(0,10));
+  const[toDate,setToDate]=useState(today());
+  const[sourceText,setSourceText]=useState("");
+  const[sourceLabel,setSourceLabel]=useState("");
+  const[busy,setBusy]=useState(false);
+  const[fileBusy,setFileBusy]=useState(false);
+  const[status,setStatus]=useState("");
+  const[result,setResult]=useState(null);
+  const[editorRow,setEditorRow]=useState(null);
+  const hiddenIssuesRef=useRef(new Set());
+  const account=accs.find(a=>a.id===accountId)||null;
+
+  useEffect(()=>{
+    if(preselectedAccountId)setAccountId(preselectedAccountId);
+  },[preselectedAccountId]);
+
+  useEffect(()=>{
+    if(!accountId&&accs[0]?.id)setAccountId(accs[0].id);
+  },[accountId,accs]);
+
+  const loadStatementFile=async(file)=>{
+    if(!file)return;
+    setFileBusy(true);
+    try{
+      const text=await readStatementFileText(file);
+      setSourceText(text);
+      setSourceLabel(file.name||"Uploaded statement");
+      setStatus(`Loaded statement file: ${file.name||"statement"}`);
+    }catch(error){
+      setStatus(error?.message||"Unable to read statement file.");
+    }finally{
+      setFileBusy(false);
+    }
+  };
+
+  const queueStatementRow=(row)=>{
+    if(!account)return;
+    const txType=row.type==="credit"||row.type==="income"?"income":"expense";
+    addInbox([{
+      type:txType,
+      date:row.date,
+      description:row.description,
+      amount:row.amount,
+      originalAmount:row.originalAmount??row.amount,
+      currency:row.currency||baseCurrency,
+      baseAmount:row.baseAmount??row.amount,
+      baseCurrency:row.baseCurrency||baseCurrency,
+      fxRate:row.fxRate||1,
+      fxDate:row.fxDate||row.date,
+      fxRateDate:row.fxRateDate||row.date,
+      fxSource:row.fxSource||"",
+      vendor:row.vendor||"",
+      trackVendor:Boolean(row.vendor),
+      businessActivity:row.businessActivity||(acts.includes("Personal")?"Personal":(acts[0]||"")),
+      category:row.category||"Other",
+      subCategory:row.subCategory||"",
+      paymentMethod:row.paymentMethod||account.typeName||"",
+      accountId:account.id,
+      accountName:account.name,
+      source:"statement",
+    }]);
+    setStatus(`Queued "${row.description}" to Inbox for review.`);
+  };
+
+  const hideIssue=(id)=>{
+    hiddenIssuesRef.current.add(id);
+    setResult(prev=>prev?{...prev}:prev);
+  };
+
+  const runReconciliation=async()=>{
+    if(!account)return alert("Select an account first.");
+    if(!fromDate||!toDate)return alert("Select statement period.");
+    if(!sourceText.trim())return alert("Upload or paste the statement first.");
+    setBusy(true);
+    setStatus("Parsing statement and reconciling...");
+    hiddenIssuesRef.current=new Set();
+    try{
+      const parsed=await aiParseStatement(sourceText,account.name,account.typeName,account.accountCurrency||baseCurrency,baseCurrency);
+      const prepared=await prepareStatementRows(parsed,{
+        accountCurrency:account.accountCurrency||baseCurrency,
+        baseCurrency,
+        dateFallback:fromDate||today(),
+      });
+      const statementRows=prepared.filter(row=>inDateRange(row.date,fromDate,toDate));
+      const ledgerRows=(txns||[])
+        .filter(tx=>matchesAccountForReconciliation(tx,account.id,account.name))
+        .filter(tx=>inDateRange(tx.date,fromDate,toDate));
+      const ledgerRowsWithSide=ledgerRows.map(tx=>{
+        const isOutgoing=String(tx.accountId||"")===account.id||String(tx.accountName||"")===account.name;
+        const isIncoming=String(tx.targetAccountId||"")===account.id||String(tx.targetAccountName||"")===account.name;
+        const reconSide=tx.type==="transfer"
+          ? (isIncoming&&!isOutgoing?"credit":"debit")
+          : tx.type==="income"
+            ? "credit"
+            : "debit";
+        return{...tx,_reconSide:reconSide};
+      });
+      const next=buildReconciliationResult(statementRows,ledgerRowsWithSide);
+      setResult({
+        ...next,
+        statementRows,
+        ledgerRows:ledgerRowsWithSide,
+        accountId:account.id,
+        accountName:account.name,
+      });
+      setStatus(`Matched ${next.matched.length}. Statement only ${next.statementOnly.length}. Ledger only ${next.ledgerOnly.length}. Amount mismatches ${next.amountMismatches.length}.`);
+    }catch(error){
+      setStatus(error?.message||"Reconciliation failed.");
+      setResult(null);
+    }finally{
+      setBusy(false);
+    }
+  };
+
+  const visibleIssues=(items=[])=>items.filter(item=>!hiddenIssuesRef.current.has(item.id));
+  const statementOnly=visibleIssues(result?.statementOnly||[]);
+  const ledgerOnly=visibleIssues(result?.ledgerOnly||[]);
+  const mismatches=visibleIssues(result?.amountMismatches||[]);
+  const matched=result?.matched||[];
+
+  return(<div>
+    <R style={{marginBottom:18,gap:10,flexWrap:"wrap"}}>
+      <h2 className="h2" style={{flex:1}}>Reconciliation</h2>
+      <div style={{fontSize:12,color:"#64748b"}}>All statement values are converted and shown in {baseCurrency}.</div>
+    </R>
+    <div className="card" style={{marginBottom:18}}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
+        <div><label>Account</label><select value={accountId} onChange={e=>setAccountId(e.target.value)}><option value="">Select account</option>{accs.map(acc=><option key={acc.id} value={acc.id}>{acc.name}</option>)}</select></div>
+        <div><label>Statement From</label><input type="date" value={fromDate} onChange={e=>setFromDate(e.target.value)}/></div>
+        <div><label>Statement To</label><input type="date" value={toDate} onChange={e=>setToDate(e.target.value)}/></div>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr auto",gap:10,alignItems:"end",marginTop:12}}>
+        <div>
+          <label>Upload Statement</label>
+          <input type="file" accept=".csv,.txt,.pdf,.json,.xml,.log,.html" onChange={e=>loadStatementFile(e.target.files?.[0])}/>
+        </div>
+        <button className="btn ghost" onClick={()=>{setSourceText("");setSourceLabel("");setResult(null);setStatus("");}} disabled={busy||fileBusy}>Clear Statement</button>
+      </div>
+      {sourceLabel&&<div style={{fontSize:11,color:"#94a3b8",marginTop:8}}>Loaded source: {sourceLabel}</div>}
+      <label>Statement Text</label>
+      <textarea rows={8} value={sourceText} onChange={e=>setSourceText(e.target.value)} placeholder="Upload a file or paste bank / card / wallet statement text here…"/>
+      <div style={{display:"flex",gap:10,marginTop:12}}>
+        <button className="btn pri" onClick={runReconciliation} disabled={busy||fileBusy||!accountId||!sourceText.trim()}>{busy?"Reconciling…":"Run Reconciliation"}</button>
+      </div>
+      {status&&<div style={{fontSize:12,color:"#c7d2fe",marginTop:8}}>{status}</div>}
+    </div>
+
+    {result&&<div className="g4" style={{marginBottom:18}}>
+      {[{l:"Matched",v:matched.length,c:"#34d399"},{l:"Amount Mismatch",v:mismatches.length,c:"#f59e0b"},{l:"Statement Only",v:statementOnly.length,c:"#38bdf8"},{l:"Ledger Only",v:ledgerOnly.length,c:"#f87171"}].map(card=>(
+        <div key={card.l} className="sc"><div className="lxs">{card.l}</div><div className="mono" style={{fontSize:22,color:card.c,marginTop:6}}>{card.v}</div></div>
+      ))}
+    </div>}
+
+    {mismatches.length>0&&<div className="card" style={{marginBottom:16}}>
+      <div className="sh" style={{marginBottom:10}}>Amount Mismatches</div>
+      {mismatches.map(issue=>(
+        <div key={issue.id} style={{border:"1px solid #3f2d0d",borderRadius:10,padding:12,marginBottom:10,background:"#17110a"}}>
+          <div style={{fontWeight:600,marginBottom:6}}>{issue.statementRow.description}</div>
+          <div style={{fontSize:12,color:"#94a3b8",lineHeight:1.8}}>
+            Statement: {fmt(issue.statementRow.amount)} on {fmtD(issue.statementRow.date)}{currencyMetaLabel(issue.statementRow,baseCurrency)?` · ${currencyMetaLabel(issue.statementRow,baseCurrency)}`:""}
+            <br/>
+            Ledger: {fmt(issue.ledgerTx.amount)} on {fmtD(issue.ledgerTx.date)} · {issue.ledgerTx.description||issue.ledgerTx.category}
+          </div>
+          <div style={{display:"flex",gap:8,marginTop:10,flexWrap:"wrap"}}>
+            <button className="btn sm pri" onClick={()=>setEditorRow(issue.statementRow)}>Edit Statement Item</button>
+            <button className="btn sm ghost" onClick={()=>onEditLedger?.(issue.ledgerTx)}>Edit Ledger Entry</button>
+            <button className="btn sm" style={{background:"#052e16",color:"#34d399"}} onClick={()=>queueStatementRow(issue.statementRow)}>Queue Statement to Inbox</button>
+            <button className="btn sm ghost" onClick={()=>hideIssue(issue.id)}>Hide</button>
+          </div>
+        </div>
+      ))}
+    </div>}
+
+    {statementOnly.length>0&&<div className="card" style={{marginBottom:16}}>
+      <div className="sh" style={{marginBottom:10}}>In Statement But Not In Ledger</div>
+      {statementOnly.map(issue=>(
+        <div key={issue.id} style={{border:"1px solid #0d2f3f",borderRadius:10,padding:12,marginBottom:10,background:"#09131a"}}>
+          <div style={{display:"flex",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
+            <div>
+              <div style={{fontWeight:600}}>{issue.statementRow.description}</div>
+              <div style={{fontSize:12,color:"#94a3b8",marginTop:4}}>
+                {fmtD(issue.statementRow.date)} · {fmt(issue.statementRow.amount)}
+                {currencyMetaLabel(issue.statementRow,baseCurrency)?` · ${currencyMetaLabel(issue.statementRow,baseCurrency)}`:""}
+              </div>
+            </div>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+              <button className="btn sm pri" onClick={()=>setEditorRow(issue.statementRow)}>Edit & Queue</button>
+              <button className="btn sm" style={{background:"#052e16",color:"#34d399"}} onClick={()=>queueStatementRow(issue.statementRow)}>Queue As-Is</button>
+              <button className="btn sm ghost" onClick={()=>hideIssue(issue.id)}>Hide</button>
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>}
+
+    {ledgerOnly.length>0&&<div className="card" style={{marginBottom:16}}>
+      <div className="sh" style={{marginBottom:10}}>In Ledger But Not In Statement</div>
+      {ledgerOnly.map(issue=>(
+        <div key={issue.id} style={{border:"1px solid #3f1010",borderRadius:10,padding:12,marginBottom:10,background:"#150505"}}>
+          <div style={{display:"flex",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
+            <div>
+              <div style={{fontWeight:600}}>{issue.ledgerTx.description||issue.ledgerTx.category}</div>
+              <div style={{fontSize:12,color:"#94a3b8",marginTop:4}}>
+                {fmtD(issue.ledgerTx.date)} · {fmt(issue.ledgerTx.amount)}
+                {currencyMetaLabel(issue.ledgerTx,baseCurrency)?` · ${currencyMetaLabel(issue.ledgerTx,baseCurrency)}`:""}
+              </div>
+            </div>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+              <button className="btn sm ghost" onClick={()=>onEditLedger?.(issue.ledgerTx)}>Edit Ledger Entry</button>
+              <button className="btn sm ghost" onClick={()=>hideIssue(issue.id)}>Hide</button>
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>}
+
+    {matched.length>0&&<div className="card">
+      <div className="sh" style={{marginBottom:10}}>Matched Transactions</div>
+      {matched.slice(0,30).map(pair=>(
+        <div key={pair.id} style={{display:"flex",justifyContent:"space-between",gap:10,padding:"8px 0",borderBottom:"1px solid #1e293b",fontSize:12}}>
+          <span style={{color:"#94a3b8"}}>{fmtD(pair.statementRow.date)} · {pair.statementRow.description}</span>
+          <span className="mono" style={{color:"#34d399"}}>{fmt(pair.statementRow.amount)}</span>
+        </div>
+      ))}
+      {matched.length>30&&<div style={{fontSize:11,color:"#64748b",marginTop:8}}>Showing first 30 matched rows.</div>}
+    </div>}
+
+    {editorRow&&<ReconciliationIssueEditorModal account={account} row={editorRow} acts={acts} cats={cats} onClose={()=>setEditorRow(null)} onSave={(nextRow)=>{queueStatementRow(nextRow);setEditorRow(null);}}/>}
+  </div>);
 }
 
 // ── REPORTS ───────────────────────────────────────────────────────────────────
@@ -4558,7 +5575,7 @@ function AzureGuideModal({onClose}){
   );
 }
 // ── SETTINGS ──────────────────────────────────────────────────────────────────
-function SettingsTab({acts,setActs,cats,setCats,backups,onBackupNow,onRestoreBackup,onFactoryReset,onRenameActivity,diagnostics=[],onClearDiagnostics=()=>{},buildSupportBundle=()=>null,addDiagnostic=()=>{}}){
+function SettingsTab({acts,setActs,cats,setCats,backups,onBackupNow,onRestoreBackup,onFactoryReset,onRenameActivity,currencyCfg=defaultCurrencyCfg(),onSaveCurrencyCfg=async()=>({ok:true}),diagnostics=[],onClearDiagnostics=()=>{},buildSupportBundle=()=>null,addDiagnostic=()=>{}}){
   const[newAct,setNewAct]=useState("");const[selAct,setSelAct]=useState(acts[0]||"");
   const[newCN,setNewCN]=useState("");const[newCD,setNewCD]=useState("");
   const[aiLoad,setAiLoad]=useState(false);const[aiSug,setAiSug]=useState(null);
@@ -4572,6 +5589,9 @@ function SettingsTab({acts,setActs,cats,setCats,backups,onBackupNow,onRestoreBac
   const[aiSecret,setAiSecret]=useState(savedAICfg.secret||"");
   const[aiModel,setAiModel]=useState(savedAICfg.model||DEFAULT_AI_MODEL);
   const[aiStatus,setAiStatus]=useState("");
+  const[selectedBaseCurrency,setSelectedBaseCurrency]=useState(normalizeCurrencyCode(currencyCfg?.baseCurrency||DEFAULT_BASE_CURRENCY,DEFAULT_BASE_CURRENCY));
+  const[currencyStatus,setCurrencyStatus]=useState("");
+  const[currencyBusy,setCurrencyBusy]=useState(false);
   const diagCounts=summarizeDiagnostics(diagnostics);
   const recentDiagnostics=[...(diagnostics||[])].slice(-18).reverse();
   const addAct=()=>{if(!newAct.trim())return;const n=newAct.trim();setActs(p=>[...p,n]);setCats(p=>({...p,[n]:[...NEW_ACTIVITY_DEFAULT_CATS]}));setNewAct("");};
@@ -4604,10 +5624,27 @@ function SettingsTab({acts,setActs,cats,setCats,backups,onBackupNow,onRestoreBac
   useEffect(()=>{
     saveAICfgToStorage({endpoint:aiEndpoint,secret:aiSecret,model:aiModel});
   },[aiEndpoint,aiSecret,aiModel]);
+  useEffect(()=>{
+    setSelectedBaseCurrency(normalizeCurrencyCode(currencyCfg?.baseCurrency||DEFAULT_BASE_CURRENCY,DEFAULT_BASE_CURRENCY));
+  },[currencyCfg?.baseCurrency]);
   const saveAICfg=()=>{
     saveAICfgToStorage({endpoint:aiEndpoint,secret:aiSecret,model:aiModel});
     setAiStatus("Saved AI backend settings.");
     addDiagnostic({level:"info",scope:"ai",event:"ai_config_saved",message:"AI backend settings were saved.",context:{endpoint:safeOrigin(aiEndpoint),sharedKeyConfigured:Boolean(aiSecret),model:aiModel||DEFAULT_AI_MODEL}});
+  };
+  const saveBaseCurrency=async()=>{
+    setCurrencyBusy(true);
+    setCurrencyStatus("Saving base currency...");
+    try{
+      const res=await onSaveCurrencyCfg(normalizeCurrencyCode(selectedBaseCurrency,DEFAULT_BASE_CURRENCY));
+      if(res?.ok){
+        setCurrencyStatus(res?.changed===false?`Base currency remains ${normalizeCurrencyCode(selectedBaseCurrency,DEFAULT_BASE_CURRENCY)}.`:`Base currency saved as ${normalizeCurrencyCode(selectedBaseCurrency,DEFAULT_BASE_CURRENCY)}.`);
+      }else{
+        setCurrencyStatus(res?.error||"Unable to save base currency.");
+      }
+    }finally{
+      setCurrencyBusy(false);
+    }
   };
   const testAICfg=async()=>{
     saveAICfg();
@@ -4691,6 +5728,19 @@ function SettingsTab({acts,setActs,cats,setCats,backups,onBackupNow,onRestoreBac
       </div>
       {aiStatus&&<div style={{fontSize:12,color:"#c7d2fe",marginTop:8}}>{aiStatus}</div>}
       <div style={{fontSize:11,color:"#475569",marginTop:8}}>Email sync uses AI-only processing for body + attachments. If AI cannot process an email, it stays in AI Pending Retry until resolved.</div>
+    </div>
+    <div className="card" style={{marginBottom:16}}>
+      <div style={{fontWeight:600,fontSize:14,marginBottom:10,color:"#94a3b8"}}>Currency & FX</div>
+      <div style={{fontSize:12,color:"#64748b",lineHeight:1.8,marginBottom:10}}>
+        LedgerAI detects source currency from emails, receipts, SMS, and statements, then converts everything into your base currency using daily FX rates. Changing base currency will rebase the amounts already stored in this browser and cloud snapshot.
+      </div>
+      <label>Base Currency</label>
+      <select value={selectedBaseCurrency} onChange={e=>setSelectedBaseCurrency(e.target.value)}>
+        {CURRENCY_OPTIONS.map(code=><option key={code} value={code}>{code}</option>)}
+      </select>
+      <button className="btn pri" style={{marginTop:10}} onClick={saveBaseCurrency} disabled={currencyBusy}>{currencyBusy?"Saving…":"Save Base Currency"}</button>
+      {currencyStatus&&<div style={{fontSize:12,color:"#c7d2fe",marginTop:8}}>{currencyStatus}</div>}
+      <div style={{fontSize:11,color:"#475569",marginTop:8}}>Current base currency: {normalizeCurrencyCode(currencyCfg?.baseCurrency||DEFAULT_BASE_CURRENCY,DEFAULT_BASE_CURRENCY)}. Foreign-currency metadata is kept in the background for support and reconciliation.</div>
     </div>
     <div className="card" style={{marginBottom:16,background:"linear-gradient(135deg,#0f172a,#09111f)"}}>
       <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"center",marginBottom:10,flexWrap:"wrap"}}>
@@ -4855,8 +5905,17 @@ function DailyTab({todayTxns,todInc,todExp,summary,sumLoad,getSummary,onEdit,onD
 // ── ADD/EDIT MODAL ────────────────────────────────────────────────────────────
 function AddModal({type,existing,acts,cats,accs,onAddAccount,onAddActivity,onSave,onClose}){
   const defaultAct=acts.includes("Personal")?"Personal":(acts[0]||"");
+  const baseCurrency=getBaseCurrency();
   const[form,setForm]=useState({
     type,date:today(),description:"",vendor:"",amount:"",
+    currency:baseCurrency,
+    originalAmount:"",
+    baseAmount:"",
+    baseCurrency,
+    fxRate:1,
+    fxDate:today(),
+    fxRateDate:today(),
+    fxSource:"",
     trackVendor:Boolean(existing?.trackVendor ?? existing?.vendor),
     businessActivity:type==="borrow"||type==="transfer"?defaultAct:(acts[0]||""),
     category:type==="borrow"?"Borrowed Cash":type==="transfer"?"Account Transfer":"",
@@ -4873,6 +5932,22 @@ function AddModal({type,existing,acts,cats,accs,onAddAccount,onAddActivity,onSav
   const[quickAcc,setQuickAcc]=useState({name:"",type:"savings",number:"",bank:"",balance:""});
   const fref=useRef();
   const set=(k,v)=>setForm(p=>({...p,[k]:v}));
+  const setAmountValue=v=>setForm(p=>{
+    const foreign=normalizeCurrencyCode(p.currency||baseCurrency,baseCurrency)!==baseCurrency;
+    return{
+      ...p,
+      amount:v,
+      baseAmount:v,
+      originalAmount:foreign?v:(p.originalAmount||v),
+      ...(foreign?{
+        currency:baseCurrency,
+        fxRate:1,
+        fxDate:p.date||today(),
+        fxRateDate:p.date||today(),
+        fxSource:"manual override",
+      }:{}),
+    };
+  });
   const clist=cats[form.businessActivity]||["Other"];
   const assetAccs=accs.filter(a=>a.cls==="asset");
   const liabAccs=accs.filter(a=>a.cls==="liability");
@@ -4930,15 +6005,52 @@ function AddModal({type,existing,acts,cats,accs,onAddAccount,onAddActivity,onSav
     const nextCat=p.category&&p.category!=="Borrowed Cash"?p.category:(nextCats[0]||"Other");
     return {...p,type:t,businessActivity:nextAct,category:nextCat};
   });
-  const apply=r=>{if(!r)return;setForm(p=>({...p,description:r.description||p.description,vendor:r.vendor||p.vendor,trackVendor:typeof r.trackVendor==="boolean"?r.trackVendor:(p.trackVendor||Boolean(r.vendor||p.vendor)),amount:r.amount||p.amount,businessActivity:acts.includes(r.businessActivity)?r.businessActivity:p.businessActivity,category:r.category||p.category,subCategory:r.subCategory||p.subCategory||"",date:r.date||p.date,paymentMethod:r.paymentMethod||p.paymentMethod,isNewCategory:r.isNewCategory||false,aiGenerated:true}));setSub("form");};
-  const runText=async()=>{setLoad(true);apply(await aiClassify(raw,acts,cats,form.type));setLoad(false);};
+  const apply=async(r)=>{
+    if(!r)return;
+    const normalized={
+      ...r,
+      type:form.type,
+      date:r.date||form.date||today(),
+      amount:Number(r.amount)||0,
+      currency:normalizeCurrencyCode(r.currency||baseCurrency,baseCurrency),
+    };
+    const [converted]=await convertExtractedItemsToBaseCurrency([normalized],{
+      baseCurrency,
+      fallbackCurrency:baseCurrency,
+      dateFallback:normalized.date||today(),
+    });
+    setForm(p=>({
+      ...p,
+      description:converted?.description||r.description||p.description,
+      vendor:converted?.vendor||r.vendor||p.vendor,
+      trackVendor:typeof converted?.trackVendor==="boolean"?converted.trackVendor:(typeof r.trackVendor==="boolean"?r.trackVendor:(p.trackVendor||Boolean((converted?.vendor||r.vendor||p.vendor)||""))),
+      amount:converted?.amount??r.amount??p.amount,
+      originalAmount:converted?.originalAmount??r.amount??p.originalAmount,
+      baseAmount:converted?.baseAmount??converted?.amount??r.amount??p.baseAmount,
+      currency:converted?.currency||normalizeCurrencyCode(r.currency||p.currency||baseCurrency,baseCurrency),
+      baseCurrency:converted?.baseCurrency||baseCurrency,
+      fxRate:converted?.fxRate??p.fxRate,
+      fxDate:converted?.fxDate||converted?.date||p.fxDate,
+      fxRateDate:converted?.fxRateDate||p.fxRateDate,
+      fxSource:converted?.fxSource||p.fxSource,
+      businessActivity:acts.includes(converted?.businessActivity||r.businessActivity)?(converted?.businessActivity||r.businessActivity):p.businessActivity,
+      category:converted?.category||r.category||p.category,
+      subCategory:converted?.subCategory||r.subCategory||p.subCategory||"",
+      date:converted?.date||r.date||p.date,
+      paymentMethod:converted?.paymentMethod||r.paymentMethod||p.paymentMethod,
+      isNewCategory:converted?.isNewCategory||r.isNewCategory||false,
+      aiGenerated:true,
+    }));
+    setSub("form");
+  };
+  const runText=async()=>{setLoad(true);try{await apply(await aiClassify(raw,acts,cats,form.type));}finally{setLoad(false);}};
   const runImg=async()=>{
     if(!imgB64)return;
     setLoad(true);
     const c2=Object.entries(cats).map(([a,cs])=>`${a}: ${cs.join(", ")}`).join("\n");
     try{
-      const raw2=await callAI([{role:"user",content:[{type:"image",source:{type:"base64",media_type:"image/jpeg",data:imgB64}},{type:"text",text:`Extract expense. Activities: ${acts.join(", ")}\n${c2}\nReturn ONLY JSON: {"businessActivity":"","category":"","isNewCategory":false,"description":"","amount":0,"date":"YYYY-MM-DD","vendor":"","paymentMethod":""}`}]}],500);
-      try{apply(JSON.parse(raw2.replace(/```json|```/g,"").trim()));}
+      const raw2=await callAI([{role:"user",content:[{type:"image",source:{type:"base64",media_type:"image/jpeg",data:imgB64}},{type:"text",text:`Extract expense for bookkeeping. Activities: ${acts.join(", ")}\n${c2}\nDetect the original currency explicitly and return ISO currency code. Ledger base currency: ${baseCurrency}\nReturn ONLY JSON: {"businessActivity":"","category":"","isNewCategory":false,"description":"","amount":0,"currency":"","date":"YYYY-MM-DD","vendor":"","paymentMethod":""}`}]}],500);
+      try{await apply(JSON.parse(raw2.replace(/```json|```/g,"").trim()));}
       catch{alert("AI returned invalid JSON for invoice image.");}
     }catch(e){
       alert(`AI image extraction failed: ${e.message||"backend unavailable"}`);
@@ -4972,8 +6084,9 @@ function AddModal({type,existing,acts,cats,accs,onAddAccount,onAddActivity,onSav
         {form.isNewCategory&&<div style={{background:"#0d0920",border:"1px solid #a855f7",borderRadius:8,padding:"5px 12px",marginBottom:8,fontSize:12,color:"#d8b4fe"}}>🆕 New category "{form.category}" will be created</div>}
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
           <div><label>Date</label><input type="date" value={form.date} onChange={e=>set("date",e.target.value)}/></div>
-          <div><label>Amount (₹)</label><input type="number" value={form.amount} onChange={e=>set("amount",e.target.value)} placeholder="0"/></div>
+          <div><label>{`Amount (${baseCurrency})`}</label><input type="number" value={form.amount} onChange={e=>setAmountValue(e.target.value)} placeholder="0"/></div>
         </div>
+        {currencyMetaLabel(form,baseCurrency)&&<div style={{fontSize:11,color:"#94a3b8",marginTop:8}}>{currencyMetaLabel(form,baseCurrency)}</div>}
         {form.type!=="borrow"&&form.type!=="transfer"&&<>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:2}}>
             <label style={{margin:0}}>Business Activity</label>
@@ -5013,7 +6126,7 @@ function AddModal({type,existing,acts,cats,accs,onAddAccount,onAddActivity,onSav
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginTop:8}}>
               <div><label>Bank / Institution</label><input value={quickAcc.bank} onChange={e=>setQuickAcc(p=>({...p,bank:e.target.value}))} placeholder="Optional"/></div>
               <div><label>Last 4</label><input value={quickAcc.number} onChange={e=>setQuickAcc(p=>({...p,number:e.target.value}))} placeholder="Optional"/></div>
-              <div><label>Opening Balance (₹)</label><input type="number" value={quickAcc.balance} onChange={e=>setQuickAcc(p=>({...p,balance:e.target.value}))} placeholder="0"/></div>
+              <div><label>{`Opening Balance (${baseCurrency})`}</label><input type="number" value={quickAcc.balance} onChange={e=>setQuickAcc(p=>({...p,balance:e.target.value}))} placeholder="0"/></div>
             </div>
             <button className="btn pri" type="button" style={{marginTop:10,width:"100%"}} onClick={addQuickAccount}>Add Account</button>
           </div>}
@@ -5035,7 +6148,7 @@ function AddModal({type,existing,acts,cats,accs,onAddAccount,onAddActivity,onSav
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginTop:8}}>
               <div><label>Bank / Institution</label><input value={quickAcc.bank} onChange={e=>setQuickAcc(p=>({...p,bank:e.target.value}))} placeholder="Optional"/></div>
               <div><label>Last 4</label><input value={quickAcc.number} onChange={e=>setQuickAcc(p=>({...p,number:e.target.value}))} placeholder="Optional"/></div>
-              <div><label>Opening Balance (₹)</label><input type="number" value={quickAcc.balance} onChange={e=>setQuickAcc(p=>({...p,balance:e.target.value}))} placeholder="0"/></div>
+              <div><label>{`Opening Balance (${baseCurrency})`}</label><input type="number" value={quickAcc.balance} onChange={e=>setQuickAcc(p=>({...p,balance:e.target.value}))} placeholder="0"/></div>
             </div>
             <button className="btn pri" type="button" style={{marginTop:10,width:"100%"}} onClick={addQuickAccount}>Add Account</button>
           </div>}
@@ -5065,22 +6178,33 @@ function AddModal({type,existing,acts,cats,accs,onAddAccount,onAddActivity,onSav
           <button className="btn ghost" onClick={onClose} style={{flex:1}}>Cancel</button>
           <button className="btn pri" style={{flex:2}} onClick={()=>{
             const amt=Number(form.amount);
+            const sourceCurrency=normalizeCurrencyCode(form.currency||baseCurrency,baseCurrency);
+            const currencyPatch={
+              currency:sourceCurrency,
+              originalAmount:roundMoney(Number(form.originalAmount??amt)||amt),
+              baseAmount:roundMoney(amt),
+              baseCurrency,
+              fxRate:Number(form.fxRate)||1,
+              fxDate:normalizeFxDate(form.fxDate||form.date||today()),
+              fxRateDate:normalizeFxDate(form.fxRateDate||form.fxDate||form.date||today()),
+              fxSource:String(form.fxSource||"manual"),
+            };
             const validationMsg=getAccountingValidationMessage({...form,amount:amt},accs);
             if(validationMsg)return alert(validationMsg);
             if(form.type==="transfer"){
               const fromName=accs.find(a=>a.id===form.accountId)?.name||"Source";
               const toName=accs.find(a=>a.id===form.targetAccountId)?.name||"Destination";
               const desc=(form.description||"").trim()||`Transfer: ${fromName} → ${toName}`;
-              onSave({...form,amount:amt,type:"transfer",description:desc,businessActivity:defaultAct,category:"Account Transfer",paymentMethod:"Account Transfer",isNewCategory:false,vendor:form.vendor||""});
+              onSave({...form,...currencyPatch,amount:amt,type:"transfer",description:desc,businessActivity:defaultAct,category:"Account Transfer",paymentMethod:"Account Transfer",isNewCategory:false,vendor:form.vendor||""});
               return;
             }
             if(form.type==="borrow"){
               const src=(form.borrowSource||form.vendor||"").trim();
               const desc=(form.description||"").trim()||`Cash borrowed from ${src||"Other source"}`;
-              onSave({...form,amount:amt,type:"borrow",description:desc,borrowSource:src,vendor:src||form.vendor||"",businessActivity:defaultAct,category:"Borrowed Cash",isNewCategory:false});
+              onSave({...form,...currencyPatch,amount:amt,type:"borrow",description:desc,borrowSource:src,vendor:src||form.vendor||"",businessActivity:defaultAct,category:"Borrowed Cash",isNewCategory:false});
               return;
             }
-            onSave({...form,amount:amt,type:form.type});
+            onSave({...form,...currencyPatch,amount:amt,type:form.type});
           }}>{existing?"Update Entry":`Save ${form.type==="income"?"Income":form.type==="expense"?"Expense":form.type==="transfer"?"Transfer":"Borrowed Cash"}`}</button>
         </div>
       </>}
@@ -5107,6 +6231,7 @@ function TxTable({txns,onEdit,onDelete}){
               ? <span>· {tx.accountName||"From"} → {tx.targetAccountName||"To"}</span>
               : tx.accountName&&<span>· {tx.accountName}</span>}
             {tx.borrowSource&&<span>· from {tx.borrowSource}</span>}
+            {currencyMetaLabel(tx)&&<span>· {currencyMetaLabel(tx)}</span>}
             {tx.source==="email"&&<span style={{background:"#1a2010",color:"#86efac",padding:"0 4px",borderRadius:3,fontSize:10}}>📧</span>}
             {tx.source==="auto"&&<span style={{background:"#1e1b4b",color:"#818cf8",padding:"0 4px",borderRadius:3,fontSize:10}}>AI</span>}
             {tx.source==="statement"&&<span style={{background:"#052e16",color:"#34d399",padding:"0 4px",borderRadius:3,fontSize:10}}>Stmt</span>}
