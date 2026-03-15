@@ -76,15 +76,44 @@ const sanitizeMsClientId = (id="") => {
 };
 const DEFAULT_MICROSOFT_CLIENT_ID = sanitizeMsClientId(import.meta.env.VITE_MICROSOFT_CLIENT_ID || "");
 const DEFAULT_AI_MODEL = "gpt-4.1-mini";
+const AI_CFG_KEY = "ledger_ai_cfg";
 const EMAIL_SYNC_CACHE_VERSION = "v5";
 const BACKUP_KEY = "ledger_backups";
 const MAX_BACKUPS = 50;
 const AI_PENDING_EMAIL_KEY = "ledger_ai_pending_email";
+const AI_CLOUD_CLIENT_KEY = "ledger_ai_cloud_client";
+const AI_CLOUD_CLIENT_LEGACY_KEY = "ledger_ai_cloud_client_legacy";
 const AI_RETRY_INTERVAL_MS = 30 * 60 * 1000;
 const AI_RETRY_BATCH_SIZE = 20;
+const AI_CLOUD_PULL_LIMIT = 40;
 
 function aiPendingId(accountId="",msgId=""){
   return `${String(accountId||"").trim()}::${String(msgId||"").trim()}`;
+}
+
+function normalizeAiEndpointUrl(value=""){
+  const raw=String(value||"").trim();
+  if(!raw)return "";
+  const prefixed=raw.startsWith("//")?`https:${raw}`:raw;
+  const withScheme=/^https?:\/\//i.test(prefixed)?prefixed:`https://${prefixed}`;
+  return withScheme.replace(/\/+$/,"");
+}
+
+function normalizeAICfg(cfg={}){
+  const endpoint=normalizeAiEndpointUrl(cfg?.endpoint||"");
+  const secret=String(cfg?.secret||"").trim();
+  const model=String(cfg?.model||DEFAULT_AI_MODEL).trim()||DEFAULT_AI_MODEL;
+  return {endpoint,secret,model};
+}
+
+function loadAICfg(){
+  return normalizeAICfg(LS.get(AI_CFG_KEY,{endpoint:"",secret:"",model:DEFAULT_AI_MODEL}));
+}
+
+function saveAICfgToStorage(cfg={}){
+  const next=normalizeAICfg(cfg);
+  LS.set(AI_CFG_KEY,next);
+  return next;
 }
 
 function normalizeAiPendingEntry(entry={}){
@@ -103,6 +132,8 @@ function normalizeAiPendingEntry(entry={}){
     attempts: Math.max(0, Number(entry.attempts) || 0),
     nextRetryAt: String(entry.nextRetryAt || new Date(Date.now() + AI_RETRY_INTERVAL_MS).toISOString()),
     lastError: String(entry.lastError || ""),
+    cloudQueued: Boolean(entry.cloudQueued),
+    cloudJobId: String(entry.cloudJobId || id),
   };
 }
 
@@ -127,8 +158,38 @@ function quickHash(str=""){
   return (h>>>0).toString(36);
 }
 
-function sanitizeEmailsForStorage(list=[]){
+function getStableAiCloudClientId(){
+  const owner=String(LOCKED_OWNER_EMAIL||"").trim().toLowerCase()||"ledgerai-owner";
+  return `ledger-${quickHash(owner)}`;
+}
+
+function normalizeClientList(items=[]){
+  return Array.from(new Set((items||[]).map(v=>String(v||"").trim()).filter(Boolean))).slice(0,6);
+}
+
+function getAiCloudClientIds(){
+  const stableId=getStableAiCloudClientId();
+  const savedId=String(LS.get(AI_CLOUD_CLIENT_KEY,"")||"").trim();
+  const legacySaved=LS.get(AI_CLOUD_CLIENT_LEGACY_KEY,[]);
+  const mergedLegacy=normalizeClientList([
+    ...(Array.isArray(legacySaved)?legacySaved:[]),
+    savedId&&savedId!==stableId?savedId:"",
+  ]).filter(id=>id!==stableId);
+  LS.set(AI_CLOUD_CLIENT_KEY,stableId);
+  LS.set(AI_CLOUD_CLIENT_LEGACY_KEY,mergedLegacy);
+  return [stableId,...mergedLegacy];
+}
+
+function getAiCloudClientId(){
+  return getAiCloudClientIds()[0]||getStableAiCloudClientId();
+}
+
+function sanitizeEmailsForCloud(list=[]){
   return (list||[]).map(a=>({...a,token:undefined}));
+}
+
+function persistEmailsLocally(list=[]){
+  return (list||[]).map(a=>({...a}));
 }
 
 if(typeof window!=="undefined"){
@@ -395,10 +456,10 @@ async function callAI(messages,max_tokens=800){
     }
     return "";
   };
-  const cfg=LS.get("ledger_ai_cfg",{endpoint:"",secret:"",model:DEFAULT_AI_MODEL});
-  const endpoint=(cfg.endpoint||"").trim();
-  const secret=(cfg.secret||"").trim();
-  const model=(cfg.model||DEFAULT_AI_MODEL).trim()||DEFAULT_AI_MODEL;
+  const cfg=loadAICfg();
+  const endpoint=cfg.endpoint;
+  const secret=cfg.secret;
+  const model=cfg.model;
   if(!endpoint)throw new Error("AI backend not configured. Open Settings → AI Backend and set endpoint.");
   const ctrl=new AbortController();
   const timer=setTimeout(()=>ctrl.abort(),25000);
@@ -444,7 +505,7 @@ async function aiExtractBatch(text,acts,cats){
     try{const a=JSON.parse(raw.replace(/```json|```/g,"").trim());return Array.isArray(a)?a:[];}catch{return[];}
   }catch{return[];}
 }
-async function aiAnalyzeEmail(subject,from,body,acts,cats,meta={}){
+function buildAiEmailAnalysisMessages(subject,from,body,acts,cats,meta={}){
   const c=Object.entries(cats).map(([a,cs])=>`${a}: ${cs.join(", ")}`).join("\n");
   const accountList=Array.isArray(meta.accountNames)?meta.accountNames.filter(Boolean):[];
   const accountsLine=accountList.length?accountList.join(", "):"Unknown";
@@ -452,7 +513,7 @@ async function aiAnalyzeEmail(subject,from,body,acts,cats,meta={}){
   const attachmentText=clipTextForAI((meta.attachmentText||"")+"",11000);
   const emailBody=clipTextForAI((body||"")+"",11000);
   const hasAttachment=meta.hasAttachment?"yes":"no";
-  const raw=await callAI([{role:"user",content:`You are a cashflow extraction engine for bookkeeping.
+  return [{role:"user",content:`You are a cashflow extraction engine for bookkeeping.
 Analyze this ENTIRE email body and ENTIRE attachment text.
 You must decide cashflow directly from the content without relying on external rules.
 
@@ -490,9 +551,12 @@ Return ONLY JSON:
   "transactions": [
     {"type":"expense|income|transfer","businessActivity":"","category":"","isNewCategory":false,"description":"","amount":0,"date":"YYYY-MM-DD","vendor":"","paymentMethod":"","accountName":"","targetAccountName":""}
   ]
-}`}],1600);
+}`}];
+}
+
+function parseAiEmailAnalysisRaw(raw=""){
   try{
-    const obj=JSON.parse(raw.replace(/```json|```/g,"").trim());
+    const obj=JSON.parse(String(raw||"").replace(/```json|```/g,"").trim());
     const tx=Array.isArray(obj?.transactions)?obj.transactions:[];
     const statusRaw=String(obj?.status||"").toLowerCase();
     const status=statusRaw==="success"||statusRaw==="no_transaction"||statusRaw==="retry"?statusRaw:(tx.length?"success":"no_transaction");
@@ -503,6 +567,89 @@ Return ONLY JSON:
     };
   }catch{
     return{status:"retry",reason:"parse_failed",transactions:[]};
+  }
+}
+async function aiAnalyzeEmail(subject,from,body,acts,cats,meta={}){
+  const messages=buildAiEmailAnalysisMessages(subject,from,body,acts,cats,meta);
+  const raw=await callAI(messages,1600);
+  return parseAiEmailAnalysisRaw(raw);
+}
+
+function aiCloudRetryUrl(endpoint="",path="/"){
+  const base=normalizeAiEndpointUrl(endpoint||"");
+  if(!base)throw new Error("AI backend endpoint missing");
+  const u=new URL(base);
+  u.pathname=path;
+  u.search="";
+  return u.toString();
+}
+
+function aiCloudRetryHeaders(secret=""){
+  return{
+    "Content-Type":"application/json",
+    ...(secret?{"x-ledgerai-key":secret}:{}),
+  };
+}
+
+async function enqueueCloudAiRetryJob(job,cfg=loadAICfg()){
+  const endpoint=String(cfg?.endpoint||"").trim();
+  if(!endpoint)return{ok:false,error:"endpoint_missing"};
+  const secret=String(cfg?.secret||"").trim();
+  const url=aiCloudRetryUrl(endpoint,"/retry/enqueue");
+  const ctrl=new AbortController();
+  const timer=setTimeout(()=>ctrl.abort(),15000);
+  try{
+    const r=await fetch(url,{
+      method:"POST",
+      headers:aiCloudRetryHeaders(secret),
+      body:JSON.stringify(job||{}),
+      signal:ctrl.signal,
+    });
+    const txt=await r.text();
+    let data={};
+    try{data=JSON.parse(txt||"{}");}catch{}
+    if(!r.ok){
+      const unsupported=r.status===404||r.status===405||r.status===501;
+      return{ok:false,status:r.status,error:String(data?.error||txt||`HTTP ${r.status}`).slice(0,180),unsupported};
+    }
+    return{ok:true,data};
+  }catch(err){
+    const msg=String(err?.message||"cloud_retry_enqueue_failed");
+    return{ok:false,error:msg.includes("aborted")?"cloud_retry_enqueue_timeout":msg.slice(0,180)};
+  }finally{
+    clearTimeout(timer);
+  }
+}
+
+async function pullCloudAiRetryJobs(clientId,limit=AI_CLOUD_PULL_LIMIT,cfg=loadAICfg()){
+  const endpoint=String(cfg?.endpoint||"").trim();
+  if(!endpoint)return{ok:false,error:"endpoint_missing"};
+  const secret=String(cfg?.secret||"").trim();
+  const urlObj=new URL(aiCloudRetryUrl(endpoint,"/retry/pull"));
+  urlObj.searchParams.set("clientId",String(clientId||"").trim());
+  urlObj.searchParams.set("limit",String(Math.max(1,Math.min(Number(limit)||AI_CLOUD_PULL_LIMIT,200))));
+  const ctrl=new AbortController();
+  const timer=setTimeout(()=>ctrl.abort(),15000);
+  try{
+    const r=await fetch(urlObj.toString(),{
+      method:"GET",
+      headers:secret?{"x-ledgerai-key":secret}:{},
+      signal:ctrl.signal,
+    });
+    const txt=await r.text();
+    let data={};
+    try{data=JSON.parse(txt||"{}");}catch{}
+    if(!r.ok){
+      const unsupported=r.status===404||r.status===405||r.status===501;
+      return{ok:false,status:r.status,error:String(data?.error||txt||`HTTP ${r.status}`).slice(0,180),unsupported};
+    }
+    const jobs=Array.isArray(data?.jobs)?data.jobs:[];
+    return{ok:true,jobs,processedCount:Number(data?.processedCount)||0};
+  }catch(err){
+    const msg=String(err?.message||"cloud_retry_pull_failed");
+    return{ok:false,error:msg.includes("aborted")?"cloud_retry_pull_timeout":msg.slice(0,180)};
+  }finally{
+    clearTimeout(timer);
   }
 }
 async function aiParseStatement(text,name,type){
@@ -661,14 +808,16 @@ async function msLoginMail(clientId){
   }
 }
 
-async function msGetMailToken(clientId,accountHint){
+async function msGetMailToken(clientId,accountHint,opts={}){
   const msal=await getMsal(clientId);
   const account=pickMsAccount(msal,accountHint);
   if(!account)throw new Error("Not signed in to Microsoft");
+  const interactive=opts?.interactive!==false;
   try{
     const tok=await msal.acquireTokenSilent({scopes:MS_MAIL_SCOPES,account});
     return{account,accessToken:tok.accessToken};
-  }catch{
+  }catch(err){
+    if(!interactive)throw err;
     const tok=await runMsalInteractive(msal, clientId, () => msal.acquireTokenPopup({scopes:MS_MAIL_SCOPES,account,prompt:"select_account"}));
     return{account,accessToken:tok.accessToken};
   }
@@ -828,9 +977,10 @@ async function gmailAttachmentEvidenceText(token,msgId,attachments=[]){
 }
 function initOAuth(clientId,cb,opts={}){
   if(!window.google?.accounts?.oauth2){cb(new Error("Google Identity Services not loaded"),null);return;}
-  const prompt=(opts?.prompt ?? "consent");
+  const prompt=String(opts?.prompt ?? "").trim();
   const loginHint=(opts?.loginHint || "").trim();
-  const req={prompt};
+  const req={};
+  if(prompt)req.prompt=prompt;
   if(loginHint)req.login_hint=loginHint;
   window.google.accounts.oauth2.initTokenClient({
     client_id:clientId,
@@ -953,6 +1103,28 @@ function hydrateEmailAccount(acc={}){
   };
 }
 
+function mergeLoadedEmailsWithLocalTokens(remoteList=[],localList=[]){
+  const locals=(localList||[]).map(a=>hydrateEmailAccount(a));
+  return (remoteList||[]).map(item=>{
+    const remote=hydrateEmailAccount(item);
+    const remoteEmail=(remote.email||"").toLowerCase();
+    const local=locals.find(a=>a.id===remote.id)
+      || locals.find(a=>a.provider===remote.provider&&remoteEmail&&(a.email||"").toLowerCase()===remoteEmail);
+    if(!local)return remote;
+    return{
+      ...remote,
+      token:local.token||remote.token,
+      tokenExpiresAt:local.tokenExpiresAt||remote.tokenExpiresAt||"",
+      clientId:remote.clientId||local.clientId||"",
+      msClientId:remote.msClientId||local.msClientId||"",
+      msAccountId:remote.msAccountId||local.msAccountId||"",
+      msUsername:remote.msUsername||local.msUsername||"",
+      lastAuthAt:local.lastAuthAt||remote.lastAuthAt||"",
+      reauthRequired:Boolean(remote.reauthRequired&&!local.token),
+    };
+  });
+}
+
 export default function App(){
   const[authCfg,setAuthCfg]=useState(()=>{
     const saved=LS.get("ledger_auth_cfg",{enabled:true,googleClientId:"",ownerEmail:""});
@@ -973,7 +1145,7 @@ export default function App(){
   const[cats,setCats]=useState(()=>LS.get("ledger_cats",DEF_CATS));
   const[accs,setAccs]=useState(()=>LS.get("ledger_accs",[]));
   const[inbox,setInbox]=useState(()=>LS.get("ledger_inbox",[]));
-  const[emails,setEmails]=useState(()=>LS.get("ledger_emails",[]).map(a=>({...hydrateEmailAccount(a),token:undefined})));
+  const[emails,setEmails]=useState(()=>LS.get("ledger_emails",[]).map(a=>hydrateEmailAccount(a)));
   const[smsNums,setSmsNums]=useState(()=>LS.get("ledger_sms",[]));
   const[sbCfg,setSbCfg]=useState(()=>{
     const base=defaultCloudCfg();
@@ -984,6 +1156,8 @@ export default function App(){
   const[syncStatus,setSyncStatus]=useState("idle"); // idle|syncing|ok|error
   const[lastSync,setLastSync]=useState(()=>LS.get("ledger_lastsync",""));
   const syncTimer=useRef(null);
+  const cloudSyncPauseUntilRef=useRef(0);
+  const cloudAutoLoadTriedRef=useRef(false);
   const[showAdd,setShowAdd]=useState(false);
   const[addType,setAddType]=useState("expense");
   const[editTx,setEditTx]=useState(null);
@@ -1002,7 +1176,7 @@ export default function App(){
       acts,
       cats,
       smsNums,
-      emails:sanitizeEmailsForStorage(emails),
+      emails:persistEmailsLocally(emails),
     };
     const raw=JSON.stringify(payload);
     return{
@@ -1044,7 +1218,7 @@ export default function App(){
     setActs(Array.isArray(d.acts)&&d.acts.length?d.acts:[...DEF_ACTS]);
     setCats(d.cats&&typeof d.cats==="object"?d.cats:JSON.parse(JSON.stringify(DEF_CATS)));
     setSmsNums(Array.isArray(d.smsNums)?d.smsNums:[]);
-    setEmails(Array.isArray(d.emails)?d.emails.map(a=>({...hydrateEmailAccount(a),token:undefined})):[]);
+    setEmails(prev=>Array.isArray(d.emails)?mergeLoadedEmailsWithLocalTokens(d.emails,prev):[]);
     setSyncStatus("idle");
     setLastSync("");
     setSummary("");
@@ -1055,13 +1229,27 @@ export default function App(){
 
   const factoryReset=useCallback(()=>{
     const preservedMsClientId=sanitizeMsClientId((sbCfg?.clientId||DEFAULT_MICROSOFT_CLIENT_ID||"").trim());
+    const preservedCloudCfg={
+      ...defaultCloudCfg(),
+      ...(sbCfg||{}),
+      clientId:preservedMsClientId,
+      email:String(sbCfg?.email||""),
+      name:String(sbCfg?.name||""),
+      enabled:Boolean(sbCfg?.enabled&&preservedMsClientId),
+      needsReconnect:Boolean(sbCfg?.needsReconnect),
+    };
+    const preservedAICfg=loadAICfg();
+    const preservedEmails=(emails||[]).map(a=>({
+      ...hydrateEmailAccount(a),
+      reauthRequired:false,
+    }));
     try{
       const preReset=buildBackupSnapshot("factory-reset-before-clear");
       LS.set("ledger_last_reset_backup",preReset);
       pushBackupSnapshot("factory-reset-before-clear");
       [
         "ledger_txns","ledger_acts","ledger_cats","ledger_accs","ledger_inbox",
-        "ledger_emails","ledger_sms","ledger_odcfg","ledger_lastsync",
+        "ledger_sms","ledger_lastsync",
         AI_PENDING_EMAIL_KEY,
       ].forEach(k=>localStorage.removeItem(k));
       const purge=[];
@@ -1073,23 +1261,16 @@ export default function App(){
       purge.forEach(k=>localStorage.removeItem(k));
       if(preservedMsClientId)clearStaleMsalInteractionState(preservedMsClientId);
     }catch{}
+    saveAICfgToStorage(preservedAICfg);
     setTxns([]);
     setActs([...DEF_ACTS]);
     setCats(JSON.parse(JSON.stringify(DEF_CATS)));
     setAccs([]);
     setInbox([]);
-    setEmails([]);
+    setEmails(preservedEmails);
     setSmsNums([]);
-    setSbCfg({
-      ...defaultCloudCfg(),
-      clientId:preservedMsClientId,
-      enabled:false,
-      url:"",
-      key:"",
-      email:"",
-      name:"",
-      needsReconnect:false,
-    });
+    setSbCfg(preservedCloudCfg);
+    cloudSyncPauseUntilRef.current=Date.now()+30000;
     setSyncStatus("idle");
     setLastSync("");
     setSummary("");
@@ -1101,8 +1282,8 @@ export default function App(){
     setTab("dashboard");
     setAuthBypass(false);
     setBackups(LS.get(BACKUP_KEY,[]));
-    alert("Reset complete. LedgerAI is now fresh.");
-  },[buildBackupSnapshot,pushBackupSnapshot,sbCfg]);
+    alert("Reset complete. LedgerAI is now fresh. Email + cloud connectors were preserved.");
+  },[buildBackupSnapshot,emails,pushBackupSnapshot,sbCfg]);
 
   const onGoogleCredential=useCallback((resp)=>{
     let payload=decodeGoogleCredential(resp?.credential||"");
@@ -1142,7 +1323,7 @@ export default function App(){
   useEffect(()=>LS.set("ledger_cats",cats),[cats]);
   useEffect(()=>LS.set("ledger_accs",accs),[accs]);
   useEffect(()=>LS.set("ledger_inbox",inbox),[inbox]);
-  useEffect(()=>LS.set("ledger_emails",sanitizeEmailsForStorage(emails)),[emails]);
+  useEffect(()=>LS.set("ledger_emails",persistEmailsLocally(emails)),[emails]);
   useEffect(()=>LS.set("ledger_sms",smsNums),[smsNums]);
   useEffect(()=>LS.set("ledger_odcfg",sbCfg),[sbCfg]);
   useEffect(()=>LS.set("ledger_lastsync",lastSync),[lastSync]);
@@ -1193,6 +1374,7 @@ export default function App(){
 
   const debouncedSync=useCallback((state={})=>{
     if(!sbCfg.enabled)return;
+    if(Date.now()<cloudSyncPauseUntilRef.current)return;
     if(syncTimer.current)clearTimeout(syncTimer.current);
     syncTimer.current=setTimeout(()=>pushToCloud(state),3000);
   },[sbCfg.enabled,pushToCloud]);
@@ -1209,20 +1391,37 @@ export default function App(){
       if(d.acts)setActs(d.acts);
       if(d.cats)setCats(d.cats);
       if(d.smsNums)setSmsNums(d.smsNums);
-      if(d.emails)setEmails(d.emails.map(a=>({...hydrateEmailAccount(a),token:undefined})));
+      if(d.emails)setEmails(prev=>mergeLoadedEmailsWithLocalTokens(d.emails,prev));
       setLastSync(new Date().toISOString());setSyncStatus("ok");
       setTimeout(()=>setSyncStatus("idle"),3000);
     }catch(e){
       console.error("OneDrive load error",e);
       setSyncStatus("error");
+      if(e?.message?.includes?.("Not signed in")||e?.message?.includes?.("401")){
+        setSbCfg(p=>({...p,enabled:false,needsReconnect:true}));
+      }
     }
-  },[sbCfg]);
+  },[sbCfg,setSbCfg]);
 
-  // Auto-load from cloud on first mount if configured
+  // Auto-load from cloud once when connected and local ledger is empty.
   useEffect(()=>{
-    if(sbCfg.enabled&&sbCfg.url&&sbCfg.key)loadFromCloud();
-  // eslint-disable-next-line
-  },[]);
+    if(cloudAutoLoadTriedRef.current)return;
+    if(!sbCfg.enabled||!sbCfg.clientId)return;
+    const hasLocalData=Boolean(
+      (txns?.length||0)
+      ||(inbox?.length||0)
+      ||(accs?.length||0)
+      ||(acts?.length||0)>DEF_ACTS.length
+      ||(emails?.length||0)
+      ||(smsNums?.length||0)
+    );
+    if(hasLocalData){
+      cloudAutoLoadTriedRef.current=true;
+      return;
+    }
+    cloudAutoLoadTriedRef.current=true;
+    loadFromCloud();
+  },[sbCfg.enabled,sbCfg.clientId,txns,inbox,accs,acts,emails,smsNums,loadFromCloud]);
 
   // Auto-sync when data changes
   useEffect(()=>{debouncedSync({txns});},[txns]);
@@ -1909,12 +2108,17 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
   const[retryBusy,setRetryBusy]=useState(false);
   const retryBusyRef=useRef(false);
   const retryLastRunRef=useRef(0);
+  const cloudPullBusyRef=useRef(false);
+  const cloudPullLastRunRef=useRef(0);
+  const cloudRetryUnsupportedRef=useRef(false);
   const log=(id,msg)=>setLogs(p=>({...p,[id]:msg}));
   const googleClientId=(defaultGoogleClientId||DEFAULT_GOOGLE_CLIENT_ID||"").trim();
   const microsoftClientId=(defaultMicrosoftClientId||DEFAULT_MICROSOFT_CLIENT_ID||"").trim();
+  const cloudRetryClientId=getAiCloudClientId();
   const providerOf=acc=>(((acc?.provider||"google")+"").toLowerCase()==="microsoft"?"microsoft":"google");
-  const isSyncReady=(acc)=>{
+  const isSyncReady=(acc,{allowReauth=false}={})=>{
     if(!acc?.connected||acc?.userDisconnected)return false;
+    if(!allowReauth&&acc?.reauthRequired)return false;
     const provider=providerOf(acc);
     if(provider==="microsoft")return Boolean((acc.msClientId||microsoftClientId||"").trim());
     return Boolean((acc.clientId||googleClientId||"").trim());
@@ -1934,6 +2138,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
   const setProgress=(id,patch)=>setSyncProgress(p=>({...p,[id]:{...(p[id]||{}),...patch}}));
   const totalPendingAi=aiPending.length;
   const duePendingAi=aiPending.filter(row=>{
+    if(row.cloudQueued)return false;
     const nextAt=Date.parse(row.nextRetryAt||"");
     return !Number.isFinite(nextAt)||nextAt<=Date.now();
   }).length;
@@ -1942,6 +2147,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
     return map;
   },{});
   const duePendingByAccount=aiPending.reduce((map,row)=>{
+    if(row.cloudQueued)return map;
     const nextAt=Date.parse(row.nextRetryAt||"");
     if(!Number.isFinite(nextAt)||nextAt<=Date.now()){
       map[row.accountId]=(map[row.accountId]||0)+1;
@@ -1979,6 +2185,132 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
     });
   };
 
+  const enqueueCloudRetryFromEvidence=async({acc,evidence,msgId,provider})=>{
+    if(cloudRetryUnsupportedRef.current)return{ok:false,unsupported:true,error:"cloud_retry_unsupported"};
+    if(!acc?.id||!msgId||!evidence)return{ok:false,error:"invalid_cloud_retry_payload"};
+    const cfg=loadAICfg();
+    if(!cfg.endpoint)return{ok:false,error:"ai_endpoint_missing"};
+    const queuedAt=new Date().toISOString();
+    const jobId=`${aiPendingId(acc.id,msgId)}-${quickHash(`${queuedAt}:${Math.random()}`)}`;
+    const messages=buildAiEmailAnalysisMessages(
+      evidence.subject||"",
+      evidence.from||"",
+      evidence.body||"",
+      acts,
+      cats,
+      {
+        attachmentNames:evidence.attachmentNames||[],
+        attachmentText:evidence.attachmentText||"",
+        hasAttachment:Boolean(evidence.hasAttachment),
+        accountNames:accs.map(a=>a.name).filter(Boolean),
+      },
+    );
+    const payload={
+      jobId,
+      clientId:cloudRetryClientId,
+      accountId:String(acc.id||""),
+      provider:String(provider||"google").toLowerCase()==="microsoft"?"microsoft":"google",
+      msgId:String(msgId||""),
+      rowId:aiPendingId(acc.id,msgId),
+      subject:String(evidence.subject||""),
+      from:String(evidence.from||""),
+      emailDate:String(evidence.eDate||today()),
+      model:String(cfg.model||DEFAULT_AI_MODEL).trim()||DEFAULT_AI_MODEL,
+      max_tokens:1600,
+      messages,
+      queuedAt,
+    };
+    const out=await enqueueCloudAiRetryJob(payload,cfg);
+    if(out?.unsupported)cloudRetryUnsupportedRef.current=true;
+    if(!out?.ok)return out;
+    return{ok:true,jobId};
+  };
+
+  const pullCloudRetryResults=async({force=false}={})=>{
+    if(cloudRetryUnsupportedRef.current)return;
+    if(cloudPullBusyRef.current)return;
+    const now=Date.now();
+    if(!force&&now-cloudPullLastRunRef.current<45_000)return;
+    cloudPullBusyRef.current=true;
+    cloudPullLastRunRef.current=now;
+    try{
+      const clientIds=getAiCloudClientIds();
+      const pulledJobs=[];
+      const seenJobIds=new Set();
+      for(const clientId of clientIds){
+        const out=await pullCloudAiRetryJobs(clientId,AI_CLOUD_PULL_LIMIT,loadAICfg());
+        if(!out?.ok){
+          if(out?.unsupported)cloudRetryUnsupportedRef.current=true;
+          continue;
+        }
+        const jobs=(out.jobs||[]).filter(j=>j&&j.accountId&&j.msgId);
+        for(const job of jobs){
+          const jobId=String(job.jobId||"");
+          if(jobId&&seenJobIds.has(jobId))continue;
+          if(jobId)seenJobIds.add(jobId);
+          pulledJobs.push(job);
+        }
+      }
+      const jobs=pulledJobs;
+      if(!jobs.length)return;
+      const rowIds=new Set();
+      const cloudJobIds=new Set();
+      const msgKeys=new Set();
+      const queued=[];
+      let recovered=0;
+      for(const job of jobs){
+        const accountId=String(job.accountId||"");
+        const msgId=String(job.msgId||"");
+        const provider=String(job.provider||"google").toLowerCase()==="microsoft"?"microsoft":"google";
+        const subject=String(job.subject||"");
+        const from=String(job.from||"");
+        const eDate=String(job.emailDate||today())||today();
+        const rowId=String(job.rowId||aiPendingId(accountId,msgId)||"");
+        const cloudJobId=String(job.jobId||"");
+        if(rowId)rowIds.add(rowId);
+        if(cloudJobId)cloudJobIds.add(cloudJobId);
+        msgKeys.add(`${accountId}::${msgId}`);
+        markProcessedMessage(accountId,msgId);
+
+        const parsed=parseAiEmailAnalysisRaw(String(job.outputText||""));
+        if(String(parsed?.status||"").toLowerCase()!=="success")continue;
+        const items=sanitizeEmailTransactions(Array.isArray(parsed?.transactions)?parsed.transactions:[],{
+          acts,
+          cats,
+          eDate,
+          subject,
+          from,
+        });
+        if(!items.length)continue;
+        recovered+=items.length;
+        items.forEach(item=>queued.push({
+          ...item,
+          date:item.date||eDate||today(),
+          source:"email",
+          reviewStatus:"pending",
+          emailProvider:provider,
+          emailSubject:subject,
+          emailFrom:from,
+          emailAccountId:accountId,
+          emailMsgId:msgId,
+        }));
+      }
+      if(queued.length){
+        addInbox(queued);
+        setToast(`🤖 Cloud AI retry queued ${recovered} item(s) for review.`);
+      }
+      setAiPending(prev=>prev.filter(p=>{
+        const key=`${p.accountId}::${p.msgId}`;
+        if(rowIds.has(p.id))return false;
+        if(p.cloudJobId&&cloudJobIds.has(p.cloudJobId))return false;
+        if(msgKeys.has(key))return false;
+        return true;
+      }));
+    }finally{
+      cloudPullBusyRef.current=false;
+    }
+  };
+
   useEffect(()=>{
     if(!toast)return;
     const t=setTimeout(()=>setToast(""),2600);
@@ -1994,27 +2326,108 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
     initOAuth(clientId,(err,res)=>err?reject(err):resolve(res),opts);
   });
 
+  const googleTokenExpiryIso=(resp={})=>{
+    const expiresInSec=Math.max(60,Number(resp?.expires_in)||3600);
+    return new Date(Date.now()+expiresInSec*1000).toISOString();
+  };
+
+  const hasUsableGoogleToken=(acc={})=>{
+    const token=String(acc?.token||"").trim();
+    if(!token)return false;
+    const expMs=Date.parse(acc?.tokenExpiresAt||"");
+    // Legacy tokens without expiry metadata should be treated as stale.
+    if(!Number.isFinite(expMs))return false;
+    return expMs-Date.now()>60*1000;
+  };
+
+  const isGoogleAuthFailure=(msg="")=>{
+    const lower=String(msg||"").toLowerCase();
+    if(lower.includes("google_reauth_required"))return true;
+    if(lower.includes("request had invalid authentication credentials"))return true;
+    if(lower.includes("invalid credentials"))return true;
+    if((lower.includes("gmail")||lower.includes("googleapis.com"))&&(lower.includes("401")||lower.includes("403")||lower.includes("unauthorized")||lower.includes("forbidden")))return true;
+    return false;
+  };
+
+  const isMicrosoftAuthFailure=(msg="")=>{
+    const lower=String(msg||"").toLowerCase();
+    if(lower.includes("not signed in to microsoft"))return true;
+    if((lower.includes("microsoft")||lower.includes("outlook")||lower.includes("graph.microsoft.com"))&&(lower.includes("401")||lower.includes("403")||lower.includes("unauthorized")||lower.includes("forbidden")))return true;
+    return false;
+  };
+
+  const isDismissedAuthFlow=(msg="")=>{
+    const lower=String(msg||"").toLowerCase();
+    return lower.includes("popup_closed")
+      || lower.includes("popup_window_error")
+      || lower.includes("user_cancelled")
+      || lower.includes("interaction_in_progress");
+  };
+
+  const setGoogleSession=(accId,patch={})=>{
+    setEmails(prev=>prev.map(a=>a.id===accId?{...a,...patch,connected:true,userDisconnected:false,reauthRequired:false}:a));
+  };
+
   const ensureGoogleToken=async(acc,{interactive=false}={})=>{
     const resolvedClientId=(acc?.clientId||googleClientId||"").trim();
     if(!resolvedClientId)throw new Error("Google OAuth is not configured for this app yet.");
     const loginHint=(acc?.email||"").trim();
-    try{
-      const silentResp=await requestGoogleToken(resolvedClientId,{prompt:"",loginHint});
-      const token=silentResp?.access_token||"";
-      if(token){
-        setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,token,connected:true,userDisconnected:false,reauthRequired:false,clientId:resolvedClientId,lastAuthAt:new Date().toISOString()}:a));
-        return token;
+    if(hasUsableGoogleToken(acc))return acc.token;
+    const applyToken=(resp={})=>{
+      const token=resp?.access_token||"";
+      if(!token)return "";
+      setGoogleSession(acc.id,{
+        token,
+        tokenExpiresAt:googleTokenExpiryIso(resp),
+        clientId:resolvedClientId,
+        lastAuthAt:new Date().toISOString(),
+      });
+      return token;
+    };
+    const trySilentRefresh=async()=>{
+      const silentResp=await requestGoogleToken(resolvedClientId,{prompt:"none",loginHint});
+      const token=applyToken(silentResp);
+      if(!token)throw new Error("google_silent_refresh_unavailable:no_token");
+      return token;
+    };
+    if(!interactive){
+      // Background flows: allow only silent Google refresh (never popup).
+      try{
+        return await trySilentRefresh();
+      }catch(err){
+        const lower=String(err?.message||"").toLowerCase();
+        const needsReauth=
+          lower.includes("consent")
+          || lower.includes("access_denied")
+          || lower.includes("invalid_grant")
+          || lower.includes("login_required")
+          || lower.includes("interaction_required")
+          || lower.includes("unauthorized_client");
+        if(needsReauth)throw new Error(`google_reauth_required:${lower}`);
+        throw new Error("google_silent_refresh_unavailable:no_cached_token");
       }
-    }catch(_err){
-      // Silent refresh can fail when Google needs user interaction. We'll fall back below.
     }
-    if(acc?.token)return acc.token;
-    if(!interactive)throw new Error("google_reauth_required");
-    const consentResp=await requestGoogleToken(resolvedClientId,{prompt:"consent",loginHint});
-    const token=consentResp?.access_token||"";
-    if(!token)throw new Error("google_token_missing");
-    setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,token,connected:true,userDisconnected:false,reauthRequired:false,clientId:resolvedClientId,lastAuthAt:new Date().toISOString()}:a));
-    return token;
+    let silentErr=null;
+    try{
+      return await trySilentRefresh();
+    }catch(err){
+      // Silent refresh can fail in background tabs or when browser blocks third-party cookies.
+      silentErr=err;
+    }
+    try{
+      const interactiveResp=await requestGoogleToken(resolvedClientId,{prompt:"",loginHint});
+      const token=applyToken(interactiveResp);
+      if(!token)throw new Error("google_token_missing");
+      return token;
+    }catch(interactiveErr){
+      const lower=String(interactiveErr?.message||"").toLowerCase();
+      const needsConsent=lower.includes("consent")||lower.includes("access_denied");
+      if(!needsConsent)throw interactiveErr;
+      const consentResp=await requestGoogleToken(resolvedClientId,{prompt:"consent",loginHint});
+      const token=applyToken(consentResp);
+      if(!token)throw new Error("google_token_missing");
+      return token;
+    }
   };
 
   const connectGoogleAccount=async(existing=null)=>{
@@ -2023,7 +2436,16 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
     if(!window.google?.accounts?.oauth2){alert("Google Identity Services loading… please wait a moment and try again.");return;}
     setConnectBusy("google");
     try{
-      const authResp=await requestGoogleToken(googleClientId,{prompt:"consent"});
+      let authResp;
+      const loginHint=(existing?.email||"").trim();
+      try{
+        authResp=await requestGoogleToken(googleClientId,{prompt:"select_account",loginHint});
+      }catch(e){
+        const lower=String(e?.message||"").toLowerCase();
+        const needsConsent=lower.includes("consent")||lower.includes("access_denied");
+        if(!needsConsent)throw e;
+        authResp=await requestGoogleToken(googleClientId,{prompt:"consent",loginHint});
+      }
       const token=authResp?.access_token||"";
       if(!token)throw new Error("google_token_missing");
       const profile=await gmailGetProfile(token);
@@ -2037,9 +2459,9 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
         const base=hydrateEmailAccount({id:gid(),provider:"google",label:mail.split("@")[0],email:mail,syncQuery:GMAIL_QUERY,maxEmails:100,autoPost:false,enabled:true,firstSyncCompleted:false,syncFromDate:"",autoSyncHourly:true});
         if(ix>=0){
           const cur=hydrateEmailAccount(next[ix]);
-          next[ix]={...cur,provider:"google",email:mail,token,connected:true,userDisconnected:false,reauthRequired:false,enabled:true,clientId:googleClientId,autoSyncHourly:cur.autoSyncHourly!==false,lastAuthAt:new Date().toISOString()};
+          next[ix]={...cur,provider:"google",email:mail,token,tokenExpiresAt:googleTokenExpiryIso(authResp),connected:true,userDisconnected:false,reauthRequired:false,enabled:true,clientId:googleClientId,autoSyncHourly:cur.autoSyncHourly!==false,lastAuthAt:new Date().toISOString()};
         }else{
-          next.unshift({...base,token,connected:true,userDisconnected:false,reauthRequired:false,clientId:googleClientId,lastAuthAt:new Date().toISOString()});
+          next.unshift({...base,token,tokenExpiresAt:googleTokenExpiryIso(authResp),connected:true,userDisconnected:false,reauthRequired:false,clientId:googleClientId,lastAuthAt:new Date().toISOString()});
         }
         return next;
       });
@@ -2198,7 +2620,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
 
   const runSync=async(acc,opts={})=>{
     const provider=providerOf(acc);
-    const interactive=opts.interactive!==false;
+    const interactive=opts.interactive===true;
     const silent=opts.silent===true;
     const msClient=sanitizeMsClientId((acc?.msClientId||microsoftClientId||"").trim());
     if(provider==="microsoft"&&!msClient){
@@ -2217,7 +2639,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
       if(provider==="microsoft"){
         let auth;
         try{
-          auth=await msGetMailToken(msClient,{homeAccountId:acc.msAccountId,username:acc.msUsername||acc.email});
+          auth=await msGetMailToken(msClient,{homeAccountId:acc.msAccountId,username:acc.msUsername||acc.email},{interactive});
         }catch(msAuthErr){
           if(!interactive)throw msAuthErr;
           const login=await msLoginMail(msClient);
@@ -2299,10 +2721,22 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
           if(reason==="config"){
             throw new Error(`ai_config_error: ${String(e?.message||"AI backend config issue")}`);
           }
+          let cloudQueued=false;
+          let cloudJobId="";
+          if(evidence){
+            try{
+              const cloud=await enqueueCloudRetryFromEvidence({acc,evidence,msgId:msg.id,provider});
+              cloudQueued=Boolean(cloud?.ok);
+              cloudJobId=String(cloud?.jobId||"");
+            }catch{}
+          }
           failed++;
           pendingQueued++;
           failureReasons[reason]=(failureReasons[reason]||0)+1;
           const nowIso=new Date().toISOString();
+          const nextRetry=cloudQueued
+            ? new Date(Date.now()+Math.max(AI_RETRY_INTERVAL_MS,2*60*60*1000)).toISOString()
+            : new Date(Date.now()+AI_RETRY_INTERVAL_MS).toISOString();
           enqueueAiPending({
             id:aiPendingId(acc.id,msg.id),
             accountId:acc.id,
@@ -2315,8 +2749,10 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
             queuedAt:nowIso,
             lastTriedAt:nowIso,
             attempts:1,
-            nextRetryAt:new Date(Date.now()+AI_RETRY_INTERVAL_MS).toISOString(),
-            lastError:String(e?.message||reason||"processing_failed").slice(0,180),
+            nextRetryAt:nextRetry,
+            lastError:cloudQueued?"queued_cloud_retry":String(e?.message||reason||"processing_failed").slice(0,180),
+            cloudQueued,
+            cloudJobId:cloudJobId||aiPendingId(acc.id,msg.id),
           });
           processed.add(msg.id);
           console.error(e);
@@ -2378,18 +2814,21 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
       setToast(`📥 ${valid.length} item(s) queued for review.`);
     }catch(e){
       const msg=String(e.message||"");
-      if(provider==="google"&&(msg.includes("google_reauth_required")||msg.includes("401"))){
-        log(acc.id,"⚠ Google session needs refresh. Click Connect Gmail once to re-authorize if sync keeps failing.");
-        setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,token:null,connected:true,userDisconnected:false,reauthRequired:true}:a));
-        if(interactive&&!silent)alert("Google session needs refresh. Click Connect Gmail once, then sync will continue automatically.");
-      }else if(msg.includes("401")||msg.includes("Not signed in to Microsoft")){
-        log(acc.id,provider==="microsoft"?"⚠ Microsoft session expired — reconnect required.":"⚠ Token expired — reconnect required.");
-        setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,token:null,connected:true,userDisconnected:false,reauthRequired:true}:a));
+      if(provider==="google"&&msg.includes("google_silent_refresh_unavailable")){
+        log(acc.id,"ℹ Gmail auto-sync is paused until browser allows a silent token refresh. Keep this tab active or click Sync once.");
+        setProgress(acc.id,{phase:"done",pending:0});
       }else if(msg.includes("ai_config_error")){
         const detail=msg.replace("ai_config_error:","").trim();
         log(acc.id,`⚠ AI backend config issue: ${detail}`);
         if(!silent)alert(`AI backend config issue:\n${detail}\n\nGo to Settings → AI Backend and click Test AI Backend.`);
         setProgress(acc.id,{phase:"error",pending:0,failureReasons:{config:1}});
+      }else if(provider==="google"&&isGoogleAuthFailure(msg)){
+        log(acc.id,"⚠ Google session needs refresh. Click Connect Gmail once to re-authorize if sync keeps failing.");
+        setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,token:null,connected:true,userDisconnected:false,reauthRequired:true}:a));
+        if(interactive&&!silent)alert("Google session needs refresh. Click Connect Gmail once, then sync will continue automatically.");
+      }else if(provider==="microsoft"&&isMicrosoftAuthFailure(msg)){
+        log(acc.id,provider==="microsoft"?"⚠ Microsoft session expired — reconnect required.":"⚠ Token expired — reconnect required.");
+        setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,token:null,connected:true,userDisconnected:false,reauthRequired:true}:a));
       }else{
         log(acc.id,"Error: "+msg);
         setProgress(acc.id,{phase:"error",pending:0});
@@ -2399,42 +2838,60 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
   };
 
   const startSync=(acc,scanAll=false)=>{
+    if(acc?.reauthRequired){
+      alert(`Reconnect this ${providerOf(acc)==="microsoft"?"Outlook":"Gmail"} account first, then sync will resume normally.`);
+      return;
+    }
     if(!isSyncReady(acc)){alert(`Connect this ${providerOf(acc)==="microsoft"?"Outlook":"Gmail"} account first.`);return;}
     if(!acc.firstSyncCompleted){
       const d=acc.syncFromDate||new Date(Date.now()-90*24*60*60*1000).toISOString().slice(0,10);
       setFirstSyncPrompt({accId:acc.id,fromDate:d,scanAll:true});
       return;
     }
-    runSync(acc,{scanAll});
+    runSync(acc,{scanAll,interactive:true});
   };
 
   const runPendingAiRetry=async({force=false}={})=>{
     const now=Date.now();
     if(retryBusyRef.current)return;
     if(!force&&now-retryLastRunRef.current<15000)return;
-    const due=(aiPending||[])
+    if(force)await pullCloudRetryResults({force:true});
+    const retryRows=(aiPending||[])
       .map(normalizeAiPendingEntry)
       .filter(row=>row.accountId&&row.msgId)
-      .filter(row=>{
+      .filter(row=>!row.cloudQueued)
+      .filter(row=>force||(()=>{
         const nextAt=Date.parse(row.nextRetryAt||"");
         return !Number.isFinite(nextAt)||nextAt<=Date.now();
-      })
-      .slice(0,AI_RETRY_BATCH_SIZE);
-    if(!due.length)return;
+      })())
+      .slice(0,force?1000:AI_RETRY_BATCH_SIZE);
+    if(!retryRows.length)return;
     retryBusyRef.current=true;
     setRetryBusy(true);
     retryLastRunRef.current=now;
     let recovered=0;
+    const retryAccountCache=new Map();
+    const retryAccountErrors=new Map();
     try{
-      for(const row of due){
-        const accRaw=emails.find(a=>a.id===row.accountId);
+      for(const row of retryRows){
+        const accRaw=retryAccountCache.get(row.accountId)||emails.find(a=>a.id===row.accountId);
         if(!accRaw){
           setAiPending(prev=>prev.filter(p=>p.id!==row.id));
           continue;
         }
         const acc=hydrateEmailAccount(accRaw);
         const provider=providerOf(acc);
-        if(!isSyncReady(acc)){
+        const blockedError=retryAccountErrors.get(acc.id);
+        if(blockedError){
+          setAiPending(prev=>prev.map(p=>p.id===row.id?{
+            ...p,
+            nextRetryAt:new Date(Date.now()+AI_RETRY_INTERVAL_MS).toISOString(),
+            lastTriedAt:new Date().toISOString(),
+            lastError:String(blockedError||"auth_retry_blocked").slice(0,180),
+          }:p));
+          continue;
+        }
+        if(!isSyncReady(acc,{allowReauth:force})){
           setAiPending(prev=>prev.map(p=>p.id===row.id?{
             ...p,
             nextRetryAt:new Date(Date.now()+AI_RETRY_INTERVAL_MS).toISOString(),
@@ -2443,28 +2900,51 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
           }:p));
           continue;
         }
+        let evidence=null;
         try{
           let token=acc.token||"";
           if(provider==="microsoft"){
             const msClient=sanitizeMsClientId((acc.msClientId||microsoftClientId||"").trim());
             if(!msClient)throw new Error("microsoft_client_missing");
-            const auth=await msGetMailToken(msClient,{homeAccountId:acc.msAccountId,username:acc.msUsername||acc.email});
-            token=auth.accessToken;
-            const msAcc=auth.account||{};
-            setEmails(prev=>prev.map(a=>a.id===acc.id?{
-              ...a,
+            token=String(retryAccountCache.get(acc.id)?.token||"").trim();
+            if(!token){
+              const auth=await msGetMailToken(msClient,{homeAccountId:acc.msAccountId,username:acc.msUsername||acc.email},{interactive:force});
+              token=auth.accessToken;
+              const msAcc=auth.account||{};
+              const nextAcc={
+                ...acc,
+                token,
+                connected:true,
+                userDisconnected:false,
+                reauthRequired:false,
+                msClientId:msClient,
+                msAccountId:msAcc.homeAccountId||acc.msAccountId||"",
+                msUsername:msAcc.username||acc.msUsername||acc.email||"",
+              };
+              retryAccountCache.set(acc.id,nextAcc);
+              setEmails(prev=>prev.map(a=>a.id===acc.id?{
+                ...a,
+                token,
+                connected:true,
+                userDisconnected:false,
+                reauthRequired:false,
+                msClientId:msClient,
+                msAccountId:msAcc.homeAccountId||a.msAccountId||"",
+                msUsername:msAcc.username||a.msUsername||a.email||"",
+              }:a));
+            }
+          }else{
+            token=await ensureGoogleToken(acc,{interactive:force});
+            retryAccountCache.set(acc.id,{
+              ...acc,
               token,
+              tokenExpiresAt:new Date(Date.now()+55*60*1000).toISOString(),
               connected:true,
               userDisconnected:false,
               reauthRequired:false,
-              msClientId:msClient,
-              msAccountId:msAcc.homeAccountId||a.msAccountId||"",
-              msUsername:msAcc.username||a.msUsername||a.email||"",
-            }:a));
-          }else{
-            token=await ensureGoogleToken(acc,{interactive:false});
+            });
           }
-          const evidence=await fetchMessageEvidence(provider,token,row.msgId);
+          evidence=await fetchMessageEvidence(provider,token,row.msgId);
           const items=await analyzeMessageEvidence(evidence);
           markProcessedMessage(acc.id,row.msgId);
           setAiPending(prev=>prev.filter(p=>p.id!==row.id));
@@ -2488,17 +2968,35 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
         }catch(err){
           const msg=String(err?.message||"unknown_error");
           const lower=msg.toLowerCase();
-          if(provider==="google"&&(lower.includes("google_reauth_required")||lower.includes("401"))){
-            setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,token:null,connected:true,userDisconnected:false,reauthRequired:true}:a));
-          }else if(lower.includes("401")||lower.includes("not signed in to microsoft")){
-            setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,token:null,connected:true,userDisconnected:false,reauthRequired:true}:a));
+          let cloudQueued=false;
+          let cloudJobId=String(row.cloudJobId||"");
+          if(evidence){
+            try{
+              const cloud=await enqueueCloudRetryFromEvidence({acc,evidence,msgId:row.msgId,provider});
+              cloudQueued=Boolean(cloud?.ok);
+              if(cloudQueued)cloudJobId=String(cloud?.jobId||cloudJobId||"");
+            }catch{}
           }
+          if(provider==="google"&&isGoogleAuthFailure(lower)){
+            retryAccountErrors.set(acc.id,msg);
+            setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,token:null,connected:true,userDisconnected:false,reauthRequired:true}:a));
+          }else if(provider==="microsoft"&&isMicrosoftAuthFailure(lower)){
+            retryAccountErrors.set(acc.id,msg);
+            setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,token:null,connected:true,userDisconnected:false,reauthRequired:true}:a));
+          }else if(force&&isDismissedAuthFlow(lower)){
+            retryAccountErrors.set(acc.id,msg);
+          }
+          const nextRetry=cloudQueued
+            ? new Date(Date.now()+Math.max(AI_RETRY_INTERVAL_MS,2*60*60*1000)).toISOString()
+            : new Date(Date.now()+AI_RETRY_INTERVAL_MS).toISOString();
           setAiPending(prev=>prev.map(p=>p.id===row.id?{
             ...p,
             attempts:(Number(p.attempts)||0)+1,
-            nextRetryAt:new Date(Date.now()+AI_RETRY_INTERVAL_MS).toISOString(),
+            nextRetryAt:nextRetry,
             lastTriedAt:new Date().toISOString(),
-            lastError:msg.slice(0,180),
+            lastError:cloudQueued?"queued_cloud_retry":msg.slice(0,180),
+            cloudQueued:cloudQueued||Boolean(p.cloudQueued),
+            cloudJobId:cloudJobId||p.cloudJobId||p.id,
           }:p));
         }
       }
@@ -2507,11 +3005,13 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
       retryBusyRef.current=false;
       setRetryBusy(false);
       retryLastRunRef.current=Date.now();
+      pullCloudRetryResults({force:false}).catch(()=>{});
     }
   };
 
   useEffect(()=>{
     const runAutoSync=()=>{
+      pullCloudRetryResults({force:false}).catch(()=>{});
       runPendingAiRetry({force:false}).catch(()=>{});
       if(Object.values(syncingIds).some(Boolean))return;
       const now=Date.now();
@@ -2624,8 +3124,8 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
               {(!linked||needsReauth)&&<button className="btn sm pri" disabled={Boolean(connectBusy)} onClick={()=>connectAccount(provider,acc)}>
                 {provider==="google"&&connectingGoogle?"⏳ Connecting Gmail…":provider==="microsoft"&&connectingMicrosoft?"⏳ Connecting Outlook…":needsReauth?`Reconnect ${providerLabel}`:`Connect ${providerLabel}`}
               </button>}
-              {linked&&<button className="btn sm" style={{background:"#1a2234",color:"#818cf8"}} disabled={Boolean(syncingIds[acc.id])} onClick={()=>startSync(acc,false)}>{syncingIds[acc.id]?"⏳ Syncing…":"🔄 Sync"}</button>}
-              {linked&&<button className="btn sm ghost" disabled={Boolean(syncingIds[acc.id])} onClick={()=>setFirstSyncPrompt({accId:acc.id,fromDate:acc.syncFromDate||new Date(Date.now()-180*24*60*60*1000).toISOString().slice(0,10),scanAll:true})}>🧠 Scan From Date</button>}
+              {linked&&!needsReauth&&<button className="btn sm" style={{background:"#1a2234",color:"#818cf8"}} disabled={Boolean(syncingIds[acc.id])} onClick={()=>startSync(acc,false)}>{syncingIds[acc.id]?"⏳ Syncing…":"🔄 Sync"}</button>}
+              {linked&&!needsReauth&&<button className="btn sm ghost" disabled={Boolean(syncingIds[acc.id])} onClick={()=>setFirstSyncPrompt({accId:acc.id,fromDate:acc.syncFromDate||new Date(Date.now()-180*24*60*60*1000).toISOString().slice(0,10),scanAll:true})}>🧠 Scan From Date</button>}
               {linked&&<button className="btn sm dan" onClick={()=>disconnectAccount(acc)}>Disconnect {providerLabel}</button>}
               <button className="btn sm ghost" onClick={()=>setEmails(p=>p.map(a=>a.id===acc.id?{...a,_open:!a._open}:a))}>⚙</button>
               <button className="btn sm ghost" onClick={()=>removeAccount(acc)}>Remove</button>
@@ -2724,7 +3224,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
 
       {firstSyncPrompt&&<EmailFirstSyncModal value={firstSyncPrompt.fromDate} onClose={()=>setFirstSyncPrompt(null)} onStart={(fromDate)=>{
         const acc=emails.find(a=>a.id===firstSyncPrompt.accId);
-        if(acc)runSync(acc,{scanAll:firstSyncPrompt.scanAll,fromDate,markFirstSync:!acc.firstSyncCompleted});
+        if(acc)runSync(acc,{scanAll:firstSyncPrompt.scanAll,fromDate,markFirstSync:!acc.firstSyncCompleted,interactive:true});
         setFirstSyncPrompt(null);
       }}/>}
     </div>
@@ -3182,7 +3682,7 @@ function CloudTab({sbCfg,setSbCfg,syncStatus,lastSync,onSync,onLoad,txns,setTxns
     if(exportPrev.acts)setActs(exportPrev.acts);
     if(exportPrev.cats)setCats(exportPrev.cats);
     if(exportPrev.smsNums)setSmsNums(exportPrev.smsNums);
-    if(exportPrev.emailAccounts)setEmails(exportPrev.emailAccounts.map(a=>({...a,token:undefined})));
+    if(exportPrev.emailAccounts)setEmails(prev=>mergeLoadedEmailsWithLocalTokens(exportPrev.emailAccounts,prev));
     setExportPrev(null);
     alert("✓ Restored from backup.");
   };
@@ -3406,7 +3906,7 @@ function SettingsTab({acts,setActs,cats,setCats,backups,onBackupNow,onRestoreBac
   const[resetText,setResetText]=useState("");
   const[safetyStatus,setSafetyStatus]=useState("");
   const[restoreId,setRestoreId]=useState("");
-  const savedAICfg=LS.get("ledger_ai_cfg",{endpoint:"",secret:"",model:DEFAULT_AI_MODEL});
+  const savedAICfg=loadAICfg();
   const[aiEndpoint,setAiEndpoint]=useState(savedAICfg.endpoint||"");
   const[aiSecret,setAiSecret]=useState(savedAICfg.secret||"");
   const[aiModel,setAiModel]=useState(savedAICfg.model||DEFAULT_AI_MODEL);
@@ -3438,8 +3938,11 @@ function SettingsTab({acts,setActs,cats,setCats,backups,onBackupNow,onRestoreBac
     setAiLoad(false);
   };
   const addCat=n=>{if(!n||!selAct)return;setCats(p=>({...p,[selAct]:[...(p[selAct]||[]).filter(c=>c!==n),n]}));setNewCN("");setNewCD("");setAiSug(null);};
+  useEffect(()=>{
+    saveAICfgToStorage({endpoint:aiEndpoint,secret:aiSecret,model:aiModel});
+  },[aiEndpoint,aiSecret,aiModel]);
   const saveAICfg=()=>{
-    LS.set("ledger_ai_cfg",{endpoint:(aiEndpoint||"").trim(),secret:(aiSecret||"").trim(),model:(aiModel||DEFAULT_AI_MODEL).trim()||DEFAULT_AI_MODEL});
+    saveAICfgToStorage({endpoint:aiEndpoint,secret:aiSecret,model:aiModel});
     setAiStatus("Saved AI backend settings.");
   };
   const testAICfg=async()=>{
@@ -3554,7 +4057,7 @@ function SettingsTab({acts,setActs,cats,setCats,backups,onBackupNow,onRestoreBac
     <div className="card" style={{marginTop:18,border:"1px solid #7f1d1d",background:"#22090b"}}>
       <div style={{fontWeight:700,fontSize:14,color:"#fca5a5",marginBottom:8}}>Danger Zone</div>
       <div style={{fontSize:12,color:"#fda4af",lineHeight:1.8,marginBottom:12}}>
-        Factory Reset clears all transactions, inbox queue, accounts, email connections, and sync caches.
+        Factory Reset clears transactions, inbox queue, accounts, and sync caches. Email connectors, AI backend settings, and OneDrive connector settings are preserved.
       </div>
       <button className="btn dan" onClick={()=>setResetOpen(true)}>Reset Dashboard</button>
     </div>
@@ -3563,7 +4066,7 @@ function SettingsTab({acts,setActs,cats,setCats,backups,onBackupNow,onRestoreBac
         <div className="modal" style={{maxWidth:520}}>
           <MH title="Factory Reset" onClose={()=>{setResetOpen(false);setResetText("");}}/>
           <div style={{fontSize:13,color:"#fca5a5",lineHeight:1.8,marginBottom:10}}>
-            This will permanently remove all current LedgerAI data and disconnect all connected accounts.
+            This will permanently remove current ledger data (transactions, inbox, accounts, sync caches) while keeping connected email/cloud configuration.
           </div>
           <div style={{fontSize:12,color:"#94a3b8",marginBottom:8}}>
             Type <code style={{background:"#0a0c12",padding:"2px 6px",borderRadius:4}}>reset</code> and press <b>Enter</b> to confirm.
