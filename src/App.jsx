@@ -81,6 +81,7 @@ const EMAIL_SYNC_CACHE_VERSION = "v5";
 const BACKUP_KEY = "ledger_backups";
 const MAX_BACKUPS = 50;
 const AI_PENDING_EMAIL_KEY = "ledger_ai_pending_email";
+const AI_PENDING_RESET_KEY = "ledger_ai_pending_reset_at";
 const AI_CLOUD_CLIENT_KEY = "ledger_ai_cloud_client";
 const AI_CLOUD_CLIENT_LEGACY_KEY = "ledger_ai_cloud_client_legacy";
 const AI_RETRY_INTERVAL_MS = 30 * 60 * 1000;
@@ -140,6 +141,23 @@ function normalizeAiPendingEntry(entry={}){
     cloudQueued: Boolean(entry.cloudQueued),
     cloudJobId: String(entry.cloudJobId || id),
   };
+}
+
+function getAiPendingResetAtMs(){
+  const raw=String(LS.get(AI_PENDING_RESET_KEY,"")||"").trim();
+  const ts=Date.parse(raw);
+  return Number.isFinite(ts)?ts:0;
+}
+
+function isAiPendingStaleAfterReset(entry={}){
+  const resetAtMs=getAiPendingResetAtMs();
+  if(!resetAtMs)return false;
+  const candidateTs=
+    Date.parse(String(entry?.completedAt||""))
+    || Date.parse(String(entry?.queuedAt||""))
+    || Date.parse(String(entry?.lastTriedAt||""))
+    || 0;
+  return Number.isFinite(candidateTs)&&candidateTs>0&&candidateTs<resetAtMs;
 }
 
 function defaultCloudCfg(){
@@ -1538,6 +1556,7 @@ export default function App(){
   const canUseAuthBypass=typeof window!=="undefined"&&(window.location.hostname==="localhost"||window.location.hostname==="127.0.0.1");
   const bypassActive=Boolean(authCfg.enabled&&authBypass&&canUseAuthBypass);
   const[backups,setBackups]=useState(()=>LS.get(BACKUP_KEY,[]));
+  const[resetVersion,setResetVersion]=useState(0);
   const[diagnostics,setDiagnostics]=useState(()=>loadDiagnostics());
   const diagnosticsRef=useRef(diagnostics);
 
@@ -1627,6 +1646,7 @@ export default function App(){
   },[addDiagnostic]);
 
   const factoryReset=useCallback(()=>{
+    const resetAt=new Date().toISOString();
     const preservedMsClientId=sanitizeMsClientId((sbCfg?.clientId||DEFAULT_MICROSOFT_CLIENT_ID||"").trim());
     const preservedCloudCfg={
       ...defaultCloudCfg(),
@@ -1646,6 +1666,7 @@ export default function App(){
       const preReset=buildBackupSnapshot("factory-reset-before-clear");
       LS.set("ledger_last_reset_backup",preReset);
       pushBackupSnapshot("factory-reset-before-clear");
+      LS.set(AI_PENDING_RESET_KEY,resetAt);
       [
         "ledger_txns","ledger_acts","ledger_cats","ledger_accs","ledger_inbox",
         "ledger_sms","ledger_lastsync",
@@ -1679,6 +1700,7 @@ export default function App(){
     setEditTx(null);
     setAddType("expense");
     setTab("dashboard");
+    setResetVersion(v=>v+1);
     setAuthBypass(false);
     setBackups(LS.get(BACKUP_KEY,[]));
     addDiagnostic({level:"warn",scope:"app",event:"factory_reset",message:"Factory reset completed. Connectors and AI settings were preserved.",context:{preservedEmails:(preservedEmails||[]).length,preservedCloud:Boolean(preservedCloudCfg?.enabled),preservedAiEndpoint:Boolean(preservedAICfg?.endpoint)}});
@@ -2059,7 +2081,7 @@ export default function App(){
         {tab==="transactions"&&<LedgerTab txns={filtered} filter={filter} setFilter={setFilter} acts={acts} onEdit={tx=>{setEditTx(tx);setAddType(tx.type);setShowAdd(true);}} onDelete={delTx}/>}
         {tab==="inbox"&&<InboxTab inbox={inbox} addInbox={addInbox} acts={acts} cats={cats} onApprove={approveInbox} onEdit={editInbox} onDiscard={discardInbox}/>}
         <div style={{display:tab==="email"?"block":"none"}} aria-hidden={tab!=="email"}>
-          <EmailTab emails={emails} setEmails={setEmails} inbox={inbox} addInbox={addInbox} acts={acts} cats={cats} accs={accs} defaultGoogleClientId={authCfg.googleClientId||DEFAULT_GOOGLE_CLIENT_ID} defaultMicrosoftClientId={sbCfg.clientId||DEFAULT_MICROSOFT_CLIENT_ID||""} addDiagnostic={addDiagnostic}/>
+          <EmailTab emails={emails} setEmails={setEmails} inbox={inbox} addInbox={addInbox} acts={acts} cats={cats} accs={accs} defaultGoogleClientId={authCfg.googleClientId||DEFAULT_GOOGLE_CLIENT_ID} defaultMicrosoftClientId={sbCfg.clientId||DEFAULT_MICROSOFT_CLIENT_ID||""} addDiagnostic={addDiagnostic} resetVersion={resetVersion}/>
         </div>
         {tab==="journal"&&<JournalTab txns={txns}/>}
         {tab==="accounts"&&<AccountsTab accs={accs} setAccs={setAccs} txns={txns} addInbox={addInbox} acts={acts} cats={cats}/>}
@@ -2605,7 +2627,7 @@ function SmsOverviewModal({onClose}){
 }
 
 // ── EMAIL TAB ─────────────────────────────────────────────────────────────────
-function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleClientId,defaultMicrosoftClientId,addDiagnostic=()=>{}}){
+function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleClientId,defaultMicrosoftClientId,addDiagnostic=()=>{},resetVersion=0}){
   const[syncingIds,setSyncingIds]=useState({});
   const[syncProgress,setSyncProgress]=useState({});
   const[logs,setLogs]=useState({});
@@ -2613,7 +2635,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
   const[connectBusy,setConnectBusy]=useState("");
   const[firstSyncPrompt,setFirstSyncPrompt]=useState(null); // {accId,fromDate,scanAll}
   const[pendingView,setPendingView]=useState({open:false,accountId:""});
-  const[aiPending,setAiPending]=useState(()=>((LS.get(AI_PENDING_EMAIL_KEY,[])||[]).map(normalizeAiPendingEntry)).filter(e=>e.accountId&&e.msgId));
+  const[aiPending,setAiPending]=useState(()=>((LS.get(AI_PENDING_EMAIL_KEY,[])||[]).map(normalizeAiPendingEntry)).filter(e=>e.accountId&&e.msgId&&!isAiPendingStaleAfterReset(e)));
   const[retryBusy,setRetryBusy]=useState(false);
   const retryBusyRef=useRef(false);
   const retryLastRunRef=useRef(0);
@@ -2689,6 +2711,21 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
   useEffect(()=>{
     LS.set(AI_PENDING_EMAIL_KEY,aiPending.map(normalizeAiPendingEntry));
   },[aiPending]);
+
+  useEffect(()=>{
+    if(!resetVersion)return;
+    setAiPending([]);
+    setPendingView({open:false,accountId:""});
+    setRetryBusy(false);
+    retryBusyRef.current=false;
+    cloudPullBusyRef.current=false;
+    cloudPullLastRunRef.current=0;
+    retryLastRunRef.current=0;
+    setLogs({});
+    setSyncProgress({});
+    setSyncingIds({});
+    addDiagnostic({level:"info",scope:"email",event:"ai_pending_reset",message:"AI pending queue and email sync state cleared after factory reset."});
+  },[resetVersion,addDiagnostic]);
 
   const markProcessedMessage=(accountId,msgId)=>{
     const key=`proc_${EMAIL_SYNC_CACHE_VERSION}_${accountId}`;
@@ -2788,7 +2825,11 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
           pulledJobs.push(job);
         }
       }
-      const jobs=pulledJobs;
+      const staleJobs=pulledJobs.filter(job=>isAiPendingStaleAfterReset(job));
+      if(staleJobs.length){
+        addDiagnostic({level:"info",scope:"email",event:"cloud_retry_stale_ignored",message:`Ignored ${staleJobs.length} stale cloud AI retry job(s) after factory reset.`,context:{jobs:staleJobs.length}});
+      }
+      const jobs=pulledJobs.filter(job=>!isAiPendingStaleAfterReset(job));
       if(!jobs.length)return;
       addDiagnostic({level:"info",scope:"email",event:"cloud_retry_pull_success",message:`Pulled ${jobs.length} completed cloud AI retry job(s).`,context:{jobs:jobs.length}});
       const rowIds=new Set();
