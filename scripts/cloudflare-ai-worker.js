@@ -23,6 +23,8 @@
 const DEFAULT_MODEL = "gpt-4.1-mini";
 const MAX_TOKENS = 4096;
 const MIN_TOKENS = 64;
+const MAX_AI_UPSTREAM_ATTEMPTS = 4;
+const AI_RETRYABLE_STATUS = new Set([408, 409, 425, 429, 500, 502, 503, 504]);
 const RETRY_PREFIX = "retry:";
 const MAX_RETRY_ATTEMPTS = 10;
 const JOB_TTL_SECONDS = 14 * 24 * 60 * 60;
@@ -139,6 +141,27 @@ function retryDelayMs(attempt) {
   return exp + jitter;
 }
 
+function parseRetryAfterMs(value = "") {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  const seconds = Number(raw);
+  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
+  const ts = Date.parse(raw);
+  if (Number.isFinite(ts)) return Math.max(0, ts - Date.now());
+  return null;
+}
+
+function upstreamRetryDelayMs(attempt, retryAfterMs = null) {
+  if (Number.isFinite(retryAfterMs) && retryAfterMs > 0) return Math.min(retryAfterMs, 15_000);
+  const exp = Math.min(10_000, 700 * 2 ** (Math.max(1, Number(attempt) || 1) - 1));
+  const jitter = Math.floor(Math.random() * 450);
+  return exp + jitter;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function kvMissing(env) {
   return !env.LEDGERAI_RETRY_KV;
 }
@@ -158,69 +181,95 @@ async function callAiProvider(env, payload = {}) {
   }
 
   const useOpenAI = /^(gpt|o[0-9])/i.test(model);
-  let upstream;
-  if (useOpenAI) {
-    if (!env.OPENAI_API_KEY) {
-      const err = new Error(`Missing OPENAI_API_KEY for model ${model}`);
-      err.status = 500;
+  let lastErr = null;
+  for (let attempt = 1; attempt <= MAX_AI_UPSTREAM_ATTEMPTS; attempt += 1) {
+    let upstream;
+    try {
+      if (useOpenAI) {
+        if (!env.OPENAI_API_KEY) {
+          const err = new Error(`Missing OPENAI_API_KEY for model ${model}`);
+          err.status = 500;
+          throw err;
+        }
+        upstream = await fetch("https://api.openai.com/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${env.OPENAI_API_KEY}`,
+          },
+          body: JSON.stringify({
+            model,
+            messages,
+            temperature: 0,
+            max_tokens: maxTokens,
+          }),
+        });
+      } else {
+        if (!env.ANTHROPIC_API_KEY) {
+          const err = new Error(`Missing ANTHROPIC_API_KEY for model ${model}`);
+          err.status = 500;
+          throw err;
+        }
+        upstream = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-api-key": env.ANTHROPIC_API_KEY,
+            "anthropic-version": "2023-06-01",
+          },
+          body: JSON.stringify({
+            model,
+            max_tokens: maxTokens,
+            messages,
+          }),
+        });
+      }
+
+      const raw = await upstream.text();
+      let data = {};
+      try {
+        data = JSON.parse(raw || "{}");
+      } catch {}
+
+      if (!upstream.ok) {
+        const err = new Error(
+          data?.error?.message || data?.message || raw.slice(0, 300) || `Upstream ${upstream.status}`,
+        );
+        err.status = upstream.status;
+        const retryAfterMs = parseRetryAfterMs(upstream.headers.get("retry-after"));
+        if (attempt < MAX_AI_UPSTREAM_ATTEMPTS && AI_RETRYABLE_STATUS.has(upstream.status)) {
+          await sleep(upstreamRetryDelayMs(attempt, retryAfterMs));
+          continue;
+        }
+        throw err;
+      }
+
+      const text = useOpenAI
+        ? data?.choices?.[0]?.message?.content || ""
+        : data?.content?.[0]?.text || "";
+
+      return {
+        text: String(text || ""),
+        usage: data?.usage || null,
+      };
+    } catch (err) {
+      const msg = String(err?.message || "").toLowerCase();
+      const status = Number(err?.status || 0);
+      const retryableNetwork =
+        msg.includes("network")
+        || msg.includes("failed to fetch")
+        || msg.includes("timed out")
+        || msg.includes("temporarily unavailable");
+      lastErr = err;
+      if (attempt < MAX_AI_UPSTREAM_ATTEMPTS && (AI_RETRYABLE_STATUS.has(status) || retryableNetwork)) {
+        await sleep(upstreamRetryDelayMs(attempt));
+        continue;
+      }
       throw err;
     }
-    upstream = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${env.OPENAI_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model,
-        messages,
-        temperature: 0,
-        max_tokens: maxTokens,
-      }),
-    });
-  } else {
-    if (!env.ANTHROPIC_API_KEY) {
-      const err = new Error(`Missing ANTHROPIC_API_KEY for model ${model}`);
-      err.status = 500;
-      throw err;
-    }
-    upstream = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": env.ANTHROPIC_API_KEY,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model,
-        max_tokens: maxTokens,
-        messages,
-      }),
-    });
   }
 
-  const raw = await upstream.text();
-  let data = {};
-  try {
-    data = JSON.parse(raw || "{}");
-  } catch {}
-
-  if (!upstream.ok) {
-    const err = new Error(
-      data?.error?.message || data?.message || raw.slice(0, 300) || `Upstream ${upstream.status}`,
-    );
-    err.status = upstream.status;
-    throw err;
-  }
-
-  const text = useOpenAI
-    ? data?.choices?.[0]?.message?.content || ""
-    : data?.content?.[0]?.text || "";
-
-  return {
-    text: String(text || ""),
-    usage: data?.usage || null,
-  };
+  throw lastErr || new Error("AI upstream failed");
 }
 
 async function fetchFxRate(from = "", to = "", date = "") {

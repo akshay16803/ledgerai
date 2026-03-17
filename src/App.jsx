@@ -1117,6 +1117,9 @@ function friendlyMicrosoftAuthError(err){
   if(msg.includes("aadsts700016")||msg.includes("invalid_client")){
     return "Azure client ID is invalid for this app or tenant. Recheck VITE_MICROSOFT_CLIENT_ID / Cloud connector client ID.";
   }
+  if(msg.includes("login_required")||msg.includes("interaction_required")||msg.includes("consent_required")){
+    return "Microsoft needs an interactive sign-in for this browser session. Click Connect Outlook once, complete the popup, and sync will resume.";
+  }
   if(msg.includes("user_cancelled")||msg.includes("popup_closed")||msg.includes("popup_window_error")){
     return "Microsoft sign-in was cancelled.";
   }
@@ -1194,35 +1197,53 @@ async function callAI(messages,max_tokens=800){
   const secret=cfg.secret;
   const model=cfg.model;
   if(!endpoint)throw new Error("AI backend not configured. Open Settings → AI Backend and set endpoint.");
-  const ctrl=new AbortController();
-  const timer=setTimeout(()=>ctrl.abort(),25000);
-  try{
-    const r=await fetch(endpoint,{method:"POST",headers:{"Content-Type":"application/json",...(secret?{"x-ledgerai-key":secret}:{})},body:JSON.stringify({model,max_tokens,messages}),signal:ctrl.signal});
-    const txt=await r.text();
-    let d={};
-    try{d=JSON.parse(txt||"{}");}catch{}
-    if(!r.ok){
-      const msg=d?.error?.message||d?.message||txt?.slice?.(0,180)||`HTTP ${r.status}`;
-      throw new Error(`AI ${r.status}: ${msg}`);
+  let lastErr=null;
+  for(let attempt=1;attempt<=3;attempt++){
+    const ctrl=new AbortController();
+    const timer=setTimeout(()=>ctrl.abort(),25000);
+    try{
+      const r=await fetch(endpoint,{method:"POST",headers:{"Content-Type":"application/json",...(secret?{"x-ledgerai-key":secret}:{})},body:JSON.stringify({model,max_tokens,messages}),signal:ctrl.signal});
+      const txt=await r.text();
+      let d={};
+      try{d=JSON.parse(txt||"{}");}catch{}
+      if(!r.ok){
+        const msg=d?.error?.message||d?.message||txt?.slice?.(0,180)||`HTTP ${r.status}`;
+        const err=new Error(`AI ${r.status}: ${msg}`);
+        err.status=r.status;
+        if(attempt<3&&RETRYABLE_HTTP_STATUS.has(r.status)){
+          await sleep(nextRetryDelay(attempt,parseRetryAfterMs(r.headers.get("retry-after"))));
+          continue;
+        }
+        throw err;
+      }
+      const out=
+        d.text
+        ?? d.output_text
+        ?? d.output
+        ?? d.content?.[0]?.text
+        ?? d.content
+        ?? d.result?.content?.[0]?.text
+        ?? d.result?.output_text
+        ?? "";
+      const normalized=normalizeAIText(out);
+      if(typeof normalized!=="string")throw new Error("Invalid AI response format");
+      return normalized;
+    }catch(e){
+      const timedOut=e?.name==="AbortError";
+      const msg=String(e?.message||"").toLowerCase();
+      const status=Number(e?.status||0);
+      const retryable=timedOut||RETRYABLE_HTTP_STATUS.has(status)||msg.includes("failed to fetch")||msg.includes("network");
+      lastErr=timedOut?new Error("AI request timed out"):e;
+      if(attempt<3&&retryable){
+        await sleep(nextRetryDelay(attempt));
+        continue;
+      }
+      throw lastErr;
+    }finally{
+      clearTimeout(timer);
     }
-    const out=
-      d.text
-      ?? d.output_text
-      ?? d.output
-      ?? d.content?.[0]?.text
-      ?? d.content
-      ?? d.result?.content?.[0]?.text
-      ?? d.result?.output_text
-      ?? "";
-    const normalized=normalizeAIText(out);
-    if(typeof normalized!=="string")throw new Error("Invalid AI response format");
-    return normalized;
-  }catch(e){
-    if(e?.name==="AbortError")throw new Error("AI request timed out");
-    throw e;
-  }finally{
-    clearTimeout(timer);
   }
+  throw lastErr||new Error("AI request failed");
 }
 async function aiClassify(text,acts,cats,type="expense"){
   const c=Object.entries(cats).map(([a,cs])=>`${a}: ${cs.join(", ")}`).join("\n");
@@ -1551,8 +1572,9 @@ function buildReconciliationResult(statementRows=[],ledgerRows=[]){
 // ── ONEDRIVE / MICROSOFT GRAPH HELPERS ────────────────────────────────────────
 const GRAPH = "https://graph.microsoft.com/v1.0";
 const OD_FILE = "LedgerAI/ledgerai-data.json";         // saved at OneDrive root/LedgerAI/
-const OD_SCOPES = ["Files.ReadWrite", "User.Read"];
-const MS_MAIL_SCOPES = ["Mail.Read", "User.Read"];
+const MS_AUTH_SCOPES = ["openid", "profile", "offline_access"];
+const OD_SCOPES = ["Files.ReadWrite", "User.Read", ...MS_AUTH_SCOPES];
+const MS_MAIL_SCOPES = ["Mail.Read", "User.Read", ...MS_AUTH_SCOPES];
 const MSAL_CDN = "https://alcdn.msauth.net/browser/2.38.2/js/msal-browser.min.js";
 const MS_AUTHORITY = "https://login.microsoftonline.com/consumers";
 
@@ -1683,10 +1705,10 @@ async function msLoginMail(clientId){
   if(!account)throw new Error("Microsoft account not found after login");
   try{
     const tok=await msal.acquireTokenSilent({scopes:MS_MAIL_SCOPES,account});
-    return{account,accessToken:tok.accessToken};
+    return{account:tok.account||account,accessToken:tok.accessToken,expiresOn:tok.expiresOn};
   }catch{
     const tok=await runMsalInteractive(msal, clientId, () => msal.acquireTokenPopup({scopes:MS_MAIL_SCOPES,account}));
-    return{account,accessToken:tok.accessToken};
+    return{account:tok.account||account,accessToken:tok.accessToken,expiresOn:tok.expiresOn};
   }
 }
 
@@ -1697,11 +1719,11 @@ async function msGetMailToken(clientId,accountHint,opts={}){
   const interactive=opts?.interactive!==false;
   try{
     const tok=await msal.acquireTokenSilent({scopes:MS_MAIL_SCOPES,account});
-    return{account,accessToken:tok.accessToken};
+    return{account:tok.account||account,accessToken:tok.accessToken,expiresOn:tok.expiresOn};
   }catch(err){
     if(!interactive)throw err;
     const tok=await runMsalInteractive(msal, clientId, () => msal.acquireTokenPopup({scopes:MS_MAIL_SCOPES,account,prompt:"select_account"}));
-    return{account,accessToken:tok.accessToken};
+    return{account:tok.account||account,accessToken:tok.accessToken,expiresOn:tok.expiresOn};
   }
 }
 
@@ -3223,6 +3245,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
   const cloudPullBusyRef=useRef(false);
   const cloudPullLastRunRef=useRef(0);
   const cloudRetryUnsupportedRef=useRef(false);
+  const batchSyncBusyRef=useRef(false);
   const log=(id,msg)=>setLogs(p=>({...p,[id]:msg}));
   const setAccountIssue=(accId,message="",patch={})=>{
     const detail=redactSensitiveText(String(message||"")).slice(0,180);
@@ -3501,6 +3524,22 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
     return expMs-Date.now()>60*1000;
   };
 
+  const microsoftTokenExpiryIso=(resp={})=>{
+    const expRaw=resp?.expiresOn;
+    const expDate=expRaw instanceof Date?expRaw:(expRaw?new Date(expRaw):null);
+    if(expDate&&!Number.isNaN(expDate.getTime()))return expDate.toISOString();
+    return new Date(Date.now()+55*60*1000).toISOString();
+  };
+
+  const hasUsableMicrosoftToken=(acc={})=>{
+    const token=String(acc?.token||"").trim();
+    if(!token)return false;
+    const expMs=Date.parse(acc?.tokenExpiresAt||"");
+    if(Number.isFinite(expMs))return expMs-Date.now()>60*1000;
+    const authMs=Date.parse(acc?.lastAuthAt||"");
+    return Number.isFinite(authMs)&&Date.now()-authMs<45*60*1000;
+  };
+
   const isGoogleAuthFailure=(msg="")=>{
     const lower=String(msg||"").toLowerCase();
     if(lower.includes("google_reauth_required"))return true;
@@ -3510,9 +3549,21 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
     return false;
   };
 
+  const isMicrosoftSilentAuthUnavailable=(msg="")=>{
+    const lower=String(msg||"").toLowerCase();
+    return lower.includes("login_required")
+      || lower.includes("interaction_required")
+      || lower.includes("consent_required")
+      || lower.includes("silent authentication was denied")
+      || lower.includes("no_tokens_found")
+      || lower.includes("user_login_error")
+      || lower.includes("token renewal operation failed");
+  };
+
   const isMicrosoftAuthFailure=(msg="")=>{
     const lower=String(msg||"").toLowerCase();
     if(lower.includes("not signed in to microsoft"))return true;
+    if(isMicrosoftSilentAuthUnavailable(lower))return true;
     if((lower.includes("microsoft")||lower.includes("outlook")||lower.includes("graph.microsoft.com"))&&(lower.includes("401")||lower.includes("403")||lower.includes("unauthorized")||lower.includes("forbidden")))return true;
     return false;
   };
@@ -3665,15 +3716,15 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
         const ix=existing
           ?next.findIndex(a=>a.id===existing.id)
           :next.findIndex(a=>providerOf(a)==="microsoft"&&(a.email||"").toLowerCase()===mail.toLowerCase());
-        const base=hydrateEmailAccount({id:gid(),provider:"microsoft",label:mail.split("@")[0],email:mail,syncQuery:"",maxEmails:100,autoPost:false,autoSyncHourly:true,enabled:true,firstSyncCompleted:false,syncFromDate:"",msClientId:msClient,msAccountId:account.homeAccountId||"",msUsername:account.username||mail});
-        if(ix>=0){
-          const cur=hydrateEmailAccount(next[ix]);
-          next[ix]={...cur,provider:"microsoft",email:mail,token:login.accessToken,connected:true,userDisconnected:false,reauthRequired:false,enabled:true,autoSyncHourly:cur.autoSyncHourly!==false,msClientId:msClient,msAccountId:account.homeAccountId||cur.msAccountId||"",msUsername:account.username||cur.msUsername||mail,lastAuthAt:new Date().toISOString(),lastError:"",lastErrorAt:""};
-        }else{
-          next.unshift({...base,token:login.accessToken,connected:true,userDisconnected:false,reauthRequired:false,lastAuthAt:new Date().toISOString(),lastError:"",lastErrorAt:""});
-        }
-        return next;
-      });
+      const base=hydrateEmailAccount({id:gid(),provider:"microsoft",label:mail.split("@")[0],email:mail,syncQuery:"",maxEmails:100,autoPost:false,autoSyncHourly:true,enabled:true,firstSyncCompleted:false,syncFromDate:"",msClientId:msClient,msAccountId:account.homeAccountId||"",msUsername:account.username||mail});
+      if(ix>=0){
+        const cur=hydrateEmailAccount(next[ix]);
+        next[ix]={...cur,provider:"microsoft",email:mail,token:login.accessToken,tokenExpiresAt:microsoftTokenExpiryIso(login),connected:true,userDisconnected:false,reauthRequired:false,enabled:true,autoSyncHourly:cur.autoSyncHourly!==false,msClientId:msClient,msAccountId:account.homeAccountId||cur.msAccountId||"",msUsername:account.username||cur.msUsername||mail,lastAuthAt:new Date().toISOString(),lastError:"",lastErrorAt:""};
+      }else{
+        next.unshift({...base,token:login.accessToken,tokenExpiresAt:microsoftTokenExpiryIso(login),connected:true,userDisconnected:false,reauthRequired:false,lastAuthAt:new Date().toISOString(),lastError:"",lastErrorAt:""});
+      }
+      return next;
+    });
       setToast(`✅ Outlook connected: ${mail}`);
       addDiagnostic({level:"info",scope:"auth",event:"outlook_connect_success",message:"Outlook account connected.",provider:"microsoft",context:{email:mail,existing:Boolean(existing?.id)}});
     }catch(e){
@@ -3816,17 +3867,33 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
       let token=acc.token||"";
       let messages=[];
       if(provider==="microsoft"){
-        let auth;
-        try{
-          auth=await msGetMailToken(msClient,{homeAccountId:acc.msAccountId,username:acc.msUsername||acc.email},{interactive});
-        }catch(msAuthErr){
-          if(!interactive)throw msAuthErr;
-          const login=await msLoginMail(msClient);
-          auth={account:login.account||{},accessToken:login.accessToken};
+        if(hasUsableMicrosoftToken(acc)){
+          token=String(acc.token||"").trim();
+        }else{
+          let auth;
+          try{
+            auth=await msGetMailToken(msClient,{homeAccountId:acc.msAccountId,username:acc.msUsername||acc.email},{interactive});
+          }catch(msAuthErr){
+            if(!interactive)throw msAuthErr;
+            auth=await msLoginMail(msClient);
+          }
+          token=auth.accessToken;
+          const msAcc=auth.account||{};
+          setEmails(prev=>prev.map(a=>a.id===acc.id?{
+            ...a,
+            token,
+            tokenExpiresAt:microsoftTokenExpiryIso(auth),
+            connected:true,
+            userDisconnected:false,
+            reauthRequired:false,
+            msClientId:msClient,
+            msAccountId:msAcc.homeAccountId||a.msAccountId||"",
+            msUsername:msAcc.username||a.msUsername||a.email||"",
+            lastAuthAt:new Date().toISOString(),
+            lastError:"",
+            lastErrorAt:"",
+          }:a));
         }
-        token=auth.accessToken;
-        const msAcc=auth.account||{};
-        setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,token,connected:true,userDisconnected:false,reauthRequired:false,msClientId:msClient,msAccountId:msAcc.homeAccountId||a.msAccountId||"",msUsername:msAcc.username||a.msUsername||a.email||""}:a));
         log(acc.id,scanAll?`Scanning Outlook mailbox from ${fromDate||"beginning"}…`:"Fetching Outlook email list…");
         messages=await msListMessages(token,requestedMax,fromDate);
       }else{
@@ -3944,7 +4011,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
           flushProgress();
         }
       };
-      const maxParallel=Math.max(1,Math.min(provider==="microsoft"?6:5,toProcess.length));
+      const maxParallel=Math.max(1,Math.min(scanAll?2:(provider==="microsoft"?2:3),toProcess.length));
       let nextIndex=0;
       const worker=async()=>{
         while(true){
@@ -4006,9 +4073,14 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
     }catch(e){
       const msg=String(e.message||"");
       if(provider==="google"&&msg.includes("google_silent_refresh_unavailable")){
-        log(acc.id,"ℹ Gmail auto-sync is paused until browser allows a silent token refresh. Keep this tab active or click Sync once.");
-        setAccountIssue(acc.id,"Google silent refresh unavailable. Manual reconnect may be needed.");
+        log(acc.id,"ℹ Gmail auto-sync is paused until the browser allows a token refresh. Keep this tab active and click Sync once if needed.");
+        clearAccountIssue(acc.id,{reauthRequired:false});
         addDiagnostic({level:"warn",scope:"email",event:"google_silent_refresh_unavailable",message:"Google silent refresh is unavailable for background sync.",accountId:acc.id,provider,context:{error:e}});
+        setProgress(acc.id,{phase:"done",pending:0});
+      }else if(provider==="microsoft"&&!interactive&&isMicrosoftSilentAuthUnavailable(msg)){
+        log(acc.id,"ℹ Outlook auto-sync is paused until Microsoft allows an interactive refresh. Keep this tab active and click Sync once if needed.");
+        clearAccountIssue(acc.id,{reauthRequired:false});
+        addDiagnostic({level:"warn",scope:"email",event:"outlook_silent_refresh_unavailable",message:"Microsoft silent refresh is unavailable for background sync.",accountId:acc.id,provider,context:{error:e}});
         setProgress(acc.id,{phase:"done",pending:0});
       }else if(msg.includes("ai_config_error")){
         const detail=msg.replace("ai_config_error:","").trim();
@@ -4034,6 +4106,19 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
       }
     }
     setSyncing(acc.id,false);
+  };
+
+  const runSyncBatch=async(accounts=[],buildOpts=()=>({}))=>{
+    const list=(accounts||[]).map(hydrateEmailAccount).filter(acc=>acc?.id);
+    if(!list.length||batchSyncBusyRef.current)return;
+    batchSyncBusyRef.current=true;
+    try{
+      for(const acc of list){
+        await runSync(acc,buildOpts(acc)||{});
+      }
+    }finally{
+      batchSyncBusyRef.current=false;
+    }
   };
 
   const startSync=(acc,scanAll=false)=>{
@@ -4102,28 +4187,34 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
         let evidence=null;
         try{
           let token=acc.token||"";
-          if(provider==="microsoft"){
-            const msClient=sanitizeMsClientId((acc.msClientId||microsoftClientId||"").trim());
-            if(!msClient)throw new Error("microsoft_client_missing");
-            token=String(retryAccountCache.get(acc.id)?.token||"").trim();
-            if(!token){
-              const auth=await msGetMailToken(msClient,{homeAccountId:acc.msAccountId,username:acc.msUsername||acc.email},{interactive:force});
-              token=auth.accessToken;
-              const msAcc=auth.account||{};
-              const nextAcc={
-                ...acc,
-                token,
-                connected:true,
-                userDisconnected:false,
-                reauthRequired:false,
-                msClientId:msClient,
-                msAccountId:msAcc.homeAccountId||acc.msAccountId||"",
+        if(provider==="microsoft"){
+          const msClient=sanitizeMsClientId((acc.msClientId||microsoftClientId||"").trim());
+          if(!msClient)throw new Error("microsoft_client_missing");
+          token=String(retryAccountCache.get(acc.id)?.token||"").trim();
+          const cachedAcc=retryAccountCache.get(acc.id)||acc;
+          if(!token&&hasUsableMicrosoftToken(cachedAcc)){
+            token=String(cachedAcc.token||"").trim();
+          }
+          if(!token){
+            const auth=await msGetMailToken(msClient,{homeAccountId:acc.msAccountId,username:acc.msUsername||acc.email},{interactive:force});
+            token=auth.accessToken;
+            const msAcc=auth.account||{};
+            const nextAcc={
+              ...acc,
+              token,
+              tokenExpiresAt:microsoftTokenExpiryIso(auth),
+              connected:true,
+              userDisconnected:false,
+              reauthRequired:false,
+              msClientId:msClient,
+              msAccountId:msAcc.homeAccountId||acc.msAccountId||"",
                 msUsername:msAcc.username||acc.msUsername||acc.email||"",
               };
               retryAccountCache.set(acc.id,nextAcc);
               setEmails(prev=>prev.map(a=>a.id===acc.id?{
                 ...a,
                 token,
+                tokenExpiresAt:microsoftTokenExpiryIso(auth),
                 connected:true,
                 userDisconnected:false,
                 reauthRequired:false,
@@ -4178,7 +4269,9 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
               if(cloudQueued)cloudJobId=String(cloud?.jobId||cloudJobId||"");
             }catch{}
           }
-          if(provider==="google"&&isGoogleAuthFailure(lower)){
+          if(provider==="microsoft"&&!force&&isMicrosoftSilentAuthUnavailable(lower)){
+            clearAccountIssue(acc.id,{reauthRequired:false});
+          }else if(provider==="google"&&isGoogleAuthFailure(lower)){
             retryAccountErrors.set(acc.id,msg);
             setAccountIssue(acc.id,"Google session needs refresh.",{token:null,connected:true,userDisconnected:false,reauthRequired:true});
           }else if(provider==="microsoft"&&isMicrosoftAuthFailure(lower)){
@@ -4212,10 +4305,11 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
   };
 
   useEffect(()=>{
-    const runAutoSync=()=>{
+    const runAutoSync=async()=>{
+      if(document.visibilityState!=="visible")return;
       pullCloudRetryResults({force:false}).catch(()=>{});
       runPendingAiRetry({force:false}).catch(()=>{});
-      if(Object.values(syncingIds).some(Boolean))return;
+      if(Object.values(syncingIds).some(Boolean)||batchSyncBusyRef.current)return;
       const now=Date.now();
       const due=emails
         .map(hydrateEmailAccount)
@@ -4228,17 +4322,19 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
           return (now-last)>=60*60*1000;
         });
       if(!due.length)return;
+      const stamp=new Date().toISOString();
+      const dueIds=new Set(due.map(acc=>acc.id));
       due.forEach(acc=>{
         log(acc.id,"⏱ Hourly auto-sync started (new emails only)...");
-        setEmails(prev=>prev.map(a=>a.id===acc.id?{...a,lastAutoSyncAt:new Date().toISOString()}:a));
-        runSync(acc,{scanAll:false,auto:true,interactive:false,silent:true});
       });
+      setEmails(prev=>prev.map(a=>dueIds.has(a.id)?{...a,lastAutoSyncAt:stamp}:a));
+      await runSyncBatch(due,()=>({scanAll:false,auto:true,interactive:false,silent:true}));
     };
     const onVisible=()=>{
-      if(document.visibilityState==="visible")runAutoSync();
+      if(document.visibilityState==="visible")runAutoSync().catch(()=>{});
     };
     const t=setInterval(runAutoSync,60*1000);
-    const kick=setTimeout(runAutoSync,3000);
+    const kick=setTimeout(()=>{runAutoSync().catch(()=>{});},3000);
     window.addEventListener("focus",runAutoSync);
     window.addEventListener("online",runAutoSync);
     document.addEventListener("visibilitychange",onVisible);
@@ -4277,7 +4373,7 @@ function EmailTab({emails,setEmails,inbox,addInbox,acts,cats,accs,defaultGoogleC
           <div style={{display:"flex",gap:8,flexWrap:"wrap",justifyContent:"flex-end"}}>
             {totalPendingAi>0&&<button className="btn sm ghost" disabled={Boolean(connectBusy)} onClick={()=>setPendingView({open:true,accountId:""})}>📋 View AI Pending</button>}
             {totalPendingAi>0&&<button className="btn sm ghost" disabled={retryBusy||Boolean(connectBusy)} onClick={()=>runPendingAiRetry({force:true})}>{retryBusy?"⏳ Retrying AI…":"🤖 Retry AI Pending"}</button>}
-            {syncableAccounts.length>0&&<button className="btn sm pri" disabled={anySyncing||Boolean(connectBusy)} onClick={()=>syncableAccounts.forEach(a=>startSync(a,false))}>{anySyncing?"⏳ Syncing…":"🔄 Sync All Accounts"}</button>}
+            {syncableAccounts.length>0&&<button className="btn sm pri" disabled={anySyncing||Boolean(connectBusy)||batchSyncBusyRef.current} onClick={()=>runSyncBatch(syncableAccounts,()=>({scanAll:false,interactive:true}))}>{anySyncing||batchSyncBusyRef.current?"⏳ Syncing…":"🔄 Sync All Accounts"}</button>}
           </div>
         </R>
       </div>
