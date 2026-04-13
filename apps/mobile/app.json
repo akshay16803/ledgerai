@@ -1,0 +1,39 @@
+{
+  "expo": {
+    "name": "LedgerAI",
+    "slug": "ledgerai-mobile",
+    "version": "1.0.0",
+    "scheme": [
+      "ledgerai",
+      "com.ledgerai.mobile"
+    ],
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#070b14"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.ledgerai.mobile"
+    },
+    "android": {
+      "package": "com.ledgerai.mobile"
+    },
+    "plugins": [
+      "expo-secure-store",
+      "expo-web-browser"
+    ],
+    "extra": {
+      "supabaseUrl": "",
+      "supabaseAnonKey": "",
+      "googleIosClientId": "",
+      "googleAndroidClientId": "",
+      "microsoftClientId": "",
+      "microsoftTenant": "consumers"
+    }
+  }
+}

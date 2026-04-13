@@ -1,0 +1,137 @@
+{
+  "project_name": "Ledger AI",
+  "domain": "Accounting / Financial SaaS",
+  "theme": "Light",
+  "archetype": "1 (Organic & Earthy)",
+  "core_philosophy": "Botanical Finance. Bringing warmth, trust, and calm to a typically sterile, high-anxiety domain. Mixes old-money elegance (serif fonts) with modern AI precision (mono-spaced data).",
+  "colors": {
+    "background": {
+      "primary": "#F9F8F6",
+      "secondary": "#F2EBE5",
+      "tertiary": "#EAE4DD"
+    },
+    "text": {
+      "primary": "#1A362D",
+      "secondary": "#4A5D55",
+      "muted": "#7A8A82"
+    },
+    "brand": {
+      "primary": "#1A362D",
+      "accent_1": "#C26D5C",
+      "accent_2": "#DDA77B",
+      "accent_3": "#8E9E82"
+    },
+    "status": {
+      "success": "#3A5C4A",
+      "warning": "#C28C3C",
+      "error": "#96453A",
+      "info": "#4A6E7D"
+    },
+    "borders": {
+      "subtle": "rgba(26, 54, 45, 0.08)",
+      "strong": "rgba(26, 54, 45, 0.20)"
+    }
+  },
+  "typography": {
+    "fonts": {
+      "headings": "'Playfair Display', serif",
+      "body": "'Manrope', sans-serif",
+      "data_and_mono": "'IBM Plex Mono', monospace"
+    },
+    "scales": {
+      "h1": "text-5xl sm:text-6xl tracking-tight leading-none font-medium",
+      "h2": "text-3xl sm:text-4xl tracking-tight leading-tight",
+      "h3": "text-2xl tracking-tight",
+      "h4": "text-xl",
+      "body": "text-base leading-relaxed",
+      "small": "text-sm",
+      "overline": "text-xs uppercase tracking-[0.2em] font-semibold"
+    },
+    "rules": [
+      "Headings must use Playfair Display for an elegant, established 'Old Money Tech' aesthetic.",
+      "All tabular data, ledger entries, amounts, and code blocks must use IBM Plex Mono to align decimals and look highly technical.",
+      "Never use Inter or generic sans-serif for headings."
+    ]
+  },
+  "layout_and_spacing": {
+    "spacing_scale": {
+      "generous": "p-12 md:p-16 lg:p-24",
+      "standard": "p-6 md:p-8",
+      "tight": "p-4"
+    },
+    "marketing_pages": {
+      "grid_mode": "TETRIS",
+      "rules": "Use grid-cols-1 md:grid-cols-12 with wide gaps (gap-8 to gap-12). Embrace asymmetry. Never perfectly fill the grid. Use empty spans for breathing room."
+    },
+    "dashboard_pages": {
+      "grid_mode": "CONTROL_ROOM",
+      "rules": "High density, flat cardless rectangles, grid-cols-1 md:grid-cols-4. Strict hierarchy. Use sharp edges or max 8px radius."
+    }
+  },
+  "components_and_surfaces": {
+    "buttons": {
+      "primary": "bg-[#1A362D] text-white hover:bg-[#2A463D] transition-colors duration-200 rounded-sm px-6 py-3 font-medium",
+      "secondary": "bg-transparent border border-[#1A362D] text-[#1A362D] hover:bg-[#F2EBE5] transition-colors duration-200 rounded-sm px-6 py-3 font-medium"
+    },
+    "cards": {
+      "marketing": "No Shadcn cards. Raw div, pure Tailwind, bg-white or bg-[#F2EBE5], rounded-none or rounded-sm, p-8 or p-12, subtle ambient shadow.",
+      "dashboard": "Flat background, 1px solid subtle border (#1A362D opacity 10%), no shadow. On hover, translate-y-[-2px] with subtle shadow."
+    },
+    "navigation": {
+      "style": "Glassmorphism for marketing (Crystal Glass: bg-[#F9F8F6]/80 backdrop-blur-xl border-b border-[#1A362D]/10). Solid for dashboard."
+    },
+    "forms": {
+      "style": "Shadcn components heavily customized. Use IBM Plex Mono for input values (like amounts). Borders must match our 'subtle' border color. Focus rings in #8E9E82."
+    }
+  },
+  "motion_and_interactions": {
+    "hover_states": "Buttons must explicitly change bg and text color. Links must have an underline animation or color shift.",
+    "transitions": "Use specific properties: transition: transform 0.2s ease, opacity 0.2s ease.",
+    "accessibility": "Respect prefers-reduced-motion. Ensure focus states have contrast. Add aria-hidden='true' to purely decorative animations."
+  },
+  "testing_requirements": {
+    "data_testid": "All interactive and key informational elements MUST include a data-testid attribute in kebab-case (e.g., data-testid='login-button', data-testid='ledger-balance-amount')."
+  },
+  "media_and_assets": {
+    "icons_library": "@phosphor-icons/react (Duotone weight for marketing, Regular/Bold for dashboards)",
+    "images": {
+      "hero_background": {
+        "url": "https://images.pexels.com/photos/27519595/pexels-photo-27519595.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "description": "Minimalist modern adobe architecture with a clear blue sky, used as an earthy, grounding hero background with a light overlay."
+      },
+      "abstract_art_1": {
+        "url": "https://images.pexels.com/photos/32141332/pexels-photo-32141332.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "description": "Fluid art with sage green and white patterns, resembling organic textures. Great for feature section backgrounds."
+      },
+      "workspace_lifestyle": {
+        "url": "https://images.pexels.com/photos/7657979/pexels-photo-7657979.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "description": "Cozy coffee mug, notebook, and pencil on a clean minimalist desk. Represents calm productivity."
+      },
+      "testimonial_portrait_1": {
+        "url": "https://images.unsplash.com/photo-1758887261865-a2b89c0f7ac5?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1NzZ8MHwxfHNlYXJjaHwxfHxwcm9mZXNzaW9uYWwlMjBidXNpbmVzcyUyMG93bmVyJTIwcG9ydHJhaXR8ZW58MHx8fHwxNzc1MTYxNzYxfDA&ixlib=rb-4.1.0&q=85",
+        "description": "Professional business owner portrait for testimonials."
+      },
+      "testimonial_portrait_2": {
+        "url": "https://images.pexels.com/photos/7413964/pexels-photo-7413964.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "description": "Businessman sitting confidently on a leather couch, for high-end client testimonials."
+      },
+      "sponsor_logo_1": {
+        "url": "https://images.unsplash.com/photo-1618242579640-44870fefec88?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NzZ8MHwxfHNlYXJjaHwyfHxzcG9uc29yJTIwbG9nbyUyMG1pbmltYWx8ZW58MHx8fHwxNzc1MTYxNzYxfDA&ixlib=rb-4.1.0&q=85",
+        "description": "Minimal sponsor logo placeholder."
+      },
+      "sponsor_logo_2": {
+        "url": "https://images.unsplash.com/photo-1618243329711-359c196ffb38?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NzZ8MHwxfHNlYXJjaHwzfHxzcG9uc29yJTIwbG9nbyUyMG1pbmltYWx8ZW58MHx8fHwxNzc1MTYxNzYxfDA&ixlib=rb-4.1.0&q=85",
+        "description": "Minimal sponsor logo placeholder."
+      }
+    }
+  },
+  "instructions_to_main_agent": [
+    "Install and configure @phosphor-icons/react.",
+    "Use custom layout and Shadcn primitives.",
+    "Strictly follow the color palette provided.",
+    "Do not use generic Inter font for headings; implement Playfair Display via Google Fonts and map it to Tailwind.",
+    "Implement 'data-testid' on all interactive elements across the app.",
+    "Never use placeholder URLs; rely strictly on the images provided in this JSON.",
+    "Design the dashboard for data density, using sharp grid structures and borders."
+  ]
+}
