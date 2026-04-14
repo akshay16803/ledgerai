@@ -3222,66 +3222,80 @@ async def auto_retry_loop():
 
 
 async def _run_pending_processing():
-    """Fetch new emails from connected accounts and process all pending emails/SMS."""
+    """Fetch new emails from all connected accounts in parallel and process pending emails/SMS."""
     try:
-        # Gmail: fetch new emails + process pending
+        tasks = []
+
+        # Gmail: gather all sync tasks
         configs = await db.email_sync_config.find({"syncing": False}, {"_id": 0}).to_list(100)
         for config in configs:
             user_id = config["user_id"]
             gmail_email = config["gmail_email"]
             sync_date = config.get("sync_from_date", "")
-
             if not sync_date:
                 continue
-
-            # Check if Gmail is still connected
             token_doc = await db.gmail_tokens.find_one(
                 {"user_id": user_id, "gmail_email": gmail_email, "connected": True}, {"_id": 0}
             )
             if not token_doc:
                 continue
+            tasks.append(_safe_sync_gmail(user_id, gmail_email, sync_date))
 
-            # Fetch new emails since original sync date (duplicates are skipped automatically)
-            try:
-                logger.info(f"Auto-sync: Fetching new emails for {user_id}/{gmail_email}")
-                await sync_emails_background(user_id, gmail_email, sync_date)
-            except Exception as e:
-                logger.error(f"Auto-sync Gmail failed for {user_id}/{gmail_email}: {e}")
-
-        # Outlook: fetch new emails + process pending
+        # Outlook: gather all sync tasks
         outlook_configs = await db.outlook_sync_config.find({"syncing": False}, {"_id": 0}).to_list(100)
         for config in outlook_configs:
             user_id = config["user_id"]
             outlook_email = config["outlook_email"]
             sync_date = config.get("sync_from_date", "")
-
             if not sync_date:
                 continue
-
             token_doc = await db.outlook_tokens.find_one(
                 {"user_id": user_id, "outlook_email": outlook_email, "connected": True}, {"_id": 0}
             )
             if not token_doc:
                 continue
+            tasks.append(_safe_sync_outlook(user_id, outlook_email, sync_date))
 
-            try:
-                logger.info(f"Auto-sync: Fetching new Outlook emails for {user_id}/{outlook_email}")
-                await sync_outlook_emails_background(user_id, outlook_email, sync_date)
-            except Exception as e:
-                logger.error(f"Auto-sync Outlook failed for {user_id}/{outlook_email}: {e}")
-
-        # SMS: process any pending
+        # SMS: gather pending
         sms_pending = await db.synced_sms.find(
             {"ai_status": {"$in": ["pending", "failed"]}},
             {"_id": 0, "user_id": 1}
         ).to_list(100)
         sms_users = set(doc["user_id"] for doc in sms_pending)
         for uid in sms_users:
-            logger.info(f"Auto-retry: Processing pending SMS for {uid}")
-            await process_pending_sms(uid)
+            tasks.append(_safe_process_sms(uid))
+
+        # Run ALL tasks in parallel
+        if tasks:
+            logger.info(f"Auto-sync: Running {len(tasks)} sync/processing tasks in parallel")
+            await asyncio.gather(*tasks)
 
     except Exception as e:
         logger.error(f"Auto-sync/processing error: {e}")
+
+
+async def _safe_sync_gmail(user_id: str, gmail_email: str, sync_date: str):
+    try:
+        logger.info(f"Auto-sync: Fetching new emails for {user_id}/{gmail_email}")
+        await sync_emails_background(user_id, gmail_email, sync_date)
+    except Exception as e:
+        logger.error(f"Auto-sync Gmail failed for {user_id}/{gmail_email}: {e}")
+
+
+async def _safe_sync_outlook(user_id: str, outlook_email: str, sync_date: str):
+    try:
+        logger.info(f"Auto-sync: Fetching new Outlook emails for {user_id}/{outlook_email}")
+        await sync_outlook_emails_background(user_id, outlook_email, sync_date)
+    except Exception as e:
+        logger.error(f"Auto-sync Outlook failed for {user_id}/{outlook_email}: {e}")
+
+
+async def _safe_process_sms(user_id: str):
+    try:
+        logger.info(f"Auto-retry: Processing pending SMS for {user_id}")
+        await process_pending_sms(user_id)
+    except Exception as e:
+        logger.error(f"Auto-retry SMS failed for {user_id}: {e}")
 
 
 @app.on_event("startup")

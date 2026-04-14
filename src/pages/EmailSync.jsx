@@ -96,10 +96,20 @@ function EmailAccountCard({ acct, provider, onSetupSync, onRetry, onDisconnect, 
                 background: `${providerColor}18`, color: providerColor, fontWeight: 700,
                 textTransform: 'uppercase', letterSpacing: '0.05em'
               }}>{providerLabel}</span>
+              {/* Status badge */}
+              {acct.syncing ? (
+                <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 2, background: 'rgba(74,110,125,0.15)', color: 'var(--info)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Syncing</span>
+              ) : isProcessing ? (
+                <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 2, background: 'rgba(245,158,11,0.15)', color: 'var(--warning)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Processing</span>
+              ) : acct.sync_from_date ? (
+                <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 2, background: 'rgba(58,92,74,0.15)', color: 'var(--success)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Active</span>
+              ) : (
+                <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 2, background: 'rgba(150,69,58,0.15)', color: 'var(--error)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Setup Required</span>
+              )}
             </div>
             <span className="mono" style={{ fontSize: 11, color: 'var(--text-muted)' }}>
               Connected {acct.connected_at ? new Date(acct.connected_at).toLocaleDateString() : ''}
-              {acct.sync_from_date && ` | Syncing from ${acct.sync_from_date}`}
+              {acct.sync_from_date ? ` | Syncing from ${acct.sync_from_date} | Auto-syncs every 2 min` : ' | Set a sync date to start'}
             </span>
           </div>
         </div>
