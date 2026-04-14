@@ -132,6 +132,7 @@ class TransactionCreate(BaseModel):
     category_id: Optional[str] = None
     subcategory_id: Optional[str] = None
     description: Optional[str] = None
+    payment_method: Optional[str] = None  # upi, credit_card, debit_card, net_banking, cash, wallet, other
     is_recurring: bool = False
     recurring_frequency: Optional[str] = None  # monthly, weekly, yearly
     source: str = "manual"  # manual, email, sms
@@ -145,6 +146,7 @@ class TransactionUpdate(BaseModel):
     category_id: Optional[str] = None
     subcategory_id: Optional[str] = None
     description: Optional[str] = None
+    payment_method: Optional[str] = None
     is_recurring: Optional[bool] = None
     recurring_frequency: Optional[str] = None
 
@@ -677,6 +679,17 @@ async def update_account(account_id: str, data: AccountUpdate, user: dict = Depe
     if not update_data:
         raise HTTPException(status_code=400, detail="No fields to update")
     update_data["updated_at"] = datetime.now(timezone.utc)
+    
+    # If setting opening_balance on an AI-created account, clear the needs_opening_balance flag
+    if "opening_balance" in update_data:
+        update_data["needs_opening_balance"] = False
+        # Also update balance if this is an AI-created account with 0 balance
+        existing = await db.accounts.find_one(
+            {"account_id": account_id, "user_id": user["user_id"]}, {"_id": 0}
+        )
+        if existing and existing.get("ai_created") and existing.get("balance", 0) == 0:
+            update_data["balance"] = update_data["opening_balance"]
+    
     result = await db.accounts.update_one(
         {"account_id": account_id, "user_id": user["user_id"]},
         {"$set": update_data}
@@ -816,6 +829,7 @@ async def create_transaction(data: TransactionCreate, user: dict = Depends(get_c
         "category_id": data.category_id,
         "subcategory_id": data.subcategory_id,
         "description": data.description or "",
+        "payment_method": data.payment_method,
         "is_recurring": data.is_recurring,
         "recurring_frequency": data.recurring_frequency,
         "source": data.source,
@@ -2448,6 +2462,73 @@ async def _create_transaction_from_ai_result(
         )
         return False
 
+    # Determine account_id - either use matched account or auto-create from detected bank
+    account_id = result.get("account_id")
+    detected_bank_name = result.get("detected_bank_name")
+    detected_bank_type = result.get("detected_bank_type")
+    
+    if not account_id and detected_bank_name:
+        # Try to find existing account by name match
+        existing_account = await db.accounts.find_one({
+            "user_id": user_id,
+            "name": {"$regex": f"^{re.escape(detected_bank_name[:20])}.*", "$options": "i"}
+        }, {"_id": 0, "account_id": 1})
+        
+        if existing_account:
+            account_id = existing_account["account_id"]
+        else:
+            # Auto-create the bank account
+            bank_sub_type = "savings"  # default
+            if detected_bank_type == "current":
+                bank_sub_type = "current"
+            elif detected_bank_type == "credit_card":
+                bank_sub_type = "credit_card"
+            elif detected_bank_type == "wallet":
+                bank_sub_type = "wallet"
+            
+            new_account = {
+                "account_id": f"acc_{uuid.uuid4().hex[:12]}",
+                "user_id": user_id,
+                "name": detected_bank_name[:100],  # Limit name length
+                "account_type": "asset" if bank_sub_type in ["savings", "current", "wallet"] else "liability",
+                "sub_type": bank_sub_type,
+                "opening_balance": 0,  # Will be set during approval
+                "needs_opening_balance": True,  # Flag to prompt user during approval
+                "ai_created": True,
+                "created_at": datetime.now(timezone.utc),
+            }
+            await db.accounts.insert_one(new_account)
+            del new_account["_id"]
+            account_id = new_account["account_id"]
+            logger.info(f"Auto-created bank account: {detected_bank_name} -> {account_id}")
+    
+    # If still no account_id, use "Unknown Bank" account
+    if not account_id:
+        unknown_account = await db.accounts.find_one({
+            "user_id": user_id,
+            "name": "Unknown Bank"
+        }, {"_id": 0, "account_id": 1})
+        
+        if unknown_account:
+            account_id = unknown_account["account_id"]
+        else:
+            # Create "Unknown Bank" account
+            unknown_acc = {
+                "account_id": f"acc_{uuid.uuid4().hex[:12]}",
+                "user_id": user_id,
+                "name": "Unknown Bank",
+                "account_type": "asset",
+                "sub_type": "bank",
+                "opening_balance": 0,
+                "needs_opening_balance": True,
+                "ai_created": True,
+                "created_at": datetime.now(timezone.utc),
+            }
+            await db.accounts.insert_one(unknown_acc)
+            del unknown_acc["_id"]
+            account_id = unknown_acc["account_id"]
+            logger.info(f"Created 'Unknown Bank' fallback account: {account_id}")
+
     txn = {
         "transaction_id": f"txn_{uuid.uuid4().hex[:12]}",
         "user_id": user_id,
@@ -2458,11 +2539,12 @@ async def _create_transaction_from_ai_result(
         "exchange_rate": exchange_rate if original_currency != base_currency else None,
         "is_estimated_rate": is_estimated_rate if original_currency != base_currency else None,
         "date": result.get("date", datetime.now(timezone.utc).strftime("%Y-%m-%d")),
-        "account_id": result.get("account_id", accounts[0]["account_id"] if accounts else ""),
+        "account_id": account_id,
         "to_account_id": result.get("to_account_id"),
         "category_id": result.get("category_id"),
         "subcategory_id": result.get("subcategory_id"),
         "description": result.get("description", ""),
+        "payment_method": result.get("payment_method"),
         "is_recurring": result.get("is_recurring", False),
         "recurring_frequency": result.get("recurring_frequency"),
         "source": "email",
@@ -3035,9 +3117,10 @@ CRITICAL RULES — READ CAREFULLY:
    - Refunds credited to bank
    - Actual dividend CREDITS to bank account
 4. For transaction_type: "income" for money received, "expense" for money spent, "transfer" for money moved between your own accounts.
-5. Try to match account_id and category_id from available options. If unsure, leave as null.
-6. Extract date in YYYY-MM-DD format. If not clear, use the email date.
-7. CURRENCY: Detect the currency of the transaction from the email. Look for currency symbols ($, USD, EUR, GBP, etc.) or currency codes. If the email is from an Indian bank or UPI, use "INR". If unclear, default to "INR".
+5. For account_id: Try to match from AVAILABLE ACCOUNTS. If you can detect a SPECIFIC bank account name from the email (e.g., "HDFC Bank A/c XX1234", "ICICI Savings", "SBI Account ending 5678"), include it in detected_bank_name even if not in AVAILABLE ACCOUNTS - we will auto-create it.
+6. For payment_method: Detect how the payment was made. Common methods: "upi", "credit_card", "debit_card", "net_banking", "cash", "wallet", "cheque", "neft", "rtgs", "imps", "other".
+7. Extract date in YYYY-MM-DD format. If not clear, use the email date.
+8. CURRENCY: Detect the currency of the transaction from the email. Look for currency symbols ($, USD, EUR, GBP, etc.) or currency codes. If the email is from an Indian bank or UPI, use "INR". If unclear, default to "INR".
 
 Respond ONLY with valid JSON (no markdown, no explanation):
 {{
@@ -3047,10 +3130,13 @@ Respond ONLY with valid JSON (no markdown, no explanation):
   "currency": "INR" | "USD" | "EUR" | "GBP" | other ISO 4217 code | null,
   "date": "YYYY-MM-DD" or null,
   "description": "brief description" or null,
-  "account_id": "matching account_id" or null,
+  "account_id": "matching account_id from AVAILABLE ACCOUNTS" or null,
+  "detected_bank_name": "Name of bank account detected from email (e.g., 'HDFC Savings XX1234', 'ICICI Bank 5678')" or null,
+  "detected_bank_type": "savings" | "current" | "credit_card" | "wallet" | null,
   "to_account_id": "for transfers" or null,
   "category_id": "matching category_id" or null,
   "subcategory_id": "matching subcategory_id" or null,
+  "payment_method": "upi" | "credit_card" | "debit_card" | "net_banking" | "cash" | "wallet" | "cheque" | "neft" | "rtgs" | "imps" | "other" | null,
   "is_recurring": true/false,
   "recurring_frequency": "monthly" | "weekly" | "yearly" | null,
   "confidence": "high" | "medium" | "low",
@@ -3185,7 +3271,8 @@ INSTRUCTIONS:
 - If this SMS contains a financial transaction, extract details.
 - If NOT a financial transaction (OTP, promo, alert without transaction), set is_transaction to false.
 - For transaction_type: "income" for credit/received, "expense" for debit/spent/paid, "transfer" for moved between accounts.
-- Try to match account_id and category_id. If unsure, leave as null.
+- For account_id: Try to match from AVAILABLE ACCOUNTS. If you detect a SPECIFIC bank name/account number not in the list (e.g., "HDFC XX1234", "ICICI 5678"), include it in detected_bank_name.
+- For payment_method: Detect the payment method from the SMS. Common: "upi", "credit_card", "debit_card", "net_banking", "cash", "wallet", "cheque", "neft", "rtgs", "imps", "other".
 - Extract date in YYYY-MM-DD from timestamp.
 - Extract payee name if visible (e.g., "paid to AMAZON" -> payee is "Amazon").
 
@@ -3197,10 +3284,13 @@ Respond ONLY with valid JSON (no markdown):
   "date": "YYYY-MM-DD" or null,
   "description": "brief description" or null,
   "payee": "payee name if identifiable" or null,
-  "account_id": "matching account_id" or null,
+  "account_id": "matching account_id from AVAILABLE ACCOUNTS" or null,
+  "detected_bank_name": "Name of bank account detected (e.g., 'HDFC Savings XX1234')" or null,
+  "detected_bank_type": "savings" | "current" | "credit_card" | "wallet" | null,
   "to_account_id": "for transfers" or null,
   "category_id": "matching category_id" or null,
   "subcategory_id": "matching subcategory_id" or null,
+  "payment_method": "upi" | "credit_card" | "debit_card" | "net_banking" | "cash" | "wallet" | "cheque" | "neft" | "rtgs" | "imps" | "other" | null,
   "is_recurring": true/false,
   "recurring_frequency": "monthly" | "weekly" | "yearly" | null,
   "confidence": "high" | "medium" | "low",
@@ -3284,18 +3374,86 @@ async def _process_sms_transaction(user_id: str, sms_doc: dict, result: dict, ac
     except (ValueError, TypeError):
         txn_date = result.get("date", datetime.now(timezone.utc).strftime("%Y-%m-%d"))
 
+    # Determine account_id - either use matched account or auto-create from detected bank
+    account_id = result.get("account_id")
+    detected_bank_name = result.get("detected_bank_name")
+    detected_bank_type = result.get("detected_bank_type")
+    
+    if not account_id and detected_bank_name:
+        # Try to find existing account by name match
+        existing_account = await db.accounts.find_one({
+            "user_id": user_id,
+            "name": {"$regex": f"^{re.escape(detected_bank_name[:20])}.*", "$options": "i"}
+        }, {"_id": 0, "account_id": 1})
+        
+        if existing_account:
+            account_id = existing_account["account_id"]
+        else:
+            # Auto-create the bank account
+            bank_sub_type = "savings"  # default
+            if detected_bank_type == "current":
+                bank_sub_type = "current"
+            elif detected_bank_type == "credit_card":
+                bank_sub_type = "credit_card"
+            elif detected_bank_type == "wallet":
+                bank_sub_type = "wallet"
+            
+            new_account = {
+                "account_id": f"acc_{uuid.uuid4().hex[:12]}",
+                "user_id": user_id,
+                "name": detected_bank_name[:100],
+                "account_type": "asset" if bank_sub_type in ["savings", "current", "wallet"] else "liability",
+                "sub_type": bank_sub_type,
+                "opening_balance": 0,
+                "needs_opening_balance": True,
+                "ai_created": True,
+                "created_at": datetime.now(timezone.utc),
+            }
+            await db.accounts.insert_one(new_account)
+            del new_account["_id"]
+            account_id = new_account["account_id"]
+            logger.info(f"Auto-created bank account from SMS: {detected_bank_name} -> {account_id}")
+    
+    # If still no account_id, use "Unknown Bank" account
+    if not account_id:
+        unknown_account = await db.accounts.find_one({
+            "user_id": user_id,
+            "name": "Unknown Bank"
+        }, {"_id": 0, "account_id": 1})
+        
+        if unknown_account:
+            account_id = unknown_account["account_id"]
+        else:
+            # Create "Unknown Bank" account
+            unknown_acc = {
+                "account_id": f"acc_{uuid.uuid4().hex[:12]}",
+                "user_id": user_id,
+                "name": "Unknown Bank",
+                "account_type": "asset",
+                "sub_type": "bank",
+                "opening_balance": 0,
+                "needs_opening_balance": True,
+                "ai_created": True,
+                "created_at": datetime.now(timezone.utc),
+            }
+            await db.accounts.insert_one(unknown_acc)
+            del unknown_acc["_id"]
+            account_id = unknown_acc["account_id"]
+            logger.info(f"Created 'Unknown Bank' fallback account for SMS: {account_id}")
+
     txn = {
         "transaction_id": f"txn_{uuid.uuid4().hex[:12]}",
         "user_id": user_id,
         "transaction_type": result.get("transaction_type", "expense"),
         "amount": result.get("amount", 0),
         "date": result.get("date") or txn_date,
-        "account_id": result.get("account_id", accounts[0]["account_id"] if accounts else ""),
+        "account_id": account_id,
         "to_account_id": result.get("to_account_id"),
         "category_id": result.get("category_id"),
         "subcategory_id": result.get("subcategory_id"),
         "description": result.get("description", ""),
         "payee": result.get("payee", ""),
+        "payment_method": result.get("payment_method"),
         "is_recurring": result.get("is_recurring", False),
         "recurring_frequency": result.get("recurring_frequency"),
         "source": "sms",

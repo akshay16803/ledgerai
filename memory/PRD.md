@@ -123,6 +123,29 @@ CSV/PDF upload, auto-parsing, fuzzy reconciliation engine, add missing entries
 - Success confirmation screen with "Submit Another Request" option
 - New env var: `SUPPORT_EMAIL` (falls back to SENDER_EMAIL)
 
+### Phase 13 - Subcategories & AI Bank Detection (Apr 2026)
+- **Subcategories**: One-level deep subcategory support already existed in Categories tab
+  - Parent categories can have multiple subcategories
+  - Subcategories are optional when recording transactions
+  - UI shows hierarchical tree view with parent → subcategory structure
+- **Payment Method field**: Added to all transaction forms
+  - Options: UPI, Credit Card, Debit Card, Net Banking, Cash, Wallet, Cheque, NEFT, RTGS, IMPS, Other
+  - Optional field - can be left empty
+  - Stored in `payment_method` field on transactions
+- **AI Bank Account Detection** (Email/SMS parsing enhanced):
+  - AI prompt updated to detect specific bank account names from emails/SMS (e.g., "HDFC Savings XX1234")
+  - Detects bank type (savings, current, credit_card, wallet)
+  - Detects payment method from transaction text
+  - **Auto-creates bank accounts**: If AI detects a bank not in user's accounts, creates it automatically
+  - New accounts flagged with `needs_opening_balance: true` and `ai_created: true`
+  - **"Unknown Bank" fallback**: If no bank detected, uses/creates "Unknown Bank" account
+  - User can edit account and set opening balance during approval
+- Backend changes:
+  - `TransactionCreate` and `TransactionUpdate` models now include `payment_method`
+  - `_create_transaction_from_ai_result` updated for bank auto-creation
+  - `_process_sms_transaction` updated similarly
+  - Account update endpoint clears `needs_opening_balance` when balance is set
+
 ## Prioritized Backlog
 
 ### P1 (Next)

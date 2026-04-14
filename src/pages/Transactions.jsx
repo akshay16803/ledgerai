@@ -24,7 +24,7 @@ export default function Transactions() {
   const [form, setForm] = useState({
     amount: '', date: new Date().toISOString().split('T')[0],
     account_id: '', to_account_id: '', category_id: '', subcategory_id: '',
-    description: '', is_recurring: false, recurring_frequency: ''
+    description: '', payment_method: '', is_recurring: false, recurring_frequency: ''
   });
 
   const loadData = useCallback(async () => {
@@ -69,13 +69,14 @@ export default function Transactions() {
         category_id: txnType !== 'transfer' ? form.category_id : null,
         subcategory_id: txnType !== 'transfer' ? form.subcategory_id : null,
         description: form.description,
+        payment_method: form.payment_method || null,
         is_recurring: form.is_recurring,
         recurring_frequency: form.is_recurring ? form.recurring_frequency : null,
         source: 'manual',
         status: 'approved',
       });
       setShowForm(false);
-      setForm({ amount: '', date: new Date().toISOString().split('T')[0], account_id: '', to_account_id: '', category_id: '', subcategory_id: '', description: '', is_recurring: false, recurring_frequency: '' });
+      setForm({ amount: '', date: new Date().toISOString().split('T')[0], account_id: '', to_account_id: '', category_id: '', subcategory_id: '', description: '', payment_method: '', is_recurring: false, recurring_frequency: '' });
       loadData();
     } catch (err) { setError(err.message); }
   };
@@ -258,6 +259,26 @@ export default function Transactions() {
                 <label style={labelStyle}>Date *</label>
                 <input data-testid="txn-date-input" type="date" value={form.date} onChange={e => setForm(f => ({...f, date: e.target.value}))}
                   style={inputStyle} />
+              </div>
+
+              {/* Payment Method */}
+              <div>
+                <label style={labelStyle}>Payment Method</label>
+                <select data-testid="txn-payment-method-select" value={form.payment_method} onChange={e => setForm(f => ({...f, payment_method: e.target.value}))}
+                  style={inputStyle}>
+                  <option value="">Select method (optional)</option>
+                  <option value="upi">UPI</option>
+                  <option value="credit_card">Credit Card</option>
+                  <option value="debit_card">Debit Card</option>
+                  <option value="net_banking">Net Banking</option>
+                  <option value="cash">Cash</option>
+                  <option value="wallet">Wallet</option>
+                  <option value="cheque">Cheque</option>
+                  <option value="neft">NEFT</option>
+                  <option value="rtgs">RTGS</option>
+                  <option value="imps">IMPS</option>
+                  <option value="other">Other</option>
+                </select>
               </div>
 
               {/* Recurring */}
