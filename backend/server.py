@@ -381,7 +381,13 @@ async def google_callback(request: Request, response: Response, code: str = None
 
 @app.get("/api/auth/me")
 async def get_me(user: dict = Depends(get_current_user)):
-    return UserOut(**user)
+    settings = await db.user_settings.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    user_out = UserOut(**user).dict()
+    user_out["settings"] = {
+        "base_currency": (settings or {}).get("base_currency", "INR"),
+        "date_format": (settings or {}).get("date_format", "DD/MM/YYYY"),
+    }
+    return user_out
 
 
 @app.post("/api/auth/logout")
@@ -2408,7 +2414,7 @@ async def _create_transaction_from_ai_result(
     """Create a pending_review transaction from AI analysis. Returns True if created (not duplicate)."""
     original_amount = result.get("amount", 0)
     original_currency = (result.get("currency") or "INR").upper()
-    base_currency = "INR"
+    base_currency = await get_user_base_currency(user_id)
     converted_amount = original_amount
     exchange_rate = 1.0
     is_estimated_rate = False
@@ -3670,6 +3676,19 @@ async def download_attachment(archive_id: str, att_index: int, user: dict = Depe
     )
 
 
+@app.get("/api/records/{archive_id}/preview")
+async def preview_record(archive_id: str, user: dict = Depends(get_current_user)):
+    record = await db.email_archives.find_one(
+        {"archive_id": archive_id, "user_id": user["user_id"]},
+        {"_id": 0, "raw_eml": 0, "attachments.data": 0}
+    )
+    if not record:
+        raise HTTPException(status_code=404, detail="Record not found")
+    if isinstance(record.get("archived_at"), datetime):
+        record["archived_at"] = record["archived_at"].isoformat()
+    return record
+
+
 @app.post("/api/records/download-zip")
 async def download_records_zip(request: Request, user: dict = Depends(get_current_user)):
     body = await request.json()
@@ -4086,6 +4105,44 @@ async def process_tax_summary(user_id: str, summary_id: str, email_address: str,
             {"summary_id": summary_id},
             {"$set": {"status": "error", "error_message": str(e)}}
         )
+
+
+# ─── User Settings ───────────────────────────────────────────────────
+
+@app.get("/api/settings")
+async def get_settings(user: dict = Depends(get_current_user)):
+    settings = await db.user_settings.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    if not settings:
+        settings = {"user_id": user["user_id"], "base_currency": "INR", "date_format": "DD/MM/YYYY"}
+        await db.user_settings.insert_one(settings)
+        del settings["_id"]
+    return settings
+
+
+@app.put("/api/settings")
+async def update_settings(request: Request, user: dict = Depends(get_current_user)):
+    body = await request.json()
+    update_fields = {}
+    if "base_currency" in body:
+        update_fields["base_currency"] = body["base_currency"].upper()
+    if "date_format" in body:
+        update_fields["date_format"] = body["date_format"]
+
+    if not update_fields:
+        raise HTTPException(status_code=400, detail="No fields to update")
+
+    await db.user_settings.update_one(
+        {"user_id": user["user_id"]},
+        {"$set": update_fields},
+        upsert=True,
+    )
+    settings = await db.user_settings.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    return settings
+
+
+async def get_user_base_currency(user_id: str) -> str:
+    settings = await db.user_settings.find_one({"user_id": user_id}, {"_id": 0, "base_currency": 1})
+    return (settings or {}).get("base_currency", "INR")
 
 
 # ─── Health Check ────────────────────────────────────────────────────

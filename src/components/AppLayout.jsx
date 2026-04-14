@@ -1,10 +1,8 @@
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext.jsx';
-import { api } from '../lib/api.js';
-import { useState } from 'react';
 import {
   House, ArrowsLeftRight, Bank, Tag, BookOpen,
-  Lightbulb, SignOut, Gear, ChartPie, EnvelopeSimple, TrendUp, Scales, ChartBar, Warning, Archive, Receipt
+  Lightbulb, SignOut, Gear, EnvelopeSimple, TrendUp, Scales, ChartBar, Archive, Receipt
 } from '@phosphor-icons/react';
 
 const navItems = [
@@ -20,30 +18,16 @@ const navItems = [
   { to: '/records', icon: Archive, label: 'Records' },
   { to: '/past-insights', icon: Receipt, label: 'Past Insights' },
   { to: '/feature-requests', icon: Lightbulb, label: 'Feature Requests' },
+  { to: '/settings', icon: Gear, label: 'Settings' },
 ];
 
 export default function AppLayout({ children }) {
-  const { user, logout, checkAuth } = useAuth();
+  const { user, logout } = useAuth();
   const navigate = useNavigate();
-  const [resending, setResending] = useState(false);
-  const [resendMsg, setResendMsg] = useState('');
 
   const handleLogout = async () => {
     await logout();
     navigate('/');
-  };
-
-  const handleResendVerification = async () => {
-    setResending(true);
-    setResendMsg('');
-    try {
-      await api.post('/api/auth/resend-verification');
-      setResendMsg('Sent! Check your inbox.');
-    } catch (err) {
-      setResendMsg('Failed to send. Try again.');
-    } finally {
-      setResending(false);
-    }
   };
 
   return (
@@ -123,30 +107,6 @@ export default function AppLayout({ children }) {
 
       {/* Main content */}
       <main style={{ flex: 1, marginLeft: 240, minHeight: '100vh' }}>
-        {user && !user.email_verified && (
-          <div data-testid="email-verification-banner" style={{
-            background: '#fef3c7', borderBottom: '1px solid #fbbf24',
-            padding: '10px 40px', display: 'flex', alignItems: 'center',
-            justifyContent: 'center', gap: 12, fontSize: 13, color: '#92400e'
-          }}>
-            <Warning size={16} weight="bold" style={{ flexShrink: 0 }} />
-            <span>Please verify your email to unlock the full experience.</span>
-            <button
-              data-testid="resend-verification-btn"
-              onClick={handleResendVerification}
-              disabled={resending}
-              style={{
-                background: '#92400e', color: '#fff', border: 'none',
-                borderRadius: 3, padding: '4px 12px', fontSize: 12,
-                fontWeight: 600, cursor: resending ? 'not-allowed' : 'pointer',
-                opacity: resending ? 0.6 : 1, fontFamily: 'var(--font-body)',
-              }}
-            >
-              {resending ? 'Sending...' : 'Resend Email'}
-            </button>
-            {resendMsg && <span style={{ fontSize: 12, fontWeight: 500 }}>{resendMsg}</span>}
-          </div>
-        )}
         <div style={{ maxWidth: 1200, margin: '0 auto', padding: '32px 40px' }}>
           {children}
         </div>

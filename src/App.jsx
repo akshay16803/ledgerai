@@ -18,6 +18,7 @@ import Privacy from './pages/Privacy.jsx';
 import Terms from './pages/Terms.jsx';
 import Records from './pages/Records.jsx';
 import TaxSummary from './pages/TaxSummary.jsx';
+import Settings from './pages/Settings.jsx';
 import AppLayout from './components/AppLayout.jsx';
 
 function ProtectedRoute({ children }) {
@@ -54,6 +55,7 @@ export default function App() {
       <Route path="/records" element={<ProtectedRoute><AppLayout><Records /></AppLayout></ProtectedRoute>} />
       <Route path="/past-insights" element={<ProtectedRoute><AppLayout><TaxSummary /></AppLayout></ProtectedRoute>} />
       <Route path="/feature-requests" element={<ProtectedRoute><AppLayout><FeatureRequests /></AppLayout></ProtectedRoute>} />
+      <Route path="/settings" element={<ProtectedRoute><AppLayout><Settings /></AppLayout></ProtectedRoute>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

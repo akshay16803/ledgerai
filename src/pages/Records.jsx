@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { api } from '../lib/api';
 import {
   MagnifyingGlass, DownloadSimple, FileText, Paperclip,
-  FunnelSimple, CaretDown, CaretUp, EnvelopeSimple, Archive
+  FunnelSimple, CaretDown, CaretUp, EnvelopeSimple, Archive, Eye, X
 } from '@phosphor-icons/react';
 
 const API = import.meta.env.REACT_APP_BACKEND_URL || '';
@@ -24,6 +24,8 @@ export default function Records() {
   const [showFilters, setShowFilters] = useState(false);
   const [selected, setSelected] = useState(new Set());
   const [downloading, setDownloading] = useState(false);
+  const [previewRecord, setPreviewRecord] = useState(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
   const [page, setPage] = useState(0);
   const limit = 25;
 
@@ -76,6 +78,15 @@ export default function Records() {
 
   const downloadAttachment = (archiveId, attIndex, filename) => {
     window.open(`${API}/api/records/${archiveId}/attachments/${attIndex}/download`, '_blank');
+  };
+
+  const handlePreview = async (archiveId) => {
+    setPreviewLoading(true);
+    try {
+      const data = await api.get(`/api/records/${archiveId}/preview`);
+      setPreviewRecord(data);
+    } catch (err) { alert('Failed to load preview: ' + err.message); }
+    setPreviewLoading(false);
   };
 
   const downloadZip = async () => {
@@ -325,7 +336,7 @@ export default function Records() {
                     )}
                   </td>
                   <td style={{ padding: '10px 16px', textAlign: 'center' }}>
-                    <RecordActions record={record} onDownloadEml={downloadEml} onDownloadAttachment={downloadAttachment} />
+                    <RecordActions record={record} onDownloadEml={downloadEml} onDownloadAttachment={downloadAttachment} onPreview={handlePreview} />
                   </td>
                 </tr>
               ))}
@@ -364,16 +375,117 @@ export default function Records() {
           )}
         </div>
       )}
+
+      {/* Email Preview Modal */}
+      {(previewRecord || previewLoading) && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div onClick={() => setPreviewRecord(null)} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)' }} />
+          <div style={{
+            position: 'relative', background: '#fff', borderRadius: 2, width: '100%', maxWidth: 700,
+            maxHeight: '90vh', overflow: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.2)',
+          }}>
+            {previewLoading ? (
+              <div style={{ padding: 60, textAlign: 'center', color: 'var(--text-muted)' }}>Loading preview...</div>
+            ) : previewRecord && (
+              <>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 24px', borderBottom: '1px solid var(--border-subtle)' }}>
+                  <h2 style={{ fontSize: 16, fontWeight: 600 }}>Email Preview</h2>
+                  <button data-testid="close-preview" onClick={() => setPreviewRecord(null)}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4 }}>
+                    <X size={20} />
+                  </button>
+                </div>
+                <div style={{ padding: '20px 24px' }}>
+                  <div style={{ marginBottom: 16, paddingBottom: 16, borderBottom: '1px solid var(--border-subtle)' }}>
+                    <h3 style={{ fontSize: 15, fontWeight: 600, marginBottom: 8 }}>{previewRecord.subject || '(no subject)'}</h3>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '4px 12px', fontSize: 13 }}>
+                      <span style={{ color: 'var(--text-muted)', fontWeight: 600 }}>From:</span>
+                      <span>{previewRecord.from_email}</span>
+                      <span style={{ color: 'var(--text-muted)', fontWeight: 600 }}>Date:</span>
+                      <span>{previewRecord.date}</span>
+                      <span style={{ color: 'var(--text-muted)', fontWeight: 600 }}>Transaction:</span>
+                      <span>
+                        <span style={{
+                          padding: '2px 8px', borderRadius: 2, fontSize: 11, fontWeight: 600, textTransform: 'uppercase',
+                          color: previewRecord.transaction_type === 'income' ? 'var(--success)' : 'var(--error)',
+                          background: previewRecord.transaction_type === 'income' ? 'rgba(58,92,74,0.1)' : 'rgba(150,69,58,0.1)',
+                        }}>{previewRecord.transaction_type}</span>
+                        <span className="mono" style={{ marginLeft: 8, fontWeight: 600 }}>{formatCurrency(previewRecord.transaction_amount)}</span>
+                      </span>
+                    </div>
+                  </div>
+                  <div style={{
+                    fontSize: 13, lineHeight: 1.7, color: 'var(--text-secondary)',
+                    maxHeight: 300, overflow: 'auto', padding: 16,
+                    background: 'var(--bg-secondary)', borderRadius: 2, marginBottom: 16,
+                    whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                  }}>
+                    {previewRecord.body_text || previewRecord.snippet || 'No email content available.'}
+                  </div>
+                  {previewRecord.attachment_count > 0 && (
+                    <div>
+                      <h4 style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <Paperclip size={14} /> Attachments ({previewRecord.attachment_count})
+                      </h4>
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                        {previewRecord.attachments?.map((att, i) => (
+                          <button key={i} data-testid={`preview-att-${i}`}
+                            onClick={() => window.open(`${API}/api/records/${previewRecord.archive_id}/attachments/${i}/download`, '_blank')}
+                            style={{
+                              display: 'flex', alignItems: 'center', gap: 6,
+                              padding: '8px 14px', background: 'var(--bg-primary)',
+                              border: '1px solid var(--border-strong)', borderRadius: 2,
+                              cursor: 'pointer', fontSize: 12, fontFamily: 'var(--font-body)', color: 'var(--text-secondary)',
+                            }}>
+                            <DownloadSimple size={13} style={{ color: 'var(--info)' }} />
+                            {att.filename}
+                            <span className="mono" style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+                              {att.size ? `${Math.round(att.size / 1024)}KB` : ''}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid var(--border-subtle)', display: 'flex', gap: 8 }}>
+                    <button onClick={() => downloadEml(previewRecord.archive_id)}
+                      style={{
+                        background: 'var(--bg-primary)', border: '1px solid var(--border-strong)',
+                        borderRadius: 2, padding: '8px 16px', cursor: 'pointer', fontSize: 12,
+                        fontWeight: 600, fontFamily: 'var(--font-body)', display: 'flex', alignItems: 'center', gap: 4, color: 'var(--text-secondary)',
+                      }}>
+                      <FileText size={13} /> Download .eml
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-function RecordActions({ record, onDownloadEml, onDownloadAttachment }) {
+function RecordActions({ record, onDownloadEml, onDownloadAttachment, onPreview }) {
   const [expanded, setExpanded] = useState(false);
 
   return (
     <div style={{ position: 'relative' }}>
       <div style={{ display: 'flex', gap: 4, justifyContent: 'center' }}>
+        <button
+          data-testid={`preview-${record.archive_id}`}
+          onClick={() => onPreview(record.archive_id)}
+          title="Preview email"
+          style={{
+            background: 'rgba(194,109,92,0.1)', border: 'none',
+            borderRadius: 2, padding: '5px 10px', cursor: 'pointer', fontSize: 11,
+            fontWeight: 600, fontFamily: 'var(--font-body)', display: 'flex', alignItems: 'center', gap: 3,
+            color: 'var(--brand-primary)',
+          }}
+        >
+          <Eye size={12} /> View
+        </button>
         <button
           data-testid={`download-eml-${record.archive_id}`}
           onClick={() => onDownloadEml(record.archive_id)}
