@@ -77,7 +77,7 @@ function EmailAccountCard({ acct, provider, onSetupSync, onRetry, onDisconnect, 
             Processing {acct.stats.ai_pending} emails... Please wait.
           </div>
           <div className="mono" style={{ fontSize: 12, opacity: 0.9 }}>
-            {acct.stats.processed_by_ai + acct.stats.no_transaction} / {acct.stats.total_synced} done
+            {acct.stats.processed_by_ai + acct.stats.no_transaction} / {acct.stats.total_synced} analyzed
           </div>
         </div>
       )}
@@ -223,13 +223,13 @@ function EmailAccountCard({ acct, provider, onSetupSync, onRetry, onDisconnect, 
           )}
 
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-            <StatPill label="Emails Synced" value={acct.stats.total_synced} color="var(--info)" />
-            <StatPill label="Processed" value={acct.stats.processed_by_ai} color="var(--success)" pulsing={isProcessing} />
-            <StatPill label="No Transaction" value={acct.stats.no_transaction} color="var(--text-muted)" />
-            <StatPill label="Pending" value={acct.stats.ai_pending} color="var(--warning)" pulsing={isProcessing} />
+            <StatPill label="Total Emails" value={acct.stats.total_synced} color="var(--info)" />
+            <StatPill label="Transactions Detected" value={acct.stats.processed_by_ai} color="var(--success)" pulsing={isProcessing} />
+            <StatPill label="Skipped" value={acct.stats.no_transaction} color="var(--text-muted)" />
+            <StatPill label="In Queue" value={acct.stats.ai_pending} color="var(--warning)" pulsing={isProcessing} />
             <StatPill label="Failed" value={acct.stats.ai_failed} color="var(--error)" />
-            <StatPill label="Transactions Created" value={acct.stats.transactions_created} color="var(--accent-1)" />
-            <StatPill label="Pending Review" value={acct.stats.pending_review} color="var(--warning)" />
+            <StatPill label="Added to Ledger" value={acct.stats.transactions_created} color="var(--accent-1)" />
+            <StatPill label="Needs Review" value={acct.stats.pending_review} color="var(--warning)" />
           </div>
           {acct.syncing && (
             <div className="mono" style={{
@@ -536,13 +536,13 @@ export default function EmailSync() {
           </div>
           <div style={{ padding: '20px 24px' }}>
             <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-              <StatPill label="SMS Synced" value={smsStats.total_synced} color="#7C3AED" />
-              <StatPill label="Processed" value={smsStats.processed_by_ai} color="var(--success)" />
-              <StatPill label="No Transaction" value={smsStats.no_transaction} color="var(--text-muted)" />
-              <StatPill label="Pending" value={smsStats.ai_pending} color="var(--warning)" />
+              <StatPill label="Total SMS" value={smsStats.total_synced} color="#7C3AED" />
+              <StatPill label="Transactions Detected" value={smsStats.processed_by_ai} color="var(--success)" />
+              <StatPill label="Skipped" value={smsStats.no_transaction} color="var(--text-muted)" />
+              <StatPill label="In Queue" value={smsStats.ai_pending} color="var(--warning)" />
               <StatPill label="Failed" value={smsStats.ai_failed} color="var(--error)" />
-              <StatPill label="Transactions Created" value={smsStats.transactions_created} color="var(--accent-1)" />
-              <StatPill label="Pending Review" value={smsStats.pending_review} color="var(--warning)" />
+              <StatPill label="Added to Ledger" value={smsStats.transactions_created} color="var(--accent-1)" />
+              <StatPill label="Needs Review" value={smsStats.pending_review} color="var(--warning)" />
             </div>
           </div>
         </div>
