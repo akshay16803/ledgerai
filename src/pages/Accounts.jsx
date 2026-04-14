@@ -43,7 +43,7 @@ export default function Accounts() {
 
   const openCreate = () => {
     setEditingAcc(null);
-    setForm({ name: '', account_type: 'asset', sub_type: 'bank', opening_balance: '', currency: 'INR', description: '' });
+    setForm({ name: '', account_type: 'asset', sub_type: 'bank', account_number: '', opening_balance: '', currency: 'INR', description: '' });
     setShowForm(true);
     setError('');
   };
@@ -54,6 +54,7 @@ export default function Accounts() {
       name: acc.name,
       account_type: acc.account_type,
       sub_type: acc.sub_type || '',
+      account_number: acc.account_number || '',
       opening_balance: acc.opening_balance || 0,
       balance: acc.balance || 0,
       currency: acc.currency || 'INR',
@@ -71,7 +72,7 @@ export default function Accounts() {
 
     try {
       if (editingAcc) {
-        const update = { name: form.name, sub_type: form.sub_type, description: form.description, currency: form.currency };
+        const update = { name: form.name, sub_type: form.sub_type, account_number: form.account_number, description: form.description, currency: form.currency };
         if (form.balance !== undefined) update.balance = parseFloat(form.balance) || 0;
         await api.put(`/api/accounts/${editingAcc.account_id}`, update);
       } else {
@@ -129,6 +130,11 @@ export default function Accounts() {
                     <label style={labelStyle}>Account Name *</label>
                     <input data-testid="account-name-input" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
                       style={inputStyle} placeholder="e.g., HDFC Savings" />
+                  </div>
+                  <div>
+                    <label style={labelStyle}>Account Number</label>
+                    <input data-testid="account-number-input" value={form.account_number} onChange={e => setForm(f => ({ ...f, account_number: e.target.value }))}
+                      style={inputStyle} placeholder="e.g., XX1234 (optional)" />
                   </div>
                   <div>
                     <label style={labelStyle}>Type *</label>
@@ -222,6 +228,11 @@ export default function Accounts() {
                   </div>
                 </div>
                 <h3 style={{ fontSize: 16, fontWeight: 600, fontFamily: 'var(--font-body)', marginBottom: 4 }}>{acc.name}</h3>
+                {acc.account_number && (
+                  <span className="mono" style={{ fontSize: 11, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>
+                    A/c: {acc.account_number}
+                  </span>
+                )}
                 <span className="mono" style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'capitalize' }}>
                   {acc.account_type} / {acc.sub_type?.replace(/_/g, ' ') || 'general'}
                 </span>

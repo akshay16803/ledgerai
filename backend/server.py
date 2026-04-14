@@ -103,6 +103,7 @@ class AccountCreate(BaseModel):
     name: str
     account_type: str  # asset, liability, income, expense, equity
     sub_type: Optional[str] = None  # bank, cash, credit_card, loan, etc.
+    account_number: Optional[str] = None  # optional account number for reference
     opening_balance: float = 0.0
     currency: str = "INR"
     description: Optional[str] = None
@@ -110,6 +111,7 @@ class AccountCreate(BaseModel):
 class AccountUpdate(BaseModel):
     name: Optional[str] = None
     sub_type: Optional[str] = None
+    account_number: Optional[str] = None
     description: Optional[str] = None
     currency: Optional[str] = None
     opening_balance: Optional[float] = None
@@ -662,6 +664,7 @@ async def create_account(data: AccountCreate, user: dict = Depends(get_current_u
         "name": data.name,
         "account_type": data.account_type,
         "sub_type": data.sub_type or "",
+        "account_number": data.account_number or "",
         "opening_balance": data.opening_balance,
         "balance": data.opening_balance,
         "currency": data.currency,
