@@ -1839,9 +1839,8 @@ def reconcile_entries(parsed: list, ledger_txns: list, account_id: str) -> dict:
 
 def get_gmail_redirect_uri(request: Request):
     """Get Gmail OAuth redirect URI dynamically from request headers."""
-    host = request.headers.get("host", "")
-    scheme = request.headers.get("x-forwarded-proto", "https")
-    return f"{scheme}://{host}/api/gmail/callback"
+    base = _get_backend_url(request)
+    return f"{base}/api/gmail/callback"
 
 
 def get_gmail_flow(redirect_uri: str):
@@ -1975,9 +1974,8 @@ async def gmail_disconnect(request: Request, user: dict = Depends(get_current_us
 
 def get_outlook_redirect_uri(request: Request):
     """Get Outlook OAuth redirect URI dynamically from request headers."""
-    host = request.headers.get("host", "")
-    scheme = request.headers.get("x-forwarded-proto", "https")
-    return f"{scheme}://{host}/api/outlook/callback"
+    base = _get_backend_url(request)
+    return f"{base}/api/outlook/callback"
 
 
 @app.get("/api/outlook/connect")
