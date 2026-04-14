@@ -1,8 +1,9 @@
+import { useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import {
   House, ArrowsLeftRight, Bank, Tag, BookOpen,
-  Lightbulb, SignOut, Gear, EnvelopeSimple, TrendUp, Scales, ChartBar, Archive, Receipt
+  Lightbulb, SignOut, Gear, EnvelopeSimple, TrendUp, Scales, ChartBar, Archive, Receipt, List, X
 } from '@phosphor-icons/react';
 
 const navItems = [
@@ -24,34 +25,84 @@ const navItems = [
 export default function AppLayout({ children }) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const [sidebarOpen, setSidebarOpen] = useState(true);
 
   const handleLogout = async () => {
     await logout();
     navigate('/');
   };
 
+  const closeSidebarOnMobile = () => {
+    if (window.innerWidth < 768) setSidebarOpen(false);
+  };
+
   return (
     <div style={{ display: 'flex', minHeight: '100vh', background: 'var(--bg-primary)' }}>
+      <style>{`
+        @media (max-width: 767px) {
+          .sidebar-overlay { display: block !important; }
+          .app-sidebar { width: 260px !important; }
+          .app-main { margin-left: 0 !important; }
+          .app-main-content { padding: 20px 16px !important; }
+        }
+        @media (min-width: 768px) {
+          .sidebar-overlay { display: none !important; }
+        }
+      `}</style>
+
+      {/* Mobile overlay */}
+      {sidebarOpen && (
+        <div
+          className="sidebar-overlay"
+          onClick={() => setSidebarOpen(false)}
+          style={{
+            display: 'none', position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)',
+            zIndex: 40, backdropFilter: 'blur(2px)',
+          }}
+        />
+      )}
+
       {/* Sidebar */}
-      <aside data-testid="app-sidebar" style={{
-        width: 240, background: 'var(--brand-primary)', color: '#fff',
-        display: 'flex', flexDirection: 'column', position: 'fixed',
-        top: 0, left: 0, bottom: 0, zIndex: 50
-      }}>
-        <div style={{ padding: '24px 20px', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
-          <h1 style={{ fontFamily: 'var(--font-heading)', fontSize: 22, fontWeight: 600, letterSpacing: '-0.02em' }}>
-            SpentyAI
-          </h1>
-          <span className="mono" style={{ fontSize: 11, opacity: 0.5, display: 'block', marginTop: 2 }}>
-            Autonomous Accounting
-          </span>
+      <aside
+        data-testid="app-sidebar"
+        className="app-sidebar"
+        style={{
+          width: sidebarOpen ? 240 : 0,
+          minWidth: sidebarOpen ? 240 : 0,
+          background: 'var(--brand-primary)', color: '#fff',
+          display: 'flex', flexDirection: 'column',
+          position: 'fixed', top: 0, left: 0, bottom: 0, zIndex: 50,
+          overflow: 'hidden',
+          transition: 'width 0.25s ease, min-width 0.25s ease',
+        }}
+      >
+        <div style={{ padding: '24px 20px', borderBottom: '1px solid rgba(255,255,255,0.1)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <h1 style={{ fontFamily: 'var(--font-heading)', fontSize: 22, fontWeight: 600, letterSpacing: '-0.02em' }}>
+              SpentyAI
+            </h1>
+            <span className="mono" style={{ fontSize: 11, opacity: 0.5, display: 'block', marginTop: 2 }}>
+              Autonomous Accounting
+            </span>
+          </div>
+          <button
+            data-testid="close-sidebar-btn"
+            onClick={() => setSidebarOpen(false)}
+            style={{
+              background: 'none', border: 'none', color: 'rgba(255,255,255,0.5)',
+              cursor: 'pointer', padding: 4, display: 'flex', alignItems: 'center',
+            }}
+          >
+            <X size={20} />
+          </button>
         </div>
 
-        <nav style={{ flex: 1, padding: '12px 8px', display: 'flex', flexDirection: 'column', gap: 2 }}>
+        <nav style={{ flex: 1, padding: '12px 8px', display: 'flex', flexDirection: 'column', gap: 2, overflowY: 'auto' }}>
           {navItems.map(({ to, icon: Icon, label }) => (
             <NavLink
               key={to}
               to={to}
+              onClick={closeSidebarOnMobile}
               data-testid={`nav-${label.toLowerCase().replace(/\s+/g, '-')}`}
               style={({ isActive }) => ({
                 display: 'flex', alignItems: 'center', gap: 10,
@@ -60,10 +111,10 @@ export default function AppLayout({ children }) {
                 background: isActive ? 'rgba(255,255,255,0.12)' : 'transparent',
                 color: isActive ? '#fff' : 'rgba(255,255,255,0.65)',
                 transition: 'all 0.15s ease',
-                textDecoration: 'none',
+                textDecoration: 'none', whiteSpace: 'nowrap',
               })}
             >
-              <Icon size={18} weight="regular" />
+              <Icon size={18} weight="regular" style={{ flexShrink: 0 }} />
               {label}
             </NavLink>
           ))}
@@ -72,9 +123,9 @@ export default function AppLayout({ children }) {
         <div style={{ padding: '16px 8px', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
           <div style={{ padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
             {user?.picture ? (
-              <img src={user.picture} alt="" style={{ width: 28, height: 28, borderRadius: '50%' }} />
+              <img src={user.picture} alt="" style={{ width: 28, height: 28, borderRadius: '50%', flexShrink: 0 }} />
             ) : (
-              <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'var(--accent-3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600 }}>
+              <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'var(--accent-3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, flexShrink: 0 }}>
                 {user?.name?.[0] || '?'}
               </div>
             )}
@@ -95,7 +146,7 @@ export default function AppLayout({ children }) {
               padding: '8px 12px', borderRadius: 4, border: 'none',
               background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.7)',
               cursor: 'pointer', fontSize: 13, fontFamily: 'var(--font-body)',
-              transition: 'background 0.15s',
+              transition: 'background 0.15s', whiteSpace: 'nowrap',
             }}
             onMouseEnter={e => e.target.style.background = 'rgba(255,255,255,0.15)'}
             onMouseLeave={e => e.target.style.background = 'rgba(255,255,255,0.08)'}
@@ -106,8 +157,43 @@ export default function AppLayout({ children }) {
       </aside>
 
       {/* Main content */}
-      <main style={{ flex: 1, marginLeft: 240, minHeight: '100vh' }}>
-        <div style={{ maxWidth: 1200, margin: '0 auto', padding: '32px 40px' }}>
+      <main
+        className="app-main"
+        style={{
+          flex: 1,
+          marginLeft: sidebarOpen ? 240 : 0,
+          minHeight: '100vh',
+          transition: 'margin-left 0.25s ease',
+        }}
+      >
+        {/* Top bar with hamburger */}
+        <div
+          data-testid="topbar"
+          style={{
+            position: 'sticky', top: 0, zIndex: 30,
+            background: 'var(--bg-primary)',
+            borderBottom: '1px solid var(--border-subtle)',
+            padding: '12px 24px',
+            display: 'flex', alignItems: 'center', gap: 12,
+          }}
+        >
+          <button
+            data-testid="toggle-sidebar-btn"
+            onClick={() => setSidebarOpen(!sidebarOpen)}
+            style={{
+              background: 'none', border: '1px solid var(--border-strong)',
+              borderRadius: 4, padding: '6px 8px', cursor: 'pointer',
+              display: 'flex', alignItems: 'center', color: 'var(--text-secondary)',
+            }}
+          >
+            <List size={20} />
+          </button>
+          <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--text-secondary)' }}>
+            SpentyAI
+          </span>
+        </div>
+
+        <div className="app-main-content" style={{ maxWidth: 1200, margin: '0 auto', padding: '24px 40px' }}>
           {children}
         </div>
       </main>
