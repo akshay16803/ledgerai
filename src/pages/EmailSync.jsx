@@ -12,13 +12,15 @@ function formatCurrency(amount) {
   return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2 }).format(amount);
 }
 
-function StatPill({ label, value, color }) {
+function StatPill({ label, value, color, pulsing }) {
   return (
     <div style={{
       display: 'flex', flexDirection: 'column', alignItems: 'center',
-      padding: '12px 20px', background: `${color}12`, borderRadius: 2, minWidth: 100
+      padding: '12px 20px', background: `${color}12`, borderRadius: 2, minWidth: 100,
+      transition: 'all 0.3s ease',
+      animation: pulsing ? 'pulse-stat 1.5s ease-in-out infinite' : 'none',
     }}>
-      <span className="mono" style={{ fontSize: 22, fontWeight: 700, color, letterSpacing: '-0.02em' }}>{value}</span>
+      <span className="mono" style={{ fontSize: 22, fontWeight: 700, color, letterSpacing: '-0.02em', transition: 'all 0.3s ease' }}>{value}</span>
       <span style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4, fontWeight: 500 }}>{label}</span>
     </div>
   );
@@ -168,10 +170,10 @@ function EmailAccountCard({ acct, provider, onSetupSync, onRetry, onDisconnect, 
         <div style={{ padding: '20px 24px' }}>
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
             <StatPill label="Emails Synced" value={acct.stats.total_synced} color="var(--info)" />
-            <StatPill label="AI Processed" value={acct.stats.processed_by_ai} color="var(--success)" />
+            <StatPill label="Processed" value={acct.stats.processed_by_ai} color="var(--success)" pulsing={acct.stats.ai_pending > 0} />
             <StatPill label="No Transaction" value={acct.stats.no_transaction} color="var(--text-muted)" />
-            <StatPill label="AI Pending" value={acct.stats.ai_pending} color="var(--warning)" />
-            <StatPill label="AI Failed" value={acct.stats.ai_failed} color="var(--error)" />
+            <StatPill label="Pending" value={acct.stats.ai_pending} color="var(--warning)" pulsing={acct.stats.ai_pending > 0} />
+            <StatPill label="Failed" value={acct.stats.ai_failed} color="var(--error)" />
             <StatPill label="Transactions Created" value={acct.stats.transactions_created} color="var(--accent-1)" />
             <StatPill label="Pending Review" value={acct.stats.pending_review} color="var(--warning)" />
           </div>
@@ -181,7 +183,16 @@ function EmailAccountCard({ acct, provider, onSetupSync, onRetry, onDisconnect, 
               borderRadius: 2, fontSize: 12, color: 'var(--info)',
               display: 'flex', alignItems: 'center', gap: 8
             }}>
-              <ArrowClockwise size={14} className="spin" /> Syncing emails in background... Auto-refreshing every 30s.
+              <ArrowClockwise size={14} className="spin" /> Syncing emails in background...
+            </div>
+          )}
+          {!acct.syncing && acct.stats.ai_pending > 0 && (
+            <div className="mono" style={{
+              marginTop: 12, padding: '8px 12px', background: 'rgba(194,140,60,0.1)',
+              borderRadius: 2, fontSize: 12, color: 'var(--warning)',
+              display: 'flex', alignItems: 'center', gap: 8
+            }}>
+              <Lightning size={14} weight="fill" /> Processing {acct.stats.ai_pending} emails...
             </div>
           )}
         </div>
@@ -238,8 +249,11 @@ export default function EmailSync() {
   useEffect(() => {
     const gmailSyncing = gmailStatus?.accounts?.some(a => a.syncing);
     const outlookSyncing = outlookStatus?.accounts?.some(a => a.syncing);
-    if (!gmailSyncing && !outlookSyncing) return;
-    const interval = setInterval(loadStatus, 30000);
+    const gmailPending = gmailStatus?.accounts?.some(a => a.stats?.ai_pending > 0);
+    const outlookPending = outlookStatus?.accounts?.some(a => a.stats?.ai_pending > 0);
+    const isActive = gmailSyncing || outlookSyncing || gmailPending || outlookPending;
+    if (!isActive) return;
+    const interval = setInterval(loadStatus, 3000);
     return () => clearInterval(interval);
   }, [gmailStatus, outlookStatus, loadStatus]);
 
@@ -275,7 +289,7 @@ export default function EmailSync() {
       await api.post('/api/email/start-sync', { gmail_email, sync_from_date: syncDate });
       setShowSyncForm(null);
       setSyncDate('');
-      setTimeout(loadStatus, 2000);
+      setTimeout(loadStatus, 1000);
     } catch (err) { setError(err.message); }
     setSyncing(false);
   };
@@ -305,7 +319,7 @@ export default function EmailSync() {
       await api.post('/api/outlook/start-sync', { outlook_email, sync_from_date: syncDate });
       setShowSyncForm(null);
       setSyncDate('');
-      setTimeout(loadStatus, 2000);
+      setTimeout(loadStatus, 1000);
     } catch (err) { setError(err.message); }
     setSyncing(false);
   };
@@ -374,11 +388,17 @@ export default function EmailSync() {
 
   return (
     <div data-testid="email-sync-page">
+      <style>{`
+        @keyframes pulse-stat {
+          0%, 100% { transform: scale(1); }
+          50% { transform: scale(1.05); }
+        }
+      `}</style>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 32 }}>
         <div>
           <h1 style={{ fontSize: 28, fontWeight: 500, letterSpacing: '-0.02em' }}>Email & SMS Sync</h1>
           <p className="mono" style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
-            Connect Gmail or Outlook, and sync SMS from your mobile to auto-detect transactions via AI
+            Connect Gmail or Outlook, and sync SMS from your mobile to auto-detect transactions
           </p>
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
@@ -449,16 +469,16 @@ export default function EmailSync() {
                 color: 'var(--text-secondary)',
                 opacity: (smsStats.ai_pending === 0 && smsStats.ai_failed === 0) ? 0.5 : 1
               }}>
-              <ArrowClockwise size={14} /> {smsRetrying ? 'Retrying...' : 'Retry Pending'}
+              <ArrowClockwise size={14} /> {smsRetrying ? 'Retrying...' : 'Retry Failed'}
             </button>
           </div>
           <div style={{ padding: '20px 24px' }}>
             <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
               <StatPill label="SMS Synced" value={smsStats.total_synced} color="#7C3AED" />
-              <StatPill label="AI Processed" value={smsStats.processed_by_ai} color="var(--success)" />
+              <StatPill label="Processed" value={smsStats.processed_by_ai} color="var(--success)" />
               <StatPill label="No Transaction" value={smsStats.no_transaction} color="var(--text-muted)" />
-              <StatPill label="AI Pending" value={smsStats.ai_pending} color="var(--warning)" />
-              <StatPill label="AI Failed" value={smsStats.ai_failed} color="var(--error)" />
+              <StatPill label="Pending" value={smsStats.ai_pending} color="var(--warning)" />
+              <StatPill label="Failed" value={smsStats.ai_failed} color="var(--error)" />
               <StatPill label="Transactions Created" value={smsStats.transactions_created} color="var(--accent-1)" />
               <StatPill label="Pending Review" value={smsStats.pending_review} color="var(--warning)" />
             </div>

@@ -2715,18 +2715,25 @@ async def process_pending_emails(user_id: str, gmail_email: str = ""):
     if gmail_email:
         query["gmail_email"] = gmail_email
 
-    pending_emails = await db.synced_emails.find(query, {"_id": 0}).limit(50).to_list(50)
+    pending_emails = await db.synced_emails.find(query, {"_id": 0}).limit(200).to_list(200)
 
     if not openai_client:
-        logger.error("OpenAI client not configured")
+        logger.error("OpenAI client not configured — cannot process emails")
         return
+
+    if not pending_emails:
+        logger.info(f"No pending emails to process for {user_id}/{gmail_email}")
+        return
+
+    logger.info(f"Processing {len(pending_emails)} pending emails for {user_id}/{gmail_email}")
 
     accounts = await db.accounts.find({"user_id": user_id}, {"_id": 0}).to_list(100)
     account_names = [f"{a['name']} ({a['account_type']}/{a.get('sub_type', '')}): {a['account_id']}" for a in accounts]
     category_info = await _get_category_info_for_ai(user_id)
 
-    for email_doc in pending_emails:
+    for i, email_doc in enumerate(pending_emails):
         try:
+            logger.info(f"Processing email {i+1}/{len(pending_emails)}: {email_doc.get('subject', '')[:50]}")
             result = await analyze_email_with_ai(email_doc, account_names, category_info)
 
             if result and result.get("is_transaction"):
@@ -2743,6 +2750,8 @@ async def process_pending_emails(user_id: str, gmail_email: str = ""):
                 {"email_id": email_doc["email_id"]},
                 {"$set": {"ai_status": "failed", "ai_error": str(e)}}
             )
+
+    logger.info(f"Finished processing emails for {user_id}/{gmail_email}")
 
 
 # ─── Smart Cross-Source Duplicate Detection ──────────────────────────
