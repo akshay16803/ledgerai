@@ -3222,35 +3222,55 @@ async def auto_retry_loop():
 
 
 async def _run_pending_processing():
-    """Process all pending emails and SMS across all users."""
+    """Fetch new emails from connected accounts and process all pending emails/SMS."""
     try:
-        # Gmail auto-retry
+        # Gmail: fetch new emails + process pending
         configs = await db.email_sync_config.find({"syncing": False}, {"_id": 0}).to_list(100)
         for config in configs:
             user_id = config["user_id"]
             gmail_email = config["gmail_email"]
+            sync_date = config.get("sync_from_date", "")
 
-            pending_count = await db.synced_emails.count_documents(
-                {"user_id": user_id, "gmail_email": gmail_email, "ai_status": {"$in": ["pending", "failed"]}}
+            if not sync_date:
+                continue
+
+            # Check if Gmail is still connected
+            token_doc = await db.gmail_tokens.find_one(
+                {"user_id": user_id, "gmail_email": gmail_email, "connected": True}, {"_id": 0}
             )
-            if pending_count > 0:
-                logger.info(f"Auto-retry: Processing {pending_count} pending emails for {user_id}/{gmail_email}")
-                await process_pending_emails(user_id, gmail_email)
+            if not token_doc:
+                continue
 
-        # Outlook auto-retry
+            # Fetch new emails since original sync date (duplicates are skipped automatically)
+            try:
+                logger.info(f"Auto-sync: Fetching new emails for {user_id}/{gmail_email}")
+                await sync_emails_background(user_id, gmail_email, sync_date)
+            except Exception as e:
+                logger.error(f"Auto-sync Gmail failed for {user_id}/{gmail_email}: {e}")
+
+        # Outlook: fetch new emails + process pending
         outlook_configs = await db.outlook_sync_config.find({"syncing": False}, {"_id": 0}).to_list(100)
         for config in outlook_configs:
             user_id = config["user_id"]
             outlook_email = config["outlook_email"]
+            sync_date = config.get("sync_from_date", "")
 
-            pending_count = await db.synced_emails.count_documents(
-                {"user_id": user_id, "outlook_email": outlook_email, "source_provider": "outlook", "ai_status": {"$in": ["pending", "failed"]}}
+            if not sync_date:
+                continue
+
+            token_doc = await db.outlook_tokens.find_one(
+                {"user_id": user_id, "outlook_email": outlook_email, "connected": True}, {"_id": 0}
             )
-            if pending_count > 0:
-                logger.info(f"Auto-retry: Processing {pending_count} pending Outlook emails for {user_id}/{outlook_email}")
-                await process_outlook_pending_emails(user_id, outlook_email)
+            if not token_doc:
+                continue
 
-        # SMS auto-retry
+            try:
+                logger.info(f"Auto-sync: Fetching new Outlook emails for {user_id}/{outlook_email}")
+                await sync_outlook_emails_background(user_id, outlook_email, sync_date)
+            except Exception as e:
+                logger.error(f"Auto-sync Outlook failed for {user_id}/{outlook_email}: {e}")
+
+        # SMS: process any pending
         sms_pending = await db.synced_sms.find(
             {"ai_status": {"$in": ["pending", "failed"]}},
             {"_id": 0, "user_id": 1}
@@ -3261,7 +3281,7 @@ async def _run_pending_processing():
             await process_pending_sms(uid)
 
     except Exception as e:
-        logger.error(f"Pending processing error: {e}")
+        logger.error(f"Auto-sync/processing error: {e}")
 
 
 @app.on_event("startup")
