@@ -197,6 +197,7 @@ async def get_current_user(request: Request) -> dict:
 # ─── Auth Routes ────────────────────────────────────────────────────
 
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "")
+BACKEND_URL = os.environ.get("BACKEND_URL", "")
 
 GOOGLE_AUTH_SCOPES = [
     "openid",
@@ -214,9 +215,18 @@ def _get_frontend_url(request: Request) -> str:
     return f"{scheme}://{host}"
 
 
+def _get_backend_url(request: Request) -> str:
+    """Resolve backend's own public URL for OAuth callbacks."""
+    if BACKEND_URL:
+        return BACKEND_URL.rstrip("/")
+    scheme = request.headers.get("x-forwarded-proto", "https")
+    host = request.headers.get("host", "")
+    return f"{scheme}://{host}"
+
+
 def _get_google_auth_callback_uri(request: Request) -> str:
-    """Build the Google OAuth callback URI from the incoming request."""
-    base = _get_frontend_url(request)
+    """Build the Google OAuth callback URI pointing to the backend."""
+    base = _get_backend_url(request)
     return f"{base}/api/auth/google/callback"
 
 
