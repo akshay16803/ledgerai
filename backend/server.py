@@ -3209,65 +3209,59 @@ async def _process_sms_transaction(user_id: str, sms_doc: dict, result: dict, ac
 # ─── Background Auto-Retry Task ─────────────────────────────────────
 
 async def auto_retry_loop():
+    # First run: process any pending emails immediately after startup (10s delay for DB readiness)
+    await asyncio.sleep(10)
+    await _run_pending_processing()
+
     while True:
         try:
-            await asyncio.sleep(900)  # 15 minutes
-            # Gmail auto-retry
-            configs = await db.email_sync_config.find({"syncing": False}, {"_id": 0}).to_list(100)
-            for config in configs:
-                user_id = config["user_id"]
-                gmail_email = config["gmail_email"]
-
-                pending_count = await db.synced_emails.count_documents(
-                    {"user_id": user_id, "gmail_email": gmail_email, "ai_status": {"$in": ["pending", "failed"]}}
-                )
-                if pending_count > 0:
-                    logger.info(f"Auto-retry: Processing {pending_count} pending emails for {user_id}/{gmail_email}")
-                    await process_pending_emails(user_id, gmail_email)
-
-                token_doc = await db.gmail_tokens.find_one(
-                    {"user_id": user_id, "gmail_email": gmail_email, "connected": True}, {"_id": 0}
-                )
-                if token_doc:
-                    last_sync = config.get("last_sync_at")
-                    if last_sync:
-                        sync_date = config.get("sync_from_date", "")
-                        await sync_emails_background(user_id, gmail_email, sync_date)
-
-            # Outlook auto-retry
-            outlook_configs = await db.outlook_sync_config.find({"syncing": False}, {"_id": 0}).to_list(100)
-            for config in outlook_configs:
-                user_id = config["user_id"]
-                outlook_email = config["outlook_email"]
-
-                pending_count = await db.synced_emails.count_documents(
-                    {"user_id": user_id, "outlook_email": outlook_email, "source_provider": "outlook", "ai_status": {"$in": ["pending", "failed"]}}
-                )
-                if pending_count > 0:
-                    logger.info(f"Auto-retry: Processing {pending_count} pending Outlook emails for {user_id}/{outlook_email}")
-                    await process_outlook_pending_emails(user_id, outlook_email)
-
-                token_doc = await db.outlook_tokens.find_one(
-                    {"user_id": user_id, "outlook_email": outlook_email, "connected": True}, {"_id": 0}
-                )
-                if token_doc:
-                    last_sync = config.get("last_sync_at")
-                    if last_sync:
-                        sync_date = config.get("sync_from_date", "")
-                        await sync_outlook_emails_background(user_id, outlook_email, sync_date)
-
-            # SMS auto-retry
-            sms_pending = await db.synced_sms.find(
-                {"ai_status": {"$in": ["pending", "failed"]}},
-                {"_id": 0, "user_id": 1}
-            ).to_list(100)
-            sms_users = set(doc["user_id"] for doc in sms_pending)
-            for uid in sms_users:
-                logger.info(f"Auto-retry: Processing pending SMS for {uid}")
-                await process_pending_sms(uid)
-
+            await asyncio.sleep(120)  # Check every 2 minutes
+            await _run_pending_processing()
         except Exception as e:
             logger.error(f"Auto-retry loop error: {e}")
+
+
+async def _run_pending_processing():
+    """Process all pending emails and SMS across all users."""
+    try:
+        # Gmail auto-retry
+        configs = await db.email_sync_config.find({"syncing": False}, {"_id": 0}).to_list(100)
+        for config in configs:
+            user_id = config["user_id"]
+            gmail_email = config["gmail_email"]
+
+            pending_count = await db.synced_emails.count_documents(
+                {"user_id": user_id, "gmail_email": gmail_email, "ai_status": {"$in": ["pending", "failed"]}}
+            )
+            if pending_count > 0:
+                logger.info(f"Auto-retry: Processing {pending_count} pending emails for {user_id}/{gmail_email}")
+                await process_pending_emails(user_id, gmail_email)
+
+        # Outlook auto-retry
+        outlook_configs = await db.outlook_sync_config.find({"syncing": False}, {"_id": 0}).to_list(100)
+        for config in outlook_configs:
+            user_id = config["user_id"]
+            outlook_email = config["outlook_email"]
+
+            pending_count = await db.synced_emails.count_documents(
+                {"user_id": user_id, "outlook_email": outlook_email, "source_provider": "outlook", "ai_status": {"$in": ["pending", "failed"]}}
+            )
+            if pending_count > 0:
+                logger.info(f"Auto-retry: Processing {pending_count} pending Outlook emails for {user_id}/{outlook_email}")
+                await process_outlook_pending_emails(user_id, outlook_email)
+
+        # SMS auto-retry
+        sms_pending = await db.synced_sms.find(
+            {"ai_status": {"$in": ["pending", "failed"]}},
+            {"_id": 0, "user_id": 1}
+        ).to_list(100)
+        sms_users = set(doc["user_id"] for doc in sms_pending)
+        for uid in sms_users:
+            logger.info(f"Auto-retry: Processing pending SMS for {uid}")
+            await process_pending_sms(uid)
+
+    except Exception as e:
+        logger.error(f"Pending processing error: {e}")
 
 
 @app.on_event("startup")
@@ -3286,6 +3280,10 @@ async def startup_event():
         {"active": True},
         {"$set": {"active": False, "finished_at": datetime.now(timezone.utc)}}
     )
+
+    # Reset stuck syncing flags (interrupted by deploy)
+    await db.email_sync_config.update_many({"syncing": True}, {"$set": {"syncing": False}})
+    await db.outlook_sync_config.update_many({"syncing": True}, {"$set": {"syncing": False}})
 
     asyncio.create_task(auto_retry_loop())
     await db.synced_emails.create_index([("user_id", 1), ("gmail_email", 1), ("message_id", 1)], unique=True, sparse=True)
