@@ -1,17 +1,18 @@
 import { useState, useEffect } from 'react';
 import { api } from '../lib/api';
+import { getCached, setCache } from '../lib/cache';
 import { PaperPlaneRight, Clock, CheckCircle } from '@phosphor-icons/react';
 
 export default function FeatureRequests() {
-  const [requests, setRequests] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [requests, setRequests] = useState(() => getCached('featurerequests') || []);
+  const [loading, setLoading] = useState(!getCached('featurerequests'));
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ title: '', description: '', category: 'general' });
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
   const load = () => {
-    api.get('/api/feature-requests').then(setRequests).catch(console.error).finally(() => setLoading(false));
+    api.get('/api/feature-requests').then(data => { setRequests(data); setCache('featurerequests', data); }).catch(console.error).finally(() => setLoading(false));
   };
 
   useEffect(() => { load(); }, []);

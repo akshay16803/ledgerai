@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../lib/api';
+import { getCached, setCache } from '../lib/cache';
 import { Plus, ArrowDown, ArrowUp, ArrowsLeftRight, Check, X, Funnel } from '@phosphor-icons/react';
 
 function formatCurrency(amount) {
@@ -7,11 +8,12 @@ function formatCurrency(amount) {
 }
 
 export default function Transactions() {
-  const [transactions, setTransactions] = useState([]);
-  const [accounts, setAccounts] = useState([]);
-  const [categories, setCategories] = useState([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
+  const cachedTxn = getCached('transactions');
+  const [transactions, setTransactions] = useState(cachedTxn?.transactions || []);
+  const [accounts, setAccounts] = useState(cachedTxn?.accounts || []);
+  const [categories, setCategories] = useState(cachedTxn?.categories || []);
+  const [total, setTotal] = useState(cachedTxn?.total || 0);
+  const [loading, setLoading] = useState(!cachedTxn);
   const [showForm, setShowForm] = useState(false);
   const [txnType, setTxnType] = useState('expense');
   const [filterType, setFilterType] = useState('');
@@ -34,6 +36,9 @@ export default function Transactions() {
       setTotal(txnRes.total);
       setAccounts(accs);
       setCategories(cats);
+      if (!filterType && !filterStatus) {
+        setCache('transactions', { transactions: txnRes.transactions, total: txnRes.total, accounts: accs, categories: cats });
+      }
     } catch (err) { console.error(err); }
     setLoading(false);
   }, [filterType, filterStatus]);

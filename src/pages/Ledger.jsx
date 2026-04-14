@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../lib/api';
+import { getCached, setCache } from '../lib/cache';
 import { Funnel } from '@phosphor-icons/react';
 
 function formatCurrency(amount) {
@@ -7,10 +8,11 @@ function formatCurrency(amount) {
 }
 
 export default function Ledger() {
-  const [transactions, setTransactions] = useState([]);
-  const [accounts, setAccounts] = useState([]);
-  const [categories, setCategories] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const cached = getCached('ledger');
+  const [transactions, setTransactions] = useState(cached?.transactions || []);
+  const [accounts, setAccounts] = useState(cached?.accounts || []);
+  const [categories, setCategories] = useState(cached?.categories || []);
+  const [loading, setLoading] = useState(!cached);
   const [selectedAccount, setSelectedAccount] = useState('');
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
@@ -40,6 +42,9 @@ export default function Ledger() {
     try {
       const res = await api.get(`/api/transactions?${params.toString()}`);
       setTransactions(res.transactions);
+      if (!selectedAccount && !fromDate && !toDate) {
+        setCache('ledger', { transactions: res.transactions, accounts, categories });
+      }
     } catch (err) {
       console.error('Failed to load transactions:', err);
     } finally {

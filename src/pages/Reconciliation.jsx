@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../lib/api';
+import { getCached, setCache } from '../lib/cache';
 import {
   FileText, Upload, ArrowClockwise, Check, X, Warning,
   CheckCircle, XCircle, Question, Scales, Trash, Eye
@@ -36,9 +37,10 @@ function StatusBadge({ status }) {
 }
 
 export default function Reconciliation() {
-  const [statements, setStatements] = useState([]);
-  const [accounts, setAccounts] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const cached = getCached('reconciliation');
+  const [statements, setStatements] = useState(cached?.statements || []);
+  const [accounts, setAccounts] = useState(cached?.accounts || []);
+  const [loading, setLoading] = useState(!cached);
   const [uploading, setUploading] = useState(false);
   const [selectedAccountId, setSelectedAccountId] = useState('');
   const [statementType, setStatementType] = useState('bank');
@@ -56,6 +58,7 @@ export default function Reconciliation() {
       ]);
       setStatements(stmtRes.statements || []);
       setAccounts(accs);
+      setCache('reconciliation', { statements: stmtRes.statements || [], accounts: accs });
       setSelectedAccountId(prev => prev || (accs.length > 0 ? accs[0].account_id : ''));
     } catch (err) { console.error(err); }
     setLoading(false);

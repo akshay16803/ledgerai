@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../lib/api';
+import { getCached, setCache } from '../lib/cache';
 import {
   EnvelopeSimple, ArrowClockwise, Check, X, Clock,
   Lightning, Warning, CaretDown, CaretUp, CalendarBlank,
@@ -246,10 +247,11 @@ function EmailAccountCard({ acct, provider, onSetupSync, onRetry, onDisconnect, 
 }
 
 export default function EmailSync() {
-  const [gmailStatus, setGmailStatus] = useState(null);
-  const [outlookStatus, setOutlookStatus] = useState(null);
-  const [smsStats, setSmsStats] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const cached = getCached('emailsync');
+  const [gmailStatus, setGmailStatus] = useState(cached?.gmailStatus || null);
+  const [outlookStatus, setOutlookStatus] = useState(cached?.outlookStatus || null);
+  const [smsStats, setSmsStats] = useState(cached?.smsStats || null);
+  const [loading, setLoading] = useState(!cached);
   const [connectingGmail, setConnectingGmail] = useState(false);
   const [connectingOutlook, setConnectingOutlook] = useState(false);
   const [syncDate, setSyncDate] = useState('');
@@ -280,6 +282,7 @@ export default function EmailSync() {
       setPendingTotal(review.total);
       setAccounts(accs);
       setCategories(cats);
+      setCache('emailsync', { gmailStatus: gStatus, outlookStatus: oStatus, smsStats: sStats });
     } catch (err) { console.error(err); }
     setLoading(false);
   }, []);

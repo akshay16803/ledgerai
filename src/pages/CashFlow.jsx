@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../lib/api';
+import { getCached, setCache } from '../lib/cache';
 import {
   TrendUp, TrendDown, Repeat, ArrowRight,
   CurrencyInr, CalendarBlank, Check, X, CaretDown
@@ -113,11 +114,12 @@ function ProjectionChart({ data }) {
 }
 
 export default function CashFlow() {
-  const [projection, setProjection] = useState(null);
-  const [allTransactions, setAllTransactions] = useState([]);
-  const [accounts, setAccounts] = useState([]);
-  const [categories, setCategories] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const cached = getCached('cashflow');
+  const [projection, setProjection] = useState(cached?.projection || null);
+  const [allTransactions, setAllTransactions] = useState(cached?.transactions || []);
+  const [accounts, setAccounts] = useState(cached?.accounts || []);
+  const [categories, setCategories] = useState(cached?.categories || []);
+  const [loading, setLoading] = useState(!cached);
   const [editingId, setEditingId] = useState(null);
   const [editFreq, setEditFreq] = useState('monthly');
   const [showAddRecurring, setShowAddRecurring] = useState(false);
@@ -134,6 +136,7 @@ export default function CashFlow() {
       setAllTransactions(txnData.transactions || []);
       setAccounts(accs);
       setCategories(cats);
+      setCache('cashflow', { projection: proj, transactions: txnData.transactions || [], accounts: accs, categories: cats });
     } catch (err) { console.error(err); }
     setLoading(false);
   }, []);

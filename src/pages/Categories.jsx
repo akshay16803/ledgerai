@@ -1,17 +1,18 @@
 import { useState, useEffect } from 'react';
 import { api } from '../lib/api';
+import { getCached, setCache } from '../lib/cache';
 import { Plus, Trash, CaretRight } from '@phosphor-icons/react';
 
 export default function Categories() {
-  const [categories, setCategories] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [categories, setCategories] = useState(() => getCached('categories') || []);
+  const [loading, setLoading] = useState(!getCached('categories'));
   const [activeTab, setActiveTab] = useState('expense');
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ name: '', parent_id: '' });
   const [error, setError] = useState('');
 
   const load = () => {
-    api.get('/api/categories').then(setCategories).catch(console.error).finally(() => setLoading(false));
+    api.get('/api/categories').then(data => { setCategories(data); setCache('categories', data); }).catch(console.error).finally(() => setLoading(false));
   };
 
   useEffect(() => { load(); }, []);

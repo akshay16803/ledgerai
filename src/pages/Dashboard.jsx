@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
+import { getCached, setCache } from '../lib/cache';
 import {
   TrendUp, TrendDown, Scales, Clock, ArrowRight, Plus
 } from '@phosphor-icons/react';
@@ -33,14 +34,15 @@ function formatCurrency(amount) {
 }
 
 export default function Dashboard() {
-  const [summary, setSummary] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [summary, setSummary] = useState(() => getCached('dashboard'));
+  const [loading, setLoading] = useState(!getCached('dashboard'));
   const navigate = useNavigate();
 
   const loadData = useCallback(async () => {
     try {
       const data = await api.get('/api/dashboard/summary');
       setSummary(data);
+      setCache('dashboard', data);
     } catch (err) {
       console.error('Dashboard load failed:', err);
     } finally {

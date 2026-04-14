@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { api } from '../lib/api';
+import { getCached, setCache } from '../lib/cache';
 import { Plus, Trash, PencilSimple, Bank, Wallet, CreditCard } from '@phosphor-icons/react';
 
 const accountTypes = [
@@ -26,7 +27,7 @@ export default function Accounts() {
   const [error, setError] = useState('');
 
   const load = () => {
-    api.get('/api/accounts').then(setAccounts).catch(console.error).finally(() => setLoading(false));
+    api.get('/api/accounts').then(data => { setAccounts(data); setCache('accounts', data); }).catch(console.error).finally(() => setLoading(false));
   };
 
   useEffect(() => { load(); }, []);

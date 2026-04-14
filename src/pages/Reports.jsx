@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, Fragment } from 'react';
 import { api } from '../lib/api';
+import { getCached, setCache } from '../lib/cache';
 import {
   TrendUp, TrendDown, ArrowsLeftRight, FunnelSimple,
   CurrencyInr, ChartBar, ChartPie, CaretDown, CaretRight
@@ -175,10 +176,11 @@ function DonutChart({ data, total, typeLabel }) {
 }
 
 export default function Reports() {
-  const [summary, setSummary] = useState(null);
-  const [periods, setPeriods] = useState([]);
-  const [categories, setCategories] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const cached = getCached('reports');
+  const [summary, setSummary] = useState(cached?.summary || null);
+  const [periods, setPeriods] = useState(cached?.periods || []);
+  const [categories, setCategories] = useState(cached?.categories || []);
+  const [loading, setLoading] = useState(!cached);
   const [activePreset, setActivePreset] = useState(4);
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
@@ -201,6 +203,9 @@ export default function Reports() {
       setSummary(sum);
       setPeriods(per.periods || []);
       setCategories({ expense: catExp.categories || [], income: catInc.categories || [] });
+      if (!sd && !ed) {
+        setCache('reports', { summary: sum, periods: per.periods || [], categories: { expense: catExp.categories || [], income: catInc.categories || [] } });
+      }
     } catch (err) { console.error(err); }
     setLoading(false);
   }, []);
