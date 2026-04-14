@@ -2814,7 +2814,7 @@ async def check_cross_source_duplicate(user_id: str, amount: float, date_str: st
 
 def _build_email_analysis_prompt(email_doc: dict, account_names: list, category_info: list) -> str:
     """Build the AI prompt for email transaction analysis."""
-    return f"""Analyze this email and determine if it contains a financial transaction (income, expense, or transfer).
+    return f"""Analyze this email and determine if it contains an ACTUAL COMPLETED cash transaction.
 
 EMAIL:
 Subject: {email_doc.get('subject', '')}
@@ -2828,13 +2828,34 @@ AVAILABLE ACCOUNTS:
 AVAILABLE CATEGORIES:
 {chr(10).join(category_info) if category_info else "No categories configured"}
 
-INSTRUCTIONS:
-- If this email contains a financial transaction (payment confirmation, receipt, bank alert, invoice, subscription charge, salary credit, etc.), extract the details.
-- If this is NOT a financial transaction (newsletter, promotional, social, etc.), set is_transaction to false.
-- For transaction_type: use "income" for money received, "expense" for money spent, "transfer" for money moved between accounts.
-- Try to match account_id and category_id from the available options. If unsure, leave them as null.
-- Extract the date in YYYY-MM-DD format from the email. If not clear, use the email date.
-- Detect if this looks like a recurring transaction.
+CRITICAL RULES — READ CAREFULLY:
+1. ONLY mark as a transaction if there is a CONFIRMED cash inflow or outflow from a bank account, wallet, or UPI.
+2. Set is_transaction to FALSE for ALL of the following:
+   - Credit card BILLS/STATEMENTS (these summarize past transactions already recorded individually)
+   - Credit card DUE REMINDERS or payment due notices (not a payment until actually paid)
+   - Stock/mutual fund/trading notifications, alerts, or order confirmations (money moves within demat/trading accounts, not trackable via email)
+   - Algo trading webhooks or signals (e.g., Kite, Zerodha, Groww, Upstox alerts)
+   - Portfolio updates, NAV changes, dividend ANNOUNCEMENTS (not actual credits)
+   - OTP/authentication emails
+   - Newsletters, promotions, marketing emails
+   - Account STATEMENTS or summaries (individual transactions are tracked separately)
+   - Delivery/shipping notifications without payment info
+   - Login alerts, security notifications
+   - Balance check notifications (informational, not a transaction)
+3. DO mark as a transaction:
+   - UPI payment confirmations (money sent/received)
+   - Bank account debit/credit alerts
+   - Actual credit card PAYMENT confirmations (paying the bill, not the bill itself)
+   - Salary/income credits to bank
+   - Subscription charges debited from bank/card
+   - Recharges, bill payments completed
+   - EMI debits
+   - Insurance premium debits
+   - Refunds credited to bank
+   - Actual dividend CREDITS to bank account
+4. For transaction_type: "income" for money received, "expense" for money spent, "transfer" for money moved between your own accounts.
+5. Try to match account_id and category_id from available options. If unsure, leave as null.
+6. Extract date in YYYY-MM-DD format. If not clear, use the email date.
 
 Respond ONLY with valid JSON (no markdown, no explanation):
 {{
