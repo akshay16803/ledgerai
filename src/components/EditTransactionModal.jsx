@@ -26,6 +26,7 @@ export function EditTransactionModal({ transaction, accounts, categories, onSave
   const [quickSubCatName, setQuickSubCatName] = useState('');
   const [showQuickAcc, setShowQuickAcc] = useState(false);
   const [quickAccName, setQuickAccName] = useState('');
+  const [quickAccBalance, setQuickAccBalance] = useState('');
   const [localAccounts, setLocalAccounts] = useState(accounts);
   const [localCategories, setLocalCategories] = useState(categories);
 
@@ -59,11 +60,13 @@ export function EditTransactionModal({ transaction, accounts, categories, onSave
 
   const handleQuickAddAccount = async () => {
     if (!quickAccName.trim()) return;
+    if (quickAccBalance === '') { alert('Please enter the account balance'); return; }
     try {
-      await api.post('/api/accounts', { name: quickAccName.trim(), account_type: 'asset', sub_type: 'bank', opening_balance: 0, currency: 'INR' });
+      await api.post('/api/accounts', { name: quickAccName.trim(), account_type: 'asset', sub_type: 'bank', opening_balance: parseFloat(quickAccBalance) || 0, currency: 'INR' });
       const accs = await api.get('/api/accounts');
       setLocalAccounts(accs);
       setQuickAccName('');
+      setQuickAccBalance('');
       setShowQuickAcc(false);
     } catch (err) { alert(err.message); }
   };
@@ -169,7 +172,20 @@ export function EditTransactionModal({ transaction, accounts, categories, onSave
                   <button type="button" data-testid="modal-quick-add-account" onClick={() => setShowQuickAcc(!showQuickAcc)}
                     style={quickAddBtnStyle}><Plus size={14} /></button>
                 </div>
-                {showQuickAcc && <QuickAddInput value={quickAccName} onChange={setQuickAccName} onSave={handleQuickAddAccount} placeholder="Account name" />}
+                {showQuickAcc && (
+                  <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
+                    <input value={quickAccName} onChange={e => setQuickAccName(e.target.value)} placeholder="Account name"
+                      onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), handleQuickAddAccount())}
+                      style={{ ...inputStyle, flex: 1, padding: '6px 10px', fontSize: 12, minWidth: 120 }} />
+                    <input type="number" value={quickAccBalance} onChange={e => setQuickAccBalance(e.target.value)} placeholder="Balance"
+                      onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), handleQuickAddAccount())}
+                      style={{ ...inputStyle, width: 100, padding: '6px 10px', fontSize: 12, fontFamily: 'var(--font-mono)' }} />
+                    <button type="button" onClick={handleQuickAddAccount}
+                      style={{ padding: '6px 12px', background: 'var(--success)', color: '#fff', border: 'none', borderRadius: 2, fontSize: 11, cursor: 'pointer', fontFamily: 'var(--font-body)', display: 'flex', alignItems: 'center', gap: 3 }}>
+                      <Check size={12} /> Save
+                    </button>
+                  </div>
+                )}
               </div>
 
               {/* Amount */}

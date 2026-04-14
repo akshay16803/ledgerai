@@ -112,6 +112,8 @@ class AccountUpdate(BaseModel):
     sub_type: Optional[str] = None
     description: Optional[str] = None
     currency: Optional[str] = None
+    opening_balance: Optional[float] = None
+    balance: Optional[float] = None
 
 class CategoryCreate(BaseModel):
     name: str
