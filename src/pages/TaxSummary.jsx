@@ -123,7 +123,7 @@ export default function TaxSummary() {
         }}>
           <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 20 }}>Create New Summary</h3>
           <form onSubmit={handleCreate}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+            <div className="form-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
               <div>
                 <label style={labelStyle}>Summary Name</label>
                 <input data-testid="ts-name" type="text" placeholder="e.g., FY 2024-25"
@@ -197,7 +197,7 @@ export default function TaxSummary() {
           </p>
         </div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340, 1fr))', gap: 16 }}>
+        <div className="card-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 16 }}>
           {summaries.map(s => (
             <SummaryCard key={s.summary_id} summary={s}
               onView={() => setActiveDetail(s.summary_id)}
@@ -261,7 +261,7 @@ function SummaryCard({ summary, onView, onDelete, onExport }) {
 
         {s.status === 'complete' && (
           <>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 16 }}>
+            <div className="stat-grid-3" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 16 }}>
               <div style={{ textAlign: 'center', padding: '12px 8px', background: 'rgba(58,92,74,0.06)', borderRadius: 2 }}>
                 <TrendUp size={16} style={{ color: 'var(--success)', marginBottom: 4 }} />
                 <div className="mono" style={{ fontSize: 16, fontWeight: 700, color: 'var(--success)' }}>{formatCurrency(s.total_income)}</div>
@@ -405,7 +405,7 @@ function TaxSummaryDetail({ summaryId, onBack }) {
       </div>
 
       {/* Summary Stats */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 12, marginBottom: 24 }}>
+      <div className="stat-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 12, marginBottom: 24 }}>
         <StatBox label="Income" value={formatCurrency(summary.total_income)} color="var(--success)" icon={TrendUp} />
         <StatBox label="Expenses" value={formatCurrency(summary.total_expenses)} color="var(--error)" icon={TrendDown} />
         <StatBox label="Net" value={formatCurrency(net)} color={net >= 0 ? 'var(--success)' : 'var(--error)'} icon={Scales} />
@@ -455,7 +455,7 @@ function TaxSummaryDetail({ summaryId, onBack }) {
 
       {/* Transaction Table */}
       <div style={{ background: '#fff', border: '1px solid var(--border-subtle)', borderRadius: 2, overflow: 'hidden' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 650 }}>
           <thead>
             <tr style={{ borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-secondary)' }}>
               <th style={thStyle}>Date</th>

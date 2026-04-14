@@ -101,3 +101,29 @@ a {
 .stagger-3 { animation-delay: 0.3s; opacity: 0; }
 .stagger-4 { animation-delay: 0.4s; opacity: 0; }
 .stagger-5 { animation-delay: 0.5s; opacity: 0; }
+
+/* ─── Responsive Utilities ─────────────────────────────── */
+
+.table-responsive {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+@media (max-width: 767px) {
+  .hide-mobile { display: none !important; }
+  .page-title { font-size: 22px !important; }
+  .page-subtitle { font-size: 12px !important; }
+  .stat-grid { grid-template-columns: 1fr 1fr !important; }
+  .stat-grid-3 { grid-template-columns: 1fr !important; }
+  .form-grid { grid-template-columns: 1fr !important; }
+  .action-bar { flex-direction: column !important; align-items: stretch !important; gap: 12px !important; }
+  .filter-bar { flex-direction: column !important; }
+  .modal-content { max-width: 95vw !important; margin: 8px !important; }
+  .card-grid { grid-template-columns: 1fr !important; }
+}
+
+@media (min-width: 768px) and (max-width: 1023px) {
+  .stat-grid { grid-template-columns: repeat(3, 1fr) !important; }
+  .card-grid { grid-template-columns: 1fr 1fr !important; }
+}

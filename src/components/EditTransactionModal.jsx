@@ -113,6 +113,7 @@ export function EditTransactionModal({ transaction, accounts, categories, onSave
       <div style={{
         position: 'relative', background: '#fff', borderRadius: 2, width: '100%', maxWidth: 580,
         maxHeight: '90vh', overflow: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.2)',
+        margin: '0 8px',
       }}>
         {/* Header */}
         <div style={{
@@ -151,7 +152,7 @@ export function EditTransactionModal({ transaction, accounts, categories, onSave
           </div>
 
           <form onSubmit={handleSubmit}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+            <div className="form-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
               {/* Account */}
               <div>
                 <label style={labelStyle}>

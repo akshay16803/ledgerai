@@ -94,6 +94,17 @@ CSV/PDF upload, auto-parsing, fuzzy reconciliation engine, add missing entries
 - Reconciliation: statements upload/reconcile
 - Reports: summary, by-period, by-category
 
+### Phase 11 - UX Improvements & Mobile (Apr 2026)
+- Broken email account reconnect prompt with one-click reconnect
+- Edit Transaction Modal — reusable popup on Transactions, Ledger, and Email & SMS pages
+- Quick-add for Category, Subcategory, Account inside the modal
+- Multi-currency AI detection — detects currency from emails, converts using frankfurter.app
+- Settings tab with default currency (46 currencies) and date format preferences
+- Email preview modal in Records tab (view email body + download attachments)
+- Collapsible sidebar with hamburger toggle
+- Removed email verification banner (Google-only login)
+- Full mobile-responsive design across all pages
+
 ## Prioritized Backlog
 
 ### P1 (Next)
@@ -102,7 +113,9 @@ CSV/PDF upload, auto-parsing, fuzzy reconciliation engine, add missing entries
 
 ### P2 (Future)
 - Stripe + Razorpay + PayPal payment integration
+- Microsoft Azure app under professional email
 
 ### P3 (Backlog)
 - React Native mobile app
 - Exportable PDF reports
+- Admin analytics dashboard (aggregated, non-personal metrics)

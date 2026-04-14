@@ -37,7 +37,7 @@ export default function Login() {
 
         <div style={{
           background: '#fff', border: '1px solid var(--border-subtle)',
-          borderRadius: 4, padding: 40
+          borderRadius: 4, padding: '32px 24px'
         }}>
           <button
             data-testid="google-login-button"

@@ -33,7 +33,7 @@ export default function Landing() {
         position: 'fixed', top: 0, left: 0, right: 0, zIndex: 100,
         background: 'rgba(249, 248, 246, 0.85)', backdropFilter: 'blur(20px)',
         borderBottom: '1px solid var(--border-subtle)',
-        padding: '0 40px', height: 64, display: 'flex', alignItems: 'center', justifyContent: 'space-between'
+        padding: '0 20px', height: 64, display: 'flex', alignItems: 'center', justifyContent: 'space-between'
       }}>
         <h1 style={{ fontFamily: 'var(--font-heading)', fontSize: 20, fontWeight: 600, color: 'var(--brand-primary)' }}>
           SpentyAI
@@ -124,7 +124,7 @@ export default function Landing() {
           </h2>
         </div>
         <div style={{
-          display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
+          display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
           gap: 24
         }}>
           {features.map(({ icon: Icon, title, desc }, i) => (

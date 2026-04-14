@@ -243,7 +243,7 @@ export default function CashFlow() {
         </div>
 
         {recurringItems.length > 0 && (
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 650 }}>
             <thead>
               <tr style={{ borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-secondary)' }}>
                 <th style={thStyle}>Description</th>
@@ -343,7 +343,7 @@ export default function CashFlow() {
               No approved non-recurring transactions available.
             </div>
           ) : (
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 650 }}>
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-secondary)' }}>
                   <th style={thStyle}>Date</th>
@@ -373,7 +373,7 @@ export default function CashFlow() {
           <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-secondary)' }}>
             <h2 style={{ fontSize: 18, fontWeight: 500 }}>Monthly Breakdown</h2>
           </div>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 650 }}>
             <thead>
               <tr style={{ borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-secondary)' }}>
                 <th style={thStyle}>Month</th>

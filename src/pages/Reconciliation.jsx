@@ -244,7 +244,7 @@ export default function Reconciliation() {
               </span>
             </h3>
           </div>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 650 }}>
             <thead>
               <tr style={{ borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-secondary)' }}>
                 <th style={thStyle}>File</th>
@@ -343,7 +343,7 @@ export default function Reconciliation() {
             </div>
 
             {activeStmt.parsed_entries?.length > 0 && !recon && (
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 650 }}>
                 <thead>
                   <tr style={{ borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-secondary)' }}>
                     <th style={thStyle}>Date</th>
@@ -393,7 +393,7 @@ export default function Reconciliation() {
               {/* Matched */}
               {recon.matched?.length > 0 && (
                 <ReconSection title="Matched Entries" icon={CheckCircle} color="var(--success)" count={recon.matched.length}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 650 }}>
                     <thead>
                       <tr style={{ borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-secondary)' }}>
                         <th style={thStyle}>Date</th>
@@ -432,7 +432,7 @@ export default function Reconciliation() {
                       <Check size={12} weight="bold" /> Add {selectedMissing.length} to Ledger
                     </button>
                   )}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 650 }}>
                     <thead>
                       <tr style={{ borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-secondary)' }}>
                         <th style={{ ...thStyle, width: 40 }}></th>
@@ -477,7 +477,7 @@ export default function Reconciliation() {
               {/* Missing from Statement */}
               {recon.missing_from_statement?.length > 0 && (
                 <ReconSection title="In Ledger but Missing from Statement" icon={XCircle} color="var(--info)" count={recon.missing_from_statement.length}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 650 }}>
                     <thead>
                       <tr style={{ borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-secondary)' }}>
                         <th style={thStyle}>Date</th>
@@ -512,7 +512,7 @@ export default function Reconciliation() {
               {/* Conflicts */}
               {recon.conflicts?.length > 0 && (
                 <ReconSection title="Conflicts (Amount Mismatch)" icon={Warning} color="var(--error)" count={recon.conflicts.length}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 650 }}>
                     <thead>
                       <tr style={{ borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-secondary)' }}>
                         <th style={thStyle}>Date</th>

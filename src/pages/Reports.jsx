@@ -335,7 +335,7 @@ export default function Reports() {
         {/* Category Table with Subcategory Drilldown */}
         {catData.length > 0 && (
           <div style={{ borderTop: '1px solid var(--border-subtle)' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 650 }}>
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-secondary)' }}>
                   <th style={thStyle}></th>
@@ -422,7 +422,7 @@ export default function Reports() {
           <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-secondary)' }}>
             <h2 style={{ fontSize: 16, fontWeight: 500 }}>Monthly Details</h2>
           </div>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 650 }}>
             <thead>
               <tr style={{ borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-secondary)' }}>
                 <th style={thStyle}>Month</th>

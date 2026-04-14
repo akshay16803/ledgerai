@@ -64,10 +64,10 @@ export default function Dashboard() {
 
   return (
     <div data-testid="dashboard-page">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 32 }}>
+      <div className="action-bar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 32 }}>
         <div>
-          <h1 style={{ fontSize: 28, fontWeight: 500, letterSpacing: '-0.02em' }}>Dashboard</h1>
-          <p className="mono" style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
+          <h1 className="page-title" style={{ fontSize: 28, fontWeight: 500, letterSpacing: '-0.02em' }}>Dashboard</h1>
+          <p className="mono page-subtitle" style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
             Financial overview
           </p>
         </div>
@@ -86,7 +86,7 @@ export default function Dashboard() {
       </div>
 
       {/* Stats Grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 32 }}>
+      <div className="stat-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 32 }}>
         <StatCard testId="stat-net-worth" label="Net Worth" value={formatCurrency(summary.net_worth)} icon={Scales} color="var(--brand-primary)" accent="var(--accent-3)" />
         <StatCard testId="stat-income" label="Income This Month" value={formatCurrency(summary.income_this_month)} icon={TrendUp} color="var(--success)" accent="var(--success)" />
         <StatCard testId="stat-expenses" label="Expenses This Month" value={formatCurrency(summary.expense_this_month)} icon={TrendDown} color="var(--error)" accent="var(--error)" />
@@ -94,7 +94,7 @@ export default function Dashboard() {
       </div>
 
       {/* Two columns: Accounts + Recent Transactions */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
+      <div className="card-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
         {/* Accounts */}
         <div data-testid="accounts-overview" style={{ background: '#fff', border: '1px solid var(--border-subtle)', borderRadius: 2, padding: 24 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
