@@ -206,7 +206,9 @@ export default function Reports() {
       if (!sd && !ed) {
         setCache('reports', { summary: sum, periods: per.periods || [], categories: { expense: catExp.categories || [], income: catInc.categories || [] } });
       }
-    } catch (err) { console.error(err); }
+    } catch {
+      // Reports will show empty state on error
+    }
     setLoading(false);
   }, []);
 

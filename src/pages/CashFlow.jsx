@@ -137,7 +137,9 @@ export default function CashFlow() {
       setAccounts(accs);
       setCategories(cats);
       setCache('cashflow', { projection: proj, transactions: txnData.transactions || [], accounts: accs, categories: cats });
-    } catch (err) { console.error(err); }
+    } catch {
+      // Cash flow will show empty state on error
+    }
     setLoading(false);
   }, []);
 

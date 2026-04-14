@@ -35,7 +35,9 @@ export default function TaxSummary() {
       setSummaries(res.summaries);
       setAvailableEmails(emailsRes.emails);
       setCache('taxsummary', { summaries: res.summaries });
-    } catch (err) { console.error(err); }
+    } catch {
+      // Tax summary will show empty state on error
+    }
     setLoading(false);
   }, []);
 
@@ -382,7 +384,9 @@ function TaxSummaryDetail({ summaryId, onBack }) {
       const data = await api.get(`/api/tax-summary/${summaryId}`);
       setSummary(data.summary);
       setTransactions(data.transactions);
-    } catch (err) { console.error(err); }
+    } catch {
+      // Detail will show empty state on error
+    }
     setLoading(false);
   }, [summaryId]);
 

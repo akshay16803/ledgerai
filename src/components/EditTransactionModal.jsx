@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { api } from '../lib/api';
 import { X, ArrowDown, ArrowUp, ArrowsLeftRight, Plus, Check } from '@phosphor-icons/react';
 
@@ -34,8 +34,19 @@ export function EditTransactionModal({ transaction, accounts, categories, onSave
   useEffect(() => { setLocalAccounts(accounts); }, [accounts]);
   useEffect(() => { setLocalCategories(categories); }, [categories]);
 
-  const parentCategories = localCategories.filter(c => !c.parent_id && c.category_type === txnType);
-  const subCategories = localCategories.filter(c => c.parent_id === form.category_id);
+  // Memoize expensive filter operations
+  const parentCategories = useMemo(
+    () => localCategories.filter(c => !c.parent_id && c.category_type === txnType),
+    [localCategories, txnType]
+  );
+  const subCategories = useMemo(
+    () => localCategories.filter(c => c.parent_id === form.category_id),
+    [localCategories, form.category_id]
+  );
+  const filteredToAccounts = useMemo(
+    () => localAccounts.filter(a => a.account_id !== form.account_id),
+    [localAccounts, form.account_id]
+  );
 
   const handleQuickAddCategory = async () => {
     if (!quickCatName.trim()) return;
@@ -206,7 +217,7 @@ export function EditTransactionModal({ transaction, accounts, categories, onSave
                     onChange={e => setForm(f => ({ ...f, to_account_id: e.target.value }))}
                     style={inputStyle}>
                     <option value="">Select destination</option>
-                    {localAccounts.filter(a => a.account_id !== form.account_id).map(a =>
+                    {filteredToAccounts.map(a =>
                       <option key={a.account_id} value={a.account_id}>{a.name}</option>
                     )}
                   </select>

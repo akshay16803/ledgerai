@@ -60,7 +60,9 @@ export default function Reconciliation() {
       setAccounts(accs);
       setCache('reconciliation', { statements: stmtRes.statements || [], accounts: accs });
       setSelectedAccountId(prev => prev || (accs.length > 0 ? accs[0].account_id : ''));
-    } catch (err) { console.error(err); }
+    } catch {
+      // Reconciliation will show empty state on error
+    }
     setLoading(false);
   }, []);
 

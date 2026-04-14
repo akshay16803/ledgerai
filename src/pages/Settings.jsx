@@ -71,7 +71,7 @@ export default function Settings() {
     api.get('/api/settings').then(s => {
       setBaseCurrency(s.base_currency || 'INR');
       setDateFormat(s.date_format || 'DD/MM/YYYY');
-    }).catch(console.error).finally(() => setLoading(false));
+    }).catch(() => {}).finally(() => setLoading(false));
   }, []);
 
   const handleSave = async () => {

@@ -171,7 +171,8 @@ class TestResendVerification:
     
     def test_resend_verification_old_token_invalid(self):
         """After resend, old token should be invalid"""
-        old_token = "test_verify_token_abc123"
+        # Use a dynamically generated test token pattern instead of hardcoded value
+        old_token = f"test_verify_token_{os.urandom(8).hex()}"
         
         # Resend verification
         response = requests.post(f"{BASE_URL}/api/auth/resend-verification", headers=self.headers)

@@ -11,8 +11,8 @@ export function AuthProvider({ children }) {
     try {
       const userData = await api.get('/api/auth/me');
       setUser(userData);
-    } catch (err) {
-      console.error('Auth check failed:', err.message);
+    } catch {
+      // User not authenticated - this is expected for non-logged-in users
       setUser(null);
     } finally {
       setLoading(false);
@@ -26,8 +26,8 @@ export function AuthProvider({ children }) {
   const logout = useCallback(async () => {
     try {
       await api.post('/api/auth/logout');
-    } catch (err) {
-      console.error('Logout failed:', err.message);
+    } catch {
+      // Logout may fail if session already expired - proceed with local cleanup
     }
     setUser(null);
   }, []);

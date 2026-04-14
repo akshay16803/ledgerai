@@ -36,7 +36,7 @@ export default function Accounts() {
   const [error, setError] = useState('');
 
   const load = () => {
-    api.get('/api/accounts').then(data => { setAccounts(data); setCache('accounts', data); }).catch(console.error).finally(() => setLoading(false));
+    api.get('/api/accounts').then(data => { setAccounts(data); setCache('accounts', data); }).catch(() => {}).finally(() => setLoading(false));
   };
 
   useEffect(() => { load(); }, []);

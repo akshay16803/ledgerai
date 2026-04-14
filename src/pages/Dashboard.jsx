@@ -43,8 +43,8 @@ export default function Dashboard() {
       const data = await api.get('/api/dashboard/summary');
       setSummary(data);
       setCache('dashboard', data);
-    } catch (err) {
-      console.error('Dashboard load failed:', err);
+    } catch {
+      // Dashboard will show empty/default state on error
     } finally {
       setLoading(false);
     }

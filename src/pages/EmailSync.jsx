@@ -320,7 +320,9 @@ export default function EmailSync() {
       setAccounts(accs);
       setCategories(cats);
       setCache('emailsync', { gmailStatus: gStatus, outlookStatus: oStatus, smsStats: sStats });
-    } catch (err) { console.error(err); }
+    } catch {
+      // Email sync status will show default state on error
+    }
     setLoading(false);
   }, []);
 

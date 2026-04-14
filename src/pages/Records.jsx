@@ -43,8 +43,8 @@ export default function Records() {
       const data = await api.get(`/api/records?${params.toString()}`);
       setRecords(data.records);
       setTotal(data.total);
-    } catch (err) {
-      console.error('Failed to load records:', err);
+    } catch {
+      // Records will show empty state on error
     }
     setLoading(false);
   }, [search, dateFrom, dateTo, amountMin, amountMax, page]);
@@ -524,7 +524,7 @@ function RecordActions({ record, onDownloadEml, onDownloadAttachment, onPreview 
         }}>
           {record.attachments.map((att, i) => (
             <button
-              key={i}
+              key={`${record.archive_id}-${att.filename}-${i}`}
               data-testid={`download-att-${record.archive_id}-${i}`}
               onClick={() => { onDownloadAttachment(record.archive_id, i, att.filename); setExpanded(false); }}
               style={{

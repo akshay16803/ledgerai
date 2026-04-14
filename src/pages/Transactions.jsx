@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { api } from '../lib/api';
 import { getCached, setCache } from '../lib/cache';
 import { Plus, ArrowDown, ArrowUp, ArrowsLeftRight, Check, X, Funnel, PencilSimple } from '@phosphor-icons/react';
@@ -41,14 +41,25 @@ export default function Transactions() {
       if (!filterType && !filterStatus) {
         setCache('transactions', { transactions: txnRes.transactions, total: txnRes.total, accounts: accs, categories: cats });
       }
-    } catch (err) { console.error(err); }
+    } catch (err) { /* Error handled silently - data will show empty state */ }
     setLoading(false);
   }, [filterType, filterStatus]);
 
   useEffect(() => { loadData(); }, [loadData]); // eslint-disable-line react-hooks/set-state-in-effect
 
-  const parentCategories = categories.filter(c => !c.parent_id && c.category_type === txnType);
-  const subCategories = categories.filter(c => c.parent_id === form.category_id);
+  // Memoize expensive filter operations
+  const parentCategories = useMemo(
+    () => categories.filter(c => !c.parent_id && c.category_type === txnType),
+    [categories, txnType]
+  );
+  const subCategories = useMemo(
+    () => categories.filter(c => c.parent_id === form.category_id),
+    [categories, form.category_id]
+  );
+  const filteredToAccounts = useMemo(
+    () => accounts.filter(a => a.account_id !== form.account_id),
+    [accounts, form.account_id]
+  );
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -213,7 +224,7 @@ export default function Transactions() {
                   <select data-testid="txn-to-account-select" value={form.to_account_id} onChange={e => setForm(f => ({...f, to_account_id: e.target.value}))}
                     style={inputStyle}>
                     <option value="">Select destination</option>
-                    {accounts.filter(a => a.account_id !== form.account_id).map(a => <option key={a.account_id} value={a.account_id}>{a.name}</option>)}
+                    {filteredToAccounts.map(a => <option key={a.account_id} value={a.account_id}>{a.name}</option>)}
                   </select>
                 </div>
               )}

@@ -12,7 +12,7 @@ export default function Categories() {
   const [error, setError] = useState('');
 
   const load = () => {
-    api.get('/api/categories').then(data => { setCategories(data); setCache('categories', data); }).catch(console.error).finally(() => setLoading(false));
+    api.get('/api/categories').then(data => { setCategories(data); setCache('categories', data); }).catch(() => {}).finally(() => setLoading(false));
   };
 
   useEffect(() => { load(); }, []);

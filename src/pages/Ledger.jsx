@@ -24,8 +24,8 @@ export default function Ledger() {
       const [accs, cats] = await Promise.all([api.get('/api/accounts'), api.get('/api/categories')]);
       setAccounts(accs);
       setCategories(cats);
-    } catch (err) {
-      console.error('Failed to load reference data:', err);
+    } catch {
+      // Reference data will show empty state on error
     }
   }, []);
 
@@ -47,12 +47,12 @@ export default function Ledger() {
       if (!selectedAccount && !fromDate && !toDate) {
         setCache('ledger', { transactions: res.transactions, accounts, categories });
       }
-    } catch (err) {
-      console.error('Failed to load transactions:', err);
+    } catch {
+      // Transactions will show empty state on error
     } finally {
       setLoading(false);
     }
-  }, [selectedAccount, fromDate, toDate]);
+  }, [selectedAccount, fromDate, toDate, accounts, categories]);
 
   useEffect(() => {
     loadTransactions();

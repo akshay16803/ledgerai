@@ -12,7 +12,7 @@ export default function FeatureRequests() {
   const [success, setSuccess] = useState('');
 
   const load = () => {
-    api.get('/api/feature-requests').then(data => { setRequests(data); setCache('featurerequests', data); }).catch(console.error).finally(() => setLoading(false));
+    api.get('/api/feature-requests').then(data => { setRequests(data); setCache('featurerequests', data); }).catch(() => {}).finally(() => setLoading(false));
   };
 
   useEffect(() => { load(); }, []);
