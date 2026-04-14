@@ -174,9 +174,13 @@ export default function Landing() {
         padding: '40px 24px', textAlign: 'center',
         borderTop: '1px solid var(--border-subtle)'
       }}>
-        <p className="mono" style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+        <p className="mono" style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>
           SpentyAI {new Date().getFullYear()}. Autonomous accounting software.
         </p>
+        <div style={{ display: 'flex', justifyContent: 'center', gap: 16 }}>
+          <a href="/privacy" style={{ fontSize: 12, color: 'var(--text-muted)', textDecoration: 'underline' }}>Privacy Policy</a>
+          <a href="/terms" style={{ fontSize: 12, color: 'var(--text-muted)', textDecoration: 'underline' }}>Terms of Service</a>
+        </div>
       </footer>
     </div>
   );

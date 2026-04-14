@@ -14,6 +14,8 @@ import CashFlow from './pages/CashFlow.jsx';
 import Reconciliation from './pages/Reconciliation.jsx';
 import Reports from './pages/Reports.jsx';
 import VerifyEmail from './pages/VerifyEmail.jsx';
+import Privacy from './pages/Privacy.jsx';
+import Terms from './pages/Terms.jsx';
 import AppLayout from './components/AppLayout.jsx';
 
 function ProtectedRoute({ children }) {
@@ -36,6 +38,8 @@ export default function App() {
       <Route path="/login" element={<Login />} />
       <Route path="/pricing" element={<Pricing />} />
       <Route path="/verify-email" element={<VerifyEmail />} />
+      <Route path="/privacy" element={<Privacy />} />
+      <Route path="/terms" element={<Terms />} />
       <Route path="/dashboard" element={<ProtectedRoute><AppLayout><Dashboard /></AppLayout></ProtectedRoute>} />
       <Route path="/transactions" element={<ProtectedRoute><AppLayout><Transactions /></AppLayout></ProtectedRoute>} />
       <Route path="/accounts" element={<ProtectedRoute><AppLayout><Accounts /></AppLayout></ProtectedRoute>} />
