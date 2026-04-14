@@ -60,17 +60,20 @@ CSV/PDF upload, auto-parsing, fuzzy reconciliation engine, add missing entries
 - Smarter AI email parsing: ignores credit card bills, trading/algo notifications, newsletters
 - Processing lock prevents duplicate parallel processing tasks
 - Startup cleanup resets stuck "processing" emails on deploy
+- Auto-resume processing within 10 seconds of deploy (was 15 minutes)
 - Live counter polling (3s) during active processing
 - Renamed stat labels for clarity (Total Emails, Transactions Found, Skipped, In Queue, etc.)
-- **Records tab**: New page to browse archived transaction emails
-  - Emails archived on transaction approval, deleted on rejection
-  - Full email + attachments stored
-  - Search by subject, sender, description
-  - Filter by date range, amount range
-  - Download individual .eml files
-  - Download individual attachments
-  - Bulk download as ZIP (selected or all)
-  - Pagination support
+- In-memory data caching for instant tab switching across all pages
+- **Records tab**: Archived transaction emails with search, filters, .eml and ZIP downloads
+- **Tax Summary tab**: Isolated email analysis for any past period
+  - Create multiple summaries (FY 2024-25, Q1 2025, etc.)
+  - Uses existing connected Gmail/Outlook accounts
+  - AI scans emails in date range, finds transactions
+  - Shows income/expenses/net summary card
+  - Click to view full editable transaction list
+  - Completely isolated — does NOT affect main ledger or accounts
+  - Export to CSV
+  - Real-time progress during analysis
 
 ## Auth Flow (Current)
 1. User clicks "Continue with Google" on Login page

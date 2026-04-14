@@ -17,6 +17,7 @@ import VerifyEmail from './pages/VerifyEmail.jsx';
 import Privacy from './pages/Privacy.jsx';
 import Terms from './pages/Terms.jsx';
 import Records from './pages/Records.jsx';
+import TaxSummary from './pages/TaxSummary.jsx';
 import AppLayout from './components/AppLayout.jsx';
 
 function ProtectedRoute({ children }) {
@@ -51,6 +52,7 @@ export default function App() {
       <Route path="/reports" element={<ProtectedRoute><AppLayout><Reports /></AppLayout></ProtectedRoute>} />
       <Route path="/email-sync" element={<ProtectedRoute><AppLayout><EmailSync /></AppLayout></ProtectedRoute>} />
       <Route path="/records" element={<ProtectedRoute><AppLayout><Records /></AppLayout></ProtectedRoute>} />
+      <Route path="/tax-summary" element={<ProtectedRoute><AppLayout><TaxSummary /></AppLayout></ProtectedRoute>} />
       <Route path="/feature-requests" element={<ProtectedRoute><AppLayout><FeatureRequests /></AppLayout></ProtectedRoute>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

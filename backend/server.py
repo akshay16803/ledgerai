@@ -3588,6 +3588,374 @@ async def download_records_zip(request: Request, user: dict = Depends(get_curren
     )
 
 
+# ─── Tax Summary ─────────────────────────────────────────────────────
+
+@app.post("/api/tax-summary")
+async def create_tax_summary(request: Request, user: dict = Depends(get_current_user)):
+    body = await request.json()
+    name = body.get("name", "").strip()
+    date_from = body.get("date_from", "")
+    date_to = body.get("date_to", "")
+    email_address = body.get("email_address", "")
+    provider = body.get("provider", "gmail")
+
+    if not name or not date_from or not date_to or not email_address:
+        raise HTTPException(status_code=400, detail="name, date_from, date_to, and email_address are required")
+
+    summary_id = f"ts_{uuid.uuid4().hex[:12]}"
+    summary = {
+        "summary_id": summary_id,
+        "user_id": user["user_id"],
+        "name": name,
+        "date_from": date_from,
+        "date_to": date_to,
+        "email_address": email_address,
+        "provider": provider,
+        "status": "processing",
+        "total_emails_scanned": 0,
+        "total_income": 0,
+        "total_expenses": 0,
+        "transaction_count": 0,
+        "created_at": datetime.now(timezone.utc),
+    }
+    await db.tax_summaries.insert_one(summary)
+    del summary["_id"]
+
+    asyncio.create_task(process_tax_summary(user["user_id"], summary_id, email_address, provider, date_from, date_to))
+
+    return summary
+
+
+@app.get("/api/tax-summary")
+async def list_tax_summaries(user: dict = Depends(get_current_user)):
+    summaries = await db.tax_summaries.find(
+        {"user_id": user["user_id"]}, {"_id": 0}
+    ).sort("created_at", -1).to_list(50)
+    for s in summaries:
+        if isinstance(s.get("created_at"), datetime):
+            s["created_at"] = s["created_at"].isoformat()
+    return {"summaries": summaries}
+
+
+@app.get("/api/tax-summary/{summary_id}")
+async def get_tax_summary(summary_id: str, user: dict = Depends(get_current_user)):
+    summary = await db.tax_summaries.find_one(
+        {"summary_id": summary_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    if not summary:
+        raise HTTPException(status_code=404, detail="Summary not found")
+    if isinstance(summary.get("created_at"), datetime):
+        summary["created_at"] = summary["created_at"].isoformat()
+
+    txns = await db.tax_summary_transactions.find(
+        {"summary_id": summary_id, "user_id": user["user_id"]}, {"_id": 0}
+    ).sort("date", 1).to_list(5000)
+
+    return {"summary": summary, "transactions": txns}
+
+
+@app.delete("/api/tax-summary/{summary_id}")
+async def delete_tax_summary(summary_id: str, user: dict = Depends(get_current_user)):
+    result = await db.tax_summaries.delete_one(
+        {"summary_id": summary_id, "user_id": user["user_id"]}
+    )
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Summary not found")
+    await db.tax_summary_transactions.delete_many({"summary_id": summary_id})
+    return {"message": "Summary deleted"}
+
+
+@app.post("/api/tax-summary/{summary_id}/transactions")
+async def add_tax_summary_transaction(summary_id: str, request: Request, user: dict = Depends(get_current_user)):
+    summary = await db.tax_summaries.find_one(
+        {"summary_id": summary_id, "user_id": user["user_id"]}
+    )
+    if not summary:
+        raise HTTPException(status_code=404, detail="Summary not found")
+
+    body = await request.json()
+    txn = {
+        "txn_id": f"tstxn_{uuid.uuid4().hex[:12]}",
+        "summary_id": summary_id,
+        "user_id": user["user_id"],
+        "transaction_type": body.get("transaction_type", "expense"),
+        "amount": float(body.get("amount", 0)),
+        "date": body.get("date", ""),
+        "description": body.get("description", ""),
+        "category": body.get("category", ""),
+        "from_email": body.get("from_email", "Manual"),
+        "source": "manual",
+    }
+    await db.tax_summary_transactions.insert_one(txn)
+    del txn["_id"]
+    await _recalculate_tax_summary(summary_id)
+    return txn
+
+
+@app.put("/api/tax-summary/{summary_id}/transactions/{txn_id}")
+async def update_tax_summary_transaction(summary_id: str, txn_id: str, request: Request, user: dict = Depends(get_current_user)):
+    body = await request.json()
+    update_fields = {}
+    for field in ["transaction_type", "amount", "date", "description", "category"]:
+        if field in body:
+            update_fields[field] = body[field]
+    if "amount" in update_fields:
+        update_fields["amount"] = float(update_fields["amount"])
+
+    if not update_fields:
+        raise HTTPException(status_code=400, detail="No fields to update")
+
+    result = await db.tax_summary_transactions.update_one(
+        {"txn_id": txn_id, "summary_id": summary_id, "user_id": user["user_id"]},
+        {"$set": update_fields}
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+
+    await _recalculate_tax_summary(summary_id)
+    updated = await db.tax_summary_transactions.find_one({"txn_id": txn_id}, {"_id": 0})
+    return updated
+
+
+@app.delete("/api/tax-summary/{summary_id}/transactions/{txn_id}")
+async def delete_tax_summary_transaction(summary_id: str, txn_id: str, user: dict = Depends(get_current_user)):
+    result = await db.tax_summary_transactions.delete_one(
+        {"txn_id": txn_id, "summary_id": summary_id, "user_id": user["user_id"]}
+    )
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    await _recalculate_tax_summary(summary_id)
+    return {"message": "Transaction deleted"}
+
+
+@app.get("/api/tax-summary/{summary_id}/export")
+async def export_tax_summary(summary_id: str, user: dict = Depends(get_current_user)):
+    summary = await db.tax_summaries.find_one(
+        {"summary_id": summary_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    if not summary:
+        raise HTTPException(status_code=404, detail="Summary not found")
+
+    txns = await db.tax_summary_transactions.find(
+        {"summary_id": summary_id}, {"_id": 0}
+    ).sort("date", 1).to_list(5000)
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Date", "Type", "Description", "Category", "Amount (INR)", "Source Email"])
+    for t in txns:
+        writer.writerow([
+            t.get("date", ""), t.get("transaction_type", ""),
+            t.get("description", ""), t.get("category", ""),
+            t.get("amount", 0), t.get("from_email", ""),
+        ])
+    writer.writerow([])
+    writer.writerow(["Summary", summary.get("name", "")])
+    writer.writerow(["Period", f"{summary.get('date_from', '')} to {summary.get('date_to', '')}"])
+    writer.writerow(["Total Income", summary.get("total_income", 0)])
+    writer.writerow(["Total Expenses", summary.get("total_expenses", 0)])
+    writer.writerow(["Net", summary.get("total_income", 0) - summary.get("total_expenses", 0)])
+
+    csv_bytes = output.getvalue().encode("utf-8-sig")
+    filename = re.sub(r'[^\w\s-]', '', summary.get("name", "tax_summary"))[:40].strip()
+
+    return Response(
+        content=csv_bytes,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}.csv"'},
+    )
+
+
+@app.get("/api/tax-summary/available-emails")
+async def get_available_emails_for_tax(user: dict = Depends(get_current_user)):
+    """Get all connected Gmail and Outlook emails available for tax summary scanning."""
+    gmail_tokens = await db.gmail_tokens.find(
+        {"user_id": user["user_id"], "connected": True}, {"_id": 0, "gmail_email": 1}
+    ).to_list(10)
+    outlook_tokens = await db.outlook_tokens.find(
+        {"user_id": user["user_id"], "connected": True}, {"_id": 0, "outlook_email": 1}
+    ).to_list(10)
+
+    emails = []
+    for t in gmail_tokens:
+        emails.append({"email": t["gmail_email"], "provider": "gmail"})
+    for t in outlook_tokens:
+        emails.append({"email": t["outlook_email"], "provider": "outlook"})
+    return {"emails": emails}
+
+
+async def _recalculate_tax_summary(summary_id: str):
+    """Recalculate totals for a tax summary."""
+    txns = await db.tax_summary_transactions.find(
+        {"summary_id": summary_id}, {"_id": 0, "transaction_type": 1, "amount": 1}
+    ).to_list(5000)
+
+    total_income = sum(t["amount"] for t in txns if t.get("transaction_type") == "income")
+    total_expenses = sum(t["amount"] for t in txns if t.get("transaction_type") == "expense")
+
+    await db.tax_summaries.update_one(
+        {"summary_id": summary_id},
+        {"$set": {
+            "total_income": total_income,
+            "total_expenses": total_expenses,
+            "transaction_count": len(txns),
+        }}
+    )
+
+
+async def process_tax_summary(user_id: str, summary_id: str, email_address: str, provider: str, date_from: str, date_to: str):
+    """Background task: scan emails for a date range and create isolated tax transactions."""
+    try:
+        emails_scanned = 0
+        email_docs = []
+
+        if provider == "gmail":
+            creds = await get_gmail_credentials(user_id, email_address)
+            if not creds:
+                await db.tax_summaries.update_one(
+                    {"summary_id": summary_id},
+                    {"$set": {"status": "error", "error_message": "Gmail credentials not found. Please reconnect Gmail from Email & SMS tab."}}
+                )
+                return
+
+            service = build("gmail", "v1", credentials=creds)
+            query = f"after:{date_from} before:{date_to}"
+            page_token = None
+
+            while True:
+                result = service.users().messages().list(
+                    userId="me", q=query, maxResults=100, pageToken=page_token
+                ).execute()
+                messages = result.get("messages", [])
+                if not messages:
+                    break
+
+                for msg_ref in messages:
+                    try:
+                        msg = service.users().messages().get(
+                            userId="me", id=msg_ref["id"], format="full"
+                        ).execute()
+                        headers = {h["name"].lower(): h["value"] for h in msg.get("payload", {}).get("headers", [])}
+                        body_text = extract_email_body(msg.get("payload", {}))
+
+                        email_docs.append({
+                            "subject": headers.get("subject", ""),
+                            "from_email": headers.get("from", ""),
+                            "date": headers.get("date", ""),
+                            "body_text": body_text[:5000] if body_text else msg.get("snippet", ""),
+                        })
+                        emails_scanned += 1
+                    except Exception as e:
+                        logger.error(f"Tax summary: failed to fetch Gmail message: {e}")
+
+                page_token = result.get("nextPageToken")
+                if not page_token:
+                    break
+
+        elif provider == "outlook":
+            access_token = await get_outlook_access_token(user_id, email_address)
+            if not access_token:
+                await db.tax_summaries.update_one(
+                    {"summary_id": summary_id},
+                    {"$set": {"status": "error", "error_message": "Outlook credentials not found. Please reconnect Outlook from Email & SMS tab."}}
+                )
+                return
+
+            filter_str = f"receivedDateTime ge {date_from}T00:00:00Z and receivedDateTime le {date_to}T23:59:59Z"
+            url = f"{MS_GRAPH_BASE}/me/messages?$filter={filter_str}&$top=100&$select=subject,from,receivedDateTime,bodyPreview,body"
+
+            async with httpx.AsyncClient() as http_client:
+                while url:
+                    resp = await http_client.get(url, headers={"Authorization": f"Bearer {access_token}"})
+                    if resp.status_code != 200:
+                        break
+                    data = resp.json()
+                    for msg in data.get("value", []):
+                        body_content = msg.get("body", {}).get("content", "")
+                        body_text = re.sub(r'<[^>]+>', ' ', body_content)
+                        body_text = re.sub(r'\s+', ' ', body_text).strip()
+                        from_info = msg.get("from", {}).get("emailAddress", {})
+                        email_docs.append({
+                            "subject": msg.get("subject", ""),
+                            "from_email": from_info.get("address", ""),
+                            "date": msg.get("receivedDateTime", ""),
+                            "body_text": body_text[:5000] if body_text else msg.get("bodyPreview", ""),
+                        })
+                        emails_scanned += 1
+                    url = data.get("@odata.nextLink")
+
+        await db.tax_summaries.update_one(
+            {"summary_id": summary_id},
+            {"$set": {"total_emails_scanned": emails_scanned, "status": "analyzing"}}
+        )
+
+        if not openai_client or not email_docs:
+            await db.tax_summaries.update_one(
+                {"summary_id": summary_id},
+                {"$set": {"status": "complete" if not email_docs else "error",
+                          "error_message": "OpenAI not configured" if not email_docs and openai_client else None}}
+            )
+            await _recalculate_tax_summary(summary_id)
+            return
+
+        # Process emails through AI
+        accounts = await db.accounts.find({"user_id": user_id}, {"_id": 0}).to_list(100)
+        account_names = [f"{a['name']} ({a['account_type']}/{a.get('sub_type', '')})" for a in accounts]
+        category_info = await _get_category_info_for_ai(user_id)
+
+        for i, email_doc in enumerate(email_docs):
+            try:
+                result = await analyze_email_with_ai(email_doc, account_names, category_info)
+                if result and result.get("is_transaction"):
+                    parsed_date = result.get("date", "")
+                    if not parsed_date:
+                        try:
+                            parsed_dt = parsedate_to_datetime(email_doc.get("date", ""))
+                            parsed_date = parsed_dt.strftime("%Y-%m-%d")
+                        except Exception:
+                            parsed_date = date_from
+
+                    txn = {
+                        "txn_id": f"tstxn_{uuid.uuid4().hex[:12]}",
+                        "summary_id": summary_id,
+                        "user_id": user_id,
+                        "transaction_type": result.get("transaction_type", "expense"),
+                        "amount": float(result.get("amount", 0)),
+                        "date": parsed_date,
+                        "description": result.get("description", ""),
+                        "category": result.get("category_id", ""),
+                        "from_email": email_doc.get("from_email", ""),
+                        "source": "email",
+                        "confidence": result.get("confidence", "medium"),
+                    }
+                    await db.tax_summary_transactions.insert_one(txn)
+
+                # Update progress every 10 emails
+                if (i + 1) % 10 == 0:
+                    await _recalculate_tax_summary(summary_id)
+                    await db.tax_summaries.update_one(
+                        {"summary_id": summary_id},
+                        {"$set": {"emails_analyzed": i + 1}}
+                    )
+
+            except Exception as e:
+                logger.error(f"Tax summary AI analysis failed: {e}")
+
+        await _recalculate_tax_summary(summary_id)
+        await db.tax_summaries.update_one(
+            {"summary_id": summary_id},
+            {"$set": {"status": "complete", "completed_at": datetime.now(timezone.utc), "emails_analyzed": len(email_docs)}}
+        )
+        logger.info(f"Tax summary {summary_id} complete: scanned {emails_scanned} emails")
+
+    except Exception as e:
+        logger.error(f"Tax summary processing failed: {e}")
+        await db.tax_summaries.update_one(
+            {"summary_id": summary_id},
+            {"$set": {"status": "error", "error_message": str(e)}}
+        )
+
+
 # ─── Health Check ────────────────────────────────────────────────────
 
 @app.get("/api/health")
