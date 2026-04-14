@@ -5,8 +5,9 @@ import {
   EnvelopeSimple, ArrowClockwise, Check, X, Clock,
   Lightning, Warning, CaretDown, CaretUp, CalendarBlank,
   CloudArrowUp, Plugs, PlugsConnected, MicrosoftOutlookLogo,
-  ChatText, DeviceMobile
+  ChatText, DeviceMobile, PencilSimple
 } from '@phosphor-icons/react';
+import { EditTransactionModal } from '../components/EditTransactionModal';
 
 function formatCurrency(amount) {
   if (!amount) return '—';
@@ -294,6 +295,7 @@ export default function EmailSync() {
   const [syncing, setSyncing] = useState(false);
   const [retrying, setRetrying] = useState(false);
   const [smsRetrying, setSmsRetrying] = useState(false);
+  const [editingTxn, setEditingTxn] = useState(null);
   const [pendingTxns, setPendingTxns] = useState([]);
   const [pendingTotal, setPendingTotal] = useState(0);
   const [accounts, setAccounts] = useState([]);
@@ -728,6 +730,16 @@ export default function EmailSync() {
                     </td>
                     <td style={{ padding: '10px 16px', textAlign: 'center' }}>
                       <div style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
+                        <button data-testid={`edit-review-${txn.transaction_id}`}
+                          onClick={() => setEditingTxn(txn)} title="Edit before approving"
+                          style={{
+                            background: 'rgba(74,110,125,0.1)', color: 'var(--info)', border: 'none',
+                            borderRadius: 2, padding: '6px 10px', cursor: 'pointer', fontSize: 11,
+                            fontWeight: 600, fontFamily: 'var(--font-body)',
+                            display: 'flex', alignItems: 'center', gap: 4
+                          }}>
+                          <PencilSimple size={12} weight="bold" /> Edit
+                        </button>
                         <button data-testid={`approve-review-${txn.transaction_id}`}
                           onClick={() => handleApprove(txn.transaction_id)} title="Approve & Record"
                           style={{
@@ -756,6 +768,16 @@ export default function EmailSync() {
             </table>
           </div>
         </div>
+      )}
+
+      {editingTxn && (
+        <EditTransactionModal
+          transaction={editingTxn}
+          accounts={accounts}
+          categories={categories}
+          onSave={() => { setEditingTxn(null); loadStatus(); }}
+          onClose={() => setEditingTxn(null)}
+        />
       )}
     </div>
   );

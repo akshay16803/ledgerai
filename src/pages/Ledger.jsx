@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../lib/api';
 import { getCached, setCache } from '../lib/cache';
-import { Funnel } from '@phosphor-icons/react';
+import { Funnel, PencilSimple } from '@phosphor-icons/react';
+import { EditTransactionModal } from '../components/EditTransactionModal';
 
 function formatCurrency(amount) {
   return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2 }).format(amount);
@@ -13,6 +14,7 @@ export default function Ledger() {
   const [accounts, setAccounts] = useState(cached?.accounts || []);
   const [categories, setCategories] = useState(cached?.categories || []);
   const [loading, setLoading] = useState(!cached);
+  const [editingTxn, setEditingTxn] = useState(null);
   const [selectedAccount, setSelectedAccount] = useState('');
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
@@ -117,6 +119,7 @@ export default function Ledger() {
                 {selectedAccount && (
                   <th style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Balance</th>
                 )}
+                <th style={{ padding: '12px 16px', textAlign: 'center', fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)', width: 60 }}>Edit</th>
               </tr>
             </thead>
             <tbody>
@@ -160,12 +163,28 @@ export default function Ledger() {
                         {formatCurrency(runningBalance)}
                       </td>
                     )}
+                    <td style={{ padding: '10px 16px', textAlign: 'center' }}>
+                      <button data-testid={`ledger-edit-${txn.transaction_id}`} onClick={() => setEditingTxn(txn)} title="Edit"
+                        style={{ background: 'rgba(74,110,125,0.1)', border: 'none', borderRadius: 2, padding: '4px 8px', cursor: 'pointer', color: 'var(--info)' }}>
+                        <PencilSimple size={14} />
+                      </button>
+                    </td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
         </div>
+      )}
+
+      {editingTxn && (
+        <EditTransactionModal
+          transaction={editingTxn}
+          accounts={accounts}
+          categories={categories}
+          onSave={() => { setEditingTxn(null); loadTransactions(); }}
+          onClose={() => setEditingTxn(null)}
+        />
       )}
     </div>
   );

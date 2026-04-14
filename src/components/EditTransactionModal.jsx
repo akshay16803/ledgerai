@@ -1,0 +1,327 @@
+import { useState, useEffect } from 'react';
+import { api } from '../lib/api';
+import { X, ArrowDown, ArrowUp, ArrowsLeftRight, Plus, Check } from '@phosphor-icons/react';
+
+export function EditTransactionModal({ transaction, accounts, categories, onSave, onClose }) {
+  const isEdit = !!transaction;
+  const [txnType, setTxnType] = useState(transaction?.transaction_type || 'expense');
+  const [form, setForm] = useState({
+    amount: transaction?.amount || '',
+    date: transaction?.date || new Date().toISOString().split('T')[0],
+    account_id: transaction?.account_id || '',
+    to_account_id: transaction?.to_account_id || '',
+    category_id: transaction?.category_id || '',
+    subcategory_id: transaction?.subcategory_id || '',
+    description: transaction?.description || '',
+    is_recurring: transaction?.is_recurring || false,
+    recurring_frequency: transaction?.recurring_frequency || '',
+  });
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  // Quick-add state
+  const [showQuickCat, setShowQuickCat] = useState(false);
+  const [quickCatName, setQuickCatName] = useState('');
+  const [showQuickSubCat, setShowQuickSubCat] = useState(false);
+  const [quickSubCatName, setQuickSubCatName] = useState('');
+  const [showQuickAcc, setShowQuickAcc] = useState(false);
+  const [quickAccName, setQuickAccName] = useState('');
+  const [localAccounts, setLocalAccounts] = useState(accounts);
+  const [localCategories, setLocalCategories] = useState(categories);
+
+  useEffect(() => { setLocalAccounts(accounts); }, [accounts]);
+  useEffect(() => { setLocalCategories(categories); }, [categories]);
+
+  const parentCategories = localCategories.filter(c => !c.parent_id && c.category_type === txnType);
+  const subCategories = localCategories.filter(c => c.parent_id === form.category_id);
+
+  const handleQuickAddCategory = async () => {
+    if (!quickCatName.trim()) return;
+    try {
+      await api.post('/api/categories', { name: quickCatName.trim(), category_type: txnType });
+      const cats = await api.get('/api/categories');
+      setLocalCategories(cats);
+      setQuickCatName('');
+      setShowQuickCat(false);
+    } catch (err) { alert(err.message); }
+  };
+
+  const handleQuickAddSubCategory = async () => {
+    if (!quickSubCatName.trim() || !form.category_id) return;
+    try {
+      await api.post('/api/categories', { name: quickSubCatName.trim(), category_type: txnType, parent_id: form.category_id });
+      const cats = await api.get('/api/categories');
+      setLocalCategories(cats);
+      setQuickSubCatName('');
+      setShowQuickSubCat(false);
+    } catch (err) { alert(err.message); }
+  };
+
+  const handleQuickAddAccount = async () => {
+    if (!quickAccName.trim()) return;
+    try {
+      await api.post('/api/accounts', { name: quickAccName.trim(), account_type: 'asset', sub_type: 'bank', opening_balance: 0, currency: 'INR' });
+      const accs = await api.get('/api/accounts');
+      setLocalAccounts(accs);
+      setQuickAccName('');
+      setShowQuickAcc(false);
+    } catch (err) { alert(err.message); }
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError('');
+    if (!form.amount || parseFloat(form.amount) <= 0) { setError('Amount must be positive'); return; }
+    if (!form.date) { setError('Date is required'); return; }
+    if (!form.account_id) { setError('Account is required'); return; }
+    if (txnType !== 'transfer' && !form.category_id) { setError('Category is required'); return; }
+    if (txnType === 'transfer' && !form.to_account_id) { setError('Destination account is required'); return; }
+
+    setSaving(true);
+    try {
+      const payload = {
+        transaction_type: txnType,
+        amount: parseFloat(form.amount),
+        date: form.date,
+        account_id: form.account_id,
+        to_account_id: txnType === 'transfer' ? form.to_account_id : null,
+        category_id: txnType !== 'transfer' ? form.category_id : null,
+        subcategory_id: txnType !== 'transfer' ? form.subcategory_id : null,
+        description: form.description,
+        is_recurring: form.is_recurring,
+        recurring_frequency: form.is_recurring ? form.recurring_frequency : null,
+      };
+
+      if (isEdit) {
+        await api.put(`/api/transactions/${transaction.transaction_id}`, payload);
+      } else {
+        await api.post('/api/transactions', { ...payload, source: 'manual', status: 'approved' });
+      }
+      onSave();
+    } catch (err) { setError(err.message); }
+    setSaving(false);
+  };
+
+  return (
+    <div data-testid="edit-transaction-modal" style={{
+      position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center',
+    }}>
+      {/* Backdrop */}
+      <div onClick={onClose} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)' }} />
+
+      {/* Modal */}
+      <div style={{
+        position: 'relative', background: '#fff', borderRadius: 2, width: '100%', maxWidth: 580,
+        maxHeight: '90vh', overflow: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.2)',
+      }}>
+        {/* Header */}
+        <div style={{
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          padding: '20px 28px', borderBottom: '1px solid var(--border-subtle)',
+        }}>
+          <h2 style={{ fontSize: 18, fontWeight: 600 }}>{isEdit ? 'Edit Transaction' : 'New Transaction'}</h2>
+          <button data-testid="close-edit-modal" onClick={onClose}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4 }}>
+            <X size={20} />
+          </button>
+        </div>
+
+        <div style={{ padding: '24px 28px' }}>
+          {/* Type Tabs */}
+          <div style={{ display: 'flex', gap: 0, marginBottom: 24, borderBottom: '1px solid var(--border-subtle)' }}>
+            {[
+              { key: 'income', label: 'Income', icon: ArrowDown, color: 'var(--success)' },
+              { key: 'expense', label: 'Expense', icon: ArrowUp, color: 'var(--error)' },
+              { key: 'transfer', label: 'Transfer', icon: ArrowsLeftRight, color: 'var(--info)' },
+            ].map(({ key, label, icon: Icon, color }) => (
+              <button key={key} data-testid={`modal-txn-type-${key}`}
+                onClick={() => { setTxnType(key); setForm(f => ({ ...f, category_id: '', subcategory_id: '' })); }}
+                style={{
+                  padding: '10px 20px', border: 'none',
+                  borderBottom: txnType === key ? `2px solid ${color}` : '2px solid transparent',
+                  background: 'transparent', cursor: 'pointer', fontSize: 14,
+                  fontWeight: txnType === key ? 600 : 400,
+                  color: txnType === key ? color : 'var(--text-muted)',
+                  fontFamily: 'var(--font-body)', display: 'flex', alignItems: 'center', gap: 6,
+                  transition: 'all 0.15s',
+                }}>
+                <Icon size={16} weight={txnType === key ? 'bold' : 'regular'} /> {label}
+              </button>
+            ))}
+          </div>
+
+          <form onSubmit={handleSubmit}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+              {/* Account */}
+              <div>
+                <label style={labelStyle}>
+                  {txnType === 'income' ? 'Account Receiving Payment *' :
+                   txnType === 'expense' ? 'Account Making Payment *' : 'From Account *'}
+                </label>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <select data-testid="modal-account-select" value={form.account_id}
+                    onChange={e => setForm(f => ({ ...f, account_id: e.target.value }))}
+                    style={{ ...inputStyle, flex: 1 }}>
+                    <option value="">Select account</option>
+                    {localAccounts.map(a => <option key={a.account_id} value={a.account_id}>{a.name}</option>)}
+                  </select>
+                  <button type="button" data-testid="modal-quick-add-account" onClick={() => setShowQuickAcc(!showQuickAcc)}
+                    style={quickAddBtnStyle}><Plus size={14} /></button>
+                </div>
+                {showQuickAcc && <QuickAddInput value={quickAccName} onChange={setQuickAccName} onSave={handleQuickAddAccount} placeholder="Account name" />}
+              </div>
+
+              {/* Amount */}
+              <div>
+                <label style={labelStyle}>Amount *</label>
+                <input data-testid="modal-amount-input" type="number" step="0.01" placeholder="0.00"
+                  value={form.amount} onChange={e => setForm(f => ({ ...f, amount: e.target.value }))}
+                  style={{ ...inputStyle, fontFamily: 'var(--font-mono)' }} />
+              </div>
+
+              {/* Transfer destination */}
+              {txnType === 'transfer' && (
+                <div>
+                  <label style={labelStyle}>To Account *</label>
+                  <select data-testid="modal-to-account-select" value={form.to_account_id}
+                    onChange={e => setForm(f => ({ ...f, to_account_id: e.target.value }))}
+                    style={inputStyle}>
+                    <option value="">Select destination</option>
+                    {localAccounts.filter(a => a.account_id !== form.account_id).map(a =>
+                      <option key={a.account_id} value={a.account_id}>{a.name}</option>
+                    )}
+                  </select>
+                </div>
+              )}
+
+              {/* Category */}
+              {txnType !== 'transfer' && (
+                <div>
+                  <label style={labelStyle}>Category *</label>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <select data-testid="modal-category-select" value={form.category_id}
+                      onChange={e => setForm(f => ({ ...f, category_id: e.target.value, subcategory_id: '' }))}
+                      style={{ ...inputStyle, flex: 1 }}>
+                      <option value="">Select category</option>
+                      {parentCategories.map(c => <option key={c.category_id} value={c.category_id}>{c.name}</option>)}
+                    </select>
+                    <button type="button" data-testid="modal-quick-add-category" onClick={() => setShowQuickCat(!showQuickCat)}
+                      style={quickAddBtnStyle}><Plus size={14} /></button>
+                  </div>
+                  {showQuickCat && <QuickAddInput value={quickCatName} onChange={setQuickCatName} onSave={handleQuickAddCategory} placeholder="Category name" />}
+                </div>
+              )}
+
+              {/* Subcategory */}
+              {txnType !== 'transfer' && (
+                <div>
+                  <label style={labelStyle}>Subcategory</label>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <select data-testid="modal-subcategory-select" value={form.subcategory_id}
+                      onChange={e => setForm(f => ({ ...f, subcategory_id: e.target.value }))}
+                      style={{ ...inputStyle, flex: 1 }}>
+                      <option value="">{subCategories.length === 0 ? 'No subcategories' : 'Select subcategory'}</option>
+                      {subCategories.map(c => <option key={c.category_id} value={c.category_id}>{c.name}</option>)}
+                    </select>
+                    {form.category_id && (
+                      <button type="button" data-testid="modal-quick-add-subcategory" onClick={() => setShowQuickSubCat(!showQuickSubCat)}
+                        style={quickAddBtnStyle}><Plus size={14} /></button>
+                    )}
+                  </div>
+                  {showQuickSubCat && <QuickAddInput value={quickSubCatName} onChange={setQuickSubCatName} onSave={handleQuickAddSubCategory} placeholder="Subcategory name" />}
+                </div>
+              )}
+
+              {/* Date */}
+              <div>
+                <label style={labelStyle}>Date *</label>
+                <input data-testid="modal-date-input" type="date" value={form.date}
+                  onChange={e => setForm(f => ({ ...f, date: e.target.value }))}
+                  style={inputStyle} />
+              </div>
+
+              {/* Recurring */}
+              <div>
+                <label style={labelStyle}>Recurring</label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer' }}>
+                    <input data-testid="modal-recurring-checkbox" type="checkbox" checked={form.is_recurring}
+                      onChange={e => setForm(f => ({ ...f, is_recurring: e.target.checked }))} />
+                    Is Recurring
+                  </label>
+                  {form.is_recurring && (
+                    <select data-testid="modal-frequency-select" value={form.recurring_frequency}
+                      onChange={e => setForm(f => ({ ...f, recurring_frequency: e.target.value }))}
+                      style={{ ...inputStyle, width: 'auto', padding: '6px 10px', fontSize: 12 }}>
+                      <option value="">Frequency</option>
+                      <option value="weekly">Weekly</option>
+                      <option value="monthly">Monthly</option>
+                      <option value="quarterly">Quarterly</option>
+                      <option value="yearly">Yearly</option>
+                    </select>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Description */}
+            <div style={{ marginBottom: 20 }}>
+              <label style={labelStyle}>Description</label>
+              <input data-testid="modal-description-input" value={form.description}
+                onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
+                style={inputStyle} placeholder="Optional description" />
+            </div>
+
+            {error && <p style={{ color: 'var(--error)', fontSize: 13, marginBottom: 12 }}>{error}</p>}
+
+            <div style={{ display: 'flex', gap: 12 }}>
+              <button data-testid="modal-save-btn" type="submit" disabled={saving}
+                style={{
+                  background: 'var(--brand-primary)', color: '#fff', border: 'none',
+                  padding: '10px 24px', borderRadius: 2, fontSize: 13, fontWeight: 600,
+                  cursor: saving ? 'not-allowed' : 'pointer', fontFamily: 'var(--font-body)',
+                  opacity: saving ? 0.6 : 1,
+                }}>
+                {saving ? 'Saving...' : isEdit ? 'Update Transaction' : 'Save Transaction'}
+              </button>
+              <button type="button" onClick={onClose}
+                style={{
+                  background: 'none', border: '1px solid var(--border-strong)', color: 'var(--text-secondary)',
+                  padding: '10px 24px', borderRadius: 2, fontSize: 13, cursor: 'pointer', fontFamily: 'var(--font-body)',
+                }}>Cancel</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function QuickAddInput({ value, onChange, onSave, placeholder }) {
+  return (
+    <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+      <input value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
+        onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), onSave())}
+        style={{ ...inputStyle, flex: 1, padding: '6px 10px', fontSize: 12 }} />
+      <button type="button" onClick={onSave}
+        style={{ padding: '6px 12px', background: 'var(--success)', color: '#fff', border: 'none', borderRadius: 2, fontSize: 11, cursor: 'pointer', fontFamily: 'var(--font-body)', display: 'flex', alignItems: 'center', gap: 3 }}>
+        <Check size={12} /> Save
+      </button>
+    </div>
+  );
+}
+
+const inputStyle = {
+  width: '100%', padding: '10px 14px', border: '1px solid var(--border-strong)',
+  borderRadius: 2, fontSize: 14, fontFamily: 'var(--font-body)', outline: 'none', background: 'var(--bg-primary)',
+};
+
+const labelStyle = {
+  fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 6,
+};
+
+const quickAddBtnStyle = {
+  padding: '0 10px', border: '1px solid var(--border-strong)', borderRadius: 2,
+  background: 'var(--bg-primary)', cursor: 'pointer', color: 'var(--accent-1)',
+  display: 'flex', alignItems: 'center',
+};

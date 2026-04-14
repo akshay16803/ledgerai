@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../lib/api';
 import { getCached, setCache } from '../lib/cache';
-import { Plus, ArrowDown, ArrowUp, ArrowsLeftRight, Check, X, Funnel } from '@phosphor-icons/react';
+import { Plus, ArrowDown, ArrowUp, ArrowsLeftRight, Check, X, Funnel, PencilSimple } from '@phosphor-icons/react';
+import { EditTransactionModal } from '../components/EditTransactionModal';
 
 function formatCurrency(amount) {
   return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2 }).format(amount);
@@ -19,6 +20,7 @@ export default function Transactions() {
   const [filterType, setFilterType] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
   const [error, setError] = useState('');
+  const [editingTxn, setEditingTxn] = useState(null);
   const [form, setForm] = useState({
     amount: '', date: new Date().toISOString().split('T')[0],
     account_id: '', to_account_id: '', category_id: '', subcategory_id: '',
@@ -388,6 +390,10 @@ export default function Transactions() {
                   </td>
                   <td style={{ padding: '12px 16px', textAlign: 'center' }}>
                     <div style={{ display: 'flex', gap: 4, justifyContent: 'center' }}>
+                      <button data-testid={`edit-txn-${txn.transaction_id}`} onClick={() => setEditingTxn(txn)} title="Edit"
+                        style={{ background: 'rgba(74,110,125,0.1)', border: 'none', borderRadius: 2, padding: '4px 8px', cursor: 'pointer', color: 'var(--info)' }}>
+                        <PencilSimple size={14} weight="bold" />
+                      </button>
                       {txn.status === 'pending_review' && (
                         <>
                           <button data-testid={`approve-txn-${txn.transaction_id}`} onClick={() => handleApprove(txn.transaction_id)} title="Approve"
@@ -411,6 +417,17 @@ export default function Transactions() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {/* Edit Transaction Modal */}
+      {editingTxn && (
+        <EditTransactionModal
+          transaction={editingTxn}
+          accounts={accounts}
+          categories={categories}
+          onSave={() => { setEditingTxn(null); loadData(); }}
+          onClose={() => setEditingTxn(null)}
+        />
       )}
     </div>
   );
