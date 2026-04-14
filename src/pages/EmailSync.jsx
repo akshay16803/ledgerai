@@ -55,11 +55,32 @@ function EmailAccountCard({ acct, provider, onSetupSync, onRetry, onDisconnect, 
   const email = provider === 'gmail' ? acct.gmail_email : acct.outlook_email;
   const providerLabel = provider === 'gmail' ? 'Gmail' : 'Outlook';
   const providerColor = provider === 'gmail' ? '#EA4335' : '#0078D4';
+  const isProcessing = acct.stats?.is_processing || acct.stats?.ai_pending > 0;
 
   return (
     <div data-testid={`${provider}-account-${email}`} style={{
-      background: '#fff', border: '1px solid var(--border-subtle)', borderRadius: 2, overflow: 'hidden'
+      background: '#fff', border: `1px solid ${isProcessing ? 'var(--warning)' : 'var(--border-subtle)'}`, borderRadius: 2, overflow: 'hidden',
+      transition: 'border-color 0.3s ease',
     }}>
+      {/* Processing banner */}
+      {isProcessing && (
+        <div data-testid={`processing-banner-${email}`} style={{
+          background: 'linear-gradient(90deg, #f59e0b, #f97316, #f59e0b)',
+          backgroundSize: '200% 100%',
+          animation: 'shimmer 2s linear infinite',
+          padding: '10px 24px',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          color: '#fff', fontWeight: 600, fontSize: 13,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Lightning size={16} weight="fill" />
+            Processing {acct.stats.ai_pending} emails... Please wait.
+          </div>
+          <div className="mono" style={{ fontSize: 12, opacity: 0.9 }}>
+            {acct.stats.processed_by_ai + acct.stats.no_transaction} / {acct.stats.total_synced} done
+          </div>
+        </div>
+      )}
       <div style={{
         padding: '20px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
         borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-secondary)'
@@ -108,14 +129,23 @@ function EmailAccountCard({ acct, provider, onSetupSync, onRetry, onDisconnect, 
               </button>
               <button data-testid={`retry-btn-${email}`}
                 onClick={() => onRetry(email)}
-                disabled={retrying}
+                disabled={retrying || isProcessing}
                 style={{
-                  background: 'var(--bg-primary)', border: '1px solid var(--border-strong)',
+                  background: isProcessing ? 'var(--warning)' : 'var(--bg-primary)',
+                  border: isProcessing ? 'none' : '1px solid var(--border-strong)',
                   padding: '8px 16px', borderRadius: 2, fontSize: 12, fontWeight: 600,
-                  cursor: retrying ? 'not-allowed' : 'pointer', fontFamily: 'var(--font-body)',
-                  display: 'flex', alignItems: 'center', gap: 4, color: 'var(--text-secondary)'
+                  cursor: (retrying || isProcessing) ? 'not-allowed' : 'pointer', fontFamily: 'var(--font-body)',
+                  display: 'flex', alignItems: 'center', gap: 4,
+                  color: isProcessing ? '#fff' : 'var(--text-secondary)',
+                  opacity: isProcessing ? 0.9 : 1,
                 }}>
-                <ArrowClockwise size={14} /> {retrying ? 'Retrying...' : 'Retry Pending'}
+                {isProcessing ? (
+                  <><ArrowClockwise size={14} className="spin" /> Processing...</>
+                ) : retrying ? (
+                  <><ArrowClockwise size={14} className="spin" /> Starting...</>
+                ) : (
+                  <><ArrowClockwise size={14} /> Retry Pending</>
+                )}
               </button>
             </>
           )}
@@ -168,11 +198,35 @@ function EmailAccountCard({ acct, provider, onSetupSync, onRetry, onDisconnect, 
 
       {acct.stats && (
         <div style={{ padding: '20px 24px' }}>
+          {/* Progress bar when processing */}
+          {isProcessing && acct.stats.total_synced > 0 && (
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)' }}>Processing Progress</span>
+                <span className="mono" style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                  {Math.round(((acct.stats.processed_by_ai + acct.stats.no_transaction) / acct.stats.total_synced) * 100)}%
+                </span>
+              </div>
+              <div style={{
+                width: '100%', height: 8, background: 'var(--bg-secondary)',
+                borderRadius: 4, overflow: 'hidden',
+              }}>
+                <div style={{
+                  height: '100%',
+                  width: `${((acct.stats.processed_by_ai + acct.stats.no_transaction) / acct.stats.total_synced) * 100}%`,
+                  background: 'linear-gradient(90deg, var(--success), #10b981)',
+                  borderRadius: 4,
+                  transition: 'width 0.5s ease',
+                }} />
+              </div>
+            </div>
+          )}
+
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
             <StatPill label="Emails Synced" value={acct.stats.total_synced} color="var(--info)" />
-            <StatPill label="Processed" value={acct.stats.processed_by_ai} color="var(--success)" pulsing={acct.stats.ai_pending > 0} />
+            <StatPill label="Processed" value={acct.stats.processed_by_ai} color="var(--success)" pulsing={isProcessing} />
             <StatPill label="No Transaction" value={acct.stats.no_transaction} color="var(--text-muted)" />
-            <StatPill label="Pending" value={acct.stats.ai_pending} color="var(--warning)" pulsing={acct.stats.ai_pending > 0} />
+            <StatPill label="Pending" value={acct.stats.ai_pending} color="var(--warning)" pulsing={isProcessing} />
             <StatPill label="Failed" value={acct.stats.ai_failed} color="var(--error)" />
             <StatPill label="Transactions Created" value={acct.stats.transactions_created} color="var(--accent-1)" />
             <StatPill label="Pending Review" value={acct.stats.pending_review} color="var(--warning)" />
@@ -184,15 +238,6 @@ function EmailAccountCard({ acct, provider, onSetupSync, onRetry, onDisconnect, 
               display: 'flex', alignItems: 'center', gap: 8
             }}>
               <ArrowClockwise size={14} className="spin" /> Syncing emails in background...
-            </div>
-          )}
-          {!acct.syncing && acct.stats.ai_pending > 0 && (
-            <div className="mono" style={{
-              marginTop: 12, padding: '8px 12px', background: 'rgba(194,140,60,0.1)',
-              borderRadius: 2, fontSize: 12, color: 'var(--warning)',
-              display: 'flex', alignItems: 'center', gap: 8
-            }}>
-              <Lightning size={14} weight="fill" /> Processing {acct.stats.ai_pending} emails...
             </div>
           )}
         </div>
@@ -398,6 +443,17 @@ export default function EmailSync() {
         @keyframes pulse-stat {
           0%, 100% { transform: scale(1); }
           50% { transform: scale(1.05); }
+        }
+        @keyframes shimmer {
+          0% { background-position: 200% 0; }
+          100% { background-position: -200% 0; }
+        }
+        .spin {
+          animation: spin-anim 1s linear infinite;
+        }
+        @keyframes spin-anim {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
         }
       `}</style>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 32 }}>

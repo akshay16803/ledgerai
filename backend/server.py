@@ -2194,7 +2194,8 @@ async def get_outlook_sync_stats(user_id: str, outlook_email: str = None):
 
     total_synced = await db.synced_emails.count_documents(query)
     processed = await db.synced_emails.count_documents({**query, "ai_status": "processed"})
-    pending = await db.synced_emails.count_documents({**query, "ai_status": {"$in": ["pending", "processing"]}})
+    currently_processing = await db.synced_emails.count_documents({**query, "ai_status": "processing"})
+    pending = await db.synced_emails.count_documents({**query, "ai_status": "pending"})
     failed = await db.synced_emails.count_documents({**query, "ai_status": "failed"})
     no_transaction = await db.synced_emails.count_documents({**query, "ai_status": "no_transaction"})
 
@@ -2209,10 +2210,11 @@ async def get_outlook_sync_stats(user_id: str, outlook_email: str = None):
         "total_synced": total_synced,
         "processed_by_ai": processed,
         "no_transaction": no_transaction,
-        "ai_pending": pending,
+        "ai_pending": pending + currently_processing,
         "ai_failed": failed,
         "transactions_created": transactions_created,
         "pending_review": pending_review,
+        "is_processing": currently_processing > 0,
     }
 
 
@@ -2581,7 +2583,8 @@ async def get_email_sync_stats(user_id: str, gmail_email: str = None):
 
     total_synced = await db.synced_emails.count_documents(query)
     processed = await db.synced_emails.count_documents({**query, "ai_status": "processed"})
-    pending = await db.synced_emails.count_documents({**query, "ai_status": {"$in": ["pending", "processing"]}})
+    currently_processing = await db.synced_emails.count_documents({**query, "ai_status": "processing"})
+    pending = await db.synced_emails.count_documents({**query, "ai_status": "pending"})
     failed = await db.synced_emails.count_documents({**query, "ai_status": "failed"})
     no_transaction = await db.synced_emails.count_documents({**query, "ai_status": "no_transaction"})
 
@@ -2593,10 +2596,11 @@ async def get_email_sync_stats(user_id: str, gmail_email: str = None):
         "total_synced": total_synced,
         "processed_by_ai": processed,
         "no_transaction": no_transaction,
-        "ai_pending": pending,
+        "ai_pending": pending + currently_processing,
         "ai_failed": failed,
         "transactions_created": transactions_created,
         "pending_review": pending_review,
+        "is_processing": currently_processing > 0,
     }
 
 
