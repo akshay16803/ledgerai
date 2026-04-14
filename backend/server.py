@@ -1969,6 +1969,15 @@ async def gmail_status(user: dict = Depends(get_current_user)):
             {"user_id": user["user_id"], "gmail_email": t["gmail_email"]}, {"_id": 0}
         )
         stats = await get_email_sync_stats(user["user_id"], t["gmail_email"])
+
+        # Check if sync has failed with 0 emails despite having a sync date
+        needs_reconnect = False
+        if sync_config and sync_config.get("sync_from_date") and stats.get("total_synced", 0) == 0 and not sync_config.get("syncing"):
+            # Likely a token issue — check last sync error
+            last_error = sync_config.get("last_error")
+            if last_error:
+                needs_reconnect = True
+
         accounts.append({
             "gmail_email": t["gmail_email"],
             "connected": True,
@@ -1976,6 +1985,7 @@ async def gmail_status(user: dict = Depends(get_current_user)):
             "sync_from_date": sync_config.get("sync_from_date") if sync_config else None,
             "syncing": sync_config.get("syncing", False) if sync_config else False,
             "stats": stats,
+            "needs_reconnect": needs_reconnect,
         })
     return {"accounts": accounts}
 
@@ -2124,6 +2134,13 @@ async def outlook_status(user: dict = Depends(get_current_user)):
             {"user_id": user["user_id"], "outlook_email": t["outlook_email"]}, {"_id": 0}
         )
         stats = await get_outlook_sync_stats(user["user_id"], t["outlook_email"])
+
+        needs_reconnect = False
+        if sync_config and sync_config.get("sync_from_date") and stats.get("total_synced", 0) == 0 and not sync_config.get("syncing"):
+            last_error = sync_config.get("last_error")
+            if last_error:
+                needs_reconnect = True
+
         accounts.append({
             "outlook_email": t["outlook_email"],
             "connected": True,
@@ -2131,6 +2148,7 @@ async def outlook_status(user: dict = Depends(get_current_user)):
             "sync_from_date": sync_config.get("sync_from_date") if sync_config else None,
             "syncing": sync_config.get("syncing", False) if sync_config else False,
             "stats": stats,
+            "needs_reconnect": needs_reconnect,
         })
     return {"accounts": accounts}
 
@@ -2349,6 +2367,10 @@ async def sync_outlook_emails_background(user_id: str, outlook_email: str, sync_
 
                 if resp.status_code != 200:
                     logger.error(f"Outlook messages fetch failed: {resp.text}")
+                    await db.outlook_sync_config.update_one(
+                        {"user_id": user_id, "outlook_email": outlook_email},
+                        {"$set": {"last_error": f"HTTP {resp.status_code}: {resp.text[:200]}"}}
+                    )
                     break
 
                 messages = resp.json().get("value", [])
@@ -2367,7 +2389,7 @@ async def sync_outlook_emails_background(user_id: str, outlook_email: str, sync_
 
         await db.outlook_sync_config.update_one(
             {"user_id": user_id, "outlook_email": outlook_email},
-            {"$set": {"syncing": False, "last_sync_at": datetime.now(timezone.utc), "last_sync_count": total_fetched}}
+            {"$set": {"syncing": False, "last_sync_at": datetime.now(timezone.utc), "last_sync_count": total_fetched, "last_error": None}}
         )
 
         await process_outlook_pending_emails(user_id, outlook_email)
@@ -2376,7 +2398,7 @@ async def sync_outlook_emails_background(user_id: str, outlook_email: str, sync_
         logger.error(f"Outlook email sync failed for {user_id}/{outlook_email}: {e}")
         await db.outlook_sync_config.update_one(
             {"user_id": user_id, "outlook_email": outlook_email},
-            {"$set": {"syncing": False, "sync_error": str(e)}}
+            {"$set": {"syncing": False, "last_error": str(e)}}
         )
 
 
@@ -2722,7 +2744,7 @@ async def sync_emails_background(user_id: str, gmail_email: str, sync_from_date:
 
         await db.email_sync_config.update_one(
             {"user_id": user_id, "gmail_email": gmail_email},
-            {"$set": {"syncing": False, "last_sync_at": datetime.now(timezone.utc), "last_sync_count": total_fetched}}
+            {"$set": {"syncing": False, "last_sync_at": datetime.now(timezone.utc), "last_sync_count": total_fetched, "last_error": None}}
         )
 
         await process_pending_emails(user_id, gmail_email)
@@ -2731,7 +2753,7 @@ async def sync_emails_background(user_id: str, gmail_email: str, sync_from_date:
         logger.error(f"Email sync failed for {user_id}/{gmail_email}: {e}")
         await db.email_sync_config.update_one(
             {"user_id": user_id, "gmail_email": gmail_email},
-            {"$set": {"syncing": False, "sync_error": str(e)}}
+            {"$set": {"syncing": False, "last_error": str(e)}}
         )
 
 

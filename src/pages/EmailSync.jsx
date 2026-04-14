@@ -52,17 +52,42 @@ function SourceBadge({ source }) {
   );
 }
 
-function EmailAccountCard({ acct, provider, onSetupSync, onRetry, onDisconnect, showSyncForm, syncDate, setSyncDate, syncing, retrying, onStartSync, onCancelSync }) {
+function EmailAccountCard({ acct, provider, onSetupSync, onRetry, onDisconnect, onReconnect, showSyncForm, syncDate, setSyncDate, syncing, retrying, onStartSync, onCancelSync }) {
   const email = provider === 'gmail' ? acct.gmail_email : acct.outlook_email;
   const providerLabel = provider === 'gmail' ? 'Gmail' : 'Outlook';
   const providerColor = provider === 'gmail' ? '#EA4335' : '#0078D4';
   const isProcessing = acct.stats?.is_processing || acct.stats?.ai_pending > 0;
+  const needsReconnect = acct.needs_reconnect;
 
   return (
     <div data-testid={`${provider}-account-${email}`} style={{
-      background: '#fff', border: `1px solid ${isProcessing ? 'var(--warning)' : 'var(--border-subtle)'}`, borderRadius: 2, overflow: 'hidden',
+      background: '#fff', border: `1px solid ${needsReconnect ? 'var(--error)' : isProcessing ? 'var(--warning)' : 'var(--border-subtle)'}`, borderRadius: 2, overflow: 'hidden',
       transition: 'border-color 0.3s ease',
     }}>
+      {/* Reconnect banner */}
+      {needsReconnect && (
+        <div data-testid={`reconnect-banner-${email}`} style={{
+          background: 'rgba(150,69,58,0.1)', padding: '12px 24px',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          borderBottom: '1px solid var(--error)',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--error)', fontSize: 13, fontWeight: 600 }}>
+            <Warning size={16} weight="fill" />
+            Connection expired — unable to sync emails. Please reconnect.
+          </div>
+          <button
+            data-testid={`reconnect-btn-${email}`}
+            onClick={() => onReconnect(email)}
+            style={{
+              background: 'var(--error)', color: '#fff', border: 'none',
+              padding: '6px 16px', borderRadius: 2, fontSize: 12, fontWeight: 600,
+              cursor: 'pointer', fontFamily: 'var(--font-body)',
+            }}
+          >
+            Reconnect
+          </button>
+        </div>
+      )}
       {/* Processing banner */}
       {isProcessing && (
         <div data-testid={`processing-banner-${email}`} style={{
@@ -404,6 +429,22 @@ export default function EmailSync() {
     } catch (err) { alert(err.message); }
   };
 
+  const handleGmailReconnect = async (gmail_email) => {
+    try {
+      await api.post('/api/gmail/disconnect', { gmail_email });
+      const res = await api.get('/api/gmail/connect');
+      if (res.auth_url) window.location.href = res.auth_url;
+    } catch (err) { alert(err.message); }
+  };
+
+  const handleOutlookReconnect = async (outlook_email) => {
+    try {
+      await api.post('/api/outlook/disconnect', { outlook_email });
+      const res = await api.get('/api/outlook/connect');
+      if (res.auth_url) window.location.href = res.auth_url;
+    } catch (err) { alert(err.message); }
+  };
+
   const handleSmsRetry = async () => {
     setSmsRetrying(true);
     try {
@@ -600,6 +641,7 @@ export default function EmailSync() {
               onSetupSync={toggleSyncForm}
               onRetry={handleGmailRetry}
               onDisconnect={handleGmailDisconnect}
+              onReconnect={handleGmailReconnect}
               showSyncForm={showSyncForm}
               syncDate={syncDate}
               setSyncDate={setSyncDate}
@@ -617,6 +659,7 @@ export default function EmailSync() {
               onSetupSync={toggleSyncForm}
               onRetry={handleOutlookRetry}
               onDisconnect={handleOutlookDisconnect}
+              onReconnect={handleOutlookReconnect}
               showSyncForm={showSyncForm}
               syncDate={syncDate}
               setSyncDate={setSyncDate}
