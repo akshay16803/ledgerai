@@ -934,6 +934,11 @@ async def approve_transaction(transaction_id: str, user: dict = Depends(get_curr
         {"$set": {"status": "approved", "approved_at": datetime.now(timezone.utc)}}
     )
     await apply_transaction_to_balances(user["user_id"], existing)
+
+    # Archive the source email with attachments if this is an email-sourced transaction
+    if existing.get("source") == "email" and existing.get("source_email_id"):
+        asyncio.create_task(archive_email_for_transaction(user["user_id"], existing))
+
     updated = await db.transactions.find_one({"transaction_id": transaction_id}, {"_id": 0})
     return updated
 
@@ -953,6 +958,14 @@ async def reject_transaction(transaction_id: str, user: dict = Depends(get_curre
         {"transaction_id": transaction_id},
         {"$set": {"status": "rejected", "rejected_at": datetime.now(timezone.utc)}}
     )
+
+    # Remove archived email if it was already archived
+    if existing.get("source_email_id"):
+        await db.email_archives.delete_one({
+            "user_id": user["user_id"],
+            "source_email_id": existing["source_email_id"]
+        })
+
     return {"message": "Transaction rejected"}
 
 
@@ -3283,6 +3296,298 @@ async def startup_event():
     await db.outlook_sync_config.create_index([("user_id", 1), ("outlook_email", 1)], unique=True)
     await db.synced_sms.create_index([("user_id", 1), ("sender", 1), ("timestamp", 1), ("body_hash", 1)], sparse=True)
     await db.synced_sms.create_index([("user_id", 1), ("ai_status", 1)])
+
+
+# ─── Email Archive & Records ─────────────────────────────────────────
+
+async def archive_email_for_transaction(user_id: str, transaction: dict):
+    """Fetch full email with attachments and archive it when a transaction is approved."""
+    source_email_id = transaction.get("source_email_id")
+    if not source_email_id:
+        return
+
+    # Check if already archived
+    existing_archive = await db.email_archives.find_one({"source_email_id": source_email_id})
+    if existing_archive:
+        return
+
+    email_doc = await db.synced_emails.find_one({"email_id": source_email_id}, {"_id": 0})
+    if not email_doc:
+        return
+
+    source_provider = transaction.get("source_provider", "gmail")
+    attachments = []
+    raw_eml = None
+
+    try:
+        if source_provider == "gmail":
+            gmail_email = email_doc.get("gmail_email", "")
+            creds = await get_gmail_credentials(user_id, gmail_email)
+            if creds:
+                service = build("gmail", "v1", credentials=creds)
+                msg_id = email_doc.get("message_id")
+
+                # Get raw email for .eml download
+                try:
+                    raw_msg = service.users().messages().get(userId="me", id=msg_id, format="raw").execute()
+                    raw_eml = raw_msg.get("raw", "")
+                except Exception as e:
+                    logger.error(f"Failed to fetch raw email {msg_id}: {e}")
+
+                # Get full message with attachment metadata
+                full_msg = service.users().messages().get(userId="me", id=msg_id, format="full").execute()
+                attachments = await _extract_gmail_attachments(service, msg_id, full_msg.get("payload", {}))
+
+        elif source_provider == "outlook":
+            outlook_email = email_doc.get("outlook_email", "")
+            access_token = await get_outlook_access_token(user_id, outlook_email)
+            if access_token:
+                msg_id = email_doc.get("message_id")
+
+                # Get MIME content for .eml
+                async with httpx.AsyncClient() as http_client:
+                    mime_resp = await http_client.get(
+                        f"{MS_GRAPH_BASE}/me/messages/{msg_id}/$value",
+                        headers={"Authorization": f"Bearer {access_token}"},
+                    )
+                    if mime_resp.status_code == 200:
+                        raw_eml = base64.urlsafe_b64encode(mime_resp.content).decode()
+
+                # Get attachments
+                async with httpx.AsyncClient() as http_client:
+                    att_resp = await http_client.get(
+                        f"{MS_GRAPH_BASE}/me/messages/{msg_id}/attachments",
+                        headers={"Authorization": f"Bearer {access_token}"},
+                    )
+                    if att_resp.status_code == 200:
+                        for att in att_resp.json().get("value", []):
+                            if att.get("@odata.type") == "#microsoft.graph.fileAttachment":
+                                attachments.append({
+                                    "filename": att.get("name", "attachment"),
+                                    "mime_type": att.get("contentType", "application/octet-stream"),
+                                    "size": att.get("size", 0),
+                                    "data": att.get("contentBytes", ""),
+                                })
+
+    except Exception as e:
+        logger.error(f"Failed to fetch email attachments for archival: {e}")
+
+    # Parse the email date to a standard format for filtering
+    email_date = email_doc.get("date", "")
+    parsed_date = ""
+    try:
+        parsed_dt = parsedate_to_datetime(email_date)
+        parsed_date = parsed_dt.strftime("%Y-%m-%d")
+    except Exception:
+        parsed_date = transaction.get("date", "")
+
+    archive_doc = {
+        "archive_id": f"arc_{uuid.uuid4().hex[:12]}",
+        "user_id": user_id,
+        "source_email_id": source_email_id,
+        "transaction_id": transaction.get("transaction_id"),
+        "subject": email_doc.get("subject", ""),
+        "from_email": email_doc.get("from_email", ""),
+        "date": parsed_date,
+        "email_date_raw": email_date,
+        "snippet": email_doc.get("snippet", ""),
+        "body_text": email_doc.get("body_text", ""),
+        "source_provider": source_provider,
+        "transaction_amount": transaction.get("amount", 0),
+        "transaction_type": transaction.get("transaction_type", ""),
+        "transaction_description": transaction.get("description", ""),
+        "raw_eml": raw_eml,
+        "attachments": attachments,
+        "attachment_count": len(attachments),
+        "archived_at": datetime.now(timezone.utc),
+    }
+
+    await db.email_archives.insert_one(archive_doc)
+    logger.info(f"Archived email {source_email_id} with {len(attachments)} attachments for txn {transaction.get('transaction_id')}")
+
+
+async def _extract_gmail_attachments(service, msg_id: str, payload: dict) -> list:
+    """Extract attachments from a Gmail message payload."""
+    attachments = []
+
+    def _walk_parts(parts):
+        for part in parts:
+            filename = part.get("filename", "")
+            body = part.get("body", {})
+            attachment_id = body.get("attachmentId")
+
+            if filename and attachment_id:
+                try:
+                    att_data = service.users().messages().attachments().get(
+                        userId="me", messageId=msg_id, id=attachment_id
+                    ).execute()
+                    attachments.append({
+                        "filename": filename,
+                        "mime_type": part.get("mimeType", "application/octet-stream"),
+                        "size": body.get("size", 0),
+                        "data": att_data.get("data", ""),
+                    })
+                except Exception as e:
+                    logger.error(f"Failed to fetch attachment {filename}: {e}")
+
+            if "parts" in part:
+                _walk_parts(part["parts"])
+
+    if "parts" in payload:
+        _walk_parts(payload["parts"])
+
+    return attachments
+
+
+# ─── Records API Routes ──────────────────────────────────────────────
+
+@app.get("/api/records")
+async def get_records(
+    user: dict = Depends(get_current_user),
+    search: str = "",
+    date_from: str = "",
+    date_to: str = "",
+    amount_min: str = "",
+    amount_max: str = "",
+    sort_by: str = "date",
+    sort_order: str = "desc",
+    limit: int = 50,
+    skip: int = 0,
+):
+    query = {"user_id": user["user_id"]}
+
+    if search:
+        search_regex = {"$regex": search, "$options": "i"}
+        query["$or"] = [
+            {"subject": search_regex},
+            {"from_email": search_regex},
+            {"transaction_description": search_regex},
+            {"snippet": search_regex},
+        ]
+
+    if date_from:
+        query.setdefault("date", {})["$gte"] = date_from
+    if date_to:
+        query.setdefault("date", {})["$lte"] = date_to
+
+    if amount_min:
+        try:
+            query.setdefault("transaction_amount", {})["$gte"] = float(amount_min)
+        except ValueError:
+            pass
+    if amount_max:
+        try:
+            query.setdefault("transaction_amount", {})["$lte"] = float(amount_max)
+        except ValueError:
+            pass
+
+    sort_dir = -1 if sort_order == "desc" else 1
+
+    records = await db.email_archives.find(
+        query, {"_id": 0, "raw_eml": 0, "attachments.data": 0}
+    ).sort(sort_by, sort_dir).skip(skip).limit(limit).to_list(limit)
+
+    total = await db.email_archives.count_documents(query)
+
+    # Convert datetime fields for JSON
+    for r in records:
+        if isinstance(r.get("archived_at"), datetime):
+            r["archived_at"] = r["archived_at"].isoformat()
+
+    return {"records": records, "total": total}
+
+
+@app.get("/api/records/{archive_id}/download-eml")
+async def download_eml(archive_id: str, user: dict = Depends(get_current_user)):
+    record = await db.email_archives.find_one(
+        {"archive_id": archive_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    if not record:
+        raise HTTPException(status_code=404, detail="Record not found")
+    if not record.get("raw_eml"):
+        raise HTTPException(status_code=404, detail="Email content not available")
+
+    eml_bytes = base64.urlsafe_b64decode(record["raw_eml"])
+    subject_clean = re.sub(r'[^\w\s-]', '', record.get("subject", "email"))[:50].strip()
+    filename = f"{subject_clean}.eml"
+
+    return Response(
+        content=eml_bytes,
+        media_type="message/rfc822",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.get("/api/records/{archive_id}/attachments/{att_index}/download")
+async def download_attachment(archive_id: str, att_index: int, user: dict = Depends(get_current_user)):
+    record = await db.email_archives.find_one(
+        {"archive_id": archive_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    if not record:
+        raise HTTPException(status_code=404, detail="Record not found")
+
+    attachments = record.get("attachments", [])
+    if att_index < 0 or att_index >= len(attachments):
+        raise HTTPException(status_code=404, detail="Attachment not found")
+
+    att = attachments[att_index]
+    att_bytes = base64.urlsafe_b64decode(att["data"])
+
+    return Response(
+        content=att_bytes,
+        media_type=att.get("mime_type", "application/octet-stream"),
+        headers={"Content-Disposition": f'attachment; filename="{att["filename"]}"'},
+    )
+
+
+@app.post("/api/records/download-zip")
+async def download_records_zip(request: Request, user: dict = Depends(get_current_user)):
+    body = await request.json()
+    archive_ids = body.get("archive_ids", [])
+
+    if not archive_ids:
+        raise HTTPException(status_code=400, detail="No records selected")
+
+    records = await db.email_archives.find(
+        {"archive_id": {"$in": archive_ids}, "user_id": user["user_id"]}, {"_id": 0}
+    ).to_list(100)
+
+    if not records:
+        raise HTTPException(status_code=404, detail="No records found")
+
+    import zipfile
+    zip_buffer = io.BytesIO()
+
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        for record in records:
+            subject_clean = re.sub(r'[^\w\s-]', '', record.get("subject", "email"))[:40].strip()
+            date_str = record.get("date", "unknown")
+            folder = f"{date_str}_{subject_clean}"
+
+            # Add .eml file
+            if record.get("raw_eml"):
+                try:
+                    eml_bytes = base64.urlsafe_b64decode(record["raw_eml"])
+                    zf.writestr(f"{folder}/{subject_clean}.eml", eml_bytes)
+                except Exception:
+                    pass
+
+            # Add attachments
+            for i, att in enumerate(record.get("attachments", [])):
+                if att.get("data"):
+                    try:
+                        att_bytes = base64.urlsafe_b64decode(att["data"])
+                        zf.writestr(f"{folder}/attachments/{att['filename']}", att_bytes)
+                    except Exception:
+                        pass
+
+    zip_buffer.seek(0)
+
+    return Response(
+        content=zip_buffer.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": 'attachment; filename="spentyai_records.zip"'},
+    )
 
 
 # ─── Health Check ────────────────────────────────────────────────────

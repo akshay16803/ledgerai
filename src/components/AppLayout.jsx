@@ -4,7 +4,7 @@ import { api } from '../lib/api.js';
 import { useState } from 'react';
 import {
   House, ArrowsLeftRight, Bank, Tag, BookOpen,
-  Lightbulb, SignOut, Gear, ChartPie, EnvelopeSimple, TrendUp, Scales, ChartBar, Warning
+  Lightbulb, SignOut, Gear, ChartPie, EnvelopeSimple, TrendUp, Scales, ChartBar, Warning, Archive
 } from '@phosphor-icons/react';
 
 const navItems = [
@@ -17,6 +17,7 @@ const navItems = [
   { to: '/reports', icon: ChartBar, label: 'Reports' },
   { to: '/reconciliation', icon: Scales, label: 'Reconciliation' },
   { to: '/email-sync', icon: EnvelopeSimple, label: 'Email & SMS' },
+  { to: '/records', icon: Archive, label: 'Records' },
   { to: '/feature-requests', icon: Lightbulb, label: 'Feature Requests' },
 ];
 

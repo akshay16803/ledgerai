@@ -48,9 +48,29 @@ CSV/PDF upload, auto-parsing, fuzzy reconciliation engine, add missing entries
 - Implemented self-hosted Google OAuth 2.0 flow:
   - `GET /api/auth/google` — initiates OAuth, redirects to Google
   - `GET /api/auth/google/callback` — exchanges code, creates user/session, sets cookie, redirects to frontend
-- Added `FRONTEND_URL` env var for configurable post-auth redirects
+- Added `FRONTEND_URL` and `BACKEND_URL` env vars for configurable redirects
 - Cleaned `.env` files and removed leaked secrets for GitHub push
 - Removed `emergentintegrations` package dependency
+- Fixed PKCE code_verifier for Gmail OAuth
+- Fixed Gmail/Outlook callback redirects to frontend
+- Privacy Policy and Terms of Service pages
+- New Google Cloud Console project under domain owner account
+
+### Phase 10 - Email Sync Improvements & Records Archive (Apr 2026)
+- Smarter AI email parsing: ignores credit card bills, trading/algo notifications, newsletters
+- Processing lock prevents duplicate parallel processing tasks
+- Startup cleanup resets stuck "processing" emails on deploy
+- Live counter polling (3s) during active processing
+- Renamed stat labels for clarity (Total Emails, Transactions Found, Skipped, In Queue, etc.)
+- **Records tab**: New page to browse archived transaction emails
+  - Emails archived on transaction approval, deleted on rejection
+  - Full email + attachments stored
+  - Search by subject, sender, description
+  - Filter by date range, amount range
+  - Download individual .eml files
+  - Download individual attachments
+  - Bulk download as ZIP (selected or all)
+  - Pagination support
 
 ## Auth Flow (Current)
 1. User clicks "Continue with Google" on Login page
