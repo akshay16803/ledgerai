@@ -697,7 +697,7 @@ export default function EmailSync() {
                   <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Account</th>
                   <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Category</th>
                   <th style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Amount</th>
-                  <th style={{ padding: '10px 16px', textAlign: 'center', fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Actions</th>
+                  <th style={{ padding: '10px 16px', textAlign: 'center', fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)', position: 'sticky', right: 0, background: 'var(--bg-secondary)', zIndex: 2 }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -734,7 +734,7 @@ export default function EmailSync() {
                         </div>
                       )}
                     </td>
-                    <td style={{ padding: '10px 16px', textAlign: 'center' }}>
+                    <td style={{ padding: '10px 16px', textAlign: 'center', position: 'sticky', right: 0, background: '#fff', zIndex: 1, boxShadow: '-4px 0 8px rgba(0,0,0,0.04)' }}>
                       <div style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
                         <button data-testid={`edit-review-${txn.transaction_id}`}
                           onClick={() => setEditingTxn(txn)} title="Edit before approving"
