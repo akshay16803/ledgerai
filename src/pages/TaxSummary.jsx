@@ -89,7 +89,7 @@ export default function TaxSummary() {
     <div data-testid="tax-summary-page">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 32 }}>
         <div>
-          <h1 style={{ fontSize: 28, fontWeight: 500, letterSpacing: '-0.02em' }}>Tax Summary</h1>
+          <h1 style={{ fontSize: 28, fontWeight: 500, letterSpacing: '-0.02em' }}>Past Insights</h1>
           <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 6, maxWidth: 560, lineHeight: 1.6 }}>
             Scan your emails for any past period to get a complete income & expense summary — perfect for tax filing or understanding historical spending. These transactions are completely isolated and <strong>do not affect your books</strong>.
           </p>

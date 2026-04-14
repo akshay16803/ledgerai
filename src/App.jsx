@@ -52,7 +52,7 @@ export default function App() {
       <Route path="/reports" element={<ProtectedRoute><AppLayout><Reports /></AppLayout></ProtectedRoute>} />
       <Route path="/email-sync" element={<ProtectedRoute><AppLayout><EmailSync /></AppLayout></ProtectedRoute>} />
       <Route path="/records" element={<ProtectedRoute><AppLayout><Records /></AppLayout></ProtectedRoute>} />
-      <Route path="/tax-summary" element={<ProtectedRoute><AppLayout><TaxSummary /></AppLayout></ProtectedRoute>} />
+      <Route path="/past-insights" element={<ProtectedRoute><AppLayout><TaxSummary /></AppLayout></ProtectedRoute>} />
       <Route path="/feature-requests" element={<ProtectedRoute><AppLayout><FeatureRequests /></AppLayout></ProtectedRoute>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

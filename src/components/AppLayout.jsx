@@ -18,7 +18,7 @@ const navItems = [
   { to: '/reconciliation', icon: Scales, label: 'Reconciliation' },
   { to: '/email-sync', icon: EnvelopeSimple, label: 'Email & SMS' },
   { to: '/records', icon: Archive, label: 'Records' },
-  { to: '/tax-summary', icon: Receipt, label: 'Tax Summary' },
+  { to: '/past-insights', icon: Receipt, label: 'Past Insights' },
   { to: '/feature-requests', icon: Lightbulb, label: 'Feature Requests' },
 ];
 
