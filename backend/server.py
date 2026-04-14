@@ -1867,10 +1867,13 @@ async def gmail_connect(request: Request, user: dict = Depends(get_current_user)
         prompt="consent",
         include_granted_scopes="true",
     )
+    # Store code_verifier for PKCE (required by newer google-auth-oauthlib)
+    code_verifier = flow.code_verifier
     await db.gmail_oauth_states.insert_one({
         "state": state,
         "user_id": user["user_id"],
         "redirect_uri": redirect_uri,
+        "code_verifier": code_verifier,
         "created_at": datetime.now(timezone.utc),
         "expires_at": datetime.now(timezone.utc) + timedelta(minutes=10),
     })
@@ -1904,6 +1907,8 @@ async def gmail_callback(request: Request, code: str = None, state: str = None, 
 
     try:
         flow = get_gmail_flow(redirect_uri)
+        # Restore PKCE code_verifier from the stored state
+        flow.code_verifier = state_doc.get("code_verifier")
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             flow.fetch_token(code=code)
