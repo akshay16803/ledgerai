@@ -280,8 +280,12 @@ async def google_callback(request: Request, response: Response, code: str = None
 
     await db.auth_oauth_states.delete_one({"state": state})
 
-    if state_doc.get("expires_at") and state_doc["expires_at"] < datetime.now(timezone.utc):
-        return RedirectResponse(f"{frontend_url}/login?error=state_expired")
+    if state_doc.get("expires_at"):
+        expires_at = state_doc["expires_at"]
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        if expires_at < datetime.now(timezone.utc):
+            return RedirectResponse(f"{frontend_url}/login?error=state_expired")
 
     # Use frontend_url from the state doc (captured at initiation time)
     frontend_url = state_doc.get("frontend_url", frontend_url)
