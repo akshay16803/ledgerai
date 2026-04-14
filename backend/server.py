@@ -4147,6 +4147,119 @@ async def get_user_base_currency(user_id: str) -> str:
     return (settings or {}).get("base_currency", "INR")
 
 
+# ─── Support Tickets ────────────────────────────────────────────────────
+
+SUPPORT_EMAIL = os.environ.get("SUPPORT_EMAIL", SENDER_EMAIL)  # Falls back to SENDER_EMAIL if not set
+
+@app.post("/api/support/ticket")
+async def create_support_ticket(request: Request, user: dict = Depends(get_current_user)):
+    """Submit a support ticket that gets sent via email"""
+    data = await request.json()
+    subject = data.get("subject", "").strip()
+    category = data.get("category", "general")
+    priority = data.get("priority", "medium")
+    message = data.get("message", "").strip()
+    
+    if not subject:
+        raise HTTPException(status_code=400, detail="Subject is required")
+    if not message:
+        raise HTTPException(status_code=400, detail="Message is required")
+    
+    # Build ticket document
+    ticket = {
+        "user_id": user.get("user_id"),
+        "user_email": user.get("email"),
+        "user_name": user.get("name"),
+        "subject": subject,
+        "category": category,
+        "priority": priority,
+        "message": message,
+        "status": "open",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    
+    # Save to database
+    result = await db.support_tickets.insert_one(ticket)
+    ticket_id = str(result.inserted_id)
+    
+    # Priority labels
+    priority_labels = {"low": "LOW", "medium": "MEDIUM", "high": "HIGH - URGENT"}
+    priority_colors = {"low": "#6c757d", "medium": "#ffc107", "high": "#dc3545"}
+    category_labels = {
+        "bug": "Bug Report",
+        "feature": "Feature Request", 
+        "billing": "Billing Issue",
+        "account": "Account Help",
+        "data": "Data & Sync",
+        "general": "General Inquiry"
+    }
+    
+    # Send email notification
+    if RESEND_API_KEY and SUPPORT_EMAIL:
+        try:
+            email_html = f"""
+            <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto;">
+                <div style="background: #1a1a2e; color: white; padding: 24px; text-align: center;">
+                    <h1 style="margin: 0; font-size: 24px;">SpentyAI Support Ticket</h1>
+                </div>
+                
+                <div style="padding: 24px; background: #f8f9fa;">
+                    <div style="background: white; border-radius: 8px; padding: 24px; border: 1px solid #e9ecef;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 1px solid #e9ecef; padding-bottom: 16px;">
+                            <span style="background: {priority_colors.get(priority, '#6c757d')}; color: white; padding: 4px 12px; border-radius: 4px; font-size: 12px; font-weight: 600;">
+                                {priority_labels.get(priority, 'MEDIUM')}
+                            </span>
+                            <span style="color: #6c757d; font-size: 13px;">
+                                {category_labels.get(category, 'General Inquiry')}
+                            </span>
+                        </div>
+                        
+                        <h2 style="margin: 0 0 16px 0; color: #212529; font-size: 18px;">{subject}</h2>
+                        
+                        <div style="background: #f8f9fa; padding: 16px; border-radius: 4px; margin-bottom: 20px;">
+                            <p style="margin: 0; white-space: pre-wrap; line-height: 1.6; color: #495057;">{message}</p>
+                        </div>
+                        
+                        <div style="border-top: 1px solid #e9ecef; padding-top: 16px; color: #6c757d; font-size: 13px;">
+                            <p style="margin: 0 0 8px 0;"><strong>From:</strong> {user.get('name', 'Unknown')} ({user.get('email', 'No email')})</p>
+                            <p style="margin: 0 0 8px 0;"><strong>Ticket ID:</strong> {ticket_id}</p>
+                            <p style="margin: 0;"><strong>Reply to:</strong> {user.get('email', 'No email')}</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <div style="padding: 16px; text-align: center; color: #6c757d; font-size: 12px;">
+                    <p style="margin: 0;">This ticket was submitted via SpentyAI Support</p>
+                </div>
+            </div>
+            """
+            
+            params = {
+                "from": f"SpentyAI Support <{SENDER_EMAIL}>",
+                "to": [SUPPORT_EMAIL],
+                "reply_to": user.get("email"),
+                "subject": f"[{priority.upper()}] {category_labels.get(category, 'Support')}: {subject}",
+                "html": email_html,
+            }
+            await asyncio.to_thread(resend.Emails.send, params)
+            ticket["email_sent"] = True
+        except Exception as e:
+            print(f"Failed to send support ticket email: {e}")
+            ticket["email_sent"] = False
+            ticket["email_error"] = str(e)
+    else:
+        ticket["email_sent"] = False
+        ticket["email_error"] = "Email not configured"
+    
+    # Update ticket with email status
+    await db.support_tickets.update_one(
+        {"_id": result.inserted_id},
+        {"$set": {"email_sent": ticket.get("email_sent", False), "email_error": ticket.get("email_error")}}
+    )
+    
+    return {"success": True, "ticket_id": ticket_id, "email_sent": ticket.get("email_sent", False)}
+
+
 # ─── Health Check ────────────────────────────────────────────────────
 
 @app.get("/api/health")

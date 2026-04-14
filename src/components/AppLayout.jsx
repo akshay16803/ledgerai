@@ -3,7 +3,7 @@ import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import {
   House, ArrowsLeftRight, Bank, Tag, BookOpen,
-  Lightbulb, SignOut, Gear, EnvelopeSimple, TrendUp, Scales, ChartBar, Archive, Receipt, List, X
+  Lightbulb, SignOut, Gear, EnvelopeSimple, TrendUp, Scales, ChartBar, Archive, Receipt, List, X, Headset
 } from '@phosphor-icons/react';
 
 const navItems = [
@@ -19,6 +19,7 @@ const navItems = [
   { to: '/records', icon: Archive, label: 'Records' },
   { to: '/past-insights', icon: Receipt, label: 'Past Insights' },
   { to: '/feature-requests', icon: Lightbulb, label: 'Feature Requests' },
+  { to: '/support', icon: Headset, label: 'Support' },
   { to: '/settings', icon: Gear, label: 'Settings' },
 ];
 

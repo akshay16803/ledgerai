@@ -93,6 +93,7 @@ CSV/PDF upload, auto-parsing, fuzzy reconciliation engine, add missing entries
 - Cash Flow: recurring, projection
 - Reconciliation: statements upload/reconcile
 - Reports: summary, by-period, by-category
+- Support: `POST /api/support/ticket`
 
 ### Phase 11 - UX Improvements & Mobile (Apr 2026)
 - Broken email account reconnect prompt with one-click reconnect
@@ -104,6 +105,23 @@ CSV/PDF upload, auto-parsing, fuzzy reconciliation engine, add missing entries
 - Collapsible sidebar with hamburger toggle
 - Removed email verification banner (Google-only login)
 - Full mobile-responsive design across all pages
+
+### Phase 12 - Support Ticket System (Apr 2026)
+- **Support tab**: New sidebar navigation item for user support requests
+- Support ticket form with:
+  - Subject (required)
+  - Category dropdown (Bug Report, Feature Request, Billing Issue, Account Help, Data & Sync, General Inquiry)
+  - Priority selector (Low, Medium, High)
+  - Message textarea (required)
+  - Auto-filled user info (name, email)
+- Backend endpoint `POST /api/support/ticket`:
+  - Validates required fields
+  - Saves ticket to `support_tickets` MongoDB collection
+  - Sends formatted HTML email via Resend to SUPPORT_EMAIL
+  - Email includes ticket ID, priority badge, category, user contact info
+  - Reply-to set to user's email for easy response
+- Success confirmation screen with "Submit Another Request" option
+- New env var: `SUPPORT_EMAIL` (falls back to SENDER_EMAIL)
 
 ## Prioritized Backlog
 

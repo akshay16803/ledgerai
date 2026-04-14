@@ -123,7 +123,7 @@ class TestResendVerification:
         self.headers = {
             "Authorization": f"Bearer {self.session_token}",
             "Content-Type": "application/json",
-            "Origin": "https://ai-bookkeeper-test.preview.emergentagent.com"
+            "Origin": "https://transaction-parser-5.preview.emergentagent.com"
         }
         yield
     
