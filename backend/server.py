@@ -2194,7 +2194,7 @@ async def get_outlook_sync_stats(user_id: str, outlook_email: str = None):
 
     total_synced = await db.synced_emails.count_documents(query)
     processed = await db.synced_emails.count_documents({**query, "ai_status": "processed"})
-    pending = await db.synced_emails.count_documents({**query, "ai_status": "pending"})
+    pending = await db.synced_emails.count_documents({**query, "ai_status": {"$in": ["pending", "processing"]}})
     failed = await db.synced_emails.count_documents({**query, "ai_status": "failed"})
     no_transaction = await db.synced_emails.count_documents({**query, "ai_status": "no_transaction"})
 
@@ -2436,34 +2436,61 @@ async def process_outlook_pending_emails(user_id: str, outlook_email: str = ""):
     if outlook_email:
         query["outlook_email"] = outlook_email
 
-    pending_emails = await db.synced_emails.find(query, {"_id": 0}).limit(50).to_list(50)
-
-    if not openai_client:
-        logger.error("OpenAI client not configured")
+    lock_key = f"{user_id}:outlook:{outlook_email or 'all'}"
+    existing_lock = await db.processing_locks.find_one({"lock_key": lock_key, "active": True})
+    if existing_lock:
+        logger.info(f"Already processing Outlook emails for {lock_key}, skipping")
         return
 
-    accounts = await db.accounts.find({"user_id": user_id}, {"_id": 0}).to_list(100)
-    account_names = [f"{a['name']} ({a['account_type']}/{a.get('sub_type', '')}): {a['account_id']}" for a in accounts]
-    category_info = await _get_category_info_for_ai(user_id)
+    await db.processing_locks.update_one(
+        {"lock_key": lock_key},
+        {"$set": {"lock_key": lock_key, "active": True, "started_at": datetime.now(timezone.utc)}},
+        upsert=True,
+    )
 
-    for email_doc in pending_emails:
-        try:
-            result = await analyze_email_with_ai(email_doc, account_names, category_info)
+    try:
+        pending_emails = await db.synced_emails.find(query, {"_id": 0}).limit(200).to_list(200)
 
-            if result and result.get("is_transaction"):
-                await _create_transaction_from_ai_result(user_id, email_doc, result, accounts, "outlook")
-            else:
+        if not openai_client:
+            logger.error("OpenAI client not configured")
+            return
+
+        if not pending_emails:
+            return
+
+        email_ids = [e["email_id"] for e in pending_emails]
+        await db.synced_emails.update_many(
+            {"email_id": {"$in": email_ids}, "ai_status": {"$in": ["pending", "failed"]}},
+            {"$set": {"ai_status": "processing"}}
+        )
+
+        accounts = await db.accounts.find({"user_id": user_id}, {"_id": 0}).to_list(100)
+        account_names = [f"{a['name']} ({a['account_type']}/{a.get('sub_type', '')}): {a['account_id']}" for a in accounts]
+        category_info = await _get_category_info_for_ai(user_id)
+
+        for email_doc in pending_emails:
+            try:
+                result = await analyze_email_with_ai(email_doc, account_names, category_info)
+
+                if result and result.get("is_transaction"):
+                    await _create_transaction_from_ai_result(user_id, email_doc, result, accounts, "outlook")
+                else:
+                    await db.synced_emails.update_one(
+                        {"email_id": email_doc["email_id"]},
+                        {"$set": {"ai_status": "no_transaction", "ai_result": result}}
+                    )
+
+            except Exception as e:
+                logger.error(f"Failed to process Outlook email {email_doc['email_id']}: {e}")
                 await db.synced_emails.update_one(
                     {"email_id": email_doc["email_id"]},
-                    {"$set": {"ai_status": "no_transaction", "ai_result": result}}
+                    {"$set": {"ai_status": "failed", "ai_error": str(e)}}
                 )
-
-        except Exception as e:
-            logger.error(f"Failed to process Outlook email {email_doc['email_id']}: {e}")
-            await db.synced_emails.update_one(
-                {"email_id": email_doc["email_id"]},
-                {"$set": {"ai_status": "failed", "ai_error": str(e)}}
-            )
+    finally:
+        await db.processing_locks.update_one(
+            {"lock_key": lock_key},
+            {"$set": {"active": False, "finished_at": datetime.now(timezone.utc)}}
+        )
 
 
 # ─── Email Sync Routes ──────────────────────────────────────────────
@@ -2504,6 +2531,12 @@ async def start_email_sync(request: Request, user: dict = Depends(get_current_us
 async def retry_pending_emails(request: Request, user: dict = Depends(get_current_user)):
     body = await request.json()
     gmail_email = body.get("gmail_email", "")
+
+    # Check if already processing
+    lock_key = f"{user['user_id']}:{gmail_email or 'all'}"
+    existing_lock = await db.processing_locks.find_one({"lock_key": lock_key, "active": True})
+    if existing_lock:
+        return {"message": "Already processing emails", "count": 0, "already_processing": True}
 
     query = {"user_id": user["user_id"], "ai_status": {"$in": ["pending", "failed"]}}
     if gmail_email:
@@ -2548,7 +2581,7 @@ async def get_email_sync_stats(user_id: str, gmail_email: str = None):
 
     total_synced = await db.synced_emails.count_documents(query)
     processed = await db.synced_emails.count_documents({**query, "ai_status": "processed"})
-    pending = await db.synced_emails.count_documents({**query, "ai_status": "pending"})
+    pending = await db.synced_emails.count_documents({**query, "ai_status": {"$in": ["pending", "processing"]}})
     failed = await db.synced_emails.count_documents({**query, "ai_status": "failed"})
     no_transaction = await db.synced_emails.count_documents({**query, "ai_status": "no_transaction"})
 
@@ -2715,43 +2748,70 @@ async def process_pending_emails(user_id: str, gmail_email: str = ""):
     if gmail_email:
         query["gmail_email"] = gmail_email
 
-    pending_emails = await db.synced_emails.find(query, {"_id": 0}).limit(200).to_list(200)
-
-    if not openai_client:
-        logger.error("OpenAI client not configured — cannot process emails")
+    # Check if already processing (simple lock via DB)
+    lock_key = f"{user_id}:{gmail_email or 'all'}"
+    existing_lock = await db.processing_locks.find_one({"lock_key": lock_key, "active": True})
+    if existing_lock:
+        logger.info(f"Already processing emails for {lock_key}, skipping")
         return
 
-    if not pending_emails:
-        logger.info(f"No pending emails to process for {user_id}/{gmail_email}")
-        return
+    await db.processing_locks.update_one(
+        {"lock_key": lock_key},
+        {"$set": {"lock_key": lock_key, "active": True, "started_at": datetime.now(timezone.utc)}},
+        upsert=True,
+    )
 
-    logger.info(f"Processing {len(pending_emails)} pending emails for {user_id}/{gmail_email}")
+    try:
+        pending_emails = await db.synced_emails.find(query, {"_id": 0}).limit(200).to_list(200)
 
-    accounts = await db.accounts.find({"user_id": user_id}, {"_id": 0}).to_list(100)
-    account_names = [f"{a['name']} ({a['account_type']}/{a.get('sub_type', '')}): {a['account_id']}" for a in accounts]
-    category_info = await _get_category_info_for_ai(user_id)
+        if not openai_client:
+            logger.error("OpenAI client not configured — cannot process emails")
+            return
 
-    for i, email_doc in enumerate(pending_emails):
-        try:
-            logger.info(f"Processing email {i+1}/{len(pending_emails)}: {email_doc.get('subject', '')[:50]}")
-            result = await analyze_email_with_ai(email_doc, account_names, category_info)
+        if not pending_emails:
+            logger.info(f"No pending emails to process for {user_id}/{gmail_email}")
+            return
 
-            if result and result.get("is_transaction"):
-                await _create_transaction_from_ai_result(user_id, email_doc, result, accounts, "gmail")
-            else:
+        logger.info(f"Processing {len(pending_emails)} pending emails for {user_id}/{gmail_email}")
+
+        # Mark all as "processing" to prevent other tasks from picking them up
+        email_ids = [e["email_id"] for e in pending_emails]
+        await db.synced_emails.update_many(
+            {"email_id": {"$in": email_ids}, "ai_status": {"$in": ["pending", "failed"]}},
+            {"$set": {"ai_status": "processing"}}
+        )
+
+        accounts = await db.accounts.find({"user_id": user_id}, {"_id": 0}).to_list(100)
+        account_names = [f"{a['name']} ({a['account_type']}/{a.get('sub_type', '')}): {a['account_id']}" for a in accounts]
+        category_info = await _get_category_info_for_ai(user_id)
+
+        for i, email_doc in enumerate(pending_emails):
+            try:
+                logger.info(f"Processing email {i+1}/{len(pending_emails)}: {email_doc.get('subject', '')[:50]}")
+                result = await analyze_email_with_ai(email_doc, account_names, category_info)
+
+                if result and result.get("is_transaction"):
+                    await _create_transaction_from_ai_result(user_id, email_doc, result, accounts, "gmail")
+                else:
+                    await db.synced_emails.update_one(
+                        {"email_id": email_doc["email_id"]},
+                        {"$set": {"ai_status": "no_transaction", "ai_result": result}}
+                    )
+
+            except Exception as e:
+                logger.error(f"Failed to process email {email_doc['email_id']}: {e}")
                 await db.synced_emails.update_one(
                     {"email_id": email_doc["email_id"]},
-                    {"$set": {"ai_status": "no_transaction", "ai_result": result}}
+                    {"$set": {"ai_status": "failed", "ai_error": str(e)}}
                 )
 
-        except Exception as e:
-            logger.error(f"Failed to process email {email_doc['email_id']}: {e}")
-            await db.synced_emails.update_one(
-                {"email_id": email_doc["email_id"]},
-                {"$set": {"ai_status": "failed", "ai_error": str(e)}}
-            )
+        logger.info(f"Finished processing emails for {user_id}/{gmail_email}")
 
-    logger.info(f"Finished processing emails for {user_id}/{gmail_email}")
+    finally:
+        await db.processing_locks.update_one(
+            {"lock_key": lock_key},
+            {"$set": {"active": False, "finished_at": datetime.now(timezone.utc)}}
+        )
 
 
 # ─── Smart Cross-Source Duplicate Detection ──────────────────────────

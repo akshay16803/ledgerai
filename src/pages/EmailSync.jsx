@@ -297,8 +297,11 @@ export default function EmailSync() {
   const handleGmailRetry = async (gmail_email) => {
     setRetrying(true);
     try {
-      await api.post('/api/email/retry-pending', { gmail_email });
-      setTimeout(loadStatus, 3000);
+      const res = await api.post('/api/email/retry-pending', { gmail_email });
+      if (res.already_processing) {
+        setError('Emails are already being processed. Please wait.');
+      }
+      setTimeout(loadStatus, 1000);
     } catch (err) { setError(err.message); }
     setRetrying(false);
   };
@@ -327,8 +330,11 @@ export default function EmailSync() {
   const handleOutlookRetry = async (outlook_email) => {
     setRetrying(true);
     try {
-      await api.post('/api/outlook/retry-pending', { outlook_email });
-      setTimeout(loadStatus, 3000);
+      const res = await api.post('/api/outlook/retry-pending', { outlook_email });
+      if (res.already_processing) {
+        setError('Emails are already being processed. Please wait.');
+      }
+      setTimeout(loadStatus, 1000);
     } catch (err) { setError(err.message); }
     setRetrying(false);
   };
