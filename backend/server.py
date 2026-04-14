@@ -216,9 +216,8 @@ def _get_frontend_url(request: Request) -> str:
 
 def _get_google_auth_callback_uri(request: Request) -> str:
     """Build the Google OAuth callback URI from the incoming request."""
-    scheme = request.headers.get("x-forwarded-proto", "https")
-    host = request.headers.get("host", "")
-    return f"{scheme}://{host}/api/auth/google/callback"
+    base = _get_frontend_url(request)
+    return f"{base}/api/auth/google/callback"
 
 
 @app.get("/api/auth/google")
