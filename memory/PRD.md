@@ -4,11 +4,13 @@
 SpentyAI is a subscription-based full-stack autonomous accounting software with AI at its core. Double-entry bookkeeping, AI-powered email/SMS transaction detection, bank reconciliation, reports, and cross-platform sync.
 
 ## Architecture
-- **Backend**: FastAPI + MongoDB
+- **Backend**: FastAPI + MongoDB (Motor async driver)
 - **Frontend**: React + Vite (Botanical Finance design)
-- **Auth**: Google OAuth + Session cookies
+- **Auth**: Self-hosted Google OAuth 2.0 + Session cookies (replaced Emergent-managed auth)
 - **AI**: OpenAI (configured via OPENAI_API_KEY env var)
 - **Email Service**: Resend (configured via RESEND_API_KEY and SENDER_EMAIL env vars)
+- **Hosting**: Railway (external) + MongoDB Atlas
+- **Custom Domains**: www.spentyai.com
 
 ## Implemented Phases
 
@@ -39,8 +41,28 @@ CSV/PDF upload, auto-parsing, fuzzy reconciliation engine, add missing entries
 - Welcome email after verification
 - Unverified user banner
 
+### Phase 9 - External Deployment & Auth Migration (Feb 2026)
+- Migrated from Emergent platform to Railway + MongoDB Atlas
+- Rebranded Ledger AI to SpentyAI
+- Removed all Emergent proprietary auth dependencies (auth.emergentagent.com)
+- Implemented self-hosted Google OAuth 2.0 flow:
+  - `GET /api/auth/google` — initiates OAuth, redirects to Google
+  - `GET /api/auth/google/callback` — exchanges code, creates user/session, sets cookie, redirects to frontend
+- Added `FRONTEND_URL` env var for configurable post-auth redirects
+- Cleaned `.env` files and removed leaked secrets for GitHub push
+- Removed `emergentintegrations` package dependency
+
+## Auth Flow (Current)
+1. User clicks "Continue with Google" on Login page
+2. Frontend redirects to `{BACKEND}/api/auth/google`
+3. Backend constructs Google OAuth URL with state, redirects user to Google
+4. Google authenticates user, redirects to `{BACKEND}/api/auth/google/callback`
+5. Backend exchanges code for tokens, fetches user info, creates/updates user, creates session
+6. Backend sets `session_token` cookie and redirects to `{FRONTEND}/dashboard`
+7. Frontend `AuthContext` calls `/api/auth/me` with cookie → user is authenticated
+
 ## All API Endpoints
-- Auth: session, me, logout, verify-email, resend-verification
+- Auth: `GET /api/auth/google`, `GET /api/auth/google/callback`, `GET /api/auth/me`, `POST /api/auth/logout`, `GET /api/auth/verify-email`, `POST /api/auth/resend-verification`
 - Core: accounts, categories, transactions CRUD
 - Dashboard: summary
 - Email: gmail/outlook connect/sync
@@ -51,13 +73,13 @@ CSV/PDF upload, auto-parsing, fuzzy reconciliation engine, add missing entries
 
 ## Prioritized Backlog
 
-### P1 (In Progress)
-- Frontend component splitting
-- Backend modularization
+### P1 (Next)
+- Frontend component splitting (EmailSync, Reconciliation, Transactions)
+- Backend modularization (break server.py monolith)
 
-### P2 (Next)
+### P2 (Future)
 - Stripe + Razorpay + PayPal payment integration
 
-### P3 (Future)
+### P3 (Backlog)
 - React Native mobile app
 - Exportable PDF reports

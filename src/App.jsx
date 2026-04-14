@@ -1,6 +1,5 @@
-import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './contexts/AuthContext.jsx';
-import AuthCallback from './pages/AuthCallback.jsx';
 import Landing from './pages/Landing.jsx';
 import Login from './pages/Login.jsx';
 import Dashboard from './pages/Dashboard.jsx';
@@ -31,12 +30,6 @@ function ProtectedRoute({ children }) {
 }
 
 export default function App() {
-  const location = useLocation();
-  // Check URL fragment for session_id synchronously during render
-  if (location.hash?.includes('session_id=')) {
-    return <AuthCallback />;
-  }
-
   return (
     <Routes>
       <Route path="/" element={<Landing />} />

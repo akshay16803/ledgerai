@@ -196,32 +196,134 @@ async def get_current_user(request: Request) -> dict:
 
 # ─── Auth Routes ────────────────────────────────────────────────────
 
-@app.post("/api/auth/session")
-async def create_session(request: Request, response: Response):
-    body = await request.json()
-    session_id = body.get("session_id")
-    if not session_id:
-        raise HTTPException(status_code=400, detail="session_id required")
+FRONTEND_URL = os.environ.get("FRONTEND_URL", "")
 
-    # REMINDER: DO NOT HARDCODE THE URL, OR ADD ANY FALLBACKS OR REDIRECT URLS, THIS BREAKS THE AUTH
-    async with httpx.AsyncClient() as http_client:
-        resp = await http_client.get(
-            "https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data",
-            headers={"X-Session-ID": session_id},
-        )
-    if resp.status_code != 200:
-        raise HTTPException(status_code=401, detail="Invalid session_id")
+GOOGLE_AUTH_SCOPES = [
+    "openid",
+    "https://www.googleapis.com/auth/userinfo.email",
+    "https://www.googleapis.com/auth/userinfo.profile",
+]
 
-    data = resp.json()
-    email = data.get("email")
-    name = data.get("name", "")
-    picture = data.get("picture", "")
-    session_token = data.get("session_token")
 
+def _get_frontend_url(request: Request) -> str:
+    """Resolve frontend base URL for post-auth redirects."""
+    if FRONTEND_URL:
+        return FRONTEND_URL.rstrip("/")
+    scheme = request.headers.get("x-forwarded-proto", "https")
+    host = request.headers.get("host", "")
+    return f"{scheme}://{host}"
+
+
+def _get_google_auth_callback_uri(request: Request) -> str:
+    """Build the Google OAuth callback URI from the incoming request."""
+    scheme = request.headers.get("x-forwarded-proto", "https")
+    host = request.headers.get("host", "")
+    return f"{scheme}://{host}/api/auth/google/callback"
+
+
+@app.get("/api/auth/google")
+async def google_login(request: Request):
+    """Initiate Google OAuth 2.0 login flow."""
+    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
+        raise HTTPException(status_code=500, detail="Google OAuth not configured")
+
+    callback_uri = _get_google_auth_callback_uri(request)
+    state = secrets.token_urlsafe(32)
+
+    await db.auth_oauth_states.insert_one({
+        "state": state,
+        "redirect_uri": callback_uri,
+        "frontend_url": _get_frontend_url(request),
+        "created_at": datetime.now(timezone.utc),
+        "expires_at": datetime.now(timezone.utc) + timedelta(minutes=10),
+    })
+
+    params = {
+        "client_id": GOOGLE_CLIENT_ID,
+        "redirect_uri": callback_uri,
+        "response_type": "code",
+        "scope": " ".join(GOOGLE_AUTH_SCOPES),
+        "state": state,
+        "access_type": "online",
+        "prompt": "select_account",
+    }
+    google_auth_url = f"https://accounts.google.com/o/oauth2/v2/auth?{urlencode(params)}"
+    return RedirectResponse(google_auth_url)
+
+
+@app.get("/api/auth/google/callback")
+async def google_callback(request: Request, response: Response, code: str = None, state: str = None, error: str = None):
+    """Handle Google OAuth 2.0 callback, create session, redirect to frontend."""
+    # Resolve frontend URL early for error redirects
+    frontend_url = _get_frontend_url(request)
+
+    if error:
+        logger.error(f"Google OAuth error: {error}")
+        return RedirectResponse(f"{frontend_url}/login?error={error}")
+
+    if not code or not state:
+        return RedirectResponse(f"{frontend_url}/login?error=missing_params")
+
+    # Validate state
+    state_doc = await db.auth_oauth_states.find_one({"state": state}, {"_id": 0})
+    if not state_doc:
+        return RedirectResponse(f"{frontend_url}/login?error=invalid_state")
+
+    await db.auth_oauth_states.delete_one({"state": state})
+
+    if state_doc.get("expires_at") and state_doc["expires_at"] < datetime.now(timezone.utc):
+        return RedirectResponse(f"{frontend_url}/login?error=state_expired")
+
+    # Use frontend_url from the state doc (captured at initiation time)
+    frontend_url = state_doc.get("frontend_url", frontend_url)
+    callback_uri = state_doc.get("redirect_uri", _get_google_auth_callback_uri(request))
+
+    # Exchange authorization code for tokens
+    try:
+        async with httpx.AsyncClient() as http_client:
+            token_resp = await http_client.post(
+                "https://oauth2.googleapis.com/token",
+                data={
+                    "code": code,
+                    "client_id": GOOGLE_CLIENT_ID,
+                    "client_secret": GOOGLE_CLIENT_SECRET,
+                    "redirect_uri": callback_uri,
+                    "grant_type": "authorization_code",
+                },
+            )
+        if token_resp.status_code != 200:
+            logger.error(f"Google token exchange failed: {token_resp.text}")
+            return RedirectResponse(f"{frontend_url}/login?error=token_exchange_failed")
+
+        token_data = token_resp.json()
+        access_token = token_data.get("access_token")
+
+        # Fetch user info from Google
+        async with httpx.AsyncClient() as http_client:
+            userinfo_resp = await http_client.get(
+                "https://www.googleapis.com/oauth2/v2/userinfo",
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+        if userinfo_resp.status_code != 200:
+            logger.error(f"Google userinfo fetch failed: {userinfo_resp.text}")
+            return RedirectResponse(f"{frontend_url}/login?error=userinfo_failed")
+
+        userinfo = userinfo_resp.json()
+    except Exception as e:
+        logger.error(f"Google OAuth exchange error: {e}")
+        return RedirectResponse(f"{frontend_url}/login?error=oauth_error")
+
+    email = userinfo.get("email", "")
+    name = userinfo.get("name", "")
+    picture = userinfo.get("picture", "")
+
+    if not email:
+        return RedirectResponse(f"{frontend_url}/login?error=no_email")
+
+    # Create or update user
     existing_user = await db.users.find_one({"email": email}, {"_id": 0})
     if existing_user:
         user_id = existing_user["user_id"]
-        email_verified = existing_user.get("email_verified", False)
         await db.users.update_one(
             {"email": email},
             {"$set": {"name": name, "picture": picture, "updated_at": datetime.now(timezone.utc)}}
@@ -229,7 +331,6 @@ async def create_session(request: Request, response: Response):
     else:
         user_id = f"user_{uuid.uuid4().hex[:12]}"
         verification_token = secrets.token_urlsafe(32)
-        email_verified = False
         await db.users.insert_one({
             "user_id": user_id,
             "email": email,
@@ -240,10 +341,10 @@ async def create_session(request: Request, response: Response):
             "created_at": datetime.now(timezone.utc),
         })
         await seed_default_data(user_id)
-        # Send verification email to new user
-        origin = request.headers.get("origin", "")
-        asyncio.create_task(send_verification_email(email, name, verification_token, origin))
+        asyncio.create_task(send_verification_email(email, name, verification_token, frontend_url))
 
+    # Create session
+    session_token = secrets.token_urlsafe(48)
     await db.user_sessions.insert_one({
         "user_id": user_id,
         "session_token": session_token,
@@ -251,7 +352,9 @@ async def create_session(request: Request, response: Response):
         "created_at": datetime.now(timezone.utc),
     })
 
-    response.set_cookie(
+    # Build redirect response with session cookie
+    redirect_resp = RedirectResponse(f"{frontend_url}/dashboard", status_code=302)
+    redirect_resp.set_cookie(
         key="session_token",
         value=session_token,
         httponly=True,
@@ -260,8 +363,7 @@ async def create_session(request: Request, response: Response):
         path="/",
         max_age=7 * 24 * 3600,
     )
-
-    return {"user_id": user_id, "email": email, "name": name, "picture": picture, "email_verified": email_verified}
+    return redirect_resp
 
 
 @app.get("/api/auth/me")
