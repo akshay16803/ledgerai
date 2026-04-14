@@ -1879,19 +1879,24 @@ async def gmail_connect(request: Request, user: dict = Depends(get_current_user)
 
 @app.get("/api/gmail/callback")
 async def gmail_callback(request: Request, code: str = None, state: str = None, error: str = None):
+    frontend = _get_frontend_url(request)
+
     if error:
         logger.error(f"Gmail OAuth error: {error}")
-        return RedirectResponse("/?gmail_error=" + error)
+        return RedirectResponse(f"{frontend}/?gmail_error={error}")
 
     if not code or not state:
-        return RedirectResponse("/?gmail_error=missing_params")
+        return RedirectResponse(f"{frontend}/?gmail_error=missing_params")
 
     state_doc = await db.gmail_oauth_states.find_one({"state": state}, {"_id": 0})
     if not state_doc:
-        return RedirectResponse("/?gmail_error=invalid_state")
+        return RedirectResponse(f"{frontend}/?gmail_error=invalid_state")
 
-    if datetime.now(timezone.utc) > state_doc["expires_at"].replace(tzinfo=timezone.utc) if state_doc["expires_at"].tzinfo is None else state_doc["expires_at"]:
-        return RedirectResponse("/?gmail_error=state_expired")
+    expires_at = state_doc["expires_at"]
+    if isinstance(expires_at, datetime) and expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if datetime.now(timezone.utc) > expires_at:
+        return RedirectResponse(f"{frontend}/?gmail_error=state_expired")
 
     await db.gmail_oauth_states.delete_one({"state": state})
     user_id = state_doc["user_id"]
@@ -1927,11 +1932,11 @@ async def gmail_callback(request: Request, code: str = None, state: str = None, 
             upsert=True,
         )
 
-        return RedirectResponse("/dashboard?gmail=connected")
+        return RedirectResponse(f"{frontend}/email-sync?gmail=connected")
 
     except Exception as e:
         logger.error(f"Gmail OAuth token exchange failed: {e}")
-        return RedirectResponse("/?gmail_error=token_exchange_failed")
+        return RedirectResponse(f"{frontend}/?gmail_error=token_exchange_failed")
 
 
 @app.get("/api/gmail/status")
@@ -2039,22 +2044,24 @@ async def _fetch_outlook_profile(access_token: str) -> dict:
 
 @app.get("/api/outlook/callback")
 async def outlook_callback(request: Request, code: str = None, state: str = None, error: str = None):
+    frontend = _get_frontend_url(request)
+
     if error:
         logger.error(f"Outlook OAuth error: {error}")
-        return RedirectResponse("/?outlook_error=" + error)
+        return RedirectResponse(f"{frontend}/?outlook_error={error}")
 
     if not code or not state:
-        return RedirectResponse("/?outlook_error=missing_params")
+        return RedirectResponse(f"{frontend}/?outlook_error=missing_params")
 
     state_doc = await db.outlook_oauth_states.find_one({"state": state}, {"_id": 0})
     if not state_doc:
-        return RedirectResponse("/?outlook_error=invalid_state")
+        return RedirectResponse(f"{frontend}/?outlook_error=invalid_state")
 
     expires_at = state_doc["expires_at"]
     if isinstance(expires_at, datetime) and expires_at.tzinfo is None:
         expires_at = expires_at.replace(tzinfo=timezone.utc)
     if datetime.now(timezone.utc) > expires_at:
-        return RedirectResponse("/?outlook_error=state_expired")
+        return RedirectResponse(f"{frontend}/?outlook_error=state_expired")
 
     await db.outlook_oauth_states.delete_one({"state": state})
     user_id = state_doc["user_id"]
@@ -2062,11 +2069,11 @@ async def outlook_callback(request: Request, code: str = None, state: str = None
     try:
         tokens = await _exchange_outlook_token(code, state_doc["redirect_uri"])
         if not tokens:
-            return RedirectResponse("/?outlook_error=token_exchange_failed")
+            return RedirectResponse(f"{frontend}/?outlook_error=token_exchange_failed")
 
         profile = await _fetch_outlook_profile(tokens["access_token"])
         if not profile:
-            return RedirectResponse("/?outlook_error=profile_fetch_failed")
+            return RedirectResponse(f"{frontend}/?outlook_error=profile_fetch_failed")
 
         outlook_email = profile.get("mail") or profile.get("userPrincipalName", "")
         await db.outlook_tokens.update_one(
@@ -2080,11 +2087,11 @@ async def outlook_callback(request: Request, code: str = None, state: str = None
             }},
             upsert=True,
         )
-        return RedirectResponse("/dashboard?outlook=connected")
+        return RedirectResponse(f"{frontend}/email-sync?outlook=connected")
 
     except Exception as e:
         logger.error(f"Outlook OAuth callback failed: {e}")
-        return RedirectResponse("/?outlook_error=token_exchange_failed")
+        return RedirectResponse(f"{frontend}/?outlook_error=token_exchange_failed")
 
 
 @app.get("/api/outlook/status")
