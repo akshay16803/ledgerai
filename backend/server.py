@@ -2406,9 +2406,29 @@ async def _create_transaction_from_ai_result(
     user_id: str, email_doc: dict, result: dict, accounts: list, source_provider: str
 ) -> bool:
     """Create a pending_review transaction from AI analysis. Returns True if created (not duplicate)."""
+    original_amount = result.get("amount", 0)
+    original_currency = (result.get("currency") or "INR").upper()
+    base_currency = "INR"
+    converted_amount = original_amount
+    exchange_rate = 1.0
+    is_estimated_rate = False
+
+    # Convert foreign currency to base currency
+    if original_currency != base_currency and original_amount:
+        txn_date = result.get("date", datetime.now(timezone.utc).strftime("%Y-%m-%d"))
+        rate_info = await get_exchange_rate(original_currency, base_currency, txn_date)
+        if rate_info["rate"]:
+            exchange_rate = rate_info["rate"]
+            converted_amount = round(original_amount * exchange_rate, 2)
+            is_estimated_rate = rate_info["is_estimated"]
+        else:
+            # Can't convert — store original amount as-is
+            converted_amount = original_amount
+            is_estimated_rate = True
+
     duplicate = await check_cross_source_duplicate(
         user_id,
-        amount=result.get("amount", 0),
+        amount=converted_amount,
         date_str=result.get("date", ""),
         description=result.get("description", ""),
         payee=result.get("payee", ""),
@@ -2424,7 +2444,11 @@ async def _create_transaction_from_ai_result(
         "transaction_id": f"txn_{uuid.uuid4().hex[:12]}",
         "user_id": user_id,
         "transaction_type": result.get("transaction_type", "expense"),
-        "amount": result.get("amount", 0),
+        "amount": converted_amount,
+        "original_amount": original_amount if original_currency != base_currency else None,
+        "original_currency": original_currency if original_currency != base_currency else None,
+        "exchange_rate": exchange_rate if original_currency != base_currency else None,
+        "is_estimated_rate": is_estimated_rate if original_currency != base_currency else None,
         "date": result.get("date", datetime.now(timezone.utc).strftime("%Y-%m-%d")),
         "account_id": result.get("account_id", accounts[0]["account_id"] if accounts else ""),
         "to_account_id": result.get("to_account_id"),
@@ -2855,6 +2879,56 @@ async def process_pending_emails(user_id: str, gmail_email: str = ""):
 
 # ─── Smart Cross-Source Duplicate Detection ──────────────────────────
 
+# ─── Exchange Rate Cache & Conversion ────────────────────────────────
+
+_exchange_rate_cache = {}
+
+async def get_exchange_rate(from_currency: str, to_currency: str, date_str: str) -> dict:
+    """Fetch exchange rate from frankfurter.app. Returns {rate, is_estimated}."""
+    if from_currency.upper() == to_currency.upper():
+        return {"rate": 1.0, "is_estimated": False}
+
+    cache_key = f"{from_currency}:{to_currency}:{date_str}"
+    if cache_key in _exchange_rate_cache:
+        return _exchange_rate_cache[cache_key]
+
+    # Try exact date first
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                f"https://api.frankfurter.app/{date_str}",
+                params={"from": from_currency.upper(), "to": to_currency.upper()},
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                rate = data.get("rates", {}).get(to_currency.upper())
+                if rate:
+                    result = {"rate": float(rate), "is_estimated": False}
+                    _exchange_rate_cache[cache_key] = result
+                    return result
+    except Exception as e:
+        logger.error(f"Exchange rate fetch failed for {date_str}: {e}")
+
+    # Fallback: latest rate (estimated)
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                "https://api.frankfurter.app/latest",
+                params={"from": from_currency.upper(), "to": to_currency.upper()},
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                rate = data.get("rates", {}).get(to_currency.upper())
+                if rate:
+                    result = {"rate": float(rate), "is_estimated": True}
+                    _exchange_rate_cache[cache_key] = result
+                    return result
+    except Exception as e:
+        logger.error(f"Latest exchange rate fetch failed: {e}")
+
+    return {"rate": None, "is_estimated": True}
+
+
 def _extract_search_terms(payee: str, description: str) -> list:
     """Extract significant search terms from payee and description for fuzzy matching."""
     terms = []
@@ -2955,12 +3029,14 @@ CRITICAL RULES — READ CAREFULLY:
 4. For transaction_type: "income" for money received, "expense" for money spent, "transfer" for money moved between your own accounts.
 5. Try to match account_id and category_id from available options. If unsure, leave as null.
 6. Extract date in YYYY-MM-DD format. If not clear, use the email date.
+7. CURRENCY: Detect the currency of the transaction from the email. Look for currency symbols ($, USD, EUR, GBP, etc.) or currency codes. If the email is from an Indian bank or UPI, use "INR". If unclear, default to "INR".
 
 Respond ONLY with valid JSON (no markdown, no explanation):
 {{
   "is_transaction": true/false,
   "transaction_type": "income" | "expense" | "transfer" | null,
   "amount": number or null,
+  "currency": "INR" | "USD" | "EUR" | "GBP" | other ISO 4217 code | null,
   "date": "YYYY-MM-DD" or null,
   "description": "brief description" or null,
   "account_id": "matching account_id" or null,

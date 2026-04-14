@@ -726,7 +726,13 @@ export default function EmailSync() {
                       padding: '10px 16px', textAlign: 'right', fontWeight: 600,
                       color: txn.transaction_type === 'income' ? 'var(--success)' : 'var(--error)'
                     }}>
-                      {formatCurrency(txn.amount)}
+                      <div>{formatCurrency(txn.amount)}</div>
+                      {txn.original_currency && (
+                        <div style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 400 }} title={`Original: ${txn.original_currency} ${txn.original_amount} @ ${txn.exchange_rate}`}>
+                          {txn.original_currency} {txn.original_amount?.toLocaleString()}
+                          {txn.is_estimated_rate && <span style={{ color: 'var(--warning)', marginLeft: 4 }}>est.</span>}
+                        </div>
+                      )}
                     </td>
                     <td style={{ padding: '10px 16px', textAlign: 'center' }}>
                       <div style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>

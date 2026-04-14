@@ -376,8 +376,16 @@ export default function Transactions() {
                     padding: '12px 16px', textAlign: 'right', fontWeight: 600,
                     color: txn.transaction_type === 'income' ? 'var(--success)' : txn.transaction_type === 'expense' ? 'var(--error)' : 'var(--text-primary)'
                   }}>
-                    {txn.transaction_type === 'income' ? '+' : txn.transaction_type === 'expense' ? '-' : ''}
-                    {formatCurrency(txn.amount)}
+                    <div>
+                      {txn.transaction_type === 'income' ? '+' : txn.transaction_type === 'expense' ? '-' : ''}
+                      {formatCurrency(txn.amount)}
+                    </div>
+                    {txn.original_currency && (
+                      <div style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 400 }} title={`Original: ${txn.original_currency} ${txn.original_amount} @ ${txn.exchange_rate}`}>
+                        {txn.original_currency} {txn.original_amount?.toLocaleString()}
+                        {txn.is_estimated_rate && <span style={{ color: 'var(--warning)', marginLeft: 4 }}>est.</span>}
+                      </div>
+                    )}
                   </td>
                   <td style={{ padding: '12px 16px', textAlign: 'center' }}>
                     <span style={{
