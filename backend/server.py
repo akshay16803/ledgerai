@@ -3259,6 +3259,21 @@ async def auto_retry_loop():
 
 @app.on_event("startup")
 async def startup_event():
+    # Clean up stale state from previous deploys
+    # Reset stuck "processing" emails back to "pending"
+    reset_result = await db.synced_emails.update_many(
+        {"ai_status": "processing"},
+        {"$set": {"ai_status": "pending"}}
+    )
+    if reset_result.modified_count > 0:
+        logger.info(f"Startup: Reset {reset_result.modified_count} stuck 'processing' emails back to 'pending'")
+
+    # Clear all processing locks (stale from previous deploy)
+    await db.processing_locks.update_many(
+        {"active": True},
+        {"$set": {"active": False, "finished_at": datetime.now(timezone.utc)}}
+    )
+
     asyncio.create_task(auto_retry_loop())
     await db.synced_emails.create_index([("user_id", 1), ("gmail_email", 1), ("message_id", 1)], unique=True, sparse=True)
     await db.gmail_tokens.create_index([("user_id", 1), ("gmail_email", 1)], unique=True)
