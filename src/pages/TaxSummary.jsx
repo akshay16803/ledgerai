@@ -4,7 +4,7 @@ import { getCached, setCache } from '../lib/cache';
 import {
   Plus, Trash, PencilSimple, DownloadSimple, ArrowLeft,
   TrendUp, TrendDown, Scales, Lightning, CalendarBlank,
-  EnvelopeSimple, Plugs, X, Check, SpinnerGap
+  EnvelopeSimple, Plugs, X, Check, SpinnerGap, GoogleLogo, MicrosoftOutlookLogo
 } from '@phosphor-icons/react';
 
 const API = import.meta.env.REACT_APP_BACKEND_URL || '';
@@ -24,6 +24,7 @@ export default function TaxSummary() {
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState('');
   const [activeDetail, setActiveDetail] = useState(null);
+  const [connecting, setConnecting] = useState('');
 
   const loadSummaries = useCallback(async () => {
     try {
@@ -75,6 +76,22 @@ export default function TaxSummary() {
 
   const handleExport = (summaryId) => {
     window.open(`${API}/api/tax-summary/${summaryId}/export`, '_blank');
+  };
+
+  const handleConnectGmail = async () => {
+    setConnecting('gmail');
+    try {
+      const res = await api.get('/api/gmail/connect');
+      if (res.auth_url) window.location.href = res.auth_url;
+    } catch (err) { setError(err.message); setConnecting(''); }
+  };
+
+  const handleConnectOutlook = async () => {
+    setConnecting('outlook');
+    try {
+      const res = await api.get('/api/outlook/connect');
+      if (res.auth_url) window.location.href = res.auth_url;
+    } catch (err) { setError(err.message); setConnecting(''); }
   };
 
   if (activeDetail) {
@@ -133,22 +150,59 @@ export default function TaxSummary() {
               <div>
                 <label style={labelStyle}>Email Account</label>
                 {availableEmails.length > 0 ? (
-                  <select data-testid="ts-email"
-                    value={form.email_address}
-                    onChange={e => {
-                      const sel = availableEmails.find(em => em.email === e.target.value);
-                      setForm({ ...form, email_address: e.target.value, provider: sel?.provider || 'gmail' });
-                    }}
-                    style={inputStyle}
-                  >
-                    <option value="">Select email...</option>
-                    {availableEmails.map(em => (
-                      <option key={em.email} value={em.email}>{em.email} ({em.provider})</option>
-                    ))}
-                  </select>
+                  <>
+                    <select data-testid="ts-email"
+                      value={form.email_address}
+                      onChange={e => {
+                        const sel = availableEmails.find(em => em.email === e.target.value);
+                        setForm({ ...form, email_address: e.target.value, provider: sel?.provider || 'gmail' });
+                      }}
+                      style={inputStyle}
+                    >
+                      <option value="">Select email...</option>
+                      {availableEmails.map(em => (
+                        <option key={em.email} value={em.email}>{em.email} ({em.provider})</option>
+                      ))}
+                    </select>
+                    <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+                      <button type="button" onClick={handleConnectGmail} disabled={!!connecting}
+                        style={{ fontSize: 11, color: '#EA4335', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-body)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 3, padding: 0 }}>
+                        <Plus size={10} /> Add Gmail
+                      </button>
+                      <span style={{ color: 'var(--border-strong)' }}>|</span>
+                      <button type="button" onClick={handleConnectOutlook} disabled={!!connecting}
+                        style={{ fontSize: 11, color: '#0078D4', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-body)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 3, padding: 0 }}>
+                        <Plus size={10} /> Add Outlook
+                      </button>
+                    </div>
+                  </>
                 ) : (
-                  <div style={{ padding: '10px 14px', background: 'var(--bg-secondary)', borderRadius: 2, fontSize: 13, color: 'var(--text-muted)' }}>
-                    No email connected. <a href="/email-sync" style={{ color: 'var(--brand-primary)', textDecoration: 'underline' }}>Connect one first</a> from Email & SMS tab, then come back here.
+                  <div>
+                    <div style={{ padding: '12px 14px', background: 'var(--bg-secondary)', borderRadius: 2, fontSize: 13, color: 'var(--text-muted)', marginBottom: 10 }}>
+                      No email connected. Connect one to start analyzing.
+                    </div>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button type="button" data-testid="pi-connect-gmail" onClick={handleConnectGmail} disabled={connecting === 'gmail'}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px',
+                          background: '#fff', border: '1px solid #EA4335', borderRadius: 2,
+                          fontSize: 12, fontWeight: 600, cursor: connecting ? 'not-allowed' : 'pointer',
+                          color: '#EA4335', fontFamily: 'var(--font-body)',
+                        }}>
+                        <GoogleLogo size={14} weight="bold" />
+                        {connecting === 'gmail' ? 'Connecting...' : 'Connect Gmail'}
+                      </button>
+                      <button type="button" data-testid="pi-connect-outlook" onClick={handleConnectOutlook} disabled={connecting === 'outlook'}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px',
+                          background: '#fff', border: '1px solid #0078D4', borderRadius: 2,
+                          fontSize: 12, fontWeight: 600, cursor: connecting ? 'not-allowed' : 'pointer',
+                          color: '#0078D4', fontFamily: 'var(--font-body)',
+                        }}>
+                        <MicrosoftOutlookLogo size={14} weight="bold" />
+                        {connecting === 'outlook' ? 'Connecting...' : 'Connect Outlook'}
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
