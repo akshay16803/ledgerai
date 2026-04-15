@@ -227,7 +227,7 @@ export default function Accounts() {
   const [showForm, setShowForm] = useState(false);
   const [showSubTypeManager, setShowSubTypeManager] = useState(false);
   const [editingAcc, setEditingAcc] = useState(null);
-  const [form, setForm] = useState({ name: '', account_type: 'asset', sub_type: '', account_number: '', opening_balance: '', currency: 'INR', description: '' });
+  const [form, setForm] = useState({ name: '', account_type: 'asset', sub_type: '', account_number: '', opening_balance: '', balance_as_of_date: new Date().toISOString().split('T')[0], currency: 'INR', description: '' });
   const [error, setError] = useState('');
   const [subTypesMap, setSubTypesMap] = useState(() => getCached('account_sub_types') || { asset: [], liability: [], equity: [] });
 
@@ -249,7 +249,7 @@ export default function Accounts() {
   const openCreate = () => {
     setEditingAcc(null);
     const firstSubType = getSubTypeOptions('asset')[0]?.value || '';
-    setForm({ name: '', account_type: 'asset', sub_type: firstSubType, account_number: '', opening_balance: '', currency: 'INR', description: '' });
+    setForm({ name: '', account_type: 'asset', sub_type: firstSubType, account_number: '', opening_balance: '', balance_as_of_date: new Date().toISOString().split('T')[0], currency: 'INR', description: '' });
     setShowForm(true);
     setError('');
   };
@@ -262,6 +262,7 @@ export default function Accounts() {
       sub_type: acc.sub_type || '',
       account_number: acc.account_number || '',
       opening_balance: acc.opening_balance || 0,
+      balance_as_of_date: acc.balance_as_of_date || '',
       balance: acc.balance || 0,
       currency: acc.currency || 'INR',
       description: acc.description || '',
@@ -284,7 +285,8 @@ export default function Accounts() {
     try {
       if (editingAcc) {
         const update = { name: form.name, sub_type: form.sub_type, account_number: form.account_number, description: form.description, currency: form.currency };
-        if (form.balance !== undefined) update.balance = parseFloat(form.balance) || 0;
+        if (form.opening_balance !== undefined) update.opening_balance = parseFloat(form.opening_balance) || 0;
+        if (form.balance_as_of_date) update.balance_as_of_date = form.balance_as_of_date;
         await api.put(`/api/accounts/${editingAcc.account_id}`, update);
       } else {
         await api.post('/api/accounts', { ...form, opening_balance: parseFloat(form.opening_balance) || 0 });
@@ -307,6 +309,11 @@ export default function Accounts() {
   const customCount = useMemo(() => {
     return Object.values(subTypesMap).flat().filter(st => !st.is_default).length;
   }, [subTypesMap]);
+
+  // Accounts missing balance_as_of_date
+  const accountsMissingDate = useMemo(() => {
+    return accounts.filter(acc => !acc.balance_as_of_date);
+  }, [accounts]);
 
   return (
     <div data-testid="accounts-page">
@@ -398,25 +405,41 @@ export default function Accounts() {
                     </select>
                   </div>
                   {editingAcc ? (
-                    <div>
-                      <label style={labelStyle}>Current Balance *</label>
-                      <input data-testid="account-balance-input" type="number" step="0.01"
-                        value={form.balance} onChange={e => setForm(f => ({ ...f, balance: e.target.value }))}
-                        style={{ ...inputStyle, fontFamily: 'var(--font-mono)' }} placeholder="0" />
-                      <span style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4, display: 'block' }}>
-                        Opening: {formatCurrency(editingAcc.opening_balance || 0)}
-                      </span>
-                    </div>
+                    <>
+                      <div>
+                        <label style={labelStyle}>Opening Balance *</label>
+                        <input data-testid="account-balance-input" type="number" step="0.01"
+                          value={form.opening_balance} onChange={e => setForm(f => ({ ...f, opening_balance: e.target.value }))}
+                          style={{ ...inputStyle, fontFamily: 'var(--font-mono)' }} placeholder="0" />
+                      </div>
+                      <div>
+                        <label style={labelStyle}>Balance as of (end of day)</label>
+                        <input data-testid="account-balance-date" type="date"
+                          value={form.balance_as_of_date} onChange={e => setForm(f => ({ ...f, balance_as_of_date: e.target.value }))}
+                          style={inputStyle} />
+                        <span style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4, display: 'block' }}>
+                          Transactions after this date adjust the balance
+                        </span>
+                      </div>
+                    </>
                   ) : (
-                    <div>
-                      <label style={labelStyle}>Opening Balance *</label>
-                      <input data-testid="account-balance-input" type="number" step="0.01"
-                        value={form.opening_balance} onChange={e => setForm(f => ({ ...f, opening_balance: e.target.value }))}
-                        style={{ ...inputStyle, fontFamily: 'var(--font-mono)' }} placeholder="0.00" />
-                      <span style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4, display: 'block' }}>
-                        Enter the current balance of this account
-                      </span>
-                    </div>
+                    <>
+                      <div>
+                        <label style={labelStyle}>Opening Balance *</label>
+                        <input data-testid="account-balance-input" type="number" step="0.01"
+                          value={form.opening_balance} onChange={e => setForm(f => ({ ...f, opening_balance: e.target.value }))}
+                          style={{ ...inputStyle, fontFamily: 'var(--font-mono)' }} placeholder="0.00" />
+                      </div>
+                      <div>
+                        <label style={labelStyle}>Balance as of (end of day)</label>
+                        <input data-testid="account-balance-date" type="date"
+                          value={form.balance_as_of_date} onChange={e => setForm(f => ({ ...f, balance_as_of_date: e.target.value }))}
+                          style={inputStyle} />
+                        <span style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4, display: 'block' }}>
+                          Closing balance on this date
+                        </span>
+                      </div>
+                    </>
                   )}
                 </div>
                 <div style={{ marginBottom: 16 }}>
@@ -441,6 +464,21 @@ export default function Accounts() {
         </div>
       )}
 
+      {/* Balance Date Missing Banner */}
+      {!loading && accountsMissingDate.length > 0 && (
+        <div data-testid="balance-date-banner" style={{
+          display: 'flex', alignItems: 'center', gap: 10, padding: '12px 18px', marginBottom: 20,
+          background: 'rgba(194,140,60,0.08)', border: '1px solid rgba(194,140,60,0.25)', borderRadius: 2,
+          fontSize: 13, color: 'var(--warning)',
+        }}>
+          <Warning size={16} weight="bold" style={{ flexShrink: 0 }} />
+          <span>
+            <strong>{accountsMissingDate.length} account{accountsMissingDate.length > 1 ? 's' : ''}</strong> missing a balance date.
+            Edit {accountsMissingDate.length > 1 ? 'them' : 'it'} to set the date your opening balance was recorded — this ensures accurate balance calculations.
+          </span>
+        </div>
+      )}
+
       {/* Accounts List */}
       {loading ? (
         <div className="mono" style={{ color: 'var(--text-muted)' }}>Loading accounts...</div>
@@ -450,7 +488,7 @@ export default function Accounts() {
             const Icon = typeIcons[acc.sub_type] || Bank;
             return (
               <div key={acc.account_id} data-testid={`account-card-${acc.account_id}`} style={{
-                background: '#fff', border: '1px solid var(--border-subtle)',
+                background: '#fff', border: !acc.balance_as_of_date ? '1px solid rgba(194,140,60,0.35)' : '1px solid var(--border-subtle)',
                 borderRadius: 2, padding: 24,
                 transition: 'transform 0.2s ease, box-shadow 0.2s ease'
               }}
@@ -490,6 +528,12 @@ export default function Accounts() {
                 {acc.opening_balance !== acc.balance && (
                   <div className="mono" style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
                     Opening: {formatCurrency(acc.opening_balance || 0)}
+                    {acc.balance_as_of_date && <span> (as of {acc.balance_as_of_date})</span>}
+                  </div>
+                )}
+                {!acc.balance_as_of_date && (
+                  <div style={{ fontSize: 11, color: 'var(--warning)', marginTop: 6, cursor: 'pointer' }} onClick={() => openEdit(acc)}>
+                    Set balance date
                   </div>
                 )}
               </div>

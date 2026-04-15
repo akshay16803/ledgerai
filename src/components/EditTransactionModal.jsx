@@ -29,6 +29,7 @@ export function EditTransactionModal({ transaction, accounts, categories, onSave
   const [showQuickAcc, setShowQuickAcc] = useState(false);
   const [quickAccName, setQuickAccName] = useState('');
   const [quickAccBalance, setQuickAccBalance] = useState('');
+  const [quickAccDate, setQuickAccDate] = useState(new Date().toISOString().split('T')[0]);
   const [localAccounts, setLocalAccounts] = useState(accounts);
   const [localCategories, setLocalCategories] = useState(categories);
 
@@ -75,11 +76,12 @@ export function EditTransactionModal({ transaction, accounts, categories, onSave
     if (!quickAccName.trim()) return;
     if (quickAccBalance === '') { alert('Please enter the account balance'); return; }
     try {
-      await api.post('/api/accounts', { name: quickAccName.trim(), account_type: 'asset', sub_type: 'bank', opening_balance: parseFloat(quickAccBalance) || 0, currency: 'INR' });
+      await api.post('/api/accounts', { name: quickAccName.trim(), account_type: 'asset', sub_type: 'bank', opening_balance: parseFloat(quickAccBalance) || 0, balance_as_of_date: quickAccDate, currency: 'INR' });
       const accs = await api.get('/api/accounts');
       setLocalAccounts(accs);
       setQuickAccName('');
       setQuickAccBalance('');
+      setQuickAccDate(new Date().toISOString().split('T')[0]);
       setShowQuickAcc(false);
     } catch (err) { alert(err.message); }
   };
@@ -229,6 +231,8 @@ export function EditTransactionModal({ transaction, accounts, categories, onSave
                     <input type="number" value={quickAccBalance} onChange={e => setQuickAccBalance(e.target.value)} placeholder="Balance"
                       onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), handleQuickAddAccount())}
                       style={{ ...inputStyle, width: 100, padding: '6px 10px', fontSize: 12, fontFamily: 'var(--font-mono)' }} />
+                    <input type="date" data-testid="modal-quick-acc-date" value={quickAccDate} onChange={e => setQuickAccDate(e.target.value)}
+                      style={{ ...inputStyle, width: 130, padding: '6px 10px', fontSize: 12 }} title="Balance as of (end of day)" />
                     <button type="button" onClick={handleQuickAddAccount}
                       style={{ padding: '6px 12px', background: 'var(--success)', color: '#fff', border: 'none', borderRadius: 2, fontSize: 11, cursor: 'pointer', fontFamily: 'var(--font-body)', display: 'flex', alignItems: 'center', gap: 3 }}>
                       <Check size={12} /> Save

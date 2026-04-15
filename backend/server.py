@@ -105,6 +105,7 @@ class AccountCreate(BaseModel):
     sub_type: Optional[str] = None  # bank, cash, credit_card, loan, etc.
     account_number: Optional[str] = None  # optional account number for reference
     opening_balance: float = 0.0
+    balance_as_of_date: Optional[str] = None  # ISO date string (end-of-day balance on this date)
     currency: str = "INR"
     description: Optional[str] = None
 
@@ -115,6 +116,7 @@ class AccountUpdate(BaseModel):
     description: Optional[str] = None
     currency: Optional[str] = None
     opening_balance: Optional[float] = None
+    balance_as_of_date: Optional[str] = None  # ISO date string
     balance: Optional[float] = None
 
 class AccountSubTypeCreate(BaseModel):
@@ -417,6 +419,7 @@ async def logout(request: Request, response: Response):
 # ─── Default Data Seeding ───────────────────────────────────────────
 
 async def seed_default_data(user_id: str):
+    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     default_accounts = [
         {"name": "Cash", "account_type": "asset", "sub_type": "cash", "opening_balance": 0, "currency": "INR"},
         {"name": "Bank Account", "account_type": "asset", "sub_type": "bank", "opening_balance": 0, "currency": "INR"},
@@ -426,6 +429,7 @@ async def seed_default_data(user_id: str):
         acc["account_id"] = f"acc_{uuid.uuid4().hex[:12]}"
         acc["user_id"] = user_id
         acc["balance"] = acc["opening_balance"]
+        acc["balance_as_of_date"] = today_str
         acc["description"] = ""
         acc["created_at"] = datetime.now(timezone.utc)
     await db.accounts.insert_many(default_accounts)
@@ -667,6 +671,8 @@ async def list_accounts(user: dict = Depends(get_current_user)):
 
 @app.post("/api/accounts")
 async def create_account(data: AccountCreate, user: dict = Depends(get_current_user)):
+    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    balance_date = data.balance_as_of_date or today_str
     account = {
         "account_id": f"acc_{uuid.uuid4().hex[:12]}",
         "user_id": user["user_id"],
@@ -675,6 +681,7 @@ async def create_account(data: AccountCreate, user: dict = Depends(get_current_u
         "sub_type": data.sub_type or "",
         "account_number": data.account_number or "",
         "opening_balance": data.opening_balance,
+        "balance_as_of_date": balance_date,
         "balance": data.opening_balance,
         "currency": data.currency,
         "description": data.description or "",
@@ -682,6 +689,9 @@ async def create_account(data: AccountCreate, user: dict = Depends(get_current_u
     }
     await db.accounts.insert_one(account)
     del account["_id"]
+    # Recalculate balance if date is in the past (there might be transactions after that date)
+    await recalculate_account_balance(user["user_id"], account["account_id"])
+    account = await db.accounts.find_one({"account_id": account["account_id"]}, {"_id": 0})
     return account
 
 
@@ -695,12 +705,12 @@ async def update_account(account_id: str, data: AccountUpdate, user: dict = Depe
     # If setting opening_balance on an AI-created account, clear the needs_opening_balance flag
     if "opening_balance" in update_data:
         update_data["needs_opening_balance"] = False
-        # Also update balance if this is an AI-created account with 0 balance
-        existing = await db.accounts.find_one(
-            {"account_id": account_id, "user_id": user["user_id"]}, {"_id": 0}
-        )
-        if existing and existing.get("ai_created") and existing.get("balance", 0) == 0:
-            update_data["balance"] = update_data["opening_balance"]
+    
+    needs_recalculation = "opening_balance" in update_data or "balance_as_of_date" in update_data
+    
+    # Remove 'balance' from update_data if we're going to recalculate anyway
+    if needs_recalculation:
+        update_data.pop("balance", None)
     
     result = await db.accounts.update_one(
         {"account_id": account_id, "user_id": user["user_id"]},
@@ -708,6 +718,11 @@ async def update_account(account_id: str, data: AccountUpdate, user: dict = Depe
     )
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Account not found")
+    
+    # Recalculate balance when opening_balance or balance_as_of_date changes
+    if needs_recalculation:
+        await recalculate_account_balance(user["user_id"], account_id)
+    
     account = await db.accounts.find_one(
         {"account_id": account_id}, {"_id": 0}
     )
@@ -727,6 +742,19 @@ async def delete_account(account_id: str, user: dict = Depends(get_current_user)
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Account not found")
     return {"message": "Account deleted"}
+
+
+@app.post("/api/accounts/{account_id}/recalculate")
+async def recalculate_balance_endpoint(account_id: str, user: dict = Depends(get_current_user)):
+    """Recalculate account balance from opening_balance + transactions after balance_as_of_date."""
+    account = await db.accounts.find_one(
+        {"account_id": account_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+    await recalculate_account_balance(user["user_id"], account_id)
+    updated = await db.accounts.find_one({"account_id": account_id}, {"_id": 0})
+    return updated
 
 
 # ─── Account Sub Types Routes ────────────────────────────────────────
@@ -995,56 +1023,139 @@ async def create_transaction(data: TransactionCreate, user: dict = Depends(get_c
     return txn
 
 
+async def recalculate_account_balance(user_id: str, account_id: str):
+    """Recalculate account balance from opening_balance + all approved transactions after balance_as_of_date."""
+    account = await db.accounts.find_one(
+        {"account_id": account_id, "user_id": user_id}, {"_id": 0}
+    )
+    if not account:
+        return
+    
+    opening = account.get("opening_balance", 0)
+    as_of_date = account.get("balance_as_of_date")
+    
+    # Start from opening balance
+    balance = opening
+    
+    if as_of_date:
+        # Get all approved transactions for this account after the balance_as_of_date
+        # "End of day" means transactions ON that date are included in opening balance
+        # Only transactions AFTER that date should be counted
+        txn_query = {
+            "user_id": user_id,
+            "status": "approved",
+            "date": {"$gt": as_of_date},
+        }
+        
+        # Transactions where this account is the primary account
+        primary_txns = await db.transactions.find(
+            {**txn_query, "account_id": account_id}, {"_id": 0}
+        ).to_list(10000)
+        
+        for txn in primary_txns:
+            if txn["transaction_type"] == "income":
+                balance += txn["amount"]
+            elif txn["transaction_type"] == "expense":
+                balance -= txn["amount"]
+            elif txn["transaction_type"] == "transfer":
+                balance -= txn["amount"]  # Money leaving this account
+        
+        # Transfers INTO this account
+        transfer_in_txns = await db.transactions.find(
+            {**txn_query, "to_account_id": account_id, "transaction_type": "transfer"}, {"_id": 0}
+        ).to_list(10000)
+        
+        for txn in transfer_in_txns:
+            balance += txn["amount"]
+    
+    await db.accounts.update_one(
+        {"account_id": account_id, "user_id": user_id},
+        {"$set": {"balance": balance}}
+    )
+
+
 async def apply_transaction_to_balances(user_id: str, txn: dict):
     t_type = txn["transaction_type"]
     amount = txn["amount"]
+    txn_date = txn.get("date", "")
+
+    # Check if transaction date is after the account's balance_as_of_date
+    # If the transaction is on or before the snapshot date, it's already factored into opening_balance
+    async def should_apply(account_id):
+        acc = await db.accounts.find_one(
+            {"account_id": account_id, "user_id": user_id},
+            {"_id": 0, "balance_as_of_date": 1}
+        )
+        as_of = acc.get("balance_as_of_date") if acc else None
+        if not as_of:
+            return True  # No date set, apply all transactions
+        return txn_date > as_of
 
     if t_type == "income":
-        await db.accounts.update_one(
-            {"account_id": txn["account_id"], "user_id": user_id},
-            {"$inc": {"balance": amount}}
-        )
-    elif t_type == "expense":
-        await db.accounts.update_one(
-            {"account_id": txn["account_id"], "user_id": user_id},
-            {"$inc": {"balance": -amount}}
-        )
-    elif t_type == "transfer":
-        await db.accounts.update_one(
-            {"account_id": txn["account_id"], "user_id": user_id},
-            {"$inc": {"balance": -amount}}
-        )
-        if txn.get("to_account_id"):
+        if await should_apply(txn["account_id"]):
             await db.accounts.update_one(
-                {"account_id": txn["to_account_id"], "user_id": user_id},
+                {"account_id": txn["account_id"], "user_id": user_id},
                 {"$inc": {"balance": amount}}
             )
+    elif t_type == "expense":
+        if await should_apply(txn["account_id"]):
+            await db.accounts.update_one(
+                {"account_id": txn["account_id"], "user_id": user_id},
+                {"$inc": {"balance": -amount}}
+            )
+    elif t_type == "transfer":
+        if await should_apply(txn["account_id"]):
+            await db.accounts.update_one(
+                {"account_id": txn["account_id"], "user_id": user_id},
+                {"$inc": {"balance": -amount}}
+            )
+        if txn.get("to_account_id"):
+            if await should_apply(txn["to_account_id"]):
+                await db.accounts.update_one(
+                    {"account_id": txn["to_account_id"], "user_id": user_id},
+                    {"$inc": {"balance": amount}}
+                )
 
 
 async def reverse_transaction_balances(user_id: str, txn: dict):
     t_type = txn["transaction_type"]
     amount = txn["amount"]
+    txn_date = txn.get("date", "")
+
+    async def should_apply(account_id):
+        acc = await db.accounts.find_one(
+            {"account_id": account_id, "user_id": user_id},
+            {"_id": 0, "balance_as_of_date": 1}
+        )
+        as_of = acc.get("balance_as_of_date") if acc else None
+        if not as_of:
+            return True
+        return txn_date > as_of
 
     if t_type == "income":
-        await db.accounts.update_one(
-            {"account_id": txn["account_id"], "user_id": user_id},
-            {"$inc": {"balance": -amount}}
-        )
-    elif t_type == "expense":
-        await db.accounts.update_one(
-            {"account_id": txn["account_id"], "user_id": user_id},
-            {"$inc": {"balance": amount}}
-        )
-    elif t_type == "transfer":
-        await db.accounts.update_one(
-            {"account_id": txn["account_id"], "user_id": user_id},
-            {"$inc": {"balance": amount}}
-        )
-        if txn.get("to_account_id"):
+        if await should_apply(txn["account_id"]):
             await db.accounts.update_one(
-                {"account_id": txn["to_account_id"], "user_id": user_id},
+                {"account_id": txn["account_id"], "user_id": user_id},
                 {"$inc": {"balance": -amount}}
             )
+    elif t_type == "expense":
+        if await should_apply(txn["account_id"]):
+            await db.accounts.update_one(
+                {"account_id": txn["account_id"], "user_id": user_id},
+                {"$inc": {"balance": amount}}
+            )
+    elif t_type == "transfer":
+        if await should_apply(txn["account_id"]):
+            await db.accounts.update_one(
+                {"account_id": txn["account_id"], "user_id": user_id},
+                {"$inc": {"balance": amount}}
+            )
+        if txn.get("to_account_id"):
+            if await should_apply(txn["to_account_id"]):
+                await db.accounts.update_one(
+                    {"account_id": txn["to_account_id"], "user_id": user_id},
+                    {"$inc": {"balance": -amount}}
+                )
 
 
 @app.put("/api/transactions/{transaction_id}")
@@ -2698,6 +2809,7 @@ async def _create_transaction_from_ai_result(
             "account_type": "asset" if bank_sub_type in ["savings", "current", "wallet"] else "liability",
             "sub_type": bank_sub_type,
             "opening_balance": 0,  # Will be set during approval
+            "balance_as_of_date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
             "needs_opening_balance": True,  # Flag to prompt user during approval
             "ai_created": True,
             "created_at": datetime.now(timezone.utc),
@@ -2725,6 +2837,7 @@ async def _create_transaction_from_ai_result(
                 "account_type": "asset",
                 "sub_type": "bank",
                 "opening_balance": 0,
+                "balance_as_of_date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
                 "needs_opening_balance": True,
                 "ai_created": True,
                 "created_at": datetime.now(timezone.utc),
@@ -3689,6 +3802,7 @@ async def _process_sms_transaction(user_id: str, sms_doc: dict, result: dict, ac
             "account_type": "asset" if bank_sub_type in ["savings", "current", "wallet"] else "liability",
             "sub_type": bank_sub_type,
             "opening_balance": 0,
+            "balance_as_of_date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
             "needs_opening_balance": True,
             "ai_created": True,
             "created_at": datetime.now(timezone.utc),
@@ -3716,6 +3830,7 @@ async def _process_sms_transaction(user_id: str, sms_doc: dict, result: dict, ac
                 "account_type": "asset",
                 "sub_type": "bank",
                 "opening_balance": 0,
+                "balance_as_of_date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
                 "needs_opening_balance": True,
                 "ai_created": True,
                 "created_at": datetime.now(timezone.utc),

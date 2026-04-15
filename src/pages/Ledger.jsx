@@ -63,9 +63,11 @@ export default function Ledger() {
 
   // Calculate running balance for selected account
   let runningBalance = 0;
+  let balanceAsOfDate = null;
   if (selectedAccount) {
     const acc = accounts.find(a => a.account_id === selectedAccount);
     runningBalance = acc?.opening_balance || 0;
+    balanceAsOfDate = acc?.balance_as_of_date || null;
   }
 
   const sortedTxns = [...transactions].sort((a, b) => a.date.localeCompare(b.date));
@@ -138,8 +140,12 @@ export default function Ledger() {
                     debit = txn.amount; // Show debit by default
                   }
                 }
+                // Only apply to running balance if transaction is after balance_as_of_date
                 if (selectedAccount) {
-                  runningBalance += debit - credit;
+                  const afterSnapshotDate = !balanceAsOfDate || txn.date > balanceAsOfDate;
+                  if (afterSnapshotDate) {
+                    runningBalance += debit - credit;
+                  }
                 }
                 return (
                   <tr key={txn.transaction_id} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
