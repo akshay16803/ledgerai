@@ -42,19 +42,9 @@ function ProjectionChart({ data }) {
   const maxIncome = Math.max(...data.map(d => d.projected_income), 1);
   const maxExpense = Math.max(...data.map(d => d.projected_expense), 1);
   const maxVal = Math.max(maxIncome, maxExpense);
-  const balances = data.map(d => d.running_balance);
-  const minBal = Math.min(...balances);
-  const maxBal = Math.max(...balances);
-  const balRange = maxBal - minBal || 1;
 
   const chartH = 220;
   const barW = Math.max(12, Math.floor((900 - 48) / data.length) - 8);
-
-  const balPoints = data.map((d, i) => {
-    const x = 24 + i * (barW + 8) + barW / 2;
-    const y = chartH - 20 - ((d.running_balance - minBal) / balRange) * (chartH - 40);
-    return `${x},${y}`;
-  }).join(' ');
 
   return (
     <div data-testid="projection-chart" style={{ overflowX: 'auto', padding: '20px 0' }}>
@@ -88,14 +78,6 @@ function ProjectionChart({ data }) {
             </g>
           );
         })}
-
-        {/* Balance line */}
-        <polyline points={balPoints} fill="none" stroke="var(--info)" strokeWidth="2.5" strokeLinejoin="round" />
-        {data.map((d, i) => {
-          const x = 24 + i * (barW + 8) + barW / 2;
-          const y = chartH - 20 - ((d.running_balance - minBal) / balRange) * (chartH - 40);
-          return <circle key={`bal-${d.label}`} cx={x} cy={y} r="3" fill="var(--info)" />;
-        })}
       </svg>
 
       <div style={{ display: 'flex', gap: 20, justifyContent: 'center', marginTop: 8, fontSize: 11 }}>
@@ -104,9 +86,6 @@ function ProjectionChart({ data }) {
         </span>
         <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
           <span style={{ width: 10, height: 10, background: 'var(--error)', borderRadius: 1, opacity: 0.7 }} /> Expense
-        </span>
-        <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          <span style={{ width: 10, height: 10, background: 'var(--info)', borderRadius: '50%' }} /> Running Balance
         </span>
       </div>
     </div>
@@ -184,7 +163,6 @@ export default function CashFlow() {
 
       {/* Summary Cards */}
       <div data-testid="cashflow-summary" style={{ display: 'flex', gap: 16, marginBottom: 32, flexWrap: 'wrap' }}>
-        <SummaryCard label="Current Balance" value={proj.current_balance} color="var(--text-primary)" />
         <SummaryCard label="Monthly Income" value={proj.monthly_recurring_income} color="var(--success)"
           sub={`${recurringItems.filter(r => r.transaction_type === 'income').length} sources`} />
         <SummaryCard label="Monthly Expense" value={proj.monthly_recurring_expense} color="var(--error)"
@@ -382,7 +360,6 @@ export default function CashFlow() {
                 <th style={{ ...thStyle, textAlign: 'right' }}>Income</th>
                 <th style={{ ...thStyle, textAlign: 'right' }}>Expense</th>
                 <th style={{ ...thStyle, textAlign: 'right' }}>Net</th>
-                <th style={{ ...thStyle, textAlign: 'right' }}>Running Balance</th>
               </tr>
             </thead>
             <tbody>
@@ -403,12 +380,6 @@ export default function CashFlow() {
                     color: m.net >= 0 ? 'var(--success)' : 'var(--error)'
                   }}>
                     {formatCurrency(m.net)}
-                  </td>
-                  <td className="mono" style={{
-                    ...tdStyle, textAlign: 'right', fontWeight: 600,
-                    color: m.running_balance >= 0 ? 'var(--text-primary)' : 'var(--error)'
-                  }}>
-                    {formatCurrency(m.running_balance)}
                   </td>
                 </tr>
               ))}
