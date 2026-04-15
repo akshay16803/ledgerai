@@ -539,6 +539,9 @@ export default function Reconciliation() {
                 </h3>
                 <span className="mono" style={{ fontSize: 11, color: 'var(--text-muted)' }}>
                   Account: {activeStmt.account_name || getAccountName(activeStmt.account_id)}
+                  {typeof activeStmt.raw_text_chars === 'number' && activeStmt.raw_text_chars > 0 && (
+                    <> · {activeStmt.raw_text_chars.toLocaleString()} chars read</>
+                  )}
                 </span>
               </div>
               {activeStmt.status === 'parsed' && (

@@ -2163,22 +2163,36 @@ async def parse_statement_background(statement_id: str, user_id: str, password: 
         if ext == "pdf" and not effective_password and account_id:
             effective_password = await get_saved_pdf_password(user_id, account_id)
 
+        stmt_type = stmt.get("statement_type", "bank")
+        raw_text_chars = 0
         try:
             if ext == "csv":
                 await _set_parse_stage(statement_id, "extracting_text")
                 entries = parse_csv_statement(file_path)
+                # Apply the same Dr/Cr + narration overrides + dedupe to CSV rows.
+                entries = _post_process_entries(
+                    [{
+                        "date": e.get("date"),
+                        "description": e.get("description", ""),
+                        "amount": e.get("amount", 0),
+                        "transaction_type": e.get("transaction_type", "expense"),
+                        "balance": e.get("balance"),
+                    } for e in entries],
+                    stmt_type,
+                )
             elif ext == "pdf":
                 await _set_parse_stage(statement_id, "decrypting")
-                entries = await parse_pdf_statement(file_path, password=effective_password)
-            else:
-                entries = []
-
-            if not entries and ext == "pdf":
+                # Extract once so we can record the size for later verification.
                 await _set_parse_stage(statement_id, "extracting_text")
                 pdf_text = extract_pdf_text(file_path, password=effective_password)
-                if pdf_text:
+                raw_text_chars = len(pdf_text or "")
+                if pdf_text and len(pdf_text.strip()) >= 50:
                     await _set_parse_stage(statement_id, "ai_parsing")
-                    entries = await parse_statement_text_with_ai(pdf_text, stmt.get("statement_type", "bank"))
+                    entries = await parse_statement_text_with_ai(pdf_text, stmt_type)
+                else:
+                    entries = []
+            else:
+                entries = []
         except PdfPasswordRequired as e:
             # Encrypted PDF and we have no working password. Persist distinct status.
             logger.info(f"Statement {statement_id} requires a PDF password")
@@ -2215,6 +2229,7 @@ async def parse_statement_background(statement_id: str, user_id: str, password: 
                 "entry_count": len(entries),
                 "parsed_at": datetime.now(timezone.utc),
                 "parse_error": None if entries else "Could not extract any entries from this statement.",
+                "raw_text_chars": raw_text_chars,
                 "processing_stage": final_stage,
                 "processing_stage_label": final_info["label"],
                 "processing_progress": final_info["progress"],
@@ -2474,69 +2489,245 @@ def extract_pdf_text(file_path: str, password: Optional[str] = None) -> str:
     return joined
 
 
-async def parse_pdf_statement(file_path: str, password: Optional[str] = None) -> list:
+async def parse_pdf_statement(file_path: str, password: Optional[str] = None, statement_type: str = "bank") -> list:
     """Parse a PDF statement. Propagates PdfPasswordRequired if encrypted and
     the supplied password is missing or incorrect."""
     text = extract_pdf_text(file_path, password=password)
     if not text or len(text.strip()) < 50:
         return []
-    return await parse_statement_text_with_ai(text, "bank")
+    return await parse_statement_text_with_ai(text, statement_type)
 
 
-async def parse_statement_text_with_ai(text: str, statement_type: str) -> list:
-    if not openai_client:
-        logger.error("OpenAI not configured for statement parsing")
-        return []
+# Strong income/expense hint keywords — used to override an obviously-wrong
+# AI classification using only deterministic markers (Dr/Cr suffix or
+# unambiguous narration words). We DO NOT override on words that can apply
+# to either side (e.g. "transfer").
+_INCOME_NARRATION_MARKERS = (
+    "refund", "reversal", "reversed", "cashback", "cash back",
+    "interest credited", "interest credit", "int credit", "int.cr",
+    "salary", "neft credit", "imps credit", "upi credit", "rtgs credit",
+    "credit by", "credit from", "received from", "deposit",
+    "dividend", "tax refund", "tds refund",
+)
+_EXPENSE_NARRATION_MARKERS = (
+    "atm wdl", "atm withdrawal", "atm cash", "cash withdrawal",
+    "pos purchase", "pos txn", "pos ", "purchase at", "merchant",
+    "emi", "loan emi", "auto debit", "ach debit", "ecs debit",
+    "neft debit", "imps debit", "upi debit", "rtgs debit",
+    "debit by", "debit to", "paid to", "payment to",
+    "charges", "service charge", "annual fee", "late fee", "penalty",
+    "gst on ", "tds deduction", "min bal charges",
+)
 
-    truncated = text[:8000]
 
-    prompt = f"""Parse this {statement_type} statement text and extract all transactions.
+def _detect_dr_cr_suffix(description: str, raw_amount_text: str = "") -> str:
+    """Return 'income', 'expense', or '' based on Dr/Cr token after the
+    amount or in the narration. Indian bank statements commonly suffix the
+    amount with ' Cr' or ' Dr'."""
+    blob = f"{description} {raw_amount_text}".lower()
+    # Match standalone Dr / Cr tokens (avoid matching "drink" / "credit card" etc.)
+    if re.search(r'\b(cr|cr\.|cre|credit)\b', blob) and not re.search(r'\b(dr|dr\.|debit)\b', blob):
+        return "income"
+    if re.search(r'\b(dr|dr\.|debit)\b', blob) and not re.search(r'\b(cr|cr\.|cre|credit)\b', blob):
+        return "expense"
+    return ""
 
-STATEMENT TEXT:
-{truncated}
 
-Extract each transaction as a JSON object with these fields:
-- date: "YYYY-MM-DD" format
-- description: transaction description/narration
-- amount: positive number (absolute value)
-- transaction_type: "income" for credits/deposits, "expense" for debits/withdrawals
-- balance: closing balance after this transaction (if available), else null
+def _classify_from_narration(description: str) -> str:
+    """Use narration keywords as a tiebreaker. Returns 'income', 'expense'
+    or '' if nothing definitive."""
+    desc = (description or "").lower()
+    inc = any(m in desc for m in _INCOME_NARRATION_MARKERS)
+    exp = any(m in desc for m in _EXPENSE_NARRATION_MARKERS)
+    if inc and not exp:
+        return "income"
+    if exp and not inc:
+        return "expense"
+    return ""
 
-Return ONLY a valid JSON array of transactions. No markdown, no explanation.
-Example: [{{"date":"2026-01-15","description":"ATM Withdrawal","amount":5000,"transaction_type":"expense","balance":45000}}]
 
-If no transactions found, return empty array: []"""
+def _post_process_entries(entries: list, statement_type: str) -> list:
+    """Apply deterministic overrides to AI-classified transactions, normalize
+    fields, and dedupe (same chunk overlap can yield duplicates)."""
+    seen = set()
+    cleaned = []
+    is_credit_card = (statement_type == "credit_card")
+
+    for e in entries:
+        if not e.get("date") or e.get("amount") in (None, "", 0, 0.0):
+            continue
+        try:
+            amount = round(abs(float(e["amount"])), 2)
+        except (ValueError, TypeError):
+            continue
+        if amount <= 0:
+            continue
+
+        date = str(e["date"]).strip()[:10]
+        description = str(e.get("description", "") or "").strip()
+        ai_type = (e.get("transaction_type") or "").lower()
+        if ai_type not in ("income", "expense"):
+            ai_type = "expense"
+
+        # Deterministic overrides:
+        #  1) Dr/Cr suffix wins over AI guess.
+        #  2) Unambiguous narration keywords win.
+        forced = _detect_dr_cr_suffix(description, str(e.get("raw_amount", "") or ""))
+        if not forced:
+            forced = _classify_from_narration(description)
+
+        # For credit card statements, the bank's "credit" reduces what you
+        # owe (refund/payment-in) — that's a transfer in to the card account
+        # from the user's POV. The bank's "debit" / "purchase" increases
+        # what you owe — that's an expense. We keep the same income/expense
+        # convention but make sure inverted AI guesses get corrected via the
+        # narration markers above.
+        final_type = forced or ai_type
+
+        balance = None
+        if e.get("balance") not in (None, ""):
+            try:
+                balance = round(float(e["balance"]), 2)
+            except (ValueError, TypeError):
+                balance = None
+
+        # Dedupe key tolerates slight description variation across chunk overlap.
+        dedupe_key = (date, amount, final_type, description.lower()[:40])
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+
+        cleaned.append({
+            "date": date,
+            "description": description,
+            "amount": amount,
+            "transaction_type": final_type,
+            "balance": balance,
+        })
+
+    # Sort by date for predictable display
+    cleaned.sort(key=lambda x: x["date"])
+    return cleaned
+
+
+def _chunk_statement_text(text: str, chunk_chars: int = 6000, overlap: int = 600) -> list:
+    """Split long statement text into overlapping chunks so we never silently
+    drop the tail of the statement. Overlap protects against a transaction
+    being split across a chunk boundary."""
+    text = text or ""
+    if len(text) <= chunk_chars:
+        return [text]
+    chunks = []
+    start = 0
+    while start < len(text):
+        end = min(start + chunk_chars, len(text))
+        # Try to break on a newline boundary so we don't slice mid-row.
+        if end < len(text):
+            nl = text.rfind("\n", start + chunk_chars - 800, end)
+            if nl > start + 1000:
+                end = nl
+        chunks.append(text[start:end])
+        if end >= len(text):
+            break
+        start = max(end - overlap, start + 1)
+    return chunks
+
+
+async def _ai_parse_chunk(chunk: str, statement_type: str, chunk_idx: int, chunk_total: int) -> list:
+    """Send a single chunk to the AI and return the raw entry list."""
+    is_credit_card = (statement_type == "credit_card")
+
+    # Conventions are spelled out explicitly because Indian bank statements
+    # use a mix of (a) Dr/Cr suffix on the amount, (b) separate Withdrawal/
+    # Deposit columns, and (c) inline narration markers. Credit-card
+    # statements invert "credit"/"debit" relative to the cardholder's POV.
+    if is_credit_card:
+        type_rules = """This is a CREDIT CARD statement.
+- "transaction_type": "expense" for purchases, charges, fees, EMIs, cash advances, interest charged.
+- "transaction_type": "income" ONLY for payments received from the cardholder, refunds, reversals, cashback credited, statement credits.
+- The card statement may show charges as positive and payments as negative, or use "Dr"/"Cr" suffixes — read each row in context.
+- Words like "PAYMENT RECEIVED", "PAYMENT - THANK YOU", "REFUND", "REVERSAL", "CASHBACK" mean income.
+- Everything else (purchases at merchants, ATM cash, fees, GST, interest) is expense."""
+    else:
+        type_rules = """This is a BANK statement (savings / current).
+- "transaction_type": "income" for credits, deposits, salary, refunds, interest credited, money received via NEFT/IMPS/UPI/RTGS.
+- "transaction_type": "expense" for debits, withdrawals, ATM cash, POS purchases, EMI, charges, money sent via NEFT/IMPS/UPI/RTGS.
+- Many Indian bank statements suffix the amount with " Cr" (credit = money in = income) or " Dr" (debit = money out = expense). RESPECT THESE SUFFIXES — they are authoritative.
+- Many statements have separate Withdrawal/Debit and Deposit/Credit columns. If the row has a value only in the Deposit/Credit column, it's income. If only in Withdrawal/Debit, it's expense.
+- Words like "CREDIT BY", "DEPOSIT", "INTEREST CREDITED", "REFUND", "REVERSAL", "SALARY" mean income.
+- Words like "DEBIT BY", "ATM WDL", "POS", "EMI", "CHARGES", "GST ON" mean expense."""
+
+    prompt = f"""You are parsing chunk {chunk_idx + 1} of {chunk_total} from a {statement_type} statement.
+Extract EVERY transaction line you can identify in this chunk. Do not skip rows. Do not summarize.
+
+{type_rules}
+
+Return STRICT JSON with this exact shape:
+{{"transactions": [
+  {{"date":"YYYY-MM-DD","description":"...","amount":1234.56,"transaction_type":"income","balance":98765.43,"raw_amount":"1,234.56 Cr"}},
+  ...
+]}}
+
+Field rules:
+- "date": MUST be YYYY-MM-DD. Convert from any source format (DD/MM/YYYY, DD-MMM-YYYY, etc.).
+- "amount": positive number, the absolute transaction value.
+- "transaction_type": "income" or "expense" — apply the rules above strictly.
+- "balance": the running balance after the transaction, or null if not shown.
+- "raw_amount": the amount text exactly as it appears in the statement, including any Dr/Cr suffix, parentheses, or sign. This is REQUIRED so we can verify your classification.
+
+If the chunk has no transaction lines, return {{"transactions": []}}.
+
+STATEMENT CHUNK:
+{chunk}
+"""
 
     try:
         response = openai_client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "You parse bank and credit card statements into structured transaction data. Return only valid JSON arrays."},
+                {"role": "system", "content": "You parse bank and credit card statements into structured JSON. You never skip transactions. You always respect Dr/Cr suffixes. Output JSON only."},
                 {"role": "user", "content": prompt},
             ],
-            temperature=0.1,
-            max_tokens=4000,
+            temperature=0,
+            max_tokens=16000,
+            response_format={"type": "json_object"},
         )
-        content = response.choices[0].message.content
-        entries = _parse_ai_json_response(content)
-        if not isinstance(entries, list):
-            return []
-
-        cleaned = []
-        for e in entries:
-            if e.get("date") and e.get("amount"):
-                cleaned.append({
-                    "date": e["date"],
-                    "description": e.get("description", ""),
-                    "amount": round(abs(float(e["amount"])), 2),
-                    "transaction_type": e.get("transaction_type", "expense"),
-                    "balance": round(float(e["balance"]), 2) if e.get("balance") is not None else None,
-                })
-        return cleaned
-
-    except Exception as e:
-        logger.error(f"AI statement parsing failed: {e}")
+        raw = response.choices[0].message.content or "{}"
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            # Best-effort recovery for a truncated payload.
+            data = _parse_ai_json_response(raw) if raw.strip() else {}
+        if isinstance(data, list):
+            return data
+        if isinstance(data, dict):
+            txns = data.get("transactions") or data.get("entries") or []
+            return txns if isinstance(txns, list) else []
         return []
+    except Exception as e:
+        logger.error(f"AI chunk parse failed (chunk {chunk_idx + 1}/{chunk_total}): {e}")
+        return []
+
+
+async def parse_statement_text_with_ai(text: str, statement_type: str) -> list:
+    """Parse statement text using the AI in overlapping chunks so nothing is
+    truncated, then deterministically post-process the merged entries to
+    correct income/expense flips and dedupe overlap-induced duplicates."""
+    if not openai_client:
+        logger.error("OpenAI not configured for statement parsing")
+        return []
+
+    chunks = _chunk_statement_text(text)
+    logger.info(f"AI parsing statement: {len(text)} chars in {len(chunks)} chunk(s) ({statement_type})")
+
+    all_entries: list = []
+    for idx, chunk in enumerate(chunks):
+        entries = await _ai_parse_chunk(chunk, statement_type, idx, len(chunks))
+        all_entries.extend(entries)
+
+    cleaned = _post_process_entries(all_entries, statement_type)
+    logger.info(f"AI parsing produced {len(cleaned)} cleaned entries (from {len(all_entries)} raw)")
+    return cleaned
 
 
 def normalize_date(date_str: str) -> str:
