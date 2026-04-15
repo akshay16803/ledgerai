@@ -872,7 +872,8 @@ async def _create_loan_emi_recurring(user_id: str, account: dict):
         }
         await db.transactions.insert_one(txn)
         del txn["_id"]
-        await apply_transaction_to_balances(user_id, txn)
+        # NOTE: Do NOT apply to balances — this is a recurring template for cash flow projection.
+        # Actual payments will be recorded separately by the user.
 
 
 def _generate_amortization_schedule(outstanding: float, annual_rate: float, tenure_months: int, emi: float, start_date_str: str, emi_day: int = 1):
@@ -1260,6 +1261,7 @@ async def recalculate_account_balance(user_id: str, account_id: str):
             "user_id": user_id,
             "status": "approved",
             "date": {"$gte": as_of_date},
+            "source": {"$ne": "loan_emi"},  # Exclude recurring EMI templates
         }
         
         # Transactions where this account is the primary account
@@ -1290,6 +1292,10 @@ async def recalculate_account_balance(user_id: str, account_id: str):
 
 
 async def apply_transaction_to_balances(user_id: str, txn: dict):
+    # Skip loan_emi recurring templates — they're for cash flow projection only
+    if txn.get("source") == "loan_emi":
+        return
+    
     t_type = txn["transaction_type"]
     amount = txn["amount"]
     txn_date = txn.get("date", "")
@@ -1333,6 +1339,9 @@ async def apply_transaction_to_balances(user_id: str, txn: dict):
 
 
 async def reverse_transaction_balances(user_id: str, txn: dict):
+    if txn.get("source") == "loan_emi":
+        return
+    
     t_type = txn["transaction_type"]
     amount = txn["amount"]
     txn_date = txn.get("date", "")
