@@ -2304,32 +2304,74 @@ async def save_pdf_password(user_id: str, account_id: str, password: str) -> Non
     )
 
 
+def _pdf_has_encrypt_marker(file_path: str) -> bool:
+    """Scan the raw PDF for an /Encrypt dictionary reference. Reliable way to
+    detect encryption even when pdfplumber opens the file without raising
+    (common with restricted-permission PDFs from Indian banks)."""
+    try:
+        with open(file_path, "rb") as f:
+            head = f.read(4096)
+            f.seek(0, 2)
+            size = f.tell()
+            f.seek(max(0, size - 16384))
+            tail = f.read()
+        return b"/Encrypt" in head or b"/Encrypt" in tail
+    except Exception:
+        return False
+
+
 def extract_pdf_text(file_path: str, password: Optional[str] = None) -> str:
     """Extract text from a PDF. If the PDF is encrypted, a password can be
     supplied. Raises PdfPasswordRequired if the PDF is encrypted and the
-    supplied password (or lack thereof) cannot open it.
+    supplied password (or lack thereof) cannot open it — including the case
+    where pdfplumber opens the file but returns no text because the PDF's
+    permissions block extraction.
     """
-    text_parts = []
+    is_encrypted = _pdf_has_encrypt_marker(file_path)
+    text_parts: list = []
+    open_error: Optional[Exception] = None
+
     try:
         open_kwargs = {"password": password} if password else {}
         with pdfplumber.open(file_path, **open_kwargs) as pdf:
             for page in pdf.pages[:20]:
-                tables = page.extract_tables()
+                try:
+                    tables = page.extract_tables()
+                except Exception:
+                    tables = None
                 if tables:
                     text_parts.extend(
                         " | ".join(str(c or "") for c in row)
                         for table in tables for row in table if row
                     )
                     continue
-                page_text = page.extract_text()
+                try:
+                    page_text = page.extract_text()
+                except Exception:
+                    page_text = None
                 if page_text:
                     text_parts.append(page_text)
     except Exception as e:
+        open_error = e
         msg = str(e).lower()
-        if "password" in msg or "encrypt" in msg or "decrypt" in msg:
-            raise PdfPasswordRequired(str(e))
+        pw_markers = (
+            "password", "encrypt", "decrypt", "owner password",
+            "user password", "not allow", "permission", "pdfpasswordincorrect",
+        )
+        if any(m in msg for m in pw_markers) or is_encrypted:
+            raise PdfPasswordRequired(str(e) or "PDF is password protected")
         logger.error(f"PDF extraction failed: {e}")
-    return "\n".join(text_parts)
+
+    joined = "\n".join(text_parts).strip()
+
+    # Encrypted PDFs with restricted permissions often open cleanly but return
+    # essentially no text. Treat that as password-required so the user is asked.
+    if is_encrypted and len(joined) < 50:
+        raise PdfPasswordRequired(
+            "This PDF is password protected or has restricted permissions."
+        )
+
+    return joined
 
 
 async def parse_pdf_statement(file_path: str, password: Optional[str] = None) -> list:

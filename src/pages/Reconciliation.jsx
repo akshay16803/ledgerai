@@ -285,7 +285,8 @@ export default function Reconciliation() {
                 <Fragment key={stmt.statement_id}>
                 <tr data-testid={`stmt-row-${stmt.statement_id}`}
                   style={{
-                    borderBottom: stmt.status === 'password_required' ? 'none' : '1px solid var(--border-subtle)',
+                    borderBottom: (stmt.status === 'password_required' || (stmt.status === 'parse_failed' && stmt.file_ext === 'pdf'))
+                      ? 'none' : '1px solid var(--border-subtle)',
                     background: activeStmt?.statement_id === stmt.statement_id ? 'rgba(194,109,92,0.05)' : '#fff'
                   }}>
                   <td style={tdStyle}>
@@ -328,14 +329,16 @@ export default function Reconciliation() {
                     </div>
                   </td>
                 </tr>
-                {stmt.status === 'password_required' && (
+                {(stmt.status === 'password_required' || (stmt.status === 'parse_failed' && stmt.file_ext === 'pdf')) && (
                   <tr data-testid={`unlock-row-${stmt.statement_id}`}
                     style={{ borderBottom: '1px solid var(--border-subtle)', background: '#fff' }}>
                     <td colSpan={7} style={{ padding: '10px 16px 14px' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                         <LockKey size={16} weight="duotone" style={{ color: 'var(--warning)' }} />
                         <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                          This PDF is password protected. Enter the password to parse it — we'll remember it for this account.
+                          {stmt.status === 'password_required'
+                            ? 'This PDF is password protected. Enter the password to parse it — we\'ll remember it for this account.'
+                            : 'Parse failed. If this PDF is password protected, enter the password and retry.'}
                         </span>
                         <input
                           data-testid={`pw-input-${stmt.statement_id}`}
