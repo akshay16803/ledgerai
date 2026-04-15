@@ -204,6 +204,20 @@ CSV/PDF upload, auto-parsing, fuzzy reconciliation engine, add missing entries
 - **Compact list format**: Shows more data in less vertical space compared to card grid
 - Empty sections are automatically hidden
 
+### Phase 17 - Loan Account Management with EMI Tracking (Apr 2026)
+- **Optional loan details** for loan/mortgage accounts: interest rate (% p.a.), remaining tenure (months), EMI amount, loan start date
+- **Reducing balance amortization schedule**: `GET /api/accounts/{id}/amortization` generates month-by-month breakdown (EMI, Principal, Interest, Outstanding)
+- **Auto-recurring EMI**: When loan details are saved, auto-creates a monthly recurring expense transaction tagged `source: loan_emi`
+  - Appears in recurring payments list and 24-month cash flow projection
+  - Auto-creates "Loan EMI" expense category if none exists
+- **Frontend UX**:
+  - "Loan Details" collapsible section appears when sub_type is loan/mortgage (clearly marked as optional)
+  - Loan accounts without details show "Add loan details for EMI tracking" prompt
+  - Loan accounts with details show a "Schedule" button → opens amortization modal
+  - Amortization modal shows: 6 summary cards (Loan Amount, Rate, EMI, Total Interest, EMIs Paid, Remaining) + scrollable schedule table
+  - Paid EMIs marked with green checkmark based on actual transactions recorded
+- **API error handling fix**: Pydantic validation error arrays now display properly instead of `[object Object]`
+
 ## Prioritized Backlog
 
 ### P1 (Next)
