@@ -18,7 +18,6 @@ export default function Transactions() {
   const [showForm, setShowForm] = useState(false);
   const [txnType, setTxnType] = useState('expense');
   const [filterType, setFilterType] = useState('');
-  const [filterStatus, setFilterStatus] = useState('');
   const [error, setError] = useState('');
   const [editingTxn, setEditingTxn] = useState(null);
   const [form, setForm] = useState({
@@ -30,7 +29,7 @@ export default function Transactions() {
   const loadData = useCallback(async () => {
     try {
       const [txnRes, accs, cats] = await Promise.all([
-        api.get(`/api/transactions?${filterType ? `transaction_type=${filterType}&` : ''}${filterStatus ? `status=${filterStatus}&` : ''}limit=100`),
+        api.get(`/api/transactions?${filterType ? `transaction_type=${filterType}&` : ''}status=approved&limit=100`),
         api.get('/api/accounts'),
         api.get('/api/categories'),
       ]);
@@ -38,12 +37,12 @@ export default function Transactions() {
       setTotal(txnRes.total);
       setAccounts(accs);
       setCategories(cats);
-      if (!filterType && !filterStatus) {
+      if (!filterType) {
         setCache('transactions', { transactions: txnRes.transactions, total: txnRes.total, accounts: accs, categories: cats });
       }
     } catch (err) { /* Error handled silently - data will show empty state */ }
     setLoading(false);
-  }, [filterType, filterStatus]);
+  }, [filterType]);
 
   useEffect(() => { loadData(); }, [loadData]); // eslint-disable-line react-hooks/set-state-in-effect
 
@@ -351,13 +350,6 @@ export default function Transactions() {
           <option value="income">Income</option>
           <option value="expense">Expense</option>
           <option value="transfer">Transfer</option>
-        </select>
-        <select data-testid="filter-status" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
-          style={{ padding: '8px 14px', border: '1px solid var(--border-strong)', borderRadius: 2, fontSize: 13, fontFamily: 'var(--font-body)', background: '#fff' }}>
-          <option value="">All Statuses</option>
-          <option value="approved">Approved</option>
-          <option value="pending_review">Pending Review</option>
-          <option value="rejected">Rejected</option>
         </select>
       </div>
 
