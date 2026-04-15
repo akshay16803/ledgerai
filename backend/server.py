@@ -2521,22 +2521,37 @@ _EXPENSE_NARRATION_MARKERS = (
 
 
 def _detect_dr_cr_suffix(description: str, raw_amount_text: str = "") -> str:
-    """Return 'income', 'expense', or '' based on Dr/Cr token after the
-    amount or in the narration. Indian bank statements commonly suffix the
-    amount with ' Cr' or ' Dr'."""
-    blob = f"{description} {raw_amount_text}".lower()
-    # Match standalone Dr / Cr tokens (avoid matching "drink" / "credit card" etc.)
-    if re.search(r'\b(cr|cr\.|cre|credit)\b', blob) and not re.search(r'\b(dr|dr\.|debit)\b', blob):
+    """Return 'income', 'expense', or '' based on a Dr/Cr *suffix* on the
+    amount text. Many Indian bank statements render amounts like
+    "50,000.00 Cr" or "5,000.00 Dr". We only inspect raw_amount here — we
+    intentionally do NOT scan the description, because descriptions
+    routinely contain substrings like "CREDIT CARD", "CREDIT LIMIT",
+    "DEBIT CARD" which would flip classification incorrectly."""
+    if not raw_amount_text:
+        return ""
+    text = raw_amount_text.strip().lower()
+    # Cr / Dr as a trailing token after a number (allow trailing punctuation).
+    if re.search(r'\b(cr|cr\.)\s*$', text):
         return "income"
-    if re.search(r'\b(dr|dr\.|debit)\b', blob) and not re.search(r'\b(cr|cr\.|cre|credit)\b', blob):
+    if re.search(r'\b(dr|dr\.)\s*$', text):
         return "expense"
     return ""
 
 
 def _classify_from_narration(description: str) -> str:
     """Use narration keywords as a tiebreaker. Returns 'income', 'expense'
-    or '' if nothing definitive."""
+    or '' if nothing definitive.
+
+    When both an income and an expense marker appear in the same narration,
+    dominant income markers (refund / reversal / cashback) win — these
+    words specifically describe an outgoing transaction being undone, so
+    their presence flips the sign regardless of the original txn type
+    mentioned alongside (e.g. "REVERSAL POS TXN", "REFUND ATM WDL")."""
     desc = (description or "").lower()
+    dominant_income = ("refund", "reversal", "reversed", "cashback", "cash back")
+    if any(m in desc for m in dominant_income):
+        return "income"
+
     inc = any(m in desc for m in _INCOME_NARRATION_MARKERS)
     exp = any(m in desc for m in _EXPENSE_NARRATION_MARKERS)
     if inc and not exp:
