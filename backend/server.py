@@ -117,6 +117,15 @@ class AccountUpdate(BaseModel):
     opening_balance: Optional[float] = None
     balance: Optional[float] = None
 
+class AccountSubTypeCreate(BaseModel):
+    name: str
+    account_type: str  # asset, liability, equity
+    icon: Optional[str] = None  # optional icon identifier
+
+class AccountSubTypeUpdate(BaseModel):
+    name: Optional[str] = None
+    icon: Optional[str] = None
+
 class CategoryCreate(BaseModel):
     name: str
     category_type: str  # income or expense
@@ -718,6 +727,144 @@ async def delete_account(account_id: str, user: dict = Depends(get_current_user)
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Account not found")
     return {"message": "Account deleted"}
+
+
+# ─── Account Sub Types Routes ────────────────────────────────────────
+
+# Default sub types (used when user has no custom sub types)
+DEFAULT_SUB_TYPES = {
+    "asset": [
+        {"name": "Bank", "sub_type_id": "default_bank", "icon": "bank"},
+        {"name": "Cash", "sub_type_id": "default_cash", "icon": "cash"},
+        {"name": "Wallet", "sub_type_id": "default_wallet", "icon": "wallet"},
+        {"name": "Savings", "sub_type_id": "default_savings", "icon": "piggy_bank"},
+        {"name": "Investment", "sub_type_id": "default_investment", "icon": "chart"},
+        {"name": "Fixed Deposit", "sub_type_id": "default_fd", "icon": "lock"},
+    ],
+    "liability": [
+        {"name": "Credit Card", "sub_type_id": "default_credit_card", "icon": "credit_card"},
+        {"name": "Loan", "sub_type_id": "default_loan", "icon": "loan"},
+        {"name": "Mortgage", "sub_type_id": "default_mortgage", "icon": "house"},
+    ],
+    "equity": [
+        {"name": "Capital", "sub_type_id": "default_capital", "icon": "capital"},
+        {"name": "Retained Earnings", "sub_type_id": "default_retained", "icon": "savings"},
+    ],
+}
+
+@app.get("/api/account-sub-types")
+async def list_account_sub_types(user: dict = Depends(get_current_user), account_type: Optional[str] = None):
+    """List all account sub types (default + user custom)"""
+    query = {"user_id": user["user_id"]}
+    if account_type:
+        query["account_type"] = account_type
+    
+    # Get user's custom sub types
+    custom_types = await db.account_sub_types.find(query, {"_id": 0}).to_list(100)
+    
+    # Combine with defaults
+    result = {}
+    for acc_type in ["asset", "liability", "equity"]:
+        if account_type and acc_type != account_type:
+            continue
+        # Start with defaults
+        result[acc_type] = [
+            {**st, "is_default": True, "account_type": acc_type} 
+            for st in DEFAULT_SUB_TYPES.get(acc_type, [])
+        ]
+        # Add custom sub types
+        for custom in custom_types:
+            if custom.get("account_type") == acc_type:
+                result[acc_type].append({**custom, "is_default": False})
+    
+    return result
+
+
+@app.post("/api/account-sub-types")
+async def create_account_sub_type(data: AccountSubTypeCreate, user: dict = Depends(get_current_user)):
+    """Create a custom account sub type"""
+    # Check if name already exists for this account type
+    existing = await db.account_sub_types.find_one({
+        "user_id": user["user_id"],
+        "account_type": data.account_type,
+        "name": {"$regex": f"^{re.escape(data.name)}$", "$options": "i"}
+    })
+    if existing:
+        raise HTTPException(status_code=400, detail="Sub type with this name already exists")
+    
+    # Check if it conflicts with default names
+    defaults = DEFAULT_SUB_TYPES.get(data.account_type, [])
+    for d in defaults:
+        if d["name"].lower() == data.name.lower():
+            raise HTTPException(status_code=400, detail="Cannot create sub type with same name as default")
+    
+    sub_type = {
+        "sub_type_id": f"subtype_{uuid.uuid4().hex[:12]}",
+        "user_id": user["user_id"],
+        "name": data.name,
+        "account_type": data.account_type,
+        "icon": data.icon or "folder",
+        "created_at": datetime.now(timezone.utc),
+    }
+    await db.account_sub_types.insert_one(sub_type)
+    del sub_type["_id"]
+    return sub_type
+
+
+@app.put("/api/account-sub-types/{sub_type_id}")
+async def update_account_sub_type(sub_type_id: str, data: AccountSubTypeUpdate, user: dict = Depends(get_current_user)):
+    """Update a custom account sub type"""
+    if sub_type_id.startswith("default_"):
+        raise HTTPException(status_code=400, detail="Cannot modify default sub types")
+    
+    update_data = {k: v for k, v in data.dict().items() if v is not None}
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    
+    # If renaming, check for conflicts
+    if "name" in update_data:
+        existing = await db.account_sub_types.find_one({
+            "user_id": user["user_id"],
+            "name": {"$regex": f"^{re.escape(update_data['name'])}$", "$options": "i"},
+            "sub_type_id": {"$ne": sub_type_id}
+        })
+        if existing:
+            raise HTTPException(status_code=400, detail="Sub type with this name already exists")
+    
+    update_data["updated_at"] = datetime.now(timezone.utc)
+    result = await db.account_sub_types.update_one(
+        {"sub_type_id": sub_type_id, "user_id": user["user_id"]},
+        {"$set": update_data}
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Sub type not found")
+    
+    sub_type = await db.account_sub_types.find_one({"sub_type_id": sub_type_id}, {"_id": 0})
+    return sub_type
+
+
+@app.delete("/api/account-sub-types/{sub_type_id}")
+async def delete_account_sub_type(sub_type_id: str, user: dict = Depends(get_current_user)):
+    """Delete a custom account sub type"""
+    if sub_type_id.startswith("default_"):
+        raise HTTPException(status_code=400, detail="Cannot delete default sub types")
+    
+    # Check if any accounts use this sub type
+    sub_type = await db.account_sub_types.find_one(
+        {"sub_type_id": sub_type_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    if not sub_type:
+        raise HTTPException(status_code=404, detail="Sub type not found")
+    
+    accounts_using = await db.accounts.count_documents({
+        "user_id": user["user_id"],
+        "sub_type": sub_type["name"]
+    })
+    if accounts_using > 0:
+        raise HTTPException(status_code=400, detail=f"Cannot delete sub type used by {accounts_using} account(s)")
+    
+    await db.account_sub_types.delete_one({"sub_type_id": sub_type_id, "user_id": user["user_id"]})
+    return {"message": "Sub type deleted"}
 
 
 # ─── Categories Routes ──────────────────────────────────────────────

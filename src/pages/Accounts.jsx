@@ -1,19 +1,13 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { api } from '../lib/api';
 import { getCached, setCache } from '../lib/cache';
-import { Plus, Trash, PencilSimple, Bank, Wallet, CreditCard, X } from '@phosphor-icons/react';
+import { Plus, Trash, PencilSimple, Bank, Wallet, CreditCard, X, Gear, Tag, Check, Warning } from '@phosphor-icons/react';
 
 const accountTypes = [
   { value: 'asset', label: 'Asset' },
   { value: 'liability', label: 'Liability' },
   { value: 'equity', label: 'Equity' },
 ];
-
-const subTypes = {
-  asset: ['bank', 'cash', 'wallet', 'investment', 'savings', 'fixed_deposit'],
-  liability: ['credit_card', 'loan', 'mortgage'],
-  equity: ['capital', 'retained_earnings'],
-};
 
 const typeIcons = { bank: Bank, cash: Wallet, wallet: Wallet, credit_card: CreditCard };
 
@@ -26,24 +20,236 @@ const inputStyle = {
   borderRadius: 2, fontSize: 14, fontFamily: 'var(--font-body)', outline: 'none', background: 'var(--bg-primary)',
 };
 const labelStyle = { fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 6 };
+// ─── Sub-type Management Modal ──────────────────────────────────────
+function SubTypeManager({ subTypesMap, onClose, onRefresh }) {
+  const [activeTab, setActiveTab] = useState('asset');
+  const [creating, setCreating] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [newType, setNewType] = useState('asset');
+  const [editingId, setEditingId] = useState(null);
+  const [editName, setEditName] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
 
+  const items = useMemo(() => subTypesMap[activeTab] || [], [subTypesMap, activeTab]);
+
+  const handleCreate = async () => {
+    if (!newName.trim()) return;
+    setBusy(true); setError('');
+    try {
+      await api.post('/api/account-sub-types', { name: newName.trim(), account_type: newType });
+      setNewName(''); setCreating(false);
+      onRefresh();
+    } catch (e) { setError(e.message); }
+    setBusy(false);
+  };
+
+  const handleUpdate = async (id) => {
+    if (!editName.trim()) return;
+    setBusy(true); setError('');
+    try {
+      await api.put(`/api/account-sub-types/${id}`, { name: editName.trim() });
+      setEditingId(null); setEditName('');
+      onRefresh();
+    } catch (e) { setError(e.message); }
+    setBusy(false);
+  };
+
+  const handleDelete = async (id, name) => {
+    if (!confirm(`Delete sub-type "${name}"? This cannot be undone.`)) return;
+    setBusy(true); setError('');
+    try {
+      await api.del(`/api/account-sub-types/${id}`);
+      onRefresh();
+    } catch (e) { setError(e.message); }
+    setBusy(false);
+  };
+
+  const startEdit = (item) => {
+    setEditingId(item.sub_type_id);
+    setEditName(item.name);
+    setError('');
+  };
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div onClick={onClose} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)' }} />
+      <div data-testid="subtype-manager-modal" style={{
+        position: 'relative', background: '#fff', borderRadius: 2, width: '100%', maxWidth: 600,
+        maxHeight: '90vh', overflow: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.2)', margin: '0 8px',
+      }}>
+        {/* Header */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 28px', borderBottom: '1px solid var(--border-subtle)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <Tag size={20} weight="duotone" style={{ color: 'var(--accent-1)' }} />
+            <h2 style={{ fontSize: 18, fontWeight: 600 }}>Manage Sub-types</h2>
+          </div>
+          <button data-testid="close-subtype-manager" onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4 }}>
+            <X size={20} />
+          </button>
+        </div>
+
+        {/* Tabs */}
+        <div style={{ display: 'flex', borderBottom: '1px solid var(--border-subtle)', padding: '0 28px' }}>
+          {accountTypes.map(t => (
+            <button key={t.value} data-testid={`subtype-tab-${t.value}`}
+              onClick={() => { setActiveTab(t.value); setCreating(false); setEditingId(null); setError(''); }}
+              style={{
+                background: 'none', border: 'none', borderBottom: activeTab === t.value ? '2px solid var(--brand-primary)' : '2px solid transparent',
+                padding: '12px 20px', fontSize: 13, fontWeight: activeTab === t.value ? 600 : 400,
+                color: activeTab === t.value ? 'var(--text-primary)' : 'var(--text-muted)',
+                cursor: 'pointer', fontFamily: 'var(--font-body)', transition: 'all 0.15s ease',
+              }}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Content */}
+        <div style={{ padding: '20px 28px' }}>
+          {error && (
+            <div data-testid="subtype-error" style={{
+              display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', marginBottom: 16,
+              background: 'rgba(150,69,58,0.08)', border: '1px solid rgba(150,69,58,0.2)', borderRadius: 2,
+              fontSize: 13, color: 'var(--error)',
+            }}>
+              <Warning size={14} weight="bold" /> {error}
+            </div>
+          )}
+
+          {/* Sub-type list */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {items.map(item => (
+              <div key={item.sub_type_id} data-testid={`subtype-item-${item.sub_type_id}`}
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  padding: '10px 14px', border: '1px solid var(--border-subtle)', borderRadius: 2,
+                  background: item.is_default ? 'var(--bg-secondary)' : '#fff',
+                }}>
+                {editingId === item.sub_type_id ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1 }}>
+                    <input data-testid="subtype-edit-input" autoFocus value={editName}
+                      onChange={e => setEditName(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter') handleUpdate(item.sub_type_id); if (e.key === 'Escape') setEditingId(null); }}
+                      style={{ ...inputStyle, padding: '6px 10px', fontSize: 13, flex: 1 }} />
+                    <button data-testid="subtype-edit-save" onClick={() => handleUpdate(item.sub_type_id)} disabled={busy}
+                      style={{ background: 'var(--success)', color: '#fff', border: 'none', padding: '6px 8px', borderRadius: 2, cursor: 'pointer' }}>
+                      <Check size={14} weight="bold" />
+                    </button>
+                    <button data-testid="subtype-edit-cancel" onClick={() => setEditingId(null)}
+                      style={{ background: 'none', border: '1px solid var(--border-strong)', padding: '6px 8px', borderRadius: 2, cursor: 'pointer', color: 'var(--text-muted)' }}>
+                      <X size={14} />
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <span style={{ fontSize: 14, fontWeight: 500 }}>{item.name}</span>
+                      {item.is_default && (
+                        <span className="mono" style={{ fontSize: 10, color: 'var(--text-muted)', background: 'var(--bg-tertiary)', padding: '2px 8px', borderRadius: 2 }}>
+                          DEFAULT
+                        </span>
+                      )}
+                    </div>
+                    {!item.is_default && (
+                      <div style={{ display: 'flex', gap: 4 }}>
+                        <button data-testid={`subtype-edit-${item.sub_type_id}`} onClick={() => startEdit(item)}
+                          style={{ background: 'rgba(74,110,125,0.1)', border: 'none', cursor: 'pointer', color: 'var(--info)', padding: 5, borderRadius: 2 }}>
+                          <PencilSimple size={13} />
+                        </button>
+                        <button data-testid={`subtype-delete-${item.sub_type_id}`} onClick={() => handleDelete(item.sub_type_id, item.name)}
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 5 }}>
+                          <Trash size={13} />
+                        </button>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            ))}
+
+            {items.length === 0 && (
+              <p className="mono" style={{ fontSize: 12, color: 'var(--text-muted)', textAlign: 'center', padding: 20 }}>No sub-types for this category</p>
+            )}
+          </div>
+
+          {/* Add new sub-type */}
+          {creating ? (
+            <div data-testid="subtype-create-form" style={{
+              marginTop: 16, padding: 16, border: '1px dashed var(--accent-1)', borderRadius: 2, background: 'rgba(194,109,92,0.04)',
+            }}>
+              <label style={labelStyle}>New Sub-type Name</label>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input data-testid="subtype-create-input" autoFocus value={newName}
+                  onChange={e => setNewName(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') handleCreate(); if (e.key === 'Escape') { setCreating(false); setError(''); } }}
+                  style={{ ...inputStyle, flex: 1, padding: '8px 12px', fontSize: 13 }}
+                  placeholder={`e.g., ${activeTab === 'asset' ? 'Mutual Fund' : activeTab === 'liability' ? 'BNPL' : 'Drawings'}`} />
+                <button data-testid="subtype-create-save" onClick={handleCreate} disabled={busy || !newName.trim()}
+                  style={{
+                    background: 'var(--brand-primary)', color: '#fff', border: 'none',
+                    padding: '8px 16px', borderRadius: 2, fontSize: 13, fontWeight: 600,
+                    cursor: newName.trim() ? 'pointer' : 'not-allowed', fontFamily: 'var(--font-body)',
+                    opacity: newName.trim() ? 1 : 0.5,
+                  }}>Save</button>
+                <button onClick={() => { setCreating(false); setError(''); }}
+                  style={{ background: 'none', border: '1px solid var(--border-strong)', padding: '8px 12px', borderRadius: 2, cursor: 'pointer', color: 'var(--text-muted)', fontSize: 13 }}>
+                  Cancel</button>
+              </div>
+              <p className="mono" style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 8 }}>
+                This will be added as a <strong style={{ color: 'var(--text-secondary)' }}>{activeTab}</strong> sub-type
+              </p>
+            </div>
+          ) : (
+            <button data-testid="subtype-add-btn" onClick={() => { setCreating(true); setNewName(''); setNewType(activeTab); setError(''); }}
+              style={{
+                marginTop: 16, width: '100%', background: 'none', border: '1px dashed var(--border-strong)',
+                padding: '12px', borderRadius: 2, fontSize: 13, color: 'var(--text-muted)',
+                cursor: 'pointer', fontFamily: 'var(--font-body)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                transition: 'border-color 0.15s, color 0.15s',
+              }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent-1)'; e.currentTarget.style.color = 'var(--accent-1)'; }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border-strong)'; e.currentTarget.style.color = 'var(--text-muted)'; }}>
+              <Plus size={14} weight="bold" /> Add Custom Sub-type
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+// ─── Main Accounts Page ─────────────────────────────────────────────
 export default function Accounts() {
   const [accounts, setAccounts] = useState(() => getCached('accounts') || []);
   const [loading, setLoading] = useState(!getCached('accounts'));
   const [showForm, setShowForm] = useState(false);
+  const [showSubTypeManager, setShowSubTypeManager] = useState(false);
   const [editingAcc, setEditingAcc] = useState(null);
-  const [form, setForm] = useState({ name: '', account_type: 'asset', sub_type: 'bank', opening_balance: '', currency: 'INR', description: '' });
+  const [form, setForm] = useState({ name: '', account_type: 'asset', sub_type: '', account_number: '', opening_balance: '', currency: 'INR', description: '' });
   const [error, setError] = useState('');
+  const [subTypesMap, setSubTypesMap] = useState(() => getCached('account_sub_types') || { asset: [], liability: [], equity: [] });
 
-  const load = () => {
+  const loadAccounts = useCallback(() => {
     api.get('/api/accounts').then(data => { setAccounts(data); setCache('accounts', data); }).catch(() => {}).finally(() => setLoading(false));
-  };
+  }, []);
 
-  useEffect(() => { load(); }, []);
+  const loadSubTypes = useCallback(() => {
+    api.get('/api/account-sub-types').then(data => { setSubTypesMap(data); setCache('account_sub_types', data); }).catch(() => {});
+  }, []);
+
+  useEffect(() => { loadAccounts(); loadSubTypes(); }, [loadAccounts, loadSubTypes]);
+
+  // Get sub-type options for a given account type
+  const getSubTypeOptions = useCallback((accType) => {
+    return (subTypesMap[accType] || []).map(st => ({ value: st.name.toLowerCase().replace(/\s+/g, '_'), label: st.name }));
+  }, [subTypesMap]);
 
   const openCreate = () => {
     setEditingAcc(null);
-    setForm({ name: '', account_type: 'asset', sub_type: 'bank', account_number: '', opening_balance: '', currency: 'INR', description: '' });
+    const firstSubType = getSubTypeOptions('asset')[0]?.value || '';
+    setForm({ name: '', account_type: 'asset', sub_type: firstSubType, account_number: '', opening_balance: '', currency: 'INR', description: '' });
     setShowForm(true);
     setError('');
   };
@@ -64,6 +270,11 @@ export default function Accounts() {
     setError('');
   };
 
+  const handleTypeChange = (newType) => {
+    const options = getSubTypeOptions(newType);
+    setForm(f => ({ ...f, account_type: newType, sub_type: options[0]?.value || '' }));
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
@@ -80,7 +291,7 @@ export default function Accounts() {
       }
       setShowForm(false);
       setEditingAcc(null);
-      load();
+      loadAccounts();
     } catch (err) { setError(err.message); }
   };
 
@@ -88,25 +299,57 @@ export default function Accounts() {
     if (!confirm('Delete this account?')) return;
     try {
       await api.del(`/api/accounts/${id}`);
-      load();
+      loadAccounts();
     } catch (err) { alert(err.message); }
   };
 
+  // Count custom sub-types
+  const customCount = useMemo(() => {
+    return Object.values(subTypesMap).flat().filter(st => !st.is_default).length;
+  }, [subTypesMap]);
+
   return (
     <div data-testid="accounts-page">
-      <div className="action-bar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 32 }}>
+      <div className="action-bar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 32, flexWrap: 'wrap', gap: 12 }}>
         <div>
           <h1 className="page-title" style={{ fontSize: 28, fontWeight: 500, letterSpacing: '-0.02em' }}>Accounts</h1>
           <p className="mono page-subtitle" style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>Manage your financial accounts</p>
         </div>
-        <button data-testid="add-account-btn" onClick={openCreate} style={{
-          background: 'var(--brand-primary)', color: '#fff', border: 'none',
-          padding: '10px 20px', borderRadius: 2, fontSize: 13, fontWeight: 600,
-          cursor: 'pointer', fontFamily: 'var(--font-body)', display: 'flex', alignItems: 'center', gap: 6
-        }}>
-          <Plus size={14} weight="bold" /> Add Account
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button data-testid="manage-subtypes-btn" onClick={() => setShowSubTypeManager(true)} style={{
+            background: 'none', color: 'var(--text-secondary)', border: '1px solid var(--border-strong)',
+            padding: '10px 16px', borderRadius: 2, fontSize: 13, fontWeight: 500,
+            cursor: 'pointer', fontFamily: 'var(--font-body)', display: 'flex', alignItems: 'center', gap: 6,
+            transition: 'background 0.15s, border-color 0.15s',
+          }}
+          onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-secondary)'; }}
+          onMouseLeave={e => { e.currentTarget.style.background = 'none'; }}>
+            <Gear size={14} weight="bold" /> Sub-types
+            {customCount > 0 && (
+              <span style={{
+                background: 'var(--accent-1)', color: '#fff', fontSize: 10, fontWeight: 700,
+                padding: '1px 6px', borderRadius: 10, marginLeft: 2,
+              }}>{customCount}</span>
+            )}
+          </button>
+          <button data-testid="add-account-btn" onClick={openCreate} style={{
+            background: 'var(--brand-primary)', color: '#fff', border: 'none',
+            padding: '10px 20px', borderRadius: 2, fontSize: 13, fontWeight: 600,
+            cursor: 'pointer', fontFamily: 'var(--font-body)', display: 'flex', alignItems: 'center', gap: 6
+          }}>
+            <Plus size={14} weight="bold" /> Add Account
+          </button>
+        </div>
       </div>
+
+      {/* Sub-type Manager Modal */}
+      {showSubTypeManager && (
+        <SubTypeManager
+          subTypesMap={subTypesMap}
+          onClose={() => setShowSubTypeManager(false)}
+          onRefresh={loadSubTypes}
+        />
+      )}
 
       {/* Add/Edit Account Form Modal */}
       {showForm && (
@@ -139,7 +382,7 @@ export default function Accounts() {
                   <div>
                     <label style={labelStyle}>Type *</label>
                     <select data-testid="account-type-select" value={form.account_type}
-                      onChange={e => setForm(f => ({ ...f, account_type: e.target.value, sub_type: subTypes[e.target.value]?.[0] || '' }))}
+                      onChange={e => handleTypeChange(e.target.value)}
                       style={inputStyle} disabled={!!editingAcc}>
                       {accountTypes.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
                     </select>
@@ -149,7 +392,9 @@ export default function Accounts() {
                     <select data-testid="account-subtype-select" value={form.sub_type}
                       onChange={e => setForm(f => ({ ...f, sub_type: e.target.value }))}
                       style={inputStyle}>
-                      {(subTypes[form.account_type] || []).map(s => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}
+                      {getSubTypeOptions(form.account_type).map(s => (
+                        <option key={s.value} value={s.value}>{s.label}</option>
+                      ))}
                     </select>
                   </div>
                   {editingAcc ? (
