@@ -1,9 +1,9 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, Fragment } from 'react';
 import { api } from '../lib/api';
 import { getCached, setCache } from '../lib/cache';
 import {
   FileText, Upload, ArrowClockwise, Check, X, Warning,
-  CheckCircle, XCircle, Question, Scales, Trash, Eye
+  CheckCircle, XCircle, Question, Scales, Trash, Eye, LockKey
 } from '@phosphor-icons/react';
 
 const API = import.meta.env.REACT_APP_BACKEND_URL;
@@ -26,6 +26,7 @@ function StatusBadge({ status }) {
     parsed: { bg: 'rgba(194,140,60,0.12)', color: 'var(--warning)', label: 'Ready to Reconcile' },
     reconciled: { bg: 'rgba(58,92,74,0.12)', color: 'var(--success)', label: 'Reconciled' },
     parse_failed: { bg: 'rgba(150,69,58,0.12)', color: 'var(--error)', label: 'Parse Failed' },
+    password_required: { bg: 'rgba(194,140,60,0.12)', color: 'var(--warning)', label: 'Password Needed' },
   };
   const s = map[status] || map.parsing;
   return (
@@ -49,6 +50,9 @@ export default function Reconciliation() {
   const [reconciling, setReconciling] = useState(false);
   const [addingMissing, setAddingMissing] = useState(false);
   const [selectedMissing, setSelectedMissing] = useState([]);
+  const [unlockingId, setUnlockingId] = useState('');
+  const [pwInputs, setPwInputs] = useState({});
+  const [unlockErrors, setUnlockErrors] = useState({});
 
   const loadData = useCallback(async () => {
     try {
@@ -150,6 +154,24 @@ export default function Reconciliation() {
       if (activeStmt?.statement_id === stmtId) setActiveStmt(null);
       loadData();
     } catch (err) { setError(err.message); }
+  };
+
+  const handleUnlock = async (stmtId) => {
+    const pw = (pwInputs[stmtId] || '').trim();
+    if (!pw) {
+      setUnlockErrors(prev => ({ ...prev, [stmtId]: 'Enter a password' }));
+      return;
+    }
+    setUnlockingId(stmtId);
+    setUnlockErrors(prev => ({ ...prev, [stmtId]: '' }));
+    try {
+      await api.post(`/api/statements/${stmtId}/unlock`, { password: pw });
+      setPwInputs(prev => ({ ...prev, [stmtId]: '' }));
+      loadData();
+    } catch (err) {
+      setUnlockErrors(prev => ({ ...prev, [stmtId]: err.message || 'Unlock failed' }));
+    }
+    setUnlockingId('');
   };
 
   const toggleMissing = (idx) => {
@@ -260,9 +282,10 @@ export default function Reconciliation() {
             </thead>
             <tbody>
               {statements.map(stmt => (
-                <tr key={stmt.statement_id} data-testid={`stmt-row-${stmt.statement_id}`}
+                <Fragment key={stmt.statement_id}>
+                <tr data-testid={`stmt-row-${stmt.statement_id}`}
                   style={{
-                    borderBottom: '1px solid var(--border-subtle)',
+                    borderBottom: stmt.status === 'password_required' ? 'none' : '1px solid var(--border-subtle)',
                     background: activeStmt?.statement_id === stmt.statement_id ? 'rgba(194,109,92,0.05)' : '#fff'
                   }}>
                   <td style={tdStyle}>
@@ -280,16 +303,18 @@ export default function Reconciliation() {
                   </td>
                   <td style={{ ...tdStyle, textAlign: 'center' }}>
                     <div style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
-                      <button data-testid={`view-stmt-${stmt.statement_id}`}
-                        onClick={() => handleViewStatement(stmt.statement_id)}
-                        style={{
-                          background: 'var(--brand-primary)', color: '#fff', border: 'none',
-                          borderRadius: 2, padding: '5px 12px', cursor: 'pointer', fontSize: 11,
-                          fontWeight: 600, fontFamily: 'var(--font-body)',
-                          display: 'flex', alignItems: 'center', gap: 3
-                        }}>
-                        <Eye size={12} weight="bold" /> View
-                      </button>
+                      {stmt.status !== 'password_required' && (
+                        <button data-testid={`view-stmt-${stmt.statement_id}`}
+                          onClick={() => handleViewStatement(stmt.statement_id)}
+                          style={{
+                            background: 'var(--brand-primary)', color: '#fff', border: 'none',
+                            borderRadius: 2, padding: '5px 12px', cursor: 'pointer', fontSize: 11,
+                            fontWeight: 600, fontFamily: 'var(--font-body)',
+                            display: 'flex', alignItems: 'center', gap: 3
+                          }}>
+                          <Eye size={12} weight="bold" /> View
+                        </button>
+                      )}
                       <button data-testid={`delete-stmt-${stmt.statement_id}`}
                         onClick={() => handleDelete(stmt.statement_id)}
                         style={{
@@ -303,6 +328,51 @@ export default function Reconciliation() {
                     </div>
                   </td>
                 </tr>
+                {stmt.status === 'password_required' && (
+                  <tr data-testid={`unlock-row-${stmt.statement_id}`}
+                    style={{ borderBottom: '1px solid var(--border-subtle)', background: '#fff' }}>
+                    <td colSpan={7} style={{ padding: '10px 16px 14px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                        <LockKey size={16} weight="duotone" style={{ color: 'var(--warning)' }} />
+                        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                          This PDF is password protected. Enter the password to parse it — we'll remember it for this account.
+                        </span>
+                        <input
+                          data-testid={`pw-input-${stmt.statement_id}`}
+                          type="password"
+                          placeholder="PDF password"
+                          value={pwInputs[stmt.statement_id] || ''}
+                          onChange={e => setPwInputs(prev => ({ ...prev, [stmt.statement_id]: e.target.value }))}
+                          onKeyDown={e => { if (e.key === 'Enter') handleUnlock(stmt.statement_id); }}
+                          style={{
+                            padding: '8px 14px', border: '1px solid var(--border-strong)', borderRadius: 2,
+                            fontSize: 13, fontFamily: 'var(--font-body)', background: '#fff', minWidth: 200,
+                          }}
+                        />
+                        <button
+                          data-testid={`unlock-btn-${stmt.statement_id}`}
+                          onClick={() => handleUnlock(stmt.statement_id)}
+                          disabled={unlockingId === stmt.statement_id}
+                          style={{
+                            background: 'var(--brand-primary)', color: '#fff', border: 'none',
+                            borderRadius: 2, padding: '7px 16px', cursor: unlockingId === stmt.statement_id ? 'not-allowed' : 'pointer',
+                            fontSize: 12, fontWeight: 600, fontFamily: 'var(--font-body)',
+                            opacity: unlockingId === stmt.statement_id ? 0.6 : 1,
+                            display: 'flex', alignItems: 'center', gap: 4,
+                          }}>
+                          <LockKey size={12} weight="bold" />
+                          {unlockingId === stmt.statement_id ? 'Unlocking…' : 'Unlock'}
+                        </button>
+                        {unlockErrors[stmt.statement_id] && (
+                          <span style={{ fontSize: 12, color: 'var(--error)' }}>
+                            {unlockErrors[stmt.statement_id]}
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                )}
+                </Fragment>
               ))}
             </tbody>
           </table>

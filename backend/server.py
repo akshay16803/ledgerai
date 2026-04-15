@@ -20,6 +20,7 @@ import logging
 import secrets
 import hashlib
 import pdfplumber
+from cryptography.fernet import Fernet, InvalidToken
 from urllib.parse import urlencode, quote
 from email.utils import parsedate_to_datetime
 
@@ -1999,9 +2000,81 @@ async def delete_statement(statement_id: str, user: dict = Depends(get_current_u
     return {"message": "Statement deleted"}
 
 
+@app.post("/api/statements/{statement_id}/unlock")
+async def unlock_statement(
+    statement_id: str, request: Request, user: dict = Depends(get_current_user)
+):
+    """Retry parsing a password-protected PDF statement with a user-provided
+    password. On success, the password is saved encrypted for this user+account
+    so future uploads for the same account parse automatically."""
+    body = await request.json()
+    password = (body.get("password") or "").strip()
+    if not password:
+        raise HTTPException(status_code=400, detail="Password is required")
+
+    stmt = await db.statements.find_one(
+        {"statement_id": statement_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    if not stmt:
+        raise HTTPException(status_code=404, detail="Statement not found")
+    if stmt.get("file_ext") != "pdf":
+        raise HTTPException(status_code=400, detail="Only PDF statements can be unlocked")
+
+    file_path = stmt.get("file_path")
+    if not file_path or not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="Statement file missing on server")
+
+    # Mark back to parsing so the UI reflects retry.
+    await db.statements.update_one(
+        {"statement_id": statement_id},
+        {"$set": {"status": "parsing", "parse_error": None}}
+    )
+
+    # Run the parse synchronously so we can report success/failure to the UI.
+    try:
+        entries = await parse_pdf_statement(file_path, password=password)
+        if not entries:
+            pdf_text = extract_pdf_text(file_path, password=password)
+            if pdf_text:
+                entries = await parse_statement_text_with_ai(
+                    pdf_text, stmt.get("statement_type", "bank")
+                )
+    except PdfPasswordRequired:
+        await db.statements.update_one(
+            {"statement_id": statement_id},
+            {"$set": {
+                "status": "password_required",
+                "parse_error": "The password you entered did not unlock this PDF.",
+            }}
+        )
+        raise HTTPException(status_code=400, detail="Incorrect password for this PDF")
+
+    # Password worked — persist it (encrypted) for this user+account.
+    try:
+        await save_pdf_password(user["user_id"], stmt["account_id"], password)
+    except Exception as save_err:
+        logger.error(f"Failed to save PDF password after unlock: {save_err}")
+
+    await db.statements.update_one(
+        {"statement_id": statement_id},
+        {"$set": {
+            "parsed_entries": entries,
+            "status": "parsed" if entries else "parse_failed",
+            "entry_count": len(entries),
+            "parsed_at": datetime.now(timezone.utc),
+            "parse_error": None if entries else "Unlocked but could not extract any entries.",
+        }}
+    )
+    return {
+        "statement_id": statement_id,
+        "status": "parsed" if entries else "parse_failed",
+        "entry_count": len(entries),
+    }
+
+
 # ─── Statement Parsing Helpers ───────────────────────────────────────
 
-async def parse_statement_background(statement_id: str, user_id: str):
+async def parse_statement_background(statement_id: str, user_id: str, password: Optional[str] = None):
     try:
         stmt = await db.statements.find_one({"statement_id": statement_id}, {"_id": 0})
         if not stmt:
@@ -2009,18 +2082,43 @@ async def parse_statement_background(statement_id: str, user_id: str):
 
         file_path = stmt["file_path"]
         ext = stmt["file_ext"]
+        account_id = stmt.get("account_id")
 
-        if ext == "csv":
-            entries = parse_csv_statement(file_path)
-        elif ext == "pdf":
-            entries = await parse_pdf_statement(file_path)
-        else:
-            entries = []
+        # Resolve password for encrypted PDFs: prefer explicit, else saved.
+        effective_password = password
+        if ext == "pdf" and not effective_password and account_id:
+            effective_password = await get_saved_pdf_password(user_id, account_id)
 
-        if not entries and ext == "pdf":
-            pdf_text = extract_pdf_text(file_path)
-            if pdf_text:
-                entries = await parse_statement_text_with_ai(pdf_text, stmt.get("statement_type", "bank"))
+        try:
+            if ext == "csv":
+                entries = parse_csv_statement(file_path)
+            elif ext == "pdf":
+                entries = await parse_pdf_statement(file_path, password=effective_password)
+            else:
+                entries = []
+
+            if not entries and ext == "pdf":
+                pdf_text = extract_pdf_text(file_path, password=effective_password)
+                if pdf_text:
+                    entries = await parse_statement_text_with_ai(pdf_text, stmt.get("statement_type", "bank"))
+        except PdfPasswordRequired as e:
+            # Encrypted PDF and we have no working password. Persist distinct status.
+            logger.info(f"Statement {statement_id} requires a PDF password")
+            await db.statements.update_one(
+                {"statement_id": statement_id},
+                {"$set": {
+                    "status": "password_required",
+                    "parse_error": "This PDF is password protected. Please provide the password.",
+                }}
+            )
+            return
+
+        # If user supplied a password that worked, remember it for next time.
+        if password and entries and account_id:
+            try:
+                await save_pdf_password(user_id, account_id, password)
+            except Exception as save_err:
+                logger.error(f"Failed to save PDF password: {save_err}")
 
         await db.statements.update_one(
             {"statement_id": statement_id},
@@ -2029,6 +2127,7 @@ async def parse_statement_background(statement_id: str, user_id: str):
                 "status": "parsed" if entries else "parse_failed",
                 "entry_count": len(entries),
                 "parsed_at": datetime.now(timezone.utc),
+                "parse_error": None if entries else "Could not extract any entries from this statement.",
             }}
         )
         logger.info(f"Parsed {len(entries)} entries from statement {statement_id}")
@@ -2132,10 +2231,88 @@ def parse_csv_statement(file_path: str) -> list:
     return entries
 
 
-def extract_pdf_text(file_path: str) -> str:
+class PdfPasswordRequired(Exception):
+    """Raised when a PDF is encrypted and the supplied password (if any) fails."""
+    pass
+
+
+_FERNET_CACHE: dict = {}
+
+
+async def _get_pdf_fernet() -> Fernet:
+    """Return a process-cached Fernet instance.
+    Key is loaded from PDF_PASSWORD_KEY env var, or generated once and persisted
+    in the `system_config` collection so encrypted data survives restarts.
+    """
+    if "fernet" in _FERNET_CACHE:
+        return _FERNET_CACHE["fernet"]
+
+    key = os.environ.get("PDF_PASSWORD_KEY")
+    if not key:
+        doc = await db.system_config.find_one({"key": "pdf_password_fernet_key"})
+        if doc and doc.get("value"):
+            key = doc["value"]
+        else:
+            key = Fernet.generate_key().decode()
+            await db.system_config.update_one(
+                {"key": "pdf_password_fernet_key"},
+                {"$setOnInsert": {"key": "pdf_password_fernet_key", "value": key,
+                                  "created_at": datetime.now(timezone.utc)}},
+                upsert=True,
+            )
+    fernet = Fernet(key.encode() if isinstance(key, str) else key)
+    _FERNET_CACHE["fernet"] = fernet
+    return fernet
+
+
+async def encrypt_pdf_password(password: str) -> str:
+    fernet = await _get_pdf_fernet()
+    return fernet.encrypt(password.encode()).decode()
+
+
+async def decrypt_pdf_password(ciphertext: str) -> Optional[str]:
+    try:
+        fernet = await _get_pdf_fernet()
+        return fernet.decrypt(ciphertext.encode()).decode()
+    except (InvalidToken, Exception) as e:
+        logger.warning(f"Failed to decrypt stored PDF password: {e}")
+        return None
+
+
+async def get_saved_pdf_password(user_id: str, account_id: str) -> Optional[str]:
+    """Retrieve decrypted password scoped to this user + account. Never cross-user."""
+    doc = await db.pdf_passwords.find_one(
+        {"user_id": user_id, "account_id": account_id}, {"_id": 0}
+    )
+    if not doc or not doc.get("password_encrypted"):
+        return None
+    return await decrypt_pdf_password(doc["password_encrypted"])
+
+
+async def save_pdf_password(user_id: str, account_id: str, password: str) -> None:
+    """Store encrypted password for reuse on subsequent uploads for this account."""
+    encrypted = await encrypt_pdf_password(password)
+    await db.pdf_passwords.update_one(
+        {"user_id": user_id, "account_id": account_id},
+        {"$set": {
+            "user_id": user_id,
+            "account_id": account_id,
+            "password_encrypted": encrypted,
+            "updated_at": datetime.now(timezone.utc),
+        }},
+        upsert=True,
+    )
+
+
+def extract_pdf_text(file_path: str, password: Optional[str] = None) -> str:
+    """Extract text from a PDF. If the PDF is encrypted, a password can be
+    supplied. Raises PdfPasswordRequired if the PDF is encrypted and the
+    supplied password (or lack thereof) cannot open it.
+    """
     text_parts = []
     try:
-        with pdfplumber.open(file_path) as pdf:
+        open_kwargs = {"password": password} if password else {}
+        with pdfplumber.open(file_path, **open_kwargs) as pdf:
             for page in pdf.pages[:20]:
                 tables = page.extract_tables()
                 if tables:
@@ -2148,12 +2325,17 @@ def extract_pdf_text(file_path: str) -> str:
                 if page_text:
                     text_parts.append(page_text)
     except Exception as e:
+        msg = str(e).lower()
+        if "password" in msg or "encrypt" in msg or "decrypt" in msg:
+            raise PdfPasswordRequired(str(e))
         logger.error(f"PDF extraction failed: {e}")
     return "\n".join(text_parts)
 
 
-async def parse_pdf_statement(file_path: str) -> list:
-    text = extract_pdf_text(file_path)
+async def parse_pdf_statement(file_path: str, password: Optional[str] = None) -> list:
+    """Parse a PDF statement. Propagates PdfPasswordRequired if encrypted and
+    the supplied password is missing or incorrect."""
+    text = extract_pdf_text(file_path, password=password)
     if not text or len(text.strip()) < 50:
         return []
     return await parse_statement_text_with_ai(text, "bank")
