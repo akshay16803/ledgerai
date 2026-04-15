@@ -2446,10 +2446,12 @@ async def _create_transaction_from_ai_result(
             exchange_rate = rate_info["rate"]
             converted_amount = round(original_amount * exchange_rate, 2)
             is_estimated_rate = rate_info["is_estimated"]
+            logger.info(f"Currency conversion: {original_amount} {original_currency} -> {converted_amount} {base_currency} (rate: {exchange_rate}, estimated: {is_estimated_rate})")
         else:
-            # Can't convert — store original amount as-is
+            # Can't convert — store original amount as-is (this shouldn't happen with fallback rates)
             converted_amount = original_amount
             is_estimated_rate = True
+            logger.warning(f"Currency conversion FAILED for {original_currency} -> {base_currency}, storing original amount: {original_amount}")
 
     duplicate = await check_cross_source_duplicate(
         user_id,
@@ -3038,9 +3040,30 @@ async def get_exchange_rate(from_currency: str, to_currency: str, date_str: str)
     if cache_key in _exchange_rate_cache:
         return _exchange_rate_cache[cache_key]
 
+    # Fallback rates for common currency pairs (updated periodically)
+    # These are approximate rates as of 2024, used when API is unavailable
+    fallback_rates_to_inr = {
+        "USD": 83.5,
+        "EUR": 91.0,
+        "GBP": 106.0,
+        "AUD": 55.0,
+        "CAD": 62.0,
+        "SGD": 62.0,
+        "AED": 22.7,
+        "SAR": 22.3,
+        "JPY": 0.55,
+        "CHF": 94.0,
+        "CNY": 11.5,
+        "HKD": 10.7,
+        "NZD": 51.0,
+        "THB": 2.3,
+        "MYR": 17.7,
+        "KRW": 0.062,
+    }
+    
     # Try exact date first
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
             resp = await client.get(
                 f"https://api.frankfurter.app/{date_str}",
                 params={"from": from_currency.upper(), "to": to_currency.upper()},
@@ -3053,11 +3076,11 @@ async def get_exchange_rate(from_currency: str, to_currency: str, date_str: str)
                     _exchange_rate_cache[cache_key] = result
                     return result
     except Exception as e:
-        logger.error(f"Exchange rate fetch failed for {date_str}: {e}")
+        logger.warning(f"Exchange rate fetch failed for {date_str}: {e}")
 
     # Fallback: latest rate (estimated)
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
             resp = await client.get(
                 "https://api.frankfurter.app/latest",
                 params={"from": from_currency.upper(), "to": to_currency.upper()},
@@ -3070,7 +3093,25 @@ async def get_exchange_rate(from_currency: str, to_currency: str, date_str: str)
                     _exchange_rate_cache[cache_key] = result
                     return result
     except Exception as e:
-        logger.error(f"Latest exchange rate fetch failed: {e}")
+        logger.warning(f"Latest exchange rate fetch failed: {e}")
+
+    # Final fallback: use hardcoded approximate rates
+    from_upper = from_currency.upper()
+    to_upper = to_currency.upper()
+    
+    if to_upper == "INR" and from_upper in fallback_rates_to_inr:
+        rate = fallback_rates_to_inr[from_upper]
+        result = {"rate": rate, "is_estimated": True}
+        _exchange_rate_cache[cache_key] = result
+        logger.info(f"Using fallback exchange rate: 1 {from_upper} = {rate} INR")
+        return result
+    elif from_upper == "INR" and to_upper in fallback_rates_to_inr:
+        # Reverse calculation
+        rate = 1.0 / fallback_rates_to_inr[to_upper]
+        result = {"rate": rate, "is_estimated": True}
+        _exchange_rate_cache[cache_key] = result
+        logger.info(f"Using fallback exchange rate: 1 INR = {rate} {to_upper}")
+        return result
 
     return {"rate": None, "is_estimated": True}
 
