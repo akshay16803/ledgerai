@@ -783,6 +783,7 @@ export default function EmailSync() {
           transaction={editingTxn}
           accounts={accounts}
           categories={categories}
+          isPendingReview={editingTxn.status === 'pending_review'}
           onSave={() => { setEditingTxn(null); loadStatus(); }}
           onClose={() => setEditingTxn(null)}
         />

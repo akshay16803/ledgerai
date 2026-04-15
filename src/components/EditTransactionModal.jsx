@@ -1,8 +1,8 @@
 import { useState, useEffect, useMemo } from 'react';
 import { api } from '../lib/api';
-import { X, ArrowDown, ArrowUp, ArrowsLeftRight, Plus, Check } from '@phosphor-icons/react';
+import { X, ArrowDown, ArrowUp, ArrowsLeftRight, Plus, Check, CheckCircle } from '@phosphor-icons/react';
 
-export function EditTransactionModal({ transaction, accounts, categories, onSave, onClose }) {
+export function EditTransactionModal({ transaction, accounts, categories, onSave, onClose, isPendingReview = false }) {
   const isEdit = !!transaction;
   const [txnType, setTxnType] = useState(transaction?.transaction_type || 'expense');
   const [form, setForm] = useState({
@@ -19,6 +19,7 @@ export function EditTransactionModal({ transaction, accounts, categories, onSave
   });
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [approving, setApproving] = useState(false);
 
   // Quick-add state
   const [showQuickCat, setShowQuickCat] = useState(false);
@@ -116,6 +117,41 @@ export function EditTransactionModal({ transaction, accounts, categories, onSave
       onSave();
     } catch (err) { setError(err.message); }
     setSaving(false);
+  };
+
+  // Save changes and approve transaction in one action
+  const handleSaveAndApprove = async () => {
+    setError('');
+    if (!form.amount || parseFloat(form.amount) <= 0) { setError('Amount must be positive'); return; }
+    if (!form.date) { setError('Date is required'); return; }
+    if (!form.account_id) { setError('Account is required'); return; }
+    if (txnType !== 'transfer' && !form.category_id) { setError('Category is required'); return; }
+    if (txnType === 'transfer' && !form.to_account_id) { setError('Destination account is required'); return; }
+
+    setApproving(true);
+    try {
+      // First save any changes
+      const payload = {
+        transaction_type: txnType,
+        amount: parseFloat(form.amount),
+        date: form.date,
+        account_id: form.account_id,
+        to_account_id: txnType === 'transfer' ? form.to_account_id : null,
+        category_id: txnType !== 'transfer' ? form.category_id : null,
+        subcategory_id: txnType !== 'transfer' ? form.subcategory_id : null,
+        description: form.description,
+        payment_method: form.payment_method || null,
+        is_recurring: form.is_recurring,
+        recurring_frequency: form.is_recurring ? form.recurring_frequency : null,
+      };
+      await api.put(`/api/transactions/${transaction.transaction_id}`, payload);
+      
+      // Then approve the transaction
+      await api.post(`/api/transactions/${transaction.transaction_id}/approve`);
+      
+      onSave();
+    } catch (err) { setError(err.message); }
+    setApproving(false);
   };
 
   return (
@@ -325,16 +361,37 @@ export function EditTransactionModal({ transaction, accounts, categories, onSave
 
             {error && <p style={{ color: 'var(--error)', fontSize: 13, marginBottom: 12 }}>{error}</p>}
 
-            <div style={{ display: 'flex', gap: 12 }}>
-              <button data-testid="modal-save-btn" type="submit" disabled={saving}
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+              {/* Save/Update Button */}
+              <button data-testid="modal-save-btn" type="submit" disabled={saving || approving}
                 style={{
                   background: 'var(--brand-primary)', color: '#fff', border: 'none',
                   padding: '10px 24px', borderRadius: 2, fontSize: 13, fontWeight: 600,
-                  cursor: saving ? 'not-allowed' : 'pointer', fontFamily: 'var(--font-body)',
-                  opacity: saving ? 0.6 : 1,
+                  cursor: (saving || approving) ? 'not-allowed' : 'pointer', fontFamily: 'var(--font-body)',
+                  opacity: (saving || approving) ? 0.6 : 1,
                 }}>
                 {saving ? 'Saving...' : isEdit ? 'Update Transaction' : 'Save Transaction'}
               </button>
+
+              {/* Approve Button - only show for pending review transactions */}
+              {isPendingReview && isEdit && (
+                <button 
+                  data-testid="modal-approve-btn" 
+                  type="button" 
+                  onClick={handleSaveAndApprove}
+                  disabled={saving || approving}
+                  style={{
+                    background: 'var(--success)', color: '#fff', border: 'none',
+                    padding: '10px 24px', borderRadius: 2, fontSize: 13, fontWeight: 600,
+                    cursor: (saving || approving) ? 'not-allowed' : 'pointer', fontFamily: 'var(--font-body)',
+                    opacity: (saving || approving) ? 0.6 : 1,
+                    display: 'flex', alignItems: 'center', gap: 6,
+                  }}>
+                  <CheckCircle size={16} weight="fill" />
+                  {approving ? 'Approving...' : 'Save & Approve'}
+                </button>
+              )}
+
               <button type="button" onClick={onClose}
                 style={{
                   background: 'none', border: '1px solid var(--border-strong)', color: 'var(--text-secondary)',
