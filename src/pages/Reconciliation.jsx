@@ -20,6 +20,49 @@ const thStyle = {
 };
 const tdStyle = { padding: '10px 16px' };
 
+function ProcessingBar({ stmt, now }) {
+  const progress = Math.max(0, Math.min(100, stmt.processing_progress || 5));
+  const label = stmt.processing_stage_label || 'Queued';
+  const startedAt = stmt.processing_started_at
+    ? new Date(stmt.processing_started_at).getTime()
+    : null;
+  const elapsedSec = startedAt ? Math.max(0, Math.round((now - startedAt) / 1000)) : 0;
+  const etaRaw = typeof stmt.processing_eta_seconds === 'number' ? stmt.processing_eta_seconds : null;
+  // ETA shown = server-reported remaining-for-current-stage minus time spent
+  // in this stage, floored at a small positive number so it keeps moving.
+  const updatedAt = stmt.processing_updated_at
+    ? new Date(stmt.processing_updated_at).getTime()
+    : (startedAt || now);
+  const sinceStage = Math.max(0, Math.round((now - updatedAt) / 1000));
+  const etaSec = etaRaw != null ? Math.max(1, etaRaw - sinceStage) : null;
+
+  return (
+    <div style={{ marginTop: 6, minWidth: 160 }}>
+      <div style={{
+        height: 4, borderRadius: 2, background: 'var(--bg-secondary)',
+        overflow: 'hidden', position: 'relative'
+      }}>
+        <div style={{
+          width: `${progress}%`, height: '100%',
+          background: 'var(--accent-1)',
+          transition: 'width 600ms ease',
+        }} />
+      </div>
+      <div className="mono" style={{
+        display: 'flex', justifyContent: 'space-between', gap: 8,
+        marginTop: 4, fontSize: 10.5, color: 'var(--text-muted)',
+        letterSpacing: '0.02em'
+      }}>
+        <span>{label} · {progress}%</span>
+        <span>
+          {elapsedSec}s elapsed
+          {etaSec != null && etaSec > 0 ? ` · ~${etaSec}s left` : ''}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 function StatusBadge({ status }) {
   const map = {
     parsing: { bg: 'rgba(74,110,125,0.12)', color: 'var(--info)', label: 'Parsing...' },
@@ -98,6 +141,26 @@ export default function Reconciliation() {
     loadData().then(() => { if (!active) return; });
     return () => { active = false; };
   }, [loadData]);
+
+  // Poll while any statement is still parsing so the progress bar advances
+  // without the user having to refresh. Stops automatically once no rows are
+  // in a processing state.
+  useEffect(() => {
+    const anyProcessing = statements.some(s => s.status === 'parsing');
+    if (!anyProcessing) return;
+    const id = setInterval(() => { loadData(); }, 1500);
+    return () => clearInterval(id);
+  }, [statements, loadData]);
+
+  // Tick every second so the "elapsed seconds" readout on each progress bar
+  // updates smoothly even between polls.
+  const [nowTick, setNowTick] = useState(Date.now());
+  useEffect(() => {
+    const anyProcessing = statements.some(s => s.status === 'parsing');
+    if (!anyProcessing) return;
+    const id = setInterval(() => setNowTick(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [statements]);
 
   // When sub-type changes, clear selected account if it no longer matches and
   // auto-pick the first account of that sub-type. Also sync statement_type.
@@ -205,13 +268,18 @@ export default function Reconciliation() {
     setUnlockingId(stmtId);
     setUnlockErrors(prev => ({ ...prev, [stmtId]: '' }));
     try {
+      // Backend validates the password quickly (~1s) and returns 202 while
+      // parsing continues in the background. The row's progress bar takes
+      // over from here, so we don't need to keep the button in "unlocking"
+      // state for the full parse.
       await api.post(`/api/statements/${stmtId}/unlock`, { password: pw });
       setPwInputs(prev => ({ ...prev, [stmtId]: '' }));
+      setUnlockingId('');
       loadData();
     } catch (err) {
       setUnlockErrors(prev => ({ ...prev, [stmtId]: err.message || 'Unlock failed' }));
+      setUnlockingId('');
     }
-    setUnlockingId('');
   };
 
   const toggleMissing = (idx) => {
@@ -363,7 +431,12 @@ export default function Reconciliation() {
                       ? `${stmt.period_from} → ${stmt.period_to}`
                       : '—'}
                   </td>
-                  <td style={tdStyle}><StatusBadge status={stmt.status} /></td>
+                  <td style={tdStyle}>
+                    <StatusBadge status={stmt.status} />
+                    {stmt.status === 'parsing' && (
+                      <ProcessingBar stmt={stmt} now={nowTick} />
+                    )}
+                  </td>
                   <td className="mono" style={{ ...tdStyle, fontSize: 12 }}>
                     {stmt.uploaded_at ? new Date(stmt.uploaded_at).toLocaleDateString() : ''}
                   </td>

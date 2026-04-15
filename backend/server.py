@@ -2033,22 +2033,11 @@ async def unlock_statement(
     if not file_path or not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="Statement file missing on server")
 
-    # Mark back to parsing so the UI reflects retry.
-    await db.statements.update_one(
-        {"statement_id": statement_id},
-        {"$set": {"status": "parsing", "parse_error": None}}
-    )
-
-    # Run the parse synchronously so we can report success/failure to the UI.
-    try:
-        entries = await parse_pdf_statement(file_path, password=password)
-        if not entries:
-            pdf_text = extract_pdf_text(file_path, password=password)
-            if pdf_text:
-                entries = await parse_statement_text_with_ai(
-                    pdf_text, stmt.get("statement_type", "bank")
-                )
-    except PdfPasswordRequired:
+    # Quick password validity check so we can give the user immediate
+    # feedback on an incorrect password, without blocking the browser on
+    # the full parse.
+    is_valid = await asyncio.to_thread(_quick_pdf_password_check, file_path, password)
+    if not is_valid:
         await db.statements.update_one(
             {"statement_id": statement_id},
             {"$set": {
@@ -2058,33 +2047,109 @@ async def unlock_statement(
         )
         raise HTTPException(status_code=400, detail="Incorrect password for this PDF")
 
-    # Password worked — persist it (encrypted) for this user+account.
-    try:
-        await save_pdf_password(user["user_id"], stmt["account_id"], password)
-    except Exception as save_err:
-        logger.error(f"Failed to save PDF password after unlock: {save_err}")
-
+    # Mark back to parsing and reset progress so the UI shows a fresh bar.
     await db.statements.update_one(
         {"statement_id": statement_id},
         {"$set": {
-            "parsed_entries": entries,
-            "status": "parsed" if entries else "parse_failed",
-            "entry_count": len(entries),
-            "parsed_at": datetime.now(timezone.utc),
-            "parse_error": None if entries else "Unlocked but could not extract any entries.",
+            "status": "parsing",
+            "parse_error": None,
+            "processing_stage": "queued",
+            "processing_stage_label": PARSE_STAGES["queued"]["label"],
+            "processing_progress": PARSE_STAGES["queued"]["progress"],
+            "processing_eta_seconds": PARSE_STAGES["queued"]["eta_seconds"],
+            "processing_started_at": datetime.now(timezone.utc),
+            "processing_updated_at": datetime.now(timezone.utc),
         }}
     )
+
+    # Run the heavy parse in the background so the request returns immediately.
+    asyncio.create_task(
+        parse_statement_background(statement_id, user["user_id"], password=password)
+    )
+
     return {
         "statement_id": statement_id,
-        "status": "parsed" if entries else "parse_failed",
-        "entry_count": len(entries),
+        "status": "parsing",
+        "message": "Password accepted, parsing in progress",
     }
 
 
 # ─── Statement Parsing Helpers ───────────────────────────────────────
 
+# Progress stages for statement parsing. Each tuple is:
+#   (stage_name, percent_complete_at_stage_start, rough_remaining_seconds_at_stage_start)
+# Used to drive the per-statement progress bar in the UI.
+PARSE_STAGES = {
+    "queued":          {"progress": 5,   "eta_seconds": 30, "label": "Queued"},
+    "decrypting":      {"progress": 15,  "eta_seconds": 25, "label": "Decrypting PDF"},
+    "extracting_text": {"progress": 35,  "eta_seconds": 20, "label": "Extracting text"},
+    "ai_parsing":      {"progress": 70,  "eta_seconds": 12, "label": "Reading transactions"},
+    "saving":          {"progress": 95,  "eta_seconds": 2,  "label": "Saving"},
+    "parsed":          {"progress": 100, "eta_seconds": 0,  "label": "Done"},
+    "parse_failed":    {"progress": 100, "eta_seconds": 0,  "label": "Failed"},
+    "password_required": {"progress": 0, "eta_seconds": 0,  "label": "Password required"},
+}
+
+
+async def _set_parse_stage(statement_id: str, stage: str, *, reset_start: bool = False):
+    """Write the current parsing stage + progress to the statement doc so the
+    UI can render a live progress bar. Call at every stage transition."""
+    info = PARSE_STAGES.get(stage, {"progress": 0, "eta_seconds": 0, "label": stage})
+    now = datetime.now(timezone.utc)
+    set_fields = {
+        "processing_stage": stage,
+        "processing_stage_label": info["label"],
+        "processing_progress": info["progress"],
+        "processing_eta_seconds": info["eta_seconds"],
+        "processing_updated_at": now,
+    }
+    update: dict = {"$set": set_fields}
+    if reset_start:
+        set_fields["processing_started_at"] = now
+    else:
+        # Only set started_at if it doesn't already exist.
+        update["$setOnInsert"] = {}
+        # Use a separate update to avoid overwriting an existing started_at.
+        existing = await db.statements.find_one(
+            {"statement_id": statement_id}, {"processing_started_at": 1, "_id": 0}
+        )
+        if not existing or not existing.get("processing_started_at"):
+            set_fields["processing_started_at"] = now
+        update = {"$set": set_fields}
+    await db.statements.update_one({"statement_id": statement_id}, update)
+
+
+def _quick_pdf_password_check(file_path: str, password: str) -> bool:
+    """Return True if the password successfully decrypts the PDF. Fast — just
+    opens the PDF with pdfplumber and reads the first page's text length."""
+    try:
+        import pdfplumber  # imported lazily
+        with pdfplumber.open(file_path, password=password) as pdf:
+            if not pdf.pages:
+                return False
+            # If password is wrong, pdfplumber usually raises; if it silently
+            # returns empty text on page 1, still treat as opened — the full
+            # parser will handle empty extraction.
+            try:
+                _ = pdf.pages[0].extract_text()
+            except Exception:
+                pass
+            return True
+    except Exception as e:
+        msg = str(e).lower()
+        password_markers = (
+            "password", "encrypt", "decrypt", "owner password",
+            "user password", "pdfpasswordincorrect",
+        )
+        if any(m in msg for m in password_markers):
+            return False
+        # Non-password errors (corrupt file etc.) — treat as unable to verify.
+        return False
+
+
 async def parse_statement_background(statement_id: str, user_id: str, password: Optional[str] = None):
     try:
+        await _set_parse_stage(statement_id, "queued", reset_start=True)
         stmt = await db.statements.find_one({"statement_id": statement_id}, {"_id": 0})
         if not stmt:
             return
@@ -2100,15 +2165,19 @@ async def parse_statement_background(statement_id: str, user_id: str, password: 
 
         try:
             if ext == "csv":
+                await _set_parse_stage(statement_id, "extracting_text")
                 entries = parse_csv_statement(file_path)
             elif ext == "pdf":
+                await _set_parse_stage(statement_id, "decrypting")
                 entries = await parse_pdf_statement(file_path, password=effective_password)
             else:
                 entries = []
 
             if not entries and ext == "pdf":
+                await _set_parse_stage(statement_id, "extracting_text")
                 pdf_text = extract_pdf_text(file_path, password=effective_password)
                 if pdf_text:
+                    await _set_parse_stage(statement_id, "ai_parsing")
                     entries = await parse_statement_text_with_ai(pdf_text, stmt.get("statement_type", "bank"))
         except PdfPasswordRequired as e:
             # Encrypted PDF and we have no working password. Persist distinct status.
@@ -2118,9 +2187,16 @@ async def parse_statement_background(statement_id: str, user_id: str, password: 
                 {"$set": {
                     "status": "password_required",
                     "parse_error": "This PDF is password protected. Please provide the password.",
+                    "processing_stage": "password_required",
+                    "processing_stage_label": PARSE_STAGES["password_required"]["label"],
+                    "processing_progress": 0,
+                    "processing_eta_seconds": 0,
+                    "processing_updated_at": datetime.now(timezone.utc),
                 }}
             )
             return
+
+        await _set_parse_stage(statement_id, "saving")
 
         # If user supplied a password that worked, remember it for next time.
         if password and entries and account_id:
@@ -2129,6 +2205,8 @@ async def parse_statement_background(statement_id: str, user_id: str, password: 
             except Exception as save_err:
                 logger.error(f"Failed to save PDF password: {save_err}")
 
+        final_stage = "parsed" if entries else "parse_failed"
+        final_info = PARSE_STAGES[final_stage]
         await db.statements.update_one(
             {"statement_id": statement_id},
             {"$set": {
@@ -2137,6 +2215,11 @@ async def parse_statement_background(statement_id: str, user_id: str, password: 
                 "entry_count": len(entries),
                 "parsed_at": datetime.now(timezone.utc),
                 "parse_error": None if entries else "Could not extract any entries from this statement.",
+                "processing_stage": final_stage,
+                "processing_stage_label": final_info["label"],
+                "processing_progress": final_info["progress"],
+                "processing_eta_seconds": 0,
+                "processing_updated_at": datetime.now(timezone.utc),
             }}
         )
         logger.info(f"Parsed {len(entries)} entries from statement {statement_id}")
@@ -2145,7 +2228,15 @@ async def parse_statement_background(statement_id: str, user_id: str, password: 
         logger.error(f"Statement parsing failed for {statement_id}: {e}")
         await db.statements.update_one(
             {"statement_id": statement_id},
-            {"$set": {"status": "parse_failed", "parse_error": str(e)}}
+            {"$set": {
+                "status": "parse_failed",
+                "parse_error": str(e),
+                "processing_stage": "parse_failed",
+                "processing_stage_label": PARSE_STAGES["parse_failed"]["label"],
+                "processing_progress": 100,
+                "processing_eta_seconds": 0,
+                "processing_updated_at": datetime.now(timezone.utc),
+            }}
         )
 
 
