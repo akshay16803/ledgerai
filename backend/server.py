@@ -28,7 +28,7 @@ from google_auth_oauthlib.flow import Flow
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request as GoogleRequest
 from googleapiclient.discovery import build
-from openai import OpenAI
+from openai import OpenAI, AsyncOpenAI
 import resend
 
 load_dotenv()
@@ -71,6 +71,9 @@ GMAIL_SCOPES = [
 ]
 
 openai_client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
+# Async client used specifically for statement parsing so the event loop
+# is not blocked while we wait on OpenAI (a long statement can take minutes).
+async_openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 
 # CORS origins from environment variable, defaults to allow all for flexibility
 CORS_ORIGINS = os.environ.get("CORS_ORIGINS", "*")
@@ -2625,7 +2628,7 @@ def _post_process_entries(entries: list, statement_type: str) -> list:
     return cleaned
 
 
-def _chunk_statement_text(text: str, chunk_chars: int = 6000, overlap: int = 600) -> list:
+def _chunk_statement_text(text: str, chunk_chars: int = 4500, overlap: int = 800) -> list:
     """Split long statement text into overlapping chunks so we never silently
     drop the tail of the statement. Overlap protects against a transaction
     being split across a chunk boundary."""
@@ -2673,7 +2676,13 @@ async def _ai_parse_chunk(chunk: str, statement_type: str, chunk_idx: int, chunk
 - Words like "DEBIT BY", "ATM WDL", "POS", "EMI", "CHARGES", "GST ON" mean expense."""
 
     prompt = f"""You are parsing chunk {chunk_idx + 1} of {chunk_total} from a {statement_type} statement.
-Extract EVERY transaction line you can identify in this chunk. Do not skip rows. Do not summarize.
+
+CRITICAL: Extract EVERY single transaction line. Do not skip any. Do not
+summarize. Do not deduplicate. Even if two rows look similar, if they
+appear on separate lines they are separate transactions and must BOTH
+appear in your output. First count how many transaction rows are in the
+chunk, then make sure your "transactions" array has exactly that many
+elements.
 
 {type_rules}
 
@@ -2690,6 +2699,10 @@ Field rules:
 - "balance": the running balance after the transaction, or null if not shown.
 - "raw_amount": the amount text exactly as it appears in the statement, including any Dr/Cr suffix, parentheses, or sign. This is REQUIRED so we can verify your classification.
 
+Skip only: headers, column names, page numbers, separator lines, summary
+totals, and opening/closing balance lines that are not dated
+transactions. Every DATED row with an amount is a transaction — include it.
+
 If the chunk has no transaction lines, return {{"transactions": []}}.
 
 STATEMENT CHUNK:
@@ -2697,7 +2710,7 @@ STATEMENT CHUNK:
 """
 
     try:
-        response = openai_client.chat.completions.create(
+        response = await async_openai_client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": "You parse bank and credit card statements into structured JSON. You never skip transactions. You always respect Dr/Cr suffixes. Output JSON only."},
@@ -2735,10 +2748,21 @@ async def parse_statement_text_with_ai(text: str, statement_type: str) -> list:
     chunks = _chunk_statement_text(text)
     logger.info(f"AI parsing statement: {len(text)} chars in {len(chunks)} chunk(s) ({statement_type})")
 
+    # Run chunk calls concurrently — they are independent. Cap concurrency
+    # so we don't blow through the OpenAI rate limit on very large
+    # statements.
+    sem = asyncio.Semaphore(6)
+
+    async def _guarded(idx, chunk):
+        async with sem:
+            return await _ai_parse_chunk(chunk, statement_type, idx, len(chunks))
+
+    results = await asyncio.gather(
+        *[_guarded(i, c) for i, c in enumerate(chunks)]
+    )
     all_entries: list = []
-    for idx, chunk in enumerate(chunks):
-        entries = await _ai_parse_chunk(chunk, statement_type, idx, len(chunks))
-        all_entries.extend(entries)
+    for res in results:
+        all_entries.extend(res)
 
     cleaned = _post_process_entries(all_entries, statement_type)
     logger.info(f"AI parsing produced {len(cleaned)} cleaned entries (from {len(all_entries)} raw)")
