@@ -172,8 +172,8 @@ CSV/PDF upload, auto-parsing, fuzzy reconciliation engine, add missing entries
 
 ### Phase 15 - Balance Date (balance_as_of_date) Feature (Apr 2026)
 - **Dated balance snapshots**: Every account now stores a `balance_as_of_date` alongside the opening balance
-- Represents the "end of day" closing balance on that date — all transactions on or before that date are already factored in
-- Only transactions AFTER the balance date affect the computed current balance
+- Represents the "opening balance for the day" on that date — transactions on or after that date are NOT yet factored in and will affect the computed balance
+- Transactions ON or AFTER the balance date affect the current balance; transactions before it do not
 - Default date: today's date when creating a new account
 - **Backend changes**:
   - `AccountCreate` and `AccountUpdate` models include `balance_as_of_date` field

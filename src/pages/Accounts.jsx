@@ -413,12 +413,12 @@ export default function Accounts() {
                           style={{ ...inputStyle, fontFamily: 'var(--font-mono)' }} placeholder="0" />
                       </div>
                       <div>
-                        <label style={labelStyle}>Balance as of (end of day)</label>
+                        <label style={labelStyle}>Balance as of (opening of day)</label>
                         <input data-testid="account-balance-date" type="date"
                           value={form.balance_as_of_date} onChange={e => setForm(f => ({ ...f, balance_as_of_date: e.target.value }))}
                           style={inputStyle} />
                         <span style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4, display: 'block' }}>
-                          Transactions after this date adjust the balance
+                          Transactions from this date onward adjust the balance
                         </span>
                       </div>
                     </>
@@ -431,12 +431,12 @@ export default function Accounts() {
                           style={{ ...inputStyle, fontFamily: 'var(--font-mono)' }} placeholder="0.00" />
                       </div>
                       <div>
-                        <label style={labelStyle}>Balance as of (end of day)</label>
+                        <label style={labelStyle}>Balance as of (opening of day)</label>
                         <input data-testid="account-balance-date" type="date"
                           value={form.balance_as_of_date} onChange={e => setForm(f => ({ ...f, balance_as_of_date: e.target.value }))}
                           style={inputStyle} />
                         <span style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4, display: 'block' }}>
-                          Closing balance on this date
+                          Opening balance at the start of this day
                         </span>
                       </div>
                     </>

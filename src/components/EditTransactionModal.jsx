@@ -232,7 +232,7 @@ export function EditTransactionModal({ transaction, accounts, categories, onSave
                       onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), handleQuickAddAccount())}
                       style={{ ...inputStyle, width: 100, padding: '6px 10px', fontSize: 12, fontFamily: 'var(--font-mono)' }} />
                     <input type="date" data-testid="modal-quick-acc-date" value={quickAccDate} onChange={e => setQuickAccDate(e.target.value)}
-                      style={{ ...inputStyle, width: 130, padding: '6px 10px', fontSize: 12 }} title="Balance as of (end of day)" />
+                      style={{ ...inputStyle, width: 130, padding: '6px 10px', fontSize: 12 }} title="Balance as of (opening of day)" />
                     <button type="button" onClick={handleQuickAddAccount}
                       style={{ padding: '6px 12px', background: 'var(--success)', color: '#fff', border: 'none', borderRadius: 2, fontSize: 11, cursor: 'pointer', fontFamily: 'var(--font-body)', display: 'flex', alignItems: 'center', gap: 3 }}>
                       <Check size={12} /> Save

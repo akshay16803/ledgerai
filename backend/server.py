@@ -1039,12 +1039,12 @@ async def recalculate_account_balance(user_id: str, account_id: str):
     
     if as_of_date:
         # Get all approved transactions for this account after the balance_as_of_date
-        # "End of day" means transactions ON that date are included in opening balance
-        # Only transactions AFTER that date should be counted
+        # "Opening balance for the day" means transactions ON that date are NOT yet included
+        # Transactions on or after that date should be counted
         txn_query = {
             "user_id": user_id,
             "status": "approved",
-            "date": {"$gt": as_of_date},
+            "date": {"$gte": as_of_date},
         }
         
         # Transactions where this account is the primary account
@@ -1079,8 +1079,8 @@ async def apply_transaction_to_balances(user_id: str, txn: dict):
     amount = txn["amount"]
     txn_date = txn.get("date", "")
 
-    # Check if transaction date is after the account's balance_as_of_date
-    # If the transaction is on or before the snapshot date, it's already factored into opening_balance
+    # Check if transaction date is on or after the account's balance_as_of_date
+    # Opening balance for the day means transactions ON that date are not yet factored in
     async def should_apply(account_id):
         acc = await db.accounts.find_one(
             {"account_id": account_id, "user_id": user_id},
@@ -1089,7 +1089,7 @@ async def apply_transaction_to_balances(user_id: str, txn: dict):
         as_of = acc.get("balance_as_of_date") if acc else None
         if not as_of:
             return True  # No date set, apply all transactions
-        return txn_date > as_of
+        return txn_date >= as_of
 
     if t_type == "income":
         if await should_apply(txn["account_id"]):
@@ -1130,7 +1130,7 @@ async def reverse_transaction_balances(user_id: str, txn: dict):
         as_of = acc.get("balance_as_of_date") if acc else None
         if not as_of:
             return True
-        return txn_date > as_of
+        return txn_date >= as_of
 
     if t_type == "income":
         if await should_apply(txn["account_id"]):

@@ -210,7 +210,7 @@ export default function Transactions() {
                   <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
                     <input data-testid="quick-account-name-input" value={quickAccName} onChange={e => setQuickAccName(e.target.value)} placeholder="Account name" style={{ ...inputStyle, flex: 1, padding: '6px 10px', fontSize: 12, minWidth: 100 }} />
                     <input data-testid="quick-account-balance-input" type="number" value={quickAccBalance} onChange={e => setQuickAccBalance(e.target.value)} placeholder="Balance" style={{ ...inputStyle, width: 90, padding: '6px 10px', fontSize: 12, fontFamily: 'var(--font-mono)' }} />
-                    <input data-testid="quick-account-date-input" type="date" value={quickAccDate} onChange={e => setQuickAccDate(e.target.value)} style={{ ...inputStyle, width: 130, padding: '6px 10px', fontSize: 12 }} title="Balance as of (end of day)" />
+                    <input data-testid="quick-account-date-input" type="date" value={quickAccDate} onChange={e => setQuickAccDate(e.target.value)} style={{ ...inputStyle, width: 130, padding: '6px 10px', fontSize: 12 }} title="Balance as of (opening of day)" />
                     <button type="button" data-testid="quick-save-account-btn" onClick={handleQuickAddAccount} style={{ padding: '6px 12px', background: 'var(--success)', color: '#fff', border: 'none', borderRadius: 2, fontSize: 11, cursor: 'pointer', fontFamily: 'var(--font-body)' }}>Save</button>
                   </div>
                 )}

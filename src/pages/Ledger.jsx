@@ -140,9 +140,9 @@ export default function Ledger() {
                     debit = txn.amount; // Show debit by default
                   }
                 }
-                // Only apply to running balance if transaction is after balance_as_of_date
+                // Only apply to running balance if transaction is on or after balance_as_of_date
                 if (selectedAccount) {
-                  const afterSnapshotDate = !balanceAsOfDate || txn.date > balanceAsOfDate;
+                  const afterSnapshotDate = !balanceAsOfDate || txn.date >= balanceAsOfDate;
                   if (afterSnapshotDate) {
                     runningBalance += debit - credit;
                   }
