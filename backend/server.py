@@ -1820,6 +1820,8 @@ async def upload_statement(
     file: UploadFile = File(...),
     account_id: str = Form(...),
     statement_type: str = Form("bank"),  # bank or credit_card
+    period_from: Optional[str] = Form(None),  # YYYY-MM-DD
+    period_to: Optional[str] = Form(None),    # YYYY-MM-DD
     user: dict = Depends(get_current_user),
 ):
     if not file.filename:
@@ -1849,6 +1851,7 @@ async def upload_statement(
         "user_id": user["user_id"],
         "account_id": account_id,
         "account_name": account.get("name", ""),
+        "account_sub_type": account.get("sub_type"),
         "statement_type": statement_type,
         "filename": file.filename,
         "file_ext": ext,
@@ -1857,6 +1860,8 @@ async def upload_statement(
         "status": "parsing",
         "parsed_entries": [],
         "reconciliation": None,
+        "period_from": (period_from or None),
+        "period_to": (period_to or None),
         "uploaded_at": datetime.now(timezone.utc),
     }
     await db.statements.insert_one(stmt_doc)
@@ -1906,19 +1911,23 @@ async def reconcile_statement(statement_id: str, user: dict = Depends(get_curren
     account_id = stmt["account_id"]
     user_id = user["user_id"]
 
-    dates = [e["date"] for e in parsed if e.get("date")]
-    if not dates:
-        raise HTTPException(status_code=400, detail="No valid dates in statement")
-
-    min_date = min(dates)
-    max_date = max(dates)
+    # Prefer user-selected period from upload; fall back to derived min/max
+    # from parsed entries so older statements without a saved period still work.
+    period_from = stmt.get("period_from")
+    period_to = stmt.get("period_to")
+    if not period_from or not period_to:
+        dates = [e["date"] for e in parsed if e.get("date")]
+        if not dates:
+            raise HTTPException(status_code=400, detail="No valid dates in statement")
+        period_from = period_from or min(dates)
+        period_to = period_to or max(dates)
 
     ledger_txns = await db.transactions.find(
         {
             "user_id": user_id,
             "status": "approved",
             "$or": [{"account_id": account_id}, {"to_account_id": account_id}],
-            "date": {"$gte": min_date, "$lte": max_date},
+            "date": {"$gte": period_from, "$lte": period_to},
         },
         {"_id": 0}
     ).to_list(5000)

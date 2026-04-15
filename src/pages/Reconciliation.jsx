@@ -43,8 +43,16 @@ export default function Reconciliation() {
   const [accounts, setAccounts] = useState(cached?.accounts || []);
   const [loading, setLoading] = useState(!cached);
   const [uploading, setUploading] = useState(false);
+  const [selectedSubType, setSelectedSubType] = useState('savings');
   const [selectedAccountId, setSelectedAccountId] = useState('');
   const [statementType, setStatementType] = useState('bank');
+  const [periodFrom, setPeriodFrom] = useState(() => {
+    const d = new Date();
+    d.setDate(1);
+    d.setMonth(d.getMonth() - 1);
+    return d.toISOString().split('T')[0];
+  });
+  const [periodTo, setPeriodTo] = useState(() => new Date().toISOString().split('T')[0]);
   const [error, setError] = useState('');
   const [activeStmt, setActiveStmt] = useState(null);
   const [reconciling, setReconciling] = useState(false);
@@ -53,6 +61,17 @@ export default function Reconciliation() {
   const [unlockingId, setUnlockingId] = useState('');
   const [pwInputs, setPwInputs] = useState({});
   const [unlockErrors, setUnlockErrors] = useState({});
+
+  const SUB_TYPE_OPTIONS = [
+    { value: 'savings', label: 'Savings', statementType: 'bank' },
+    { value: 'current', label: 'Current', statementType: 'bank' },
+    { value: 'bank', label: 'Bank', statementType: 'bank' },
+    { value: 'credit_card', label: 'Credit Card', statementType: 'credit_card' },
+    { value: 'wallet', label: 'Wallet', statementType: 'bank' },
+    { value: 'cash', label: 'Cash', statementType: 'bank' },
+  ];
+
+  const filteredAccounts = accounts.filter(a => (a.sub_type || '').toLowerCase() === selectedSubType);
 
   const loadData = useCallback(async () => {
     try {
@@ -63,7 +82,11 @@ export default function Reconciliation() {
       setStatements(stmtRes.statements || []);
       setAccounts(accs);
       setCache('reconciliation', { statements: stmtRes.statements || [], accounts: accs });
-      setSelectedAccountId(prev => prev || (accs.length > 0 ? accs[0].account_id : ''));
+      // Keep selected account only if it still matches the chosen sub-type.
+      setSelectedAccountId(prev => {
+        const match = accs.find(a => a.account_id === prev);
+        return match ? prev : '';
+      });
     } catch {
       // Reconciliation will show empty state on error
     }
@@ -76,10 +99,25 @@ export default function Reconciliation() {
     return () => { active = false; };
   }, [loadData]);
 
+  // When sub-type changes, clear selected account if it no longer matches and
+  // auto-pick the first account of that sub-type. Also sync statement_type.
+  useEffect(() => {
+    const opt = SUB_TYPE_OPTIONS.find(o => o.value === selectedSubType);
+    if (opt) setStatementType(opt.statementType);
+    const matches = accounts.filter(a => (a.sub_type || '').toLowerCase() === selectedSubType);
+    setSelectedAccountId(prev => {
+      if (prev && matches.some(a => a.account_id === prev)) return prev;
+      return matches.length > 0 ? matches[0].account_id : '';
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedSubType, accounts]);
+
   const handleUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
     if (!selectedAccountId) { setError('Please select an account'); return; }
+    if (!periodFrom || !periodTo) { setError('Please select the statement period'); return; }
+    if (periodFrom > periodTo) { setError('Period From cannot be after Period To'); return; }
 
     const ext = file.name.split('.').pop()?.toLowerCase();
     if (!['csv', 'pdf'].includes(ext)) {
@@ -94,6 +132,8 @@ export default function Reconciliation() {
       formData.append('file', file);
       formData.append('account_id', selectedAccountId);
       formData.append('statement_type', statementType);
+      formData.append('period_from', periodFrom);
+      formData.append('period_to', periodTo);
 
       const resp = await fetch(`${API}/api/statements/upload`, {
         method: 'POST',
@@ -222,27 +262,46 @@ export default function Reconciliation() {
         </h3>
         <div style={{ display: 'flex', gap: 16, alignItems: 'flex-end', flexWrap: 'wrap' }}>
           <div>
-            <label className="mono" style={{ fontSize: 11, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Account</label>
-            <select data-testid="account-select" value={selectedAccountId}
-              onChange={e => setSelectedAccountId(e.target.value)}
-              style={{ padding: '8px 14px', border: '1px solid var(--border-strong)', borderRadius: 2, fontSize: 13, fontFamily: 'var(--font-body)', minWidth: 200 }}>
-              {accounts.map(a => (
-                <option key={a.account_id} value={a.account_id}>{a.name} ({a.account_type})</option>
+            <label className="mono" style={{ fontSize: 11, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Sub-type</label>
+            <select data-testid="subtype-select" value={selectedSubType}
+              onChange={e => setSelectedSubType(e.target.value)}
+              style={{ padding: '8px 14px', border: '1px solid var(--border-strong)', borderRadius: 2, fontSize: 13, fontFamily: 'var(--font-body)', minWidth: 160 }}>
+              {SUB_TYPE_OPTIONS.map(o => (
+                <option key={o.value} value={o.value}>{o.label}</option>
               ))}
             </select>
           </div>
           <div>
-            <label className="mono" style={{ fontSize: 11, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Type</label>
-            <select data-testid="type-select" value={statementType} onChange={e => setStatementType(e.target.value)}
-              style={{ padding: '8px 14px', border: '1px solid var(--border-strong)', borderRadius: 2, fontSize: 13, fontFamily: 'var(--font-body)', minWidth: 150 }}>
-              <option value="bank">Bank Statement</option>
-              <option value="credit_card">Credit Card Statement</option>
+            <label className="mono" style={{ fontSize: 11, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Account</label>
+            <select data-testid="account-select" value={selectedAccountId}
+              onChange={e => setSelectedAccountId(e.target.value)}
+              disabled={filteredAccounts.length === 0}
+              style={{ padding: '8px 14px', border: '1px solid var(--border-strong)', borderRadius: 2, fontSize: 13, fontFamily: 'var(--font-body)', minWidth: 220 }}>
+              {filteredAccounts.length === 0 && (
+                <option value="">No {SUB_TYPE_OPTIONS.find(o => o.value === selectedSubType)?.label.toLowerCase()} accounts</option>
+              )}
+              {filteredAccounts.map(a => (
+                <option key={a.account_id} value={a.account_id}>{a.name}</option>
+              ))}
             </select>
+          </div>
+          <div>
+            <label className="mono" style={{ fontSize: 11, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Period From</label>
+            <input data-testid="period-from" type="date" value={periodFrom}
+              onChange={e => setPeriodFrom(e.target.value)} max={periodTo}
+              style={{ padding: '8px 14px', border: '1px solid var(--border-strong)', borderRadius: 2, fontSize: 13, fontFamily: 'var(--font-body)', background: '#fff' }} />
+          </div>
+          <div>
+            <label className="mono" style={{ fontSize: 11, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Period To</label>
+            <input data-testid="period-to" type="date" value={periodTo}
+              onChange={e => setPeriodTo(e.target.value)} min={periodFrom}
+              style={{ padding: '8px 14px', border: '1px solid var(--border-strong)', borderRadius: 2, fontSize: 13, fontFamily: 'var(--font-body)', background: '#fff' }} />
           </div>
           <div>
             <label className="mono" style={{ fontSize: 11, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>File (CSV or PDF)</label>
             <input data-testid="file-input" type="file" accept=".csv,.pdf"
-              onChange={handleUpload} disabled={uploading}
+              onChange={handleUpload}
+              disabled={uploading || filteredAccounts.length === 0 || !selectedAccountId || !periodFrom || !periodTo}
               style={{ padding: '6px', border: '1px solid var(--border-strong)', borderRadius: 2, fontSize: 13, fontFamily: 'var(--font-body)' }} />
           </div>
           {uploading && (
@@ -275,6 +334,7 @@ export default function Reconciliation() {
                 <th style={thStyle}>Account</th>
                 <th style={thStyle}>Type</th>
                 <th style={thStyle}>Entries</th>
+                <th style={thStyle}>Period</th>
                 <th style={thStyle}>Status</th>
                 <th style={thStyle}>Uploaded</th>
                 <th style={{ ...thStyle, textAlign: 'center' }}>Actions</th>
@@ -298,6 +358,11 @@ export default function Reconciliation() {
                   <td style={tdStyle}>{stmt.account_name || getAccountName(stmt.account_id)}</td>
                   <td style={tdStyle}>{stmt.statement_type === 'credit_card' ? 'Credit Card' : 'Bank'}</td>
                   <td className="mono" style={tdStyle}>{stmt.entry_count ?? '—'}</td>
+                  <td className="mono" style={{ ...tdStyle, fontSize: 12, whiteSpace: 'nowrap' }}>
+                    {stmt.period_from && stmt.period_to
+                      ? `${stmt.period_from} → ${stmt.period_to}`
+                      : '—'}
+                  </td>
                   <td style={tdStyle}><StatusBadge status={stmt.status} /></td>
                   <td className="mono" style={{ ...tdStyle, fontSize: 12 }}>
                     {stmt.uploaded_at ? new Date(stmt.uploaded_at).toLocaleDateString() : ''}
@@ -332,7 +397,7 @@ export default function Reconciliation() {
                 {(stmt.status === 'password_required' || (stmt.status === 'parse_failed' && stmt.file_ext === 'pdf')) && (
                   <tr data-testid={`unlock-row-${stmt.statement_id}`}
                     style={{ borderBottom: '1px solid var(--border-subtle)', background: '#fff' }}>
-                    <td colSpan={7} style={{ padding: '10px 16px 14px' }}>
+                    <td colSpan={8} style={{ padding: '10px 16px 14px' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                         <LockKey size={16} weight="duotone" style={{ color: 'var(--warning)' }} />
                         <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
