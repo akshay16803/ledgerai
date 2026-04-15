@@ -191,6 +191,19 @@ CSV/PDF upload, auto-parsing, fuzzy reconciliation engine, add missing entries
   - Account cards show "(as of YYYY-MM-DD)" text and "Set balance date" link for missing dates
   - Ledger running balance calculation respects `balance_as_of_date`
 
+### Phase 16 - Accounts Page Redesign: Grouped Accordion List (Apr 2026)
+- Replaced flat card grid with hierarchical accordion list for the Accounts page
+- **Grouped by account_type → sub_type**: Accounts organized under Assets/Liabilities/Equity sections
+- **Section totals**: Each account type header shows cumulative balance (e.g., "Assets ₹78,500")
+- **Sub-type rows**: Each sub-type (Bank, Cash, Wallet, Credit Card, etc.) is a clickable row showing:
+  - Sub-type icon and name
+  - Number of accounts (e.g., "2 accounts")
+  - Cumulative balance of all accounts under that sub-type
+- **Expandable accordion**: Tapping a sub-type row expands it to reveal individual accounts underneath
+- **Individual account rows** show: name, account number, opening balance with date, current balance, edit/delete buttons
+- **Compact list format**: Shows more data in less vertical space compared to card grid
+- Empty sections are automatically hidden
+
 ## Prioritized Backlog
 
 ### P1 (Next)
