@@ -681,6 +681,14 @@ async def list_accounts(user: dict = Depends(get_current_user)):
 
 @app.post("/api/accounts")
 async def create_account(data: AccountCreate, user: dict = Depends(get_current_user)):
+    # Prevent duplicate accounts with same name + account_number for this user
+    dup_query = {"user_id": user["user_id"], "name": data.name}
+    if data.account_number:
+        dup_query["account_number"] = data.account_number
+    existing = await db.accounts.find_one(dup_query, {"_id": 0, "account_id": 1})
+    if existing:
+        raise HTTPException(status_code=400, detail=f"Account '{data.name}' already exists")
+    
     today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     balance_date = data.balance_as_of_date or today_str
     account = {

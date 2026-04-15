@@ -503,6 +503,7 @@ export default function Accounts() {
   const [editingAcc, setEditingAcc] = useState(null);
   const [form, setForm] = useState({ name: '', account_type: 'asset', sub_type: '', account_number: '', opening_balance: '', balance_as_of_date: new Date().toISOString().split('T')[0], currency: 'INR', description: '', loan_interest_rate: '', loan_tenure_months: '', loan_emi_amount: '', loan_start_date: '' });
   const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
   const [subTypesMap, setSubTypesMap] = useState(() => getCached('account_sub_types') || { asset: [], liability: [], equity: [] });
 
   const loadAccounts = useCallback(() => {
@@ -556,10 +557,12 @@ export default function Accounts() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (saving) return;
     setError('');
     if (!form.name.trim()) { setError('Account name is required'); return; }
     if (form.opening_balance === '' && !editingAcc) { setError('Opening balance is required'); return; }
 
+    setSaving(true);
     try {
       // Build loan fields payload
       const loanFields = {};
@@ -595,6 +598,7 @@ export default function Accounts() {
       setEditingAcc(null);
       loadAccounts();
     } catch (err) { setError(err.message); }
+    setSaving(false);
   };
 
   const handleDelete = async (id) => {
@@ -801,10 +805,11 @@ export default function Accounts() {
                 )}
                 {error && <p data-testid="account-error" style={{ color: 'var(--error)', fontSize: 13, marginBottom: 12 }}>{error}</p>}
                 <div style={{ display: 'flex', gap: 12 }}>
-                  <button data-testid="save-account-btn" type="submit" style={{
-                    background: 'var(--brand-primary)', color: '#fff', border: 'none',
-                    padding: '10px 24px', borderRadius: 2, fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font-body)'
-                  }}>{editingAcc ? 'Update Account' : 'Save Account'}</button>
+                  <button data-testid="save-account-btn" type="submit" disabled={saving} style={{
+                    background: saving ? 'var(--text-muted)' : 'var(--brand-primary)', color: '#fff', border: 'none',
+                    padding: '10px 24px', borderRadius: 2, fontSize: 13, fontWeight: 600,
+                    cursor: saving ? 'not-allowed' : 'pointer', fontFamily: 'var(--font-body)', opacity: saving ? 0.7 : 1,
+                  }}>{saving ? 'Saving...' : editingAcc ? 'Update Account' : 'Save Account'}</button>
                   <button type="button" onClick={() => { setShowForm(false); setEditingAcc(null); }} style={{
                     background: 'none', border: '1px solid var(--border-strong)', color: 'var(--text-secondary)',
                     padding: '10px 24px', borderRadius: 2, fontSize: 13, cursor: 'pointer', fontFamily: 'var(--font-body)'
