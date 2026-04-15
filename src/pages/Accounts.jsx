@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { api } from '../lib/api';
 import { getCached, setCache } from '../lib/cache';
-import { Plus, Trash, PencilSimple, Bank, Wallet, CreditCard, X, Gear, Tag, Check, Warning } from '@phosphor-icons/react';
+import { Plus, Trash, PencilSimple, Bank, Wallet, CreditCard, X, Gear, Tag, Check, Warning, CaretRight, CaretDown } from '@phosphor-icons/react';
 
 const accountTypes = [
   { value: 'asset', label: 'Asset' },
@@ -220,6 +220,155 @@ function SubTypeManager({ subTypesMap, onClose, onRefresh }) {
 }
 
 
+// ─── Grouped Accounts List ──────────────────────────────────────────
+function AccountsGroupedList({ accounts, onEdit, onDelete, expandedSubTypes, toggleSubType }) {
+  // Group accounts: account_type → sub_type → accounts[]
+  const grouped = useMemo(() => {
+    const map = {};
+    for (const acc of accounts) {
+      const type = acc.account_type || 'asset';
+      const sub = acc.sub_type || 'general';
+      if (!map[type]) map[type] = {};
+      if (!map[type][sub]) map[type][sub] = [];
+      map[type][sub].push(acc);
+    }
+    return map;
+  }, [accounts]);
+
+  const typeOrder = ['asset', 'liability', 'equity'];
+  const typeLabels = { asset: 'Assets', liability: 'Liabilities', equity: 'Equity' };
+
+  return (
+    <div data-testid="accounts-grouped-list" style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+      {typeOrder.map(type => {
+        const subTypes = grouped[type];
+        if (!subTypes || Object.keys(subTypes).length === 0) return null;
+
+        // Total for this account type
+        const typeTotal = Object.values(subTypes).flat().reduce((sum, a) => sum + (a.balance || 0), 0);
+
+        return (
+          <div key={type} data-testid={`account-type-${type}`}>
+            {/* Account Type Header */}
+            <div style={{
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              padding: '10px 0', marginBottom: 4, borderBottom: '2px solid var(--border-strong)',
+            }}>
+              <h2 style={{ fontSize: 16, fontWeight: 600, textTransform: 'capitalize', letterSpacing: '-0.01em' }}>
+                {typeLabels[type] || type}
+              </h2>
+              <span className="mono" style={{ fontSize: 16, fontWeight: 600, color: typeTotal >= 0 ? 'var(--success)' : 'var(--error)' }}>
+                {formatCurrency(typeTotal)}
+              </span>
+            </div>
+
+            {/* Sub-type Rows */}
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              {Object.entries(subTypes).sort((a, b) => a[0].localeCompare(b[0])).map(([subType, accs]) => {
+                const key = `${type}_${subType}`;
+                const isExpanded = !!expandedSubTypes[key];
+                const subTotal = accs.reduce((sum, a) => sum + (a.balance || 0), 0);
+                const Icon = typeIcons[subType] || Bank;
+
+                return (
+                  <div key={key} data-testid={`subtype-group-${key}`}>
+                    {/* Sub-type header row — clickable to expand */}
+                    <button data-testid={`subtype-toggle-${key}`}
+                      onClick={() => toggleSubType(key)}
+                      style={{
+                        width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                        padding: '14px 16px', background: isExpanded ? 'var(--bg-secondary)' : '#fff',
+                        border: 'none', borderBottom: '1px solid var(--border-subtle)',
+                        cursor: 'pointer', fontFamily: 'var(--font-body)', textAlign: 'left',
+                        transition: 'background 0.15s ease',
+                      }}
+                      onMouseEnter={e => { if (!isExpanded) e.currentTarget.style.background = 'var(--bg-secondary)'; }}
+                      onMouseLeave={e => { if (!isExpanded) e.currentTarget.style.background = '#fff'; }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                        {isExpanded ? <CaretDown size={14} weight="bold" style={{ color: 'var(--text-muted)' }} /> : <CaretRight size={14} weight="bold" style={{ color: 'var(--text-muted)' }} />}
+                        <Icon size={18} weight="duotone" style={{ color: 'var(--accent-1)' }} />
+                        <span style={{ fontSize: 14, fontWeight: 600, textTransform: 'capitalize' }}>
+                          {subType.replace(/_/g, ' ')}
+                        </span>
+                        <span className="mono" style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 4 }}>
+                          {accs.length} account{accs.length !== 1 ? 's' : ''}
+                        </span>
+                      </div>
+                      <span className="mono" style={{ fontSize: 15, fontWeight: 600, color: subTotal >= 0 ? 'var(--success)' : 'var(--error)' }}>
+                        {formatCurrency(subTotal)}
+                      </span>
+                    </button>
+
+                    {/* Expanded account list */}
+                    {isExpanded && (
+                      <div data-testid={`subtype-accounts-${key}`} style={{
+                        borderBottom: '1px solid var(--border-subtle)',
+                        background: 'var(--bg-primary)',
+                      }}>
+                        {accs.map(acc => (
+                          <div key={acc.account_id} data-testid={`account-row-${acc.account_id}`} style={{
+                            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                            padding: '12px 16px 12px 52px',
+                            borderTop: '1px solid var(--border-subtle)',
+                            transition: 'background 0.1s ease',
+                          }}
+                          onMouseEnter={e => { e.currentTarget.style.background = 'rgba(26,54,45,0.02)'; }}
+                          onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+                          >
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <span style={{ fontSize: 14, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{acc.name}</span>
+                                {acc.account_number && (
+                                  <span className="mono" style={{ fontSize: 11, color: 'var(--text-muted)', flexShrink: 0 }}>
+                                    {acc.account_number}
+                                  </span>
+                                )}
+                                {!acc.balance_as_of_date && (
+                                  <span style={{ fontSize: 10, color: 'var(--warning)', fontWeight: 600, flexShrink: 0 }}>
+                                    No date set
+                                  </span>
+                                )}
+                              </div>
+                              {acc.balance_as_of_date && (
+                                <span className="mono" style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+                                  Opening: {formatCurrency(acc.opening_balance || 0)} as of {acc.balance_as_of_date}
+                                </span>
+                              )}
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                              <span className="mono" style={{ fontSize: 14, fontWeight: 600, color: acc.balance >= 0 ? 'var(--success)' : 'var(--error)', whiteSpace: 'nowrap' }}>
+                                {formatCurrency(acc.balance)}
+                              </span>
+                              <div style={{ display: 'flex', gap: 2 }}>
+                                <button data-testid={`edit-account-${acc.account_id}`} onClick={() => onEdit(acc)} style={{
+                                  background: 'rgba(74,110,125,0.1)', border: 'none', cursor: 'pointer', color: 'var(--info)', padding: 5, borderRadius: 2
+                                }}>
+                                  <PencilSimple size={13} />
+                                </button>
+                                <button data-testid={`delete-account-${acc.account_id}`} onClick={() => onDelete(acc.account_id)} style={{
+                                  background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 5
+                                }}>
+                                  <Trash size={13} />
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+
 // ─── Main Accounts Page ─────────────────────────────────────────────
 export default function Accounts() {
   const [accounts, setAccounts] = useState(() => getCached('accounts') || []);
@@ -314,6 +463,12 @@ export default function Accounts() {
   const accountsMissingDate = useMemo(() => {
     return accounts.filter(acc => !acc.balance_as_of_date);
   }, [accounts]);
+
+  // Expanded sub-type accordion state
+  const [expandedSubTypes, setExpandedSubTypes] = useState({});
+  const toggleSubType = useCallback((key) => {
+    setExpandedSubTypes(prev => ({ ...prev, [key]: !prev[key] }));
+  }, []);
 
   return (
     <div data-testid="accounts-page">
@@ -474,72 +629,26 @@ export default function Accounts() {
           <Warning size={16} weight="bold" style={{ flexShrink: 0 }} />
           <span>
             <strong>{accountsMissingDate.length} account{accountsMissingDate.length > 1 ? 's' : ''}</strong> missing a balance date.
-            Edit {accountsMissingDate.length > 1 ? 'them' : 'it'} to set the date your opening balance was recorded — this ensures accurate balance calculations.
+            Edit {accountsMissingDate.length > 1 ? 'them' : 'it'} to set the date your opening balance was recorded.
           </span>
         </div>
       )}
 
-      {/* Accounts List */}
+      {/* Accounts List - Grouped by Type → Sub-type */}
       {loading ? (
         <div className="mono" style={{ color: 'var(--text-muted)' }}>Loading accounts...</div>
-      ) : (
-        <div className="card-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
-          {accounts.map(acc => {
-            const Icon = typeIcons[acc.sub_type] || Bank;
-            return (
-              <div key={acc.account_id} data-testid={`account-card-${acc.account_id}`} style={{
-                background: '#fff', border: !acc.balance_as_of_date ? '1px solid rgba(194,140,60,0.35)' : '1px solid var(--border-subtle)',
-                borderRadius: 2, padding: 24,
-                transition: 'transform 0.2s ease, box-shadow 0.2s ease'
-              }}
-              onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.boxShadow = '0 4px 12px rgba(26,54,45,0.06)'; }}
-              onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = 'none'; }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
-                  <Icon size={24} weight="duotone" style={{ color: 'var(--accent-1)' }} />
-                  <div style={{ display: 'flex', gap: 4 }}>
-                    <button data-testid={`edit-account-${acc.account_id}`} onClick={() => openEdit(acc)} style={{
-                      background: 'rgba(74,110,125,0.1)', border: 'none', cursor: 'pointer', color: 'var(--info)', padding: 6, borderRadius: 2
-                    }}>
-                      <PencilSimple size={14} />
-                    </button>
-                    <button data-testid={`delete-account-${acc.account_id}`} onClick={() => handleDelete(acc.account_id)} style={{
-                      background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 6
-                    }}>
-                      <Trash size={14} />
-                    </button>
-                  </div>
-                </div>
-                <h3 style={{ fontSize: 16, fontWeight: 600, fontFamily: 'var(--font-body)', marginBottom: 4 }}>{acc.name}</h3>
-                {acc.account_number && (
-                  <span className="mono" style={{ fontSize: 11, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>
-                    A/c: {acc.account_number}
-                  </span>
-                )}
-                <span className="mono" style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'capitalize' }}>
-                  {acc.account_type} / {acc.sub_type?.replace(/_/g, ' ') || 'general'}
-                </span>
-                <div className="mono" style={{
-                  fontSize: 24, fontWeight: 600, marginTop: 16,
-                  color: acc.balance >= 0 ? 'var(--success)' : 'var(--error)'
-                }}>
-                  {formatCurrency(acc.balance)}
-                </div>
-                {acc.opening_balance !== acc.balance && (
-                  <div className="mono" style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
-                    Opening: {formatCurrency(acc.opening_balance || 0)}
-                    {acc.balance_as_of_date && <span> (as of {acc.balance_as_of_date})</span>}
-                  </div>
-                )}
-                {!acc.balance_as_of_date && (
-                  <div style={{ fontSize: 11, color: 'var(--warning)', marginTop: 6, cursor: 'pointer' }} onClick={() => openEdit(acc)}>
-                    Set balance date
-                  </div>
-                )}
-              </div>
-            );
-          })}
+      ) : accounts.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: 60, background: '#fff', border: '1px solid var(--border-subtle)', borderRadius: 2 }}>
+          <p style={{ color: 'var(--text-muted)', fontSize: 14 }}>No accounts yet. Add your first account to get started.</p>
         </div>
+      ) : (
+        <AccountsGroupedList
+          accounts={accounts}
+          onEdit={openEdit}
+          onDelete={handleDelete}
+          expandedSubTypes={expandedSubTypes}
+          toggleSubType={toggleSubType}
+        />
       )}
     </div>
   );
