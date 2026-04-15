@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import {
@@ -26,38 +26,71 @@ const navItems = [
 export default function AppLayout({ children }) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const initializedRef = useRef(false);
+  
+  // null = use CSS default, true/false = user toggled
+  const [userToggled, setUserToggled] = useState(null);
+  const [isMobile, setIsMobile] = useState(true);
+
+  // Detect mobile
+  useEffect(() => {
+    const checkMobile = () => {
+      const mobile = window.innerWidth < 768;
+      setIsMobile(mobile);
+      // Reset user toggle when switching between mobile/desktop
+      if (!initializedRef.current) {
+        initializedRef.current = true;
+      }
+    };
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
 
   const handleLogout = async () => {
     await logout();
     navigate('/');
   };
-
-  const closeSidebarOnMobile = () => {
-    if (window.innerWidth < 768) setSidebarOpen(false);
-  };
+  
+  // Toggle sidebar
+  const toggleSidebar = useCallback(() => {
+    setUserToggled(prev => {
+      // If user hasn't toggled yet, start from the CSS default
+      if (prev === null) {
+        return isMobile ? true : false; // On mobile, toggle opens; on desktop, toggle closes
+      }
+      return !prev;
+    });
+  }, [isMobile]);
+  
+  // Close sidebar on mobile when navigating
+  const handleNavClick = useCallback(() => {
+    if (isMobile) {
+      setUserToggled(false);
+    }
+  }, [isMobile]);
+  
+  // Determine if sidebar should be open
+  // If user hasn't toggled: open on desktop, closed on mobile
+  // If user has toggled: use their preference
+  const sidebarOpen = userToggled !== null ? userToggled : !isMobile;
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh', background: 'var(--bg-primary)' }}>
       <style>{`
         @media (max-width: 767px) {
-          .sidebar-overlay { display: block !important; }
-          .app-sidebar { width: 260px !important; }
           .app-main { margin-left: 0 !important; }
           .app-main-content { padding: 20px 16px !important; }
-        }
-        @media (min-width: 768px) {
-          .sidebar-overlay { display: none !important; }
         }
       `}</style>
 
       {/* Mobile overlay */}
-      {sidebarOpen && (
+      {sidebarOpen && isMobile && (
         <div
           className="sidebar-overlay"
-          onClick={() => setSidebarOpen(false)}
+          onClick={() => setUserToggled(false)}
           style={{
-            display: 'none', position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)',
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)',
             zIndex: 40, backdropFilter: 'blur(2px)',
           }}
         />
@@ -68,8 +101,8 @@ export default function AppLayout({ children }) {
         data-testid="app-sidebar"
         className="app-sidebar"
         style={{
-          width: sidebarOpen ? 240 : 0,
-          minWidth: sidebarOpen ? 240 : 0,
+          width: sidebarOpen ? (isMobile ? 260 : 240) : 0,
+          minWidth: sidebarOpen ? (isMobile ? 260 : 240) : 0,
           background: 'var(--brand-primary)', color: '#fff',
           display: 'flex', flexDirection: 'column',
           position: 'fixed', top: 0, left: 0, bottom: 0, zIndex: 50,
@@ -88,7 +121,7 @@ export default function AppLayout({ children }) {
           </div>
           <button
             data-testid="close-sidebar-btn"
-            onClick={() => setSidebarOpen(false)}
+            onClick={() => setUserToggled(false)}
             style={{
               background: 'none', border: 'none', color: 'rgba(255,255,255,0.5)',
               cursor: 'pointer', padding: 4, display: 'flex', alignItems: 'center',
@@ -103,7 +136,7 @@ export default function AppLayout({ children }) {
             <NavLink
               key={to}
               to={to}
-              onClick={closeSidebarOnMobile}
+              onClick={handleNavClick}
               data-testid={`nav-${label.toLowerCase().replace(/\s+/g, '-')}`}
               style={({ isActive }) => ({
                 display: 'flex', alignItems: 'center', gap: 10,
@@ -180,7 +213,7 @@ export default function AppLayout({ children }) {
         >
           <button
             data-testid="toggle-sidebar-btn"
-            onClick={() => setSidebarOpen(!sidebarOpen)}
+            onClick={toggleSidebar}
             style={{
               background: 'none', border: '1px solid var(--border-strong)',
               borderRadius: 4, padding: '6px 8px', cursor: 'pointer',
