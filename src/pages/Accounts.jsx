@@ -720,7 +720,7 @@ export default function Accounts() {
                   {editingAcc ? (
                     <>
                       <div>
-                        <label style={labelStyle}>Opening Balance *</label>
+                        <label style={labelStyle}>{(form.sub_type === 'loan' || form.sub_type === 'mortgage') ? 'Outstanding Balance *' : 'Opening Balance *'}</label>
                         <input data-testid="account-balance-input" type="number" step="0.01"
                           value={form.opening_balance} onChange={e => setForm(f => ({ ...f, opening_balance: e.target.value }))}
                           style={{ ...inputStyle, fontFamily: 'var(--font-mono)' }} placeholder="0" />
@@ -738,7 +738,7 @@ export default function Accounts() {
                   ) : (
                     <>
                       <div>
-                        <label style={labelStyle}>Opening Balance *</label>
+                        <label style={labelStyle}>{(form.sub_type === 'loan' || form.sub_type === 'mortgage') ? 'Outstanding Balance *' : 'Opening Balance *'}</label>
                         <input data-testid="account-balance-input" type="number" step="0.01"
                           value={form.opening_balance} onChange={e => setForm(f => ({ ...f, opening_balance: e.target.value }))}
                           style={{ ...inputStyle, fontFamily: 'var(--font-mono)' }} placeholder="0.00" />
