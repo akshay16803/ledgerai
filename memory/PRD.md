@@ -170,6 +170,27 @@ CSV/PDF upload, auto-parsing, fuzzy reconciliation engine, add missing entries
 - Badge counter on "Sub-types" button shows custom sub-type count
 - MongoDB collection: `account_sub_types` with fields: sub_type_id, user_id, name, account_type, icon, created_at
 
+### Phase 15 - Balance Date (balance_as_of_date) Feature (Apr 2026)
+- **Dated balance snapshots**: Every account now stores a `balance_as_of_date` alongside the opening balance
+- Represents the "end of day" closing balance on that date — all transactions on or before that date are already factored in
+- Only transactions AFTER the balance date affect the computed current balance
+- Default date: today's date when creating a new account
+- **Backend changes**:
+  - `AccountCreate` and `AccountUpdate` models include `balance_as_of_date` field
+  - `recalculate_account_balance()` helper: recomputes balance = opening_balance + sum(income after date) - sum(expenses after date) + transfers
+  - `apply_transaction_to_balances()` and `reverse_transaction_balances()` now check `balance_as_of_date` before applying `$inc`
+  - New endpoint: `POST /api/accounts/{id}/recalculate` — manually trigger recalculation
+  - Updating `opening_balance` or `balance_as_of_date` auto-triggers recalculation
+  - All AI-created accounts (email/SMS parsing) include `balance_as_of_date` set to today
+  - Seed default accounts include `balance_as_of_date`
+- **Frontend changes across all account creation/edit spots**:
+  - Accounts page: New Account + Edit Account forms include "Balance as of (end of day)" date picker
+  - Edit Transaction Modal: Quick-add account includes balance + date fields
+  - Transactions page: Quick-add account includes balance + date fields
+  - Warning banner on Accounts page for accounts missing `balance_as_of_date`
+  - Account cards show "(as of YYYY-MM-DD)" text and "Set balance date" link for missing dates
+  - Ledger running balance calculation respects `balance_as_of_date`
+
 ## Prioritized Backlog
 
 ### P1 (Next)
