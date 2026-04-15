@@ -158,6 +158,18 @@ CSV/PDF upload, auto-parsing, fuzzy reconciliation engine, add missing entries
   - If user has "My HDFC Savings" account and email is from HDFC, it will match correctly
 - **Same improvements for SMS parsing**: Detects bank from SMS sender ID (e.g., "HDFCBK", "ICICIB")
 
+### Phase 14 - Customizable Account Sub-types (Apr 2026)
+- **Dynamic sub-type management**: Replaced hardcoded sub-type list with API-driven approach
+- Backend endpoints: `GET/POST/PUT/DELETE /api/account-sub-types`
+- Default sub-types (Bank, Cash, Wallet, Savings, Investment, Fixed Deposit, Credit Card, Loan, Mortgage, Capital, Retained Earnings) are read-only
+- Users can create, rename, and delete custom sub-types per account category (asset/liability/equity)
+- Sub-type Manager modal with tabbed UI (Asset/Liability/Equity)
+- Inline editing and delete with confirmation for custom sub-types
+- Account create/edit form dynamically fetches and displays available sub-types
+- Delete protection: cannot delete sub-types in use by existing accounts
+- Badge counter on "Sub-types" button shows custom sub-type count
+- MongoDB collection: `account_sub_types` with fields: sub_type_id, user_id, name, account_type, icon, created_at
+
 ## Prioritized Backlog
 
 ### P1 (Next)
