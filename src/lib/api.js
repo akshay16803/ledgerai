@@ -8,7 +8,16 @@ async function request(path, options = {}) {
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(err.detail || 'Request failed');
+    // Handle Pydantic validation errors (array of error objects)
+    let errorMessage = 'Request failed';
+    if (Array.isArray(err.detail)) {
+      errorMessage = err.detail.map(e => e.msg || e.message || JSON.stringify(e)).join(', ');
+    } else if (typeof err.detail === 'string') {
+      errorMessage = err.detail;
+    } else if (err.message) {
+      errorMessage = err.message;
+    }
+    throw new Error(errorMessage);
   }
   return res.json();
 }

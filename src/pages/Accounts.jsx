@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { api } from '../lib/api';
 import { getCached, setCache } from '../lib/cache';
-import { Plus, Trash, PencilSimple, Bank, Wallet, CreditCard, X, Gear, Tag, Check, Warning, CaretRight, CaretDown } from '@phosphor-icons/react';
+import { Plus, Trash, PencilSimple, Bank, Wallet, CreditCard, X, Gear, Tag, Check, Warning, CaretRight, CaretDown, CalendarBlank, CurrencyCircleDollar } from '@phosphor-icons/react';
 
 const accountTypes = [
   { value: 'asset', label: 'Asset' },
@@ -220,8 +220,103 @@ function SubTypeManager({ subTypesMap, onClose, onRefresh }) {
 }
 
 
+// ─── Amortization Schedule Modal ────────────────────────────────────
+function AmortizationModal({ accountId, accountName, onClose }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    api.get(`/api/accounts/${accountId}/amortization`)
+      .then(d => { setData(d); setLoading(false); })
+      .catch(e => { setError(e.message); setLoading(false); });
+  }, [accountId]);
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div onClick={onClose} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)' }} />
+      <div data-testid="amortization-modal" style={{
+        position: 'relative', background: '#fff', borderRadius: 2, width: '100%', maxWidth: 720,
+        maxHeight: '90vh', overflow: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.2)', margin: '0 8px',
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 28px', borderBottom: '1px solid var(--border-subtle)', position: 'sticky', top: 0, background: '#fff', zIndex: 1 }}>
+          <div>
+            <h2 style={{ fontSize: 18, fontWeight: 600 }}>Loan Schedule</h2>
+            <p className="mono" style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{accountName}</p>
+          </div>
+          <button data-testid="close-amortization" onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4 }}>
+            <X size={20} />
+          </button>
+        </div>
+
+        <div style={{ padding: '20px 28px' }}>
+          {loading ? (
+            <div className="mono" style={{ color: 'var(--text-muted)', padding: 20, textAlign: 'center' }}>Loading schedule...</div>
+          ) : error ? (
+            <div style={{ color: 'var(--error)', fontSize: 13, padding: 20, textAlign: 'center' }}>{error}</div>
+          ) : data ? (
+            <>
+              {/* Summary cards */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12, marginBottom: 24 }}>
+                {[
+                  { label: 'Loan Amount', value: formatCurrency(data.outstanding_balance), color: 'var(--text-primary)' },
+                  { label: 'Interest Rate', value: `${data.interest_rate}% p.a.`, color: 'var(--info)' },
+                  { label: 'Monthly EMI', value: formatCurrency(data.emi_amount), color: 'var(--accent-1)' },
+                  { label: 'Total Interest', value: formatCurrency(data.total_interest), color: 'var(--warning)' },
+                  { label: 'EMIs Paid', value: `${data.payments_made} / ${data.tenure_months}`, color: 'var(--success)' },
+                  { label: 'Remaining', value: `${data.months_remaining} months`, color: 'var(--text-secondary)' },
+                ].map(c => (
+                  <div key={c.label} style={{ padding: '14px 16px', background: 'var(--bg-secondary)', borderRadius: 2 }}>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 500, marginBottom: 4 }}>{c.label}</div>
+                    <div className="mono" style={{ fontSize: 15, fontWeight: 600, color: c.color }}>{c.value}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Schedule table */}
+              <div style={{ overflow: 'auto', border: '1px solid var(--border-subtle)', borderRadius: 2 }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                  <thead>
+                    <tr style={{ background: 'var(--bg-secondary)', borderBottom: '2px solid var(--border-strong)' }}>
+                      {['#', 'Due Date', 'EMI', 'Principal', 'Interest', 'Outstanding'].map(h => (
+                        <th key={h} style={{ padding: '10px 12px', textAlign: h === '#' ? 'center' : 'right', fontWeight: 600, fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.schedule.map((row, i) => {
+                      const isPaid = i < data.payments_made;
+                      return (
+                        <tr key={row.month} data-testid={`amort-row-${row.month}`} style={{
+                          borderBottom: '1px solid var(--border-subtle)',
+                          background: isPaid ? 'rgba(58,92,74,0.04)' : 'transparent',
+                          opacity: isPaid ? 0.7 : 1,
+                        }}>
+                          <td className="mono" style={{ padding: '8px 12px', textAlign: 'center', fontWeight: 500 }}>
+                            {isPaid ? <Check size={12} weight="bold" style={{ color: 'var(--success)' }} /> : row.month}
+                          </td>
+                          <td className="mono" style={{ padding: '8px 12px', textAlign: 'right', whiteSpace: 'nowrap' }}>{row.due_date}</td>
+                          <td className="mono" style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 500 }}>{formatCurrency(row.emi)}</td>
+                          <td className="mono" style={{ padding: '8px 12px', textAlign: 'right', color: 'var(--success)' }}>{formatCurrency(row.principal)}</td>
+                          <td className="mono" style={{ padding: '8px 12px', textAlign: 'right', color: 'var(--warning)' }}>{formatCurrency(row.interest)}</td>
+                          <td className="mono" style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 500 }}>{formatCurrency(row.outstanding)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
 // ─── Grouped Accounts List ──────────────────────────────────────────
-function AccountsGroupedList({ accounts, onEdit, onDelete, expandedSubTypes, toggleSubType }) {
+function AccountsGroupedList({ accounts, onEdit, onDelete, expandedSubTypes, toggleSubType, onViewSchedule }) {
   // Group accounts: account_type → sub_type → accounts[]
   const grouped = useMemo(() => {
     const map = {};
@@ -317,7 +412,7 @@ function AccountsGroupedList({ accounts, onEdit, onDelete, expandedSubTypes, tog
                           onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
                           >
                             <div style={{ flex: 1, minWidth: 0 }}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                                 <span style={{ fontSize: 14, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{acc.name}</span>
                                 {acc.account_number && (
                                   <span className="mono" style={{ fontSize: 11, color: 'var(--text-muted)', flexShrink: 0 }}>
@@ -330,13 +425,43 @@ function AccountsGroupedList({ accounts, onEdit, onDelete, expandedSubTypes, tog
                                   </span>
                                 )}
                               </div>
-                              {acc.balance_as_of_date && (
-                                <span className="mono" style={{ fontSize: 10, color: 'var(--text-muted)' }}>
-                                  Opening: {formatCurrency(acc.opening_balance || 0)} as of {acc.balance_as_of_date}
-                                </span>
-                              )}
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                                {acc.balance_as_of_date && (
+                                  <span className="mono" style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+                                    Opening: {formatCurrency(acc.opening_balance || 0)} as of {acc.balance_as_of_date}
+                                  </span>
+                                )}
+                                {(acc.sub_type === 'loan' || acc.sub_type === 'mortgage') && acc.loan_emi_amount && (
+                                  <span className="mono" style={{ fontSize: 10, color: 'var(--accent-1)' }}>
+                                    EMI: {formatCurrency(acc.loan_emi_amount)} &middot; {acc.loan_interest_rate}% &middot; {acc.loan_tenure_months}mo
+                                  </span>
+                                )}
+                                {(acc.sub_type === 'loan' || acc.sub_type === 'mortgage') && !acc.loan_emi_amount && (
+                                  <span data-testid={`loan-prompt-${acc.account_id}`}
+                                    onClick={() => onEdit(acc)}
+                                    style={{ fontSize: 10, color: 'var(--info)', cursor: 'pointer', fontWeight: 500 }}>
+                                    Add loan details for EMI tracking
+                                  </span>
+                                )}
+                              </div>
                             </div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              {(acc.sub_type === 'loan' || acc.sub_type === 'mortgage') && acc.loan_emi_amount && (
+                                <button data-testid={`view-schedule-${acc.account_id}`}
+                                  onClick={() => onViewSchedule(acc)}
+                                  style={{
+                                    background: 'none', border: '1px solid var(--border-strong)', padding: '3px 10px',
+                                    borderRadius: 2, fontSize: 11, fontWeight: 500, cursor: 'pointer',
+                                    fontFamily: 'var(--font-body)', color: 'var(--text-secondary)',
+                                    display: 'flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap',
+                                    transition: 'background 0.1s',
+                                  }}
+                                  onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-secondary)'; }}
+                                  onMouseLeave={e => { e.currentTarget.style.background = 'none'; }}
+                                >
+                                  <CalendarBlank size={11} /> Schedule
+                                </button>
+                              )}
                               <span className="mono" style={{ fontSize: 14, fontWeight: 600, color: acc.balance >= 0 ? 'var(--success)' : 'var(--error)', whiteSpace: 'nowrap' }}>
                                 {formatCurrency(acc.balance)}
                               </span>
@@ -376,7 +501,7 @@ export default function Accounts() {
   const [showForm, setShowForm] = useState(false);
   const [showSubTypeManager, setShowSubTypeManager] = useState(false);
   const [editingAcc, setEditingAcc] = useState(null);
-  const [form, setForm] = useState({ name: '', account_type: 'asset', sub_type: '', account_number: '', opening_balance: '', balance_as_of_date: new Date().toISOString().split('T')[0], currency: 'INR', description: '' });
+  const [form, setForm] = useState({ name: '', account_type: 'asset', sub_type: '', account_number: '', opening_balance: '', balance_as_of_date: new Date().toISOString().split('T')[0], currency: 'INR', description: '', loan_interest_rate: '', loan_tenure_months: '', loan_emi_amount: '', loan_start_date: '' });
   const [error, setError] = useState('');
   const [subTypesMap, setSubTypesMap] = useState(() => getCached('account_sub_types') || { asset: [], liability: [], equity: [] });
 
@@ -398,7 +523,7 @@ export default function Accounts() {
   const openCreate = () => {
     setEditingAcc(null);
     const firstSubType = getSubTypeOptions('asset')[0]?.value || '';
-    setForm({ name: '', account_type: 'asset', sub_type: firstSubType, account_number: '', opening_balance: '', balance_as_of_date: new Date().toISOString().split('T')[0], currency: 'INR', description: '' });
+    setForm({ name: '', account_type: 'asset', sub_type: firstSubType, account_number: '', opening_balance: '', balance_as_of_date: new Date().toISOString().split('T')[0], currency: 'INR', description: '', loan_interest_rate: '', loan_tenure_months: '', loan_emi_amount: '', loan_start_date: '' });
     setShowForm(true);
     setError('');
   };
@@ -415,6 +540,10 @@ export default function Accounts() {
       balance: acc.balance || 0,
       currency: acc.currency || 'INR',
       description: acc.description || '',
+      loan_interest_rate: acc.loan_interest_rate || '',
+      loan_tenure_months: acc.loan_tenure_months || '',
+      loan_emi_amount: acc.loan_emi_amount || '',
+      loan_start_date: acc.loan_start_date || '',
     });
     setShowForm(true);
     setError('');
@@ -432,13 +561,35 @@ export default function Accounts() {
     if (form.opening_balance === '' && !editingAcc) { setError('Opening balance is required'); return; }
 
     try {
+      // Build loan fields payload
+      const loanFields = {};
+      const isLoan = form.sub_type === 'loan' || form.sub_type === 'mortgage';
+      if (isLoan) {
+        if (form.loan_interest_rate) loanFields.loan_interest_rate = parseFloat(form.loan_interest_rate);
+        if (form.loan_tenure_months) loanFields.loan_tenure_months = parseInt(form.loan_tenure_months);
+        if (form.loan_emi_amount) loanFields.loan_emi_amount = parseFloat(form.loan_emi_amount);
+        if (form.loan_start_date) loanFields.loan_start_date = form.loan_start_date;
+      }
+
       if (editingAcc) {
-        const update = { name: form.name, sub_type: form.sub_type, account_number: form.account_number, description: form.description, currency: form.currency };
+        const update = { name: form.name, sub_type: form.sub_type, account_number: form.account_number, description: form.description, currency: form.currency, ...loanFields };
         if (form.opening_balance !== undefined) update.opening_balance = parseFloat(form.opening_balance) || 0;
         if (form.balance_as_of_date) update.balance_as_of_date = form.balance_as_of_date;
         await api.put(`/api/accounts/${editingAcc.account_id}`, update);
       } else {
-        await api.post('/api/accounts', { ...form, opening_balance: parseFloat(form.opening_balance) || 0 });
+        // Build payload without empty loan fields to avoid validation errors
+        const payload = {
+          name: form.name,
+          account_type: form.account_type,
+          sub_type: form.sub_type,
+          account_number: form.account_number,
+          opening_balance: parseFloat(form.opening_balance) || 0,
+          balance_as_of_date: form.balance_as_of_date,
+          currency: form.currency,
+          description: form.description,
+          ...loanFields,
+        };
+        await api.post('/api/accounts', payload);
       }
       setShowForm(false);
       setEditingAcc(null);
@@ -469,6 +620,9 @@ export default function Accounts() {
   const toggleSubType = useCallback((key) => {
     setExpandedSubTypes(prev => ({ ...prev, [key]: !prev[key] }));
   }, []);
+
+  // Amortization modal state
+  const [amortAcc, setAmortAcc] = useState(null);
 
   return (
     <div data-testid="accounts-page">
@@ -602,6 +756,49 @@ export default function Accounts() {
                   <input data-testid="account-desc-input" value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
                     style={inputStyle} placeholder="Optional description" />
                 </div>
+
+                {/* Loan Details — shown for loan/mortgage sub-types */}
+                {(form.sub_type === 'loan' || form.sub_type === 'mortgage') && (
+                  <div data-testid="loan-details-section" style={{
+                    marginBottom: 16, padding: '16px 18px', background: 'var(--bg-secondary)', borderRadius: 2,
+                    border: '1px solid var(--border-subtle)',
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+                      <CurrencyCircleDollar size={16} weight="duotone" style={{ color: 'var(--accent-1)' }} />
+                      <span style={{ fontSize: 13, fontWeight: 600 }}>Loan Details</span>
+                      <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>(optional — for EMI tracking)</span>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                      <div>
+                        <label style={labelStyle}>Interest Rate (% p.a.)</label>
+                        <input data-testid="loan-rate-input" type="number" step="0.01"
+                          value={form.loan_interest_rate} onChange={e => setForm(f => ({ ...f, loan_interest_rate: e.target.value }))}
+                          style={{ ...inputStyle, fontFamily: 'var(--font-mono)' }} placeholder="e.g., 8.5" />
+                      </div>
+                      <div>
+                        <label style={labelStyle}>Remaining Tenure (months)</label>
+                        <input data-testid="loan-tenure-input" type="number"
+                          value={form.loan_tenure_months} onChange={e => setForm(f => ({ ...f, loan_tenure_months: e.target.value }))}
+                          style={{ ...inputStyle, fontFamily: 'var(--font-mono)' }} placeholder="e.g., 240" />
+                      </div>
+                      <div>
+                        <label style={labelStyle}>EMI Amount</label>
+                        <input data-testid="loan-emi-input" type="number" step="0.01"
+                          value={form.loan_emi_amount} onChange={e => setForm(f => ({ ...f, loan_emi_amount: e.target.value }))}
+                          style={{ ...inputStyle, fontFamily: 'var(--font-mono)' }} placeholder="e.g., 43391" />
+                      </div>
+                      <div>
+                        <label style={labelStyle}>Loan Start Date</label>
+                        <input data-testid="loan-start-input" type="date"
+                          value={form.loan_start_date} onChange={e => setForm(f => ({ ...f, loan_start_date: e.target.value }))}
+                          style={inputStyle} />
+                      </div>
+                    </div>
+                    <p className="mono" style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 10 }}>
+                      Fill these to generate an amortization schedule and auto-create a recurring EMI in your cash flow.
+                    </p>
+                  </div>
+                )}
                 {error && <p data-testid="account-error" style={{ color: 'var(--error)', fontSize: 13, marginBottom: 12 }}>{error}</p>}
                 <div style={{ display: 'flex', gap: 12 }}>
                   <button data-testid="save-account-btn" type="submit" style={{
@@ -648,6 +845,16 @@ export default function Accounts() {
           onDelete={handleDelete}
           expandedSubTypes={expandedSubTypes}
           toggleSubType={toggleSubType}
+          onViewSchedule={(acc) => setAmortAcc(acc)}
+        />
+      )}
+
+      {/* Amortization Schedule Modal */}
+      {amortAcc && (
+        <AmortizationModal
+          accountId={amortAcc.account_id}
+          accountName={amortAcc.name}
+          onClose={() => setAmortAcc(null)}
         />
       )}
     </div>
