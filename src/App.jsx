@@ -37,22 +37,13 @@ function ProtectedRoute({ children }) {
 }
 
 export default function App() {
-  // Global: prevent double-click on any button performing async work
+  // Global: prevent double-click on submit/guarded buttons (invisible, no visual delay)
   useEffect(() => {
     const handler = (e) => {
       const btn = e.target.closest('button[type="submit"], button[data-guard]');
       if (!btn || btn.disabled) return;
       btn.disabled = true;
-      btn.style.opacity = '0.6';
-      btn.style.pointerEvents = 'none';
-      // Re-enable after async completes (safety timeout)
-      setTimeout(() => {
-        if (btn) {
-          btn.disabled = false;
-          btn.style.opacity = '';
-          btn.style.pointerEvents = '';
-        }
-      }, 3000);
+      setTimeout(() => { if (btn) btn.disabled = false; }, 500);
     };
     document.addEventListener('click', handler, true);
     return () => document.removeEventListener('click', handler, true);

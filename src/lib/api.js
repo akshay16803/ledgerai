@@ -15,7 +15,7 @@ async function request(path, options = {}) {
     const promise = doFetch(path, options);
     inflight.set(key, promise);
     promise.finally(() => {
-      setTimeout(() => inflight.delete(key), 2000);
+      setTimeout(() => inflight.delete(key), 500);
     });
     return promise;
   }
