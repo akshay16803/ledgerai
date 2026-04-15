@@ -211,7 +211,7 @@ export default function Transactions() {
                     <input data-testid="quick-account-name-input" value={quickAccName} onChange={e => setQuickAccName(e.target.value)} placeholder="Account name" style={{ ...inputStyle, flex: 1, padding: '6px 10px', fontSize: 12, minWidth: 100 }} />
                     <input data-testid="quick-account-balance-input" type="number" value={quickAccBalance} onChange={e => setQuickAccBalance(e.target.value)} placeholder="Balance" style={{ ...inputStyle, width: 90, padding: '6px 10px', fontSize: 12, fontFamily: 'var(--font-mono)' }} />
                     <input data-testid="quick-account-date-input" type="date" value={quickAccDate} onChange={e => setQuickAccDate(e.target.value)} style={{ ...inputStyle, width: 130, padding: '6px 10px', fontSize: 12 }} title="Balance as of (opening of day)" />
-                    <button type="button" data-testid="quick-save-account-btn" onClick={handleQuickAddAccount} style={{ padding: '6px 12px', background: 'var(--success)', color: '#fff', border: 'none', borderRadius: 2, fontSize: 11, cursor: 'pointer', fontFamily: 'var(--font-body)' }}>Save</button>
+                    <button type="button" data-testid="quick-save-account-btn" data-guard onClick={handleQuickAddAccount} style={{ padding: '6px 12px', background: 'var(--success)', color: '#fff', border: 'none', borderRadius: 2, fontSize: 11, cursor: 'pointer', fontFamily: 'var(--font-body)' }}>Save</button>
                   </div>
                 )}
               </div>
@@ -253,7 +253,7 @@ export default function Transactions() {
                   {showQuickCat && (
                     <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
                       <input data-testid="quick-category-name-input" value={quickCatName} onChange={e => setQuickCatName(e.target.value)} placeholder="Category name" style={{ ...inputStyle, flex: 1, padding: '6px 10px', fontSize: 12 }} />
-                      <button type="button" data-testid="quick-save-category-btn" onClick={handleQuickAddCategory} style={{ padding: '6px 12px', background: 'var(--success)', color: '#fff', border: 'none', borderRadius: 2, fontSize: 11, cursor: 'pointer', fontFamily: 'var(--font-body)' }}>Save</button>
+                      <button type="button" data-testid="quick-save-category-btn" data-guard onClick={handleQuickAddCategory} style={{ padding: '6px 12px', background: 'var(--success)', color: '#fff', border: 'none', borderRadius: 2, fontSize: 11, cursor: 'pointer', fontFamily: 'var(--font-body)' }}>Save</button>
                     </div>
                   )}
                 </div>
@@ -442,7 +442,7 @@ export default function Transactions() {
                       </button>
                       {txn.status === 'pending_review' && (
                         <>
-                          <button data-testid={`approve-txn-${txn.transaction_id}`} onClick={() => handleApprove(txn.transaction_id)} title="Approve"
+                          <button data-testid={`approve-txn-${txn.transaction_id}`} data-guard onClick={() => handleApprove(txn.transaction_id)} title="Approve"
                             style={{ background: 'rgba(58,92,74,0.1)', border: 'none', borderRadius: 2, padding: '4px 8px', cursor: 'pointer', color: 'var(--success)' }}>
                             <Check size={14} weight="bold" />
                           </button>
@@ -452,7 +452,7 @@ export default function Transactions() {
                           </button>
                         </>
                       )}
-                      <button data-testid={`delete-txn-${txn.transaction_id}`} onClick={() => handleDelete(txn.transaction_id)} title="Delete"
+                      <button data-testid={`delete-txn-${txn.transaction_id}`} data-guard onClick={() => handleDelete(txn.transaction_id)} title="Delete"
                         style={{ background: 'none', border: 'none', padding: '4px 8px', cursor: 'pointer', color: 'var(--text-muted)' }}>
                         <X size={14} />
                       </button>

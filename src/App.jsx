@@ -1,4 +1,5 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
+import { useEffect } from 'react';
 import { useAuth } from './contexts/AuthContext.jsx';
 import Landing from './pages/Landing.jsx';
 import Login from './pages/Login.jsx';
@@ -36,6 +37,27 @@ function ProtectedRoute({ children }) {
 }
 
 export default function App() {
+  // Global: prevent double-click on any button performing async work
+  useEffect(() => {
+    const handler = (e) => {
+      const btn = e.target.closest('button[type="submit"], button[data-guard]');
+      if (!btn || btn.disabled) return;
+      btn.disabled = true;
+      btn.style.opacity = '0.6';
+      btn.style.pointerEvents = 'none';
+      // Re-enable after async completes (safety timeout)
+      setTimeout(() => {
+        if (btn) {
+          btn.disabled = false;
+          btn.style.opacity = '';
+          btn.style.pointerEvents = '';
+        }
+      }, 3000);
+    };
+    document.addEventListener('click', handler, true);
+    return () => document.removeEventListener('click', handler, true);
+  }, []);
+
   return (
     <Routes>
       <Route path="/" element={<Landing />} />

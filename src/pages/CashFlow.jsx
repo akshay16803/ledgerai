@@ -278,7 +278,7 @@ export default function CashFlow() {
                   <td style={{ ...tdStyle, fontSize: 12 }}>{getAccountName(item.account_id)}</td>
                   <td style={{ ...tdStyle, fontSize: 12 }}>{getCategoryName(item.category_id)}</td>
                   <td style={{ ...tdStyle, textAlign: 'center' }}>
-                    <button data-testid={`remove-recurring-${item.transaction_id}`}
+                    <button data-testid={`remove-recurring-${item.transaction_id}`} data-guard
                       onClick={() => toggleRecurring(item.transaction_id, false)}
                       style={{
                         background: 'none', border: '1px solid var(--error)', color: 'var(--error)',

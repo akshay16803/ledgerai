@@ -137,7 +137,7 @@ export default function Categories() {
                       <span className="mono" style={{ fontSize: 11, color: 'var(--text-muted)' }}>({subcats.length})</span>
                     )}
                   </div>
-                  <button data-testid={`delete-category-${cat.category_id}`} onClick={() => handleDelete(cat.category_id)}
+                  <button data-testid={`delete-category-${cat.category_id}`} data-guard onClick={() => handleDelete(cat.category_id)}
                     style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4 }}>
                     <Trash size={14} />
                   </button>
@@ -150,7 +150,7 @@ export default function Categories() {
                         padding: '10px 20px 10px 44px', borderBottom: '1px solid var(--border-subtle)'
                       }}>
                         <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{sub.name}</span>
-                        <button data-testid={`delete-subcategory-${sub.category_id}`} onClick={() => handleDelete(sub.category_id)}
+                        <button data-testid={`delete-subcategory-${sub.category_id}`} data-guard onClick={() => handleDelete(sub.category_id)}
                           style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4 }}>
                           <Trash size={12} />
                         </button>

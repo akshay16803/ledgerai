@@ -132,7 +132,7 @@ function SubTypeManager({ subTypesMap, onClose, onRefresh }) {
                       onChange={e => setEditName(e.target.value)}
                       onKeyDown={e => { if (e.key === 'Enter') handleUpdate(item.sub_type_id); if (e.key === 'Escape') setEditingId(null); }}
                       style={{ ...inputStyle, padding: '6px 10px', fontSize: 13, flex: 1 }} />
-                    <button data-testid="subtype-edit-save" onClick={() => handleUpdate(item.sub_type_id)} disabled={busy}
+                    <button data-testid="subtype-edit-save" data-guard onClick={() => handleUpdate(item.sub_type_id)} disabled={busy}
                       style={{ background: 'var(--success)', color: '#fff', border: 'none', padding: '6px 8px', borderRadius: 2, cursor: 'pointer' }}>
                       <Check size={14} weight="bold" />
                     </button>
@@ -157,7 +157,7 @@ function SubTypeManager({ subTypesMap, onClose, onRefresh }) {
                           style={{ background: 'rgba(74,110,125,0.1)', border: 'none', cursor: 'pointer', color: 'var(--info)', padding: 5, borderRadius: 2 }}>
                           <PencilSimple size={13} />
                         </button>
-                        <button data-testid={`subtype-delete-${item.sub_type_id}`} onClick={() => handleDelete(item.sub_type_id, item.name)}
+                        <button data-testid={`subtype-delete-${item.sub_type_id}`} data-guard onClick={() => handleDelete(item.sub_type_id, item.name)}
                           style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 5 }}>
                           <Trash size={13} />
                         </button>
@@ -185,7 +185,7 @@ function SubTypeManager({ subTypesMap, onClose, onRefresh }) {
                   onKeyDown={e => { if (e.key === 'Enter') handleCreate(); if (e.key === 'Escape') { setCreating(false); setError(''); } }}
                   style={{ ...inputStyle, flex: 1, padding: '8px 12px', fontSize: 13 }}
                   placeholder={`e.g., ${activeTab === 'asset' ? 'Mutual Fund' : activeTab === 'liability' ? 'BNPL' : 'Drawings'}`} />
-                <button data-testid="subtype-create-save" onClick={handleCreate} disabled={busy || !newName.trim()}
+                <button data-testid="subtype-create-save" data-guard onClick={handleCreate} disabled={busy || !newName.trim()}
                   style={{
                     background: 'var(--brand-primary)', color: '#fff', border: 'none',
                     padding: '8px 16px', borderRadius: 2, fontSize: 13, fontWeight: 600,
@@ -471,7 +471,7 @@ function AccountsGroupedList({ accounts, onEdit, onDelete, expandedSubTypes, tog
                                 }}>
                                   <PencilSimple size={13} />
                                 </button>
-                                <button data-testid={`delete-account-${acc.account_id}`} onClick={() => onDelete(acc.account_id)} style={{
+                                <button data-testid={`delete-account-${acc.account_id}`} data-guard onClick={() => onDelete(acc.account_id)} style={{
                                   background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 5
                                 }}>
                                   <Trash size={13} />

@@ -213,7 +213,7 @@ function EmailAccountCard({ acct, provider, onSetupSync, onRetry, onDisconnect, 
               padding: '8px 14px', border: '1px solid var(--border-strong)', borderRadius: 2,
               fontSize: 13, fontFamily: 'var(--font-body)', background: '#fff'
             }} />
-          <button data-testid="start-sync-btn" onClick={() => onStartSync(email)}
+          <button data-testid="start-sync-btn" data-guard onClick={() => onStartSync(email)}
             disabled={syncing || !syncDate}
             style={{
               background: 'var(--brand-primary)', color: '#fff', border: 'none',
@@ -521,7 +521,7 @@ export default function EmailSync() {
           </p>
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
-          <button data-testid="connect-gmail-btn" onClick={handleConnectGmail} disabled={connectingGmail}
+          <button data-testid="connect-gmail-btn" data-guard onClick={handleConnectGmail} disabled={connectingGmail}
             style={{
               background: '#EA4335', color: '#fff', border: 'none',
               padding: '10px 20px', borderRadius: 2, fontSize: 13, fontWeight: 600,
@@ -530,7 +530,7 @@ export default function EmailSync() {
             }}>
             <Plugs size={16} weight="bold" /> {connectingGmail ? 'Connecting...' : 'Connect Gmail'}
           </button>
-          <button data-testid="connect-outlook-btn" onClick={handleConnectOutlook} disabled={connectingOutlook}
+          <button data-testid="connect-outlook-btn" data-guard onClick={handleConnectOutlook} disabled={connectingOutlook}
             style={{
               background: '#0078D4', color: '#fff', border: 'none',
               padding: '10px 20px', borderRadius: 2, fontSize: 13, fontWeight: 600,
@@ -617,7 +617,7 @@ export default function EmailSync() {
             SMS messages are synced automatically from the mobile app.
           </p>
           <div style={{ display: 'flex', gap: 12, justifyContent: 'center' }}>
-            <button data-testid="connect-gmail-cta-btn" onClick={handleConnectGmail} disabled={connectingGmail}
+            <button data-testid="connect-gmail-cta-btn" data-guard onClick={handleConnectGmail} disabled={connectingGmail}
               style={{
                 background: '#EA4335', color: '#fff', border: 'none',
                 padding: '12px 28px', borderRadius: 2, fontSize: 14, fontWeight: 600,
@@ -625,7 +625,7 @@ export default function EmailSync() {
               }}>
               <Plugs size={16} weight="bold" /> Connect Gmail
             </button>
-            <button data-testid="connect-outlook-cta-btn" onClick={handleConnectOutlook} disabled={connectingOutlook}
+            <button data-testid="connect-outlook-cta-btn" data-guard onClick={handleConnectOutlook} disabled={connectingOutlook}
               style={{
                 background: '#0078D4', color: '#fff', border: 'none',
                 padding: '12px 28px', borderRadius: 2, fontSize: 14, fontWeight: 600,

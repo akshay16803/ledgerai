@@ -220,7 +220,7 @@ export function EditTransactionModal({ transaction, accounts, categories, onSave
                     <option value="">Select account</option>
                     {localAccounts.map(a => <option key={a.account_id} value={a.account_id}>{a.name}</option>)}
                   </select>
-                  <button type="button" data-testid="modal-quick-add-account" onClick={() => setShowQuickAcc(!showQuickAcc)}
+                  <button type="button" data-testid="modal-quick-add-account" data-guard onClick={() => setShowQuickAcc(!showQuickAcc)}
                     style={quickAddBtnStyle}><Plus size={14} /></button>
                 </div>
                 {showQuickAcc && (
@@ -380,7 +380,7 @@ export function EditTransactionModal({ transaction, accounts, categories, onSave
               {/* Approve Button - only show for pending review transactions */}
               {isPendingReview && isEdit && (
                 <button 
-                  data-testid="modal-approve-btn" 
+                  data-testid="modal-approve-btn" data-guard 
                   type="button" 
                   onClick={handleSaveAndApprove}
                   disabled={saving || approving}

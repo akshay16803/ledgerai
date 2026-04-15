@@ -347,13 +347,13 @@ function SummaryCard({ summary, onView, onDelete, onExport }) {
                 style={cardBtnStyle('var(--brand-primary)', '#fff')}>
                 View Details
               </button>
-              <button data-testid={`export-${s.summary_id}`} onClick={onExport}
+              <button data-testid={`export-${s.summary_id}`} data-guard onClick={onExport}
                 style={cardBtnStyle('var(--bg-primary)', 'var(--text-secondary)', true)}>
                 <DownloadSimple size={13} /> Export
               </button>
             </>
           )}
-          <button data-testid={`delete-${s.summary_id}`} onClick={onDelete}
+          <button data-testid={`delete-${s.summary_id}`} data-guard onClick={onDelete}
             style={{ ...cardBtnStyle('none', 'var(--error)', true), border: '1px solid var(--error)', marginLeft: 'auto' }}>
             <Trash size={13} />
           </button>
@@ -455,7 +455,7 @@ function TaxSummaryDetail({ summaryId, onBack }) {
             style={cardBtnStyle('var(--brand-primary)', '#fff')}>
             <Plus size={14} /> Add Transaction
           </button>
-          <button data-testid="export-detail-btn" onClick={handleExport}
+          <button data-testid="export-detail-btn" data-guard onClick={handleExport}
             style={cardBtnStyle('var(--bg-primary)', 'var(--text-secondary)', true)}>
             <DownloadSimple size={14} /> Export CSV
           </button>
@@ -587,7 +587,7 @@ function TaxSummaryDetail({ summaryId, onBack }) {
                     <div style={{ display: 'flex', gap: 4, justifyContent: 'center' }}>
                       <button data-testid={`edit-ts-txn-${txn.txn_id}`} onClick={() => handleEdit(txn)}
                         style={smallBtnStyle('var(--bg-primary)', 'var(--text-secondary)', true)}><PencilSimple size={12} /></button>
-                      <button data-testid={`delete-ts-txn-${txn.txn_id}`} onClick={() => handleDelete(txn.txn_id)}
+                      <button data-testid={`delete-ts-txn-${txn.txn_id}`} data-guard onClick={() => handleDelete(txn.txn_id)}
                         style={smallBtnStyle('none', 'var(--error)', true)}><Trash size={12} /></button>
                     </div>
                   </td>

@@ -331,7 +331,7 @@ export default function Reconciliation() {
                 </span>
               </div>
               {activeStmt.status === 'parsed' && (
-                <button data-testid="reconcile-btn" onClick={handleReconcile} disabled={reconciling}
+                <button data-testid="reconcile-btn" data-guard onClick={handleReconcile} disabled={reconciling}
                   style={{
                     background: 'var(--brand-primary)', color: '#fff', border: 'none',
                     padding: '10px 24px', borderRadius: 2, fontSize: 13, fontWeight: 600,
