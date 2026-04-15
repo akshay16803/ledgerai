@@ -264,7 +264,7 @@ function AmortizationModal({ accountId, accountName, onClose }) {
                   { label: 'Monthly EMI', value: formatCurrency(data.emi_amount), color: 'var(--accent-1)' },
                   { label: 'Total Interest', value: formatCurrency(data.total_interest), color: 'var(--warning)' },
                   { label: 'EMIs Paid', value: `${data.payments_made} / ${data.tenure_months}`, color: 'var(--success)' },
-                  { label: 'Remaining', value: `${data.months_remaining} months`, color: 'var(--text-secondary)' },
+                  { label: 'EMI Day / Remaining', value: `${data.emi_day || '-'}th · ${data.months_remaining}mo left`, color: 'var(--text-secondary)' },
                 ].map(c => (
                   <div key={c.label} style={{ padding: '14px 16px', background: 'var(--bg-secondary)', borderRadius: 2 }}>
                     <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 500, marginBottom: 4 }}>{c.label}</div>
@@ -433,7 +433,7 @@ function AccountsGroupedList({ accounts, onEdit, onDelete, expandedSubTypes, tog
                                 )}
                                 {(acc.sub_type === 'loan' || acc.sub_type === 'mortgage') && acc.loan_emi_amount && (
                                   <span className="mono" style={{ fontSize: 10, color: 'var(--accent-1)' }}>
-                                    EMI: {formatCurrency(acc.loan_emi_amount)} &middot; {acc.loan_interest_rate}% &middot; {acc.loan_tenure_months}mo
+                                    EMI: {formatCurrency(acc.loan_emi_amount)} &middot; {acc.loan_interest_rate}% &middot; {acc.loan_tenure_months}mo{acc.loan_emi_day ? ` · ${acc.loan_emi_day}th` : ''}
                                   </span>
                                 )}
                                 {(acc.sub_type === 'loan' || acc.sub_type === 'mortgage') && !acc.loan_emi_amount && (
@@ -501,7 +501,7 @@ export default function Accounts() {
   const [showForm, setShowForm] = useState(false);
   const [showSubTypeManager, setShowSubTypeManager] = useState(false);
   const [editingAcc, setEditingAcc] = useState(null);
-  const [form, setForm] = useState({ name: '', account_type: 'asset', sub_type: '', account_number: '', opening_balance: '', balance_as_of_date: new Date().toISOString().split('T')[0], currency: 'INR', description: '', loan_interest_rate: '', loan_tenure_months: '', loan_emi_amount: '', loan_start_date: '' });
+  const [form, setForm] = useState({ name: '', account_type: 'asset', sub_type: '', account_number: '', opening_balance: '', balance_as_of_date: new Date().toISOString().split('T')[0], currency: 'INR', description: '', loan_interest_rate: '', loan_tenure_months: '', loan_emi_amount: '', loan_emi_day: '' });
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [subTypesMap, setSubTypesMap] = useState(() => getCached('account_sub_types') || { asset: [], liability: [], equity: [] });
@@ -524,7 +524,7 @@ export default function Accounts() {
   const openCreate = () => {
     setEditingAcc(null);
     const firstSubType = getSubTypeOptions('asset')[0]?.value || '';
-    setForm({ name: '', account_type: 'asset', sub_type: firstSubType, account_number: '', opening_balance: '', balance_as_of_date: new Date().toISOString().split('T')[0], currency: 'INR', description: '', loan_interest_rate: '', loan_tenure_months: '', loan_emi_amount: '', loan_start_date: '' });
+    setForm({ name: '', account_type: 'asset', sub_type: firstSubType, account_number: '', opening_balance: '', balance_as_of_date: new Date().toISOString().split('T')[0], currency: 'INR', description: '', loan_interest_rate: '', loan_tenure_months: '', loan_emi_amount: '', loan_emi_day: '' });
     setShowForm(true);
     setError('');
   };
@@ -544,7 +544,7 @@ export default function Accounts() {
       loan_interest_rate: acc.loan_interest_rate || '',
       loan_tenure_months: acc.loan_tenure_months || '',
       loan_emi_amount: acc.loan_emi_amount || '',
-      loan_start_date: acc.loan_start_date || '',
+      loan_emi_day: acc.loan_emi_day || '',
     });
     setShowForm(true);
     setError('');
@@ -571,7 +571,7 @@ export default function Accounts() {
         if (form.loan_interest_rate) loanFields.loan_interest_rate = parseFloat(form.loan_interest_rate);
         if (form.loan_tenure_months) loanFields.loan_tenure_months = parseInt(form.loan_tenure_months);
         if (form.loan_emi_amount) loanFields.loan_emi_amount = parseFloat(form.loan_emi_amount);
-        if (form.loan_start_date) loanFields.loan_start_date = form.loan_start_date;
+        if (form.loan_emi_day) loanFields.loan_emi_day = parseInt(form.loan_emi_day);
       }
 
       if (editingAcc) {
@@ -792,10 +792,10 @@ export default function Accounts() {
                           style={{ ...inputStyle, fontFamily: 'var(--font-mono)' }} placeholder="e.g., 43391" />
                       </div>
                       <div>
-                        <label style={labelStyle}>Loan Start Date</label>
-                        <input data-testid="loan-start-input" type="date"
-                          value={form.loan_start_date} onChange={e => setForm(f => ({ ...f, loan_start_date: e.target.value }))}
-                          style={inputStyle} />
+                        <label style={labelStyle}>EMI Date (day of month)</label>
+                        <input data-testid="loan-emi-day-input" type="number" min="1" max="31"
+                          value={form.loan_emi_day} onChange={e => setForm(f => ({ ...f, loan_emi_day: e.target.value }))}
+                          style={{ ...inputStyle, fontFamily: 'var(--font-mono)' }} placeholder="e.g., 5" />
                       </div>
                     </div>
                     <p className="mono" style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 10 }}>

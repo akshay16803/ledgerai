@@ -112,7 +112,7 @@ class AccountCreate(BaseModel):
     loan_interest_rate: Optional[float] = None  # annual interest rate %
     loan_tenure_months: Optional[int] = None  # remaining tenure in months
     loan_emi_amount: Optional[float] = None  # monthly EMI amount
-    loan_start_date: Optional[str] = None  # ISO date string
+    loan_emi_day: Optional[int] = None  # day of month EMI is due (1-31)
 
 class AccountUpdate(BaseModel):
     name: Optional[str] = None
@@ -127,7 +127,7 @@ class AccountUpdate(BaseModel):
     loan_interest_rate: Optional[float] = None
     loan_tenure_months: Optional[int] = None
     loan_emi_amount: Optional[float] = None
-    loan_start_date: Optional[str] = None
+    loan_emi_day: Optional[int] = None
 
 class AccountSubTypeCreate(BaseModel):
     name: str
@@ -712,8 +712,8 @@ async def create_account(data: AccountCreate, user: dict = Depends(get_current_u
         account["loan_tenure_months"] = data.loan_tenure_months
     if data.loan_emi_amount is not None:
         account["loan_emi_amount"] = data.loan_emi_amount
-    if data.loan_start_date is not None:
-        account["loan_start_date"] = data.loan_start_date
+    if data.loan_emi_day is not None:
+        account["loan_emi_day"] = data.loan_emi_day
 
     await db.accounts.insert_one(account)
     del account["_id"]
@@ -746,7 +746,7 @@ async def update_account(account_id: str, data: AccountUpdate, user: dict = Depe
         update_data.pop("balance", None)
     
     # Check if loan details are being added/updated
-    loan_fields_changed = any(k in update_data for k in ["loan_emi_amount", "loan_tenure_months", "loan_interest_rate"])
+    loan_fields_changed = any(k in update_data for k in ["loan_emi_amount", "loan_tenure_months", "loan_interest_rate", "loan_emi_day"])
     
     result = await db.accounts.update_one(
         {"account_id": account_id, "user_id": user["user_id"]},
@@ -802,9 +802,21 @@ async def _create_loan_emi_recurring(user_id: str, account: dict):
     """Create or update a recurring EMI expense transaction for a loan account."""
     account_id = account["account_id"]
     emi_amount = account.get("loan_emi_amount", 0)
+    emi_day = account.get("loan_emi_day", 1)
     
     if not emi_amount:
         return
+    
+    # Calculate the next EMI due date based on emi_day
+    now = datetime.now(timezone.utc)
+    try:
+        emi_date = now.replace(day=min(emi_day, 28))  # Safe for all months
+    except ValueError:
+        emi_date = now.replace(day=28)
+    if emi_date.date() < now.date():
+        from dateutil.relativedelta import relativedelta
+        emi_date = emi_date + relativedelta(months=1)
+    emi_date_str = emi_date.strftime("%Y-%m-%d")
     
     # Check if a recurring EMI transaction already exists for this loan
     existing_emi = await db.transactions.find_one({
@@ -815,10 +827,10 @@ async def _create_loan_emi_recurring(user_id: str, account: dict):
     }, {"_id": 0})
     
     if existing_emi:
-        # Update the existing recurring transaction amount
+        # Update the existing recurring transaction
         await db.transactions.update_one(
             {"transaction_id": existing_emi["transaction_id"]},
-            {"$set": {"amount": emi_amount, "description": f"EMI - {account['name']}", "updated_at": datetime.now(timezone.utc)}}
+            {"$set": {"amount": emi_amount, "description": f"EMI - {account['name']}", "date": emi_date_str, "updated_at": datetime.now(timezone.utc)}}
         )
     else:
         # Find or create an expense category for "Loan EMI"
@@ -840,13 +852,12 @@ async def _create_loan_emi_recurring(user_id: str, account: dict):
                 "created_at": datetime.now(timezone.utc),
             })
         
-        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         txn = {
             "transaction_id": f"txn_{uuid.uuid4().hex[:12]}",
             "user_id": user_id,
             "transaction_type": "expense",
             "amount": emi_amount,
-            "date": today_str,
+            "date": emi_date_str,
             "account_id": account_id,
             "to_account_id": None,
             "category_id": category_id,
@@ -864,14 +875,22 @@ async def _create_loan_emi_recurring(user_id: str, account: dict):
         await apply_transaction_to_balances(user_id, txn)
 
 
-def _generate_amortization_schedule(outstanding: float, annual_rate: float, tenure_months: int, emi: float, start_date_str: str):
-    """Generate reducing balance amortization schedule."""
+def _generate_amortization_schedule(outstanding: float, annual_rate: float, tenure_months: int, emi: float, start_date_str: str, emi_day: int = 1):
+    """Generate reducing balance amortization schedule from balance_as_of_date using emi_day."""
     schedule = []
     balance = abs(outstanding)  # Work with positive numbers
     monthly_rate = (annual_rate / 100) / 12
     
     from dateutil.relativedelta import relativedelta
     start = datetime.strptime(start_date_str, "%Y-%m-%d")
+    # First EMI due date: the next occurrence of emi_day from start
+    safe_day = min(emi_day, 28)
+    try:
+        first_due = start.replace(day=safe_day)
+    except ValueError:
+        first_due = start.replace(day=28)
+    if first_due <= start:
+        first_due = first_due + relativedelta(months=1)
     
     for month in range(1, tenure_months + 1):
         interest = round(balance * monthly_rate, 2)
@@ -883,7 +902,7 @@ def _generate_amortization_schedule(outstanding: float, annual_rate: float, tenu
         if balance < 0:
             balance = 0
         
-        due_date = start + relativedelta(months=month)
+        due_date = first_due + relativedelta(months=month - 1)
         
         schedule.append({
             "month": month,
@@ -913,12 +932,13 @@ async def get_amortization(account_id: str, user: dict = Depends(get_current_use
     tenure = account.get("loan_tenure_months")
     emi = account.get("loan_emi_amount")
     outstanding = account.get("opening_balance", 0)
-    start_date = account.get("balance_as_of_date") or account.get("loan_start_date") or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    emi_day = account.get("loan_emi_day", 1)
+    start_date = account.get("balance_as_of_date") or datetime.now(timezone.utc).strftime("%Y-%m-%d")
     
     if not all([rate is not None, tenure, emi]):
         raise HTTPException(status_code=400, detail="Loan details (interest rate, tenure, EMI) are required")
     
-    schedule = _generate_amortization_schedule(outstanding, rate, tenure, emi, start_date)
+    schedule = _generate_amortization_schedule(outstanding, rate, tenure, emi, start_date, emi_day)
     
     total_interest = sum(s["interest"] for s in schedule)
     total_payment = sum(s["emi"] for s in schedule)
@@ -941,6 +961,7 @@ async def get_amortization(account_id: str, user: dict = Depends(get_current_use
         "interest_rate": rate,
         "tenure_months": tenure,
         "emi_amount": emi,
+        "emi_day": emi_day,
         "start_date": start_date,
         "total_interest": round(total_interest, 2),
         "total_payment": round(total_payment, 2),
