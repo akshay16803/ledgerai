@@ -146,6 +146,18 @@ CSV/PDF upload, auto-parsing, fuzzy reconciliation engine, add missing entries
   - `_process_sms_transaction` updated similarly
   - Account update endpoint clears `needs_opening_balance` when balance is set
 
+### Phase 13.1 - Improved Bank Detection from Email/SMS Sender (Apr 2026)
+- **Fallback bank detection from email sender/content**: If AI doesn't explicitly detect bank name:
+  - Parses `from_email` address for bank keywords (e.g., `alerts@hdfcbank.net` → HDFC Bank)
+  - Scans subject line and email body for bank mentions
+  - Supports 20+ Indian banks: HDFC, ICICI, SBI, Axis, Kotak, IDFC, Yes Bank, IndusInd, PNB, BOB, Canara, Union, Federal, RBL, Citibank, Amex, SCB, HSBC
+  - Supports wallets: Paytm, PhonePe, Google Pay, Amazon Pay
+- **Smarter account matching**:
+  - Extracts keywords from detected bank name (e.g., "HDFC" from "HDFC Bank Savings")
+  - Searches user's existing accounts for keyword matches (not just prefix match)
+  - If user has "My HDFC Savings" account and email is from HDFC, it will match correctly
+- **Same improvements for SMS parsing**: Detects bank from SMS sender ID (e.g., "HDFCBK", "ICICIB")
+
 ## Prioritized Backlog
 
 ### P1 (Next)

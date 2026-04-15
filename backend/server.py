@@ -2470,40 +2470,93 @@ async def _create_transaction_from_ai_result(
     detected_bank_name = result.get("detected_bank_name")
     detected_bank_type = result.get("detected_bank_type")
     
-    if not account_id and detected_bank_name:
-        # Try to find existing account by name match
-        existing_account = await db.accounts.find_one({
-            "user_id": user_id,
-            "name": {"$regex": f"^{re.escape(detected_bank_name[:20])}.*", "$options": "i"}
-        }, {"_id": 0, "account_id": 1})
+    # Also try to detect bank from email sender if AI didn't provide detected_bank_name
+    if not detected_bank_name:
+        from_email = (email_doc.get("from_email") or "").lower()
+        subject = (email_doc.get("subject") or "").lower()
+        body_preview = (email_doc.get("body_text") or "")[:500].lower()
+        combined_text = f"{from_email} {subject} {body_preview}"
         
-        if existing_account:
-            account_id = existing_account["account_id"]
-        else:
-            # Auto-create the bank account
-            bank_sub_type = "savings"  # default
-            if detected_bank_type == "current":
-                bank_sub_type = "current"
-            elif detected_bank_type == "credit_card":
-                bank_sub_type = "credit_card"
-            elif detected_bank_type == "wallet":
-                bank_sub_type = "wallet"
-            
-            new_account = {
-                "account_id": f"acc_{uuid.uuid4().hex[:12]}",
-                "user_id": user_id,
-                "name": detected_bank_name[:100],  # Limit name length
-                "account_type": "asset" if bank_sub_type in ["savings", "current", "wallet"] else "liability",
-                "sub_type": bank_sub_type,
-                "opening_balance": 0,  # Will be set during approval
-                "needs_opening_balance": True,  # Flag to prompt user during approval
-                "ai_created": True,
-                "created_at": datetime.now(timezone.utc),
-            }
-            await db.accounts.insert_one(new_account)
-            del new_account["_id"]
-            account_id = new_account["account_id"]
-            logger.info(f"Auto-created bank account: {detected_bank_name} -> {account_id}")
+        # Common Indian bank email patterns
+        bank_patterns = {
+            "hdfc": "HDFC Bank",
+            "icici": "ICICI Bank", 
+            "sbi": "SBI",
+            "axis": "Axis Bank",
+            "kotak": "Kotak Bank",
+            "idfc": "IDFC First Bank",
+            "yes": "Yes Bank",
+            "indusind": "IndusInd Bank",
+            "pnb": "PNB",
+            "bob": "Bank of Baroda",
+            "canara": "Canara Bank",
+            "union": "Union Bank",
+            "indian": "Indian Bank",
+            "boi": "Bank of India",
+            "federal": "Federal Bank",
+            "rbl": "RBL Bank",
+            "paytm": "Paytm Wallet",
+            "phonepe": "PhonePe",
+            "gpay": "Google Pay",
+            "amazonpay": "Amazon Pay",
+            "citi": "Citibank",
+            "amex": "American Express",
+            "scb": "Standard Chartered",
+            "hsbc": "HSBC",
+        }
+        
+        for keyword, bank_name in bank_patterns.items():
+            if keyword in combined_text:
+                detected_bank_name = bank_name
+                detected_bank_type = "wallet" if keyword in ["paytm", "phonepe", "gpay", "amazonpay"] else "savings"
+                logger.info(f"Detected bank from email sender/content: {bank_name}")
+                break
+    
+    # Try to match existing account by bank name keywords
+    if detected_bank_name:
+        # Extract key bank identifier (e.g., "HDFC" from "HDFC Bank Savings XX1234")
+        bank_keywords = [w for w in detected_bank_name.upper().split() if len(w) >= 3]
+        
+        # Get all user accounts for matching
+        existing_accounts = await db.accounts.find({"user_id": user_id}, {"_id": 0, "account_id": 1, "name": 1}).to_list(100)
+        
+        for acc in existing_accounts:
+            acc_name_upper = (acc.get("name") or "").upper()
+            # Check if any keyword from detected bank name is in existing account name
+            for keyword in bank_keywords:
+                if keyword in acc_name_upper:
+                    account_id = acc["account_id"]
+                    logger.info(f"Matched existing account '{acc['name']}' with detected bank '{detected_bank_name}'")
+                    break
+            if account_id:
+                break
+    
+    # If no match found, create new account with detected bank name
+    if not account_id and detected_bank_name:
+        # Auto-create the bank account
+        bank_sub_type = "savings"  # default
+        if detected_bank_type == "current":
+            bank_sub_type = "current"
+        elif detected_bank_type == "credit_card":
+            bank_sub_type = "credit_card"
+        elif detected_bank_type == "wallet":
+            bank_sub_type = "wallet"
+        
+        new_account = {
+            "account_id": f"acc_{uuid.uuid4().hex[:12]}",
+            "user_id": user_id,
+            "name": detected_bank_name[:100],  # Limit name length
+            "account_type": "asset" if bank_sub_type in ["savings", "current", "wallet"] else "liability",
+            "sub_type": bank_sub_type,
+            "opening_balance": 0,  # Will be set during approval
+            "needs_opening_balance": True,  # Flag to prompt user during approval
+            "ai_created": True,
+            "created_at": datetime.now(timezone.utc),
+        }
+        await db.accounts.insert_one(new_account)
+        del new_account["_id"]
+        account_id = new_account["account_id"]
+        logger.info(f"Auto-created bank account: {detected_bank_name} -> {account_id}")
     
     # If still no account_id, use "Unknown Bank" account
     if not account_id:
@@ -3382,40 +3435,80 @@ async def _process_sms_transaction(user_id: str, sms_doc: dict, result: dict, ac
     detected_bank_name = result.get("detected_bank_name")
     detected_bank_type = result.get("detected_bank_type")
     
-    if not account_id and detected_bank_name:
-        # Try to find existing account by name match
-        existing_account = await db.accounts.find_one({
-            "user_id": user_id,
-            "name": {"$regex": f"^{re.escape(detected_bank_name[:20])}.*", "$options": "i"}
-        }, {"_id": 0, "account_id": 1})
+    # Also try to detect bank from SMS sender if AI didn't provide detected_bank_name
+    if not detected_bank_name:
+        sender = (sms_doc.get("sender") or "").upper()
+        body = (sms_doc.get("body") or "").lower()
+        combined_text = f"{sender.lower()} {body}"
         
-        if existing_account:
-            account_id = existing_account["account_id"]
-        else:
-            # Auto-create the bank account
-            bank_sub_type = "savings"  # default
-            if detected_bank_type == "current":
-                bank_sub_type = "current"
-            elif detected_bank_type == "credit_card":
-                bank_sub_type = "credit_card"
-            elif detected_bank_type == "wallet":
-                bank_sub_type = "wallet"
-            
-            new_account = {
-                "account_id": f"acc_{uuid.uuid4().hex[:12]}",
-                "user_id": user_id,
-                "name": detected_bank_name[:100],
-                "account_type": "asset" if bank_sub_type in ["savings", "current", "wallet"] else "liability",
-                "sub_type": bank_sub_type,
-                "opening_balance": 0,
-                "needs_opening_balance": True,
-                "ai_created": True,
-                "created_at": datetime.now(timezone.utc),
-            }
-            await db.accounts.insert_one(new_account)
-            del new_account["_id"]
-            account_id = new_account["account_id"]
-            logger.info(f"Auto-created bank account from SMS: {detected_bank_name} -> {account_id}")
+        # Common Indian bank SMS sender patterns
+        bank_patterns = {
+            "hdfc": "HDFC Bank",
+            "icici": "ICICI Bank", 
+            "sbi": "SBI",
+            "axis": "Axis Bank",
+            "kotak": "Kotak Bank",
+            "idfc": "IDFC First Bank",
+            "yes": "Yes Bank",
+            "indusind": "IndusInd Bank",
+            "pnb": "PNB",
+            "bob": "Bank of Baroda",
+            "canara": "Canara Bank",
+            "union": "Union Bank",
+            "federal": "Federal Bank",
+            "rbl": "RBL Bank",
+            "paytm": "Paytm Wallet",
+            "phonepe": "PhonePe",
+            "gpay": "Google Pay",
+        }
+        
+        for keyword, bank_name in bank_patterns.items():
+            if keyword in combined_text:
+                detected_bank_name = bank_name
+                detected_bank_type = "wallet" if keyword in ["paytm", "phonepe", "gpay"] else "savings"
+                logger.info(f"Detected bank from SMS sender/content: {bank_name}")
+                break
+    
+    # Try to match existing account by bank name keywords
+    if detected_bank_name:
+        bank_keywords = [w for w in detected_bank_name.upper().split() if len(w) >= 3]
+        existing_accounts = await db.accounts.find({"user_id": user_id}, {"_id": 0, "account_id": 1, "name": 1}).to_list(100)
+        
+        for acc in existing_accounts:
+            acc_name_upper = (acc.get("name") or "").upper()
+            for keyword in bank_keywords:
+                if keyword in acc_name_upper:
+                    account_id = acc["account_id"]
+                    logger.info(f"Matched existing account '{acc['name']}' with detected bank '{detected_bank_name}'")
+                    break
+            if account_id:
+                break
+    
+    # If no match found, create new account with detected bank name
+    if not account_id and detected_bank_name:
+        bank_sub_type = "savings"
+        if detected_bank_type == "current":
+            bank_sub_type = "current"
+        elif detected_bank_type == "credit_card":
+            bank_sub_type = "credit_card"
+        elif detected_bank_type == "wallet":
+            bank_sub_type = "wallet"
+        
+        new_account = {
+            "account_id": f"acc_{uuid.uuid4().hex[:12]}",
+            "user_id": user_id,
+            "name": detected_bank_name[:100],
+            "account_type": "asset" if bank_sub_type in ["savings", "current", "wallet"] else "liability",
+            "sub_type": bank_sub_type,
+            "opening_balance": 0,
+            "needs_opening_balance": True,
+            "ai_created": True,
+            "created_at": datetime.now(timezone.utc),
+        }
+        await db.accounts.insert_one(new_account)
+        del new_account["_id"]
+        account_id = new_account["account_id"]
+        logger.info(f"Auto-created bank account from SMS: {detected_bank_name} -> {account_id}")
     
     # If still no account_id, use "Unknown Bank" account
     if not account_id:
