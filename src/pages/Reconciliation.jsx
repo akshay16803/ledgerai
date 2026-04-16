@@ -436,7 +436,7 @@ export default function Reconciliation() {
       {statements.length > 0 && (
         <div data-testid="statement-history" style={{
           background: '#fff', border: '1px solid var(--border-subtle)', borderRadius: 2,
-          overflow: 'hidden', marginBottom: 24
+          overflowX: 'auto', marginBottom: 24
         }}>
           <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-secondary)' }}>
             <h3 style={{ fontSize: 15, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -465,7 +465,7 @@ export default function Reconciliation() {
                 <Fragment key={stmt.statement_id}>
                 <tr data-testid={`stmt-row-${stmt.statement_id}`}
                   style={{
-                    borderBottom: (stmt.status === 'password_required' || (stmt.status === 'parse_failed' && stmt.file_ext === 'pdf'))
+                    borderBottom: (stmt.status === 'password_required' || stmt.status === 'parse_failed')
                       ? 'none' : '1px solid var(--border-subtle)',
                     background: activeStmt?.statement_id === stmt.statement_id ? 'rgba(194,109,92,0.05)' : '#fff'
                   }}>
@@ -554,16 +554,14 @@ export default function Reconciliation() {
                     </div>
                   </td>
                 </tr>
-                {(stmt.status === 'password_required' || (stmt.status === 'parse_failed' && stmt.file_ext === 'pdf')) && (
+                {stmt.status === 'password_required' && (
                   <tr data-testid={`unlock-row-${stmt.statement_id}`}
                     style={{ borderBottom: '1px solid var(--border-subtle)', background: '#fff' }}>
                     <td colSpan={8} style={{ padding: '10px 16px 14px' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                         <LockKey size={16} weight="duotone" style={{ color: 'var(--warning)' }} />
                         <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                          {stmt.status === 'password_required'
-                            ? 'This PDF is password protected. Enter the password to parse it — we\'ll remember it for this account.'
-                            : 'Parse failed. If this PDF is password protected, enter the password and retry.'}
+                          This PDF is password protected. Enter the password to parse it — we'll remember it for this account.
                         </span>
                         <input
                           data-testid={`pw-input-${stmt.statement_id}`}
@@ -596,6 +594,33 @@ export default function Reconciliation() {
                             {unlockErrors[stmt.statement_id]}
                           </span>
                         )}
+                      </div>
+                    </td>
+                  </tr>
+                )}
+                {stmt.status === 'parse_failed' && (
+                  <tr data-testid={`failed-row-${stmt.statement_id}`}
+                    style={{ borderBottom: '1px solid var(--border-subtle)', background: '#fff' }}>
+                    <td colSpan={8} style={{ padding: '10px 16px 14px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                          {stmt.parse_error || 'Parse failed.'}
+                        </span>
+                        <button data-testid={`failed-retry-${stmt.statement_id}`}
+                          onClick={() => handleRetryParse(stmt.statement_id)}
+                          style={{
+                            background: 'var(--brand-primary)', color: '#fff', border: 'none',
+                            borderRadius: 2, padding: '5px 12px', fontSize: 11, fontWeight: 600,
+                            cursor: 'pointer', fontFamily: 'var(--font-body)',
+                          }}>Retry</button>
+                        <button data-testid={`failed-delete-${stmt.statement_id}`}
+                          onClick={() => handleDelete(stmt.statement_id)}
+                          style={{
+                            background: 'none', color: 'var(--text-secondary)',
+                            border: '1px solid var(--border-strong)',
+                            borderRadius: 2, padding: '5px 12px', fontSize: 11, fontWeight: 600,
+                            cursor: 'pointer', fontFamily: 'var(--font-body)',
+                          }}>Delete & Re-upload</button>
                       </div>
                     </td>
                   </tr>
