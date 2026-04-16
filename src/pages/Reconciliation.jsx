@@ -104,6 +104,9 @@ export default function Reconciliation() {
   const [unlockingId, setUnlockingId] = useState('');
   const [pwInputs, setPwInputs] = useState({});
   const [unlockErrors, setUnlockErrors] = useState({});
+  const [reauditing, setReauditing] = useState(false);
+  const [categories, setCategories] = useState([]);
+  const [savingEntryIdx, setSavingEntryIdx] = useState(-1);
 
   const SUB_TYPE_OPTIONS = [
     { value: 'savings', label: 'Savings', statementType: 'bank' },
@@ -120,12 +123,14 @@ export default function Reconciliation() {
 
   const loadData = useCallback(async () => {
     try {
-      const [stmtRes, accs] = await Promise.all([
+      const [stmtRes, accs, cats] = await Promise.all([
         api.get('/api/statements/list'),
         api.get('/api/accounts'),
+        api.get('/api/categories').catch(() => []),
       ]);
       setStatements(stmtRes.statements || []);
       setAccounts(accs);
+      setCategories(Array.isArray(cats) ? cats : (cats?.categories || []));
       setCache('reconciliation', { statements: stmtRes.statements || [], accounts: accs });
       // Keep selected account only if it still matches the chosen sub-type.
       setSelectedAccountId(prev => {
@@ -234,6 +239,38 @@ export default function Reconciliation() {
       loadData();
     } catch (err) { setError(err.message); }
     setReconciling(false);
+  };
+
+  const handleReaudit = async () => {
+    if (!activeStmt) return;
+    setReauditing(true);
+    setError('');
+    try {
+      await api.post(`/api/statements/${activeStmt.statement_id}/reaudit`);
+      // Close modal — the row's inline progress bar picks it up from here
+      // exactly like unlock/upload does.
+      setActiveStmt(null);
+      loadData();
+    } catch (err) { setError(err.message); }
+    setReauditing(false);
+  };
+
+  const handleUpdateEntryCategory = async (entryIndex, categoryId, subcategoryId) => {
+    if (!activeStmt) return;
+    setSavingEntryIdx(entryIndex);
+    try {
+      const res = await api.patch(
+        `/api/statements/${activeStmt.statement_id}/entries/${entryIndex}`,
+        { category_id: categoryId || null, subcategory_id: subcategoryId || null },
+      );
+      setActiveStmt(prev => {
+        if (!prev) return prev;
+        const entries = [...(prev.parsed_entries || [])];
+        entries[entryIndex] = res.entry;
+        return { ...prev, parsed_entries: entries };
+      });
+    } catch (err) { setError(err.message); }
+    setSavingEntryIdx(-1);
   };
 
   const handleAddMissing = async () => {
@@ -572,16 +609,34 @@ export default function Reconciliation() {
                 )}
               </div>
               {activeStmt.status === 'parsed' && (
-                <button data-testid="reconcile-btn" data-guard onClick={handleReconcile} disabled={reconciling}
-                  style={{
-                    background: 'var(--brand-primary)', color: '#fff', border: 'none',
-                    padding: '10px 24px', borderRadius: 2, fontSize: 13, fontWeight: 600,
-                    cursor: reconciling ? 'not-allowed' : 'pointer', fontFamily: 'var(--font-body)',
-                    display: 'flex', alignItems: 'center', gap: 6,
-                    opacity: reconciling ? 0.6 : 1
-                  }}>
-                  <Scales size={16} weight="bold" /> {reconciling ? 'Reconciling...' : 'Reconcile with Ledger'}
-                </button>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <button
+                    data-testid="reaudit-btn"
+                    onClick={handleReaudit}
+                    disabled={reauditing || reconciling}
+                    title="Re-parse the source file and re-run the completeness/balance audit"
+                    style={{
+                      background: '#fff', color: 'var(--text-primary)',
+                      border: '1px solid var(--border-strong)',
+                      padding: '10px 18px', borderRadius: 2, fontSize: 13, fontWeight: 600,
+                      cursor: (reauditing || reconciling) ? 'not-allowed' : 'pointer',
+                      fontFamily: 'var(--font-body)',
+                      display: 'flex', alignItems: 'center', gap: 6,
+                      opacity: (reauditing || reconciling) ? 0.6 : 1,
+                    }}>
+                    <ArrowClockwise size={16} weight="bold" /> {reauditing ? 'Starting...' : 'Re-run audit'}
+                  </button>
+                  <button data-testid="reconcile-btn" data-guard onClick={handleReconcile} disabled={reconciling}
+                    style={{
+                      background: 'var(--brand-primary)', color: '#fff', border: 'none',
+                      padding: '10px 24px', borderRadius: 2, fontSize: 13, fontWeight: 600,
+                      cursor: reconciling ? 'not-allowed' : 'pointer', fontFamily: 'var(--font-body)',
+                      display: 'flex', alignItems: 'center', gap: 6,
+                      opacity: reconciling ? 0.6 : 1
+                    }}>
+                    <Scales size={16} weight="bold" /> {reconciling ? 'Reconciling...' : 'Reconcile with Ledger'}
+                  </button>
+                </div>
               )}
             </div>
 
@@ -610,12 +665,49 @@ export default function Reconciliation() {
                         }}>{e.transaction_type}</span>
                       </td>
                       <td style={tdStyle}>{e.description || '—'}</td>
-                      <td style={{ ...tdStyle, color: e.category_name ? 'var(--text-primary)' : 'var(--text-muted)' }}>
-                        {e.category_name || '—'}
-                      </td>
-                      <td style={{ ...tdStyle, color: e.subcategory_name ? 'var(--text-primary)' : 'var(--text-muted)' }}>
-                        {e.subcategory_name || '—'}
-                      </td>
+                      {(() => {
+                        const kind = e.transaction_type === 'income' ? 'income' : 'expense';
+                        const topCats = categories.filter(c => !c.parent_id && c.category_type === kind);
+                        const subCats = categories.filter(c => c.parent_id && c.parent_id === e.category_id);
+                        const selectStyle = {
+                          padding: '4px 6px', border: '1px solid var(--border-subtle)',
+                          borderRadius: 2, fontSize: 12, fontFamily: 'var(--font-body)',
+                          background: '#fff', minWidth: 120, maxWidth: 180,
+                          opacity: savingEntryIdx === i ? 0.6 : 1,
+                        };
+                        return (
+                          <>
+                            <td style={tdStyle}>
+                              <select
+                                value={e.category_id || ''}
+                                disabled={savingEntryIdx === i}
+                                onChange={(ev) => handleUpdateEntryCategory(i, ev.target.value, null)}
+                                style={selectStyle}
+                                data-testid={`entry-cat-${i}`}
+                              >
+                                <option value="">—</option>
+                                {topCats.map(c => (
+                                  <option key={c.category_id} value={c.category_id}>{c.name}</option>
+                                ))}
+                              </select>
+                            </td>
+                            <td style={tdStyle}>
+                              <select
+                                value={e.subcategory_id || ''}
+                                disabled={savingEntryIdx === i || !e.category_id || subCats.length === 0}
+                                onChange={(ev) => handleUpdateEntryCategory(i, e.category_id, ev.target.value)}
+                                style={selectStyle}
+                                data-testid={`entry-sub-${i}`}
+                              >
+                                <option value="">—</option>
+                                {subCats.map(c => (
+                                  <option key={c.category_id} value={c.category_id}>{c.name}</option>
+                                ))}
+                              </select>
+                            </td>
+                          </>
+                        );
+                      })()}
                       <td className="mono" style={{
                         ...tdStyle, textAlign: 'right', fontWeight: 600,
                         color: e.transaction_type === 'income' ? 'var(--success)' : 'var(--error)'

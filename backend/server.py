@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Request, Response, Depends, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, Request, Response, Depends, UploadFile, File, Form, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
@@ -2010,6 +2010,106 @@ async def delete_statement(statement_id: str, user: dict = Depends(get_current_u
 
     await db.statements.delete_one({"statement_id": statement_id})
     return {"message": "Statement deleted"}
+
+
+@app.post("/api/statements/{statement_id}/reaudit")
+async def reaudit_statement(statement_id: str, user: dict = Depends(get_current_user)):
+    """Re-run the full parse + audit + correction pipeline on an already
+    uploaded statement. Useful when the first audit found issues the
+    auto-correction couldn't fully resolve, or the user wants a fresh
+    pass after tweaking their category list."""
+    stmt = await db.statements.find_one(
+        {"statement_id": statement_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    if not stmt:
+        raise HTTPException(status_code=404, detail="Statement not found")
+
+    file_path = stmt.get("file_path")
+    if not file_path or not os.path.exists(file_path):
+        raise HTTPException(status_code=400, detail="Source file is no longer available for re-audit")
+
+    # Flip status back into the parsing state so the UI progress bar
+    # picks it up the same way an unlock/upload would.
+    await db.statements.update_one(
+        {"statement_id": statement_id},
+        {"$set": {
+            "status": "parsing",
+            "parse_error": None,
+            "processing_stage": "queued",
+            "processing_stage_label": PARSE_STAGES["queued"]["label"],
+            "processing_progress": PARSE_STAGES["queued"]["progress"],
+            "processing_eta_seconds": PARSE_STAGES["queued"]["eta_seconds"],
+            "processing_started_at": datetime.now(timezone.utc),
+            "processing_updated_at": datetime.now(timezone.utc),
+        }}
+    )
+
+    asyncio.create_task(parse_statement_background(statement_id, user["user_id"]))
+    return {"statement_id": statement_id, "status": "parsing", "message": "Re-audit started"}
+
+
+@app.patch("/api/statements/{statement_id}/entries/{entry_index}")
+async def update_statement_entry(
+    statement_id: str,
+    entry_index: int,
+    payload: dict = Body(...),
+    user: dict = Depends(get_current_user),
+):
+    """Update a single parsed entry's category / subcategory on an
+    already-parsed statement. Accepts {category_id, subcategory_id}
+    (either may be null). Category names are resolved from the user's
+    own category list for display."""
+    stmt = await db.statements.find_one(
+        {"statement_id": statement_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    if not stmt:
+        raise HTTPException(status_code=404, detail="Statement not found")
+
+    entries = stmt.get("parsed_entries") or []
+    if entry_index < 0 or entry_index >= len(entries):
+        raise HTTPException(status_code=400, detail="Invalid entry index")
+
+    category_id = payload.get("category_id")
+    subcategory_id = payload.get("subcategory_id")
+
+    # Resolve names from ids (so the UI stays consistent with the
+    # initial stamping). Unknown ids are treated as unset.
+    cat_name = None
+    sub_name = None
+    if category_id:
+        cat = await db.categories.find_one(
+            {"category_id": category_id, "user_id": user["user_id"]},
+            {"_id": 0, "name": 1, "parent_id": 1},
+        )
+        if cat and not cat.get("parent_id"):
+            cat_name = cat.get("name")
+        else:
+            category_id = None
+    if subcategory_id and category_id:
+        sub = await db.categories.find_one(
+            {"category_id": subcategory_id, "user_id": user["user_id"], "parent_id": category_id},
+            {"_id": 0, "name": 1},
+        )
+        if sub:
+            sub_name = sub.get("name")
+        else:
+            subcategory_id = None
+    else:
+        subcategory_id = None
+
+    entry = dict(entries[entry_index])
+    entry["category_id"] = category_id
+    entry["subcategory_id"] = subcategory_id
+    entry["category_name"] = cat_name
+    entry["subcategory_name"] = sub_name
+    entries[entry_index] = entry
+
+    await db.statements.update_one(
+        {"statement_id": statement_id, "user_id": user["user_id"]},
+        {"$set": {"parsed_entries": entries, "updated_at": datetime.now(timezone.utc)}},
+    )
+
+    return {"entry_index": entry_index, "entry": entry}
 
 
 @app.post("/api/statements/{statement_id}/unlock")
