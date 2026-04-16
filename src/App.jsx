@@ -37,13 +37,24 @@ function ProtectedRoute({ children }) {
 }
 
 export default function App() {
-  // Global: prevent double-click on submit/guarded buttons (invisible, no visual delay)
+  // Global: prevent rapid double-clicks on submit/guarded buttons without
+  // flipping `disabled` mid-dispatch — that was suppressing the form's
+  // submit activation (some browsers skip requestSubmit when the submit
+  // button is disabled by the time activation runs, which is after the
+  // capture phase). Use a per-button timestamp and cancel only the second
+  // click in a rapid pair; the first click always goes through.
   useEffect(() => {
     const handler = (e) => {
       const btn = e.target.closest('button[type="submit"], button[data-guard]');
-      if (!btn || btn.disabled) return;
-      btn.disabled = true;
-      setTimeout(() => { if (btn) btn.disabled = false; }, 120);
+      if (!btn) return;
+      const now = Date.now();
+      const last = Number(btn.dataset.lastClickTs || 0);
+      if (last && now - last < 500) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        return;
+      }
+      btn.dataset.lastClickTs = String(now);
     };
     document.addEventListener('click', handler, true);
     return () => document.removeEventListener('click', handler, true);
