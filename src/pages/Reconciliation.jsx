@@ -704,43 +704,58 @@ export default function Reconciliation() {
             </div>
 
             {activeStmt.parsed_entries?.length > 0 && !recon && (
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 650 }}>
+              // table-layout:fixed + percentage column widths so long IMPS
+              // descriptions wrap into the Description cell instead of pushing
+              // Amount / Balance off the right edge of the viewport.
+              <table style={{
+                width: '100%', borderCollapse: 'collapse', fontSize: 12.5,
+                tableLayout: 'fixed',
+              }}>
+                <colgroup>
+                  <col style={{ width: '8%' }} />
+                  <col style={{ width: '9%' }} />
+                  <col style={{ width: '32%' }} />
+                  <col style={{ width: '15%' }} />
+                  <col style={{ width: '15%' }} />
+                  <col style={{ width: '11%' }} />
+                  <col style={{ width: '10%' }} />
+                </colgroup>
                 <thead>
                   <tr style={{ borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-secondary)' }}>
-                    <th style={thStyle}>Date</th>
-                    <th style={thStyle}>Type</th>
-                    <th style={thStyle}>Description</th>
-                    <th style={thStyle}>Category</th>
-                    <th style={thStyle}>Subcategory</th>
-                    <th style={{ ...thStyle, textAlign: 'right' }}>Amount</th>
-                    <th style={{ ...thStyle, textAlign: 'right' }}>Balance</th>
+                    <th style={thStyleCompact}>Date</th>
+                    <th style={thStyleCompact}>Type</th>
+                    <th style={thStyleCompact}>Description</th>
+                    <th style={thStyleCompact}>Category</th>
+                    <th style={thStyleCompact}>Subcategory</th>
+                    <th style={{ ...thStyleCompact, textAlign: 'right' }}>Amount</th>
+                    <th style={{ ...thStyleCompact, textAlign: 'right' }}>Balance</th>
                   </tr>
                 </thead>
                 <tbody>
                   {activeStmt.parsed_entries.map((e, i) => (
                     <tr key={`${e.date}-${e.amount}-${i}`} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-                      <td className="mono" style={{ ...tdStyle, fontSize: 12 }}>{e.date}</td>
-                      <td style={tdStyle}>
+                      <td className="mono" style={{ ...tdStyleCompact, fontSize: 11.5 }}>{e.date}</td>
+                      <td style={tdStyleCompact}>
                         <span style={{
-                          padding: '2px 8px', borderRadius: 2, fontSize: 11, fontWeight: 600, textTransform: 'uppercase',
+                          padding: '2px 6px', borderRadius: 2, fontSize: 10.5, fontWeight: 600, textTransform: 'uppercase',
                           color: e.transaction_type === 'income' ? 'var(--success)' : 'var(--error)',
                           background: e.transaction_type === 'income' ? 'rgba(58,92,74,0.1)' : 'rgba(150,69,58,0.1)'
                         }}>{e.transaction_type}</span>
                       </td>
-                      <td style={tdStyle}>{e.description || '—'}</td>
+                      <td style={{ ...tdStyleCompact, wordBreak: 'break-word' }}>{e.description || '—'}</td>
                       {(() => {
                         const kind = e.transaction_type === 'income' ? 'income' : 'expense';
                         const topCats = categories.filter(c => !c.parent_id && c.category_type === kind);
                         const subCats = categories.filter(c => c.parent_id && c.parent_id === e.category_id);
                         const selectStyle = {
                           padding: '4px 6px', border: '1px solid var(--border-subtle)',
-                          borderRadius: 2, fontSize: 12, fontFamily: 'var(--font-body)',
-                          background: '#fff', minWidth: 120, maxWidth: 180,
+                          borderRadius: 2, fontSize: 11.5, fontFamily: 'var(--font-body)',
+                          background: '#fff', width: '100%', boxSizing: 'border-box',
                           opacity: savingEntryIdx === i ? 0.6 : 1,
                         };
                         return (
                           <>
-                            <td style={tdStyle}>
+                            <td style={tdStyleCompact}>
                               <select
                                 value={e.category_id || ''}
                                 disabled={savingEntryIdx === i}
@@ -754,7 +769,7 @@ export default function Reconciliation() {
                                 ))}
                               </select>
                             </td>
-                            <td style={tdStyle}>
+                            <td style={tdStyleCompact}>
                               <select
                                 value={e.subcategory_id || ''}
                                 disabled={savingEntryIdx === i || !e.category_id || subCats.length === 0}
@@ -772,10 +787,10 @@ export default function Reconciliation() {
                         );
                       })()}
                       <td className="mono" style={{
-                        ...tdStyle, textAlign: 'right', fontWeight: 600,
+                        ...tdStyleCompact, textAlign: 'right', fontWeight: 600,
                         color: e.transaction_type === 'income' ? 'var(--success)' : 'var(--error)'
                       }}>{formatCurrency(e.amount)}</td>
-                      <td className="mono" style={{ ...tdStyle, textAlign: 'right', color: 'var(--text-muted)' }}>
+                      <td className="mono" style={{ ...tdStyleCompact, textAlign: 'right', color: 'var(--text-muted)' }}>
                         {e.balance ? formatCurrency(e.balance) : '—'}
                       </td>
                     </tr>
