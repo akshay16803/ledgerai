@@ -2,7 +2,8 @@ import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import {
   Brain, EnvelopeSimple, ChartPie, ArrowsLeftRight,
-  Shield, Lightning, ArrowRight, CheckCircle
+  Shield, ArrowRight, CheckCircle,
+  Files, TrendUp, Plugs, Sparkle
 } from '@phosphor-icons/react';
 
 const features = [
@@ -10,8 +11,15 @@ const features = [
   { icon: ArrowsLeftRight, title: 'Double-Entry Bookkeeping', desc: 'Every transaction affects two accounts, maintaining perfect accounting integrity.' },
   { icon: EnvelopeSimple, title: 'Email & SMS Sync', desc: 'Connect Gmail and Outlook. Transactions are extracted and categorised automatically.' },
   { icon: ChartPie, title: 'Real-Time Reports', desc: 'Income, expenses, and cash flow projections updated the moment a transaction is recorded.' },
-  { icon: Shield, title: 'Bank Reconciliation', desc: 'Upload statements and let AI match, flag conflicts, and reconcile your books.' },
-  { icon: Lightning, title: 'Recurring Detection', desc: 'Automatically identifies recurring payments and projects 24-month cash flow.' },
+  { icon: Shield, title: 'Bank Reconciliation', desc: 'Upload statements — even password-protected or loan PDFs. AI matches, audits, and auto-corrects the books.' },
+  { icon: TrendUp, title: '24-Month Cash Flow', desc: 'See the next two years before they happen. Recurring payments are detected automatically to power precise forward projections.' },
+  { icon: Files, title: 'Records Vault', desc: 'Every source email, attachment, and .eml receipt is stored alongside its transaction — audit-ready the moment you need it.' },
+];
+
+const steps = [
+  { icon: Plugs, label: 'Step 01', title: 'Connect your inbox', desc: 'Link Gmail or Outlook in under a minute. SpentyAI starts reading only transaction-related messages.' },
+  { icon: Sparkle, label: 'Step 02', title: 'AI drafts your books', desc: 'Every receipt, invoice, and bank alert is parsed, categorised, and prepared as a double-entry draft.' },
+  { icon: CheckCircle, label: 'Step 03', title: 'You approve', desc: 'Nothing posts without you. Approve in one tap — or edit first. Your ledger stays clean, always.' },
 ];
 
 export default function Landing() {
@@ -108,6 +116,65 @@ export default function Landing() {
           >
             View Pricing
           </button>
+        </div>
+      </section>
+
+      {/* How it works */}
+      <section data-testid="how-it-works-section" style={{
+        borderTop: '1px solid var(--border-subtle)',
+        borderBottom: '1px solid var(--border-subtle)',
+        background: 'var(--bg-secondary)'
+      }}>
+        <div style={{ maxWidth: 1100, margin: '0 auto', padding: '80px 24px' }}>
+          <div style={{ textAlign: 'center', marginBottom: 56 }}>
+            <span className="mono" style={{
+              fontSize: 11, letterSpacing: '0.2em', textTransform: 'uppercase',
+              color: 'var(--accent-1)', fontWeight: 600
+            }}>
+              How it works
+            </span>
+            <h2 style={{
+              fontSize: 'clamp(1.75rem, 3vw, 2.5rem)', marginTop: 12,
+              fontWeight: 500, letterSpacing: '-0.02em', color: 'var(--text-primary)'
+            }}>
+              Three steps.<br />Zero spreadsheets.
+            </h2>
+          </div>
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
+            gap: 24, position: 'relative'
+          }}>
+            {steps.map(({ icon: Icon, label, title, desc }, i) => (
+              <div key={title} className={`animate-slide-up stagger-${i + 1}`} style={{
+                position: 'relative',
+                padding: 32,
+                background: 'var(--bg-primary)',
+                border: '1px solid var(--border-subtle)',
+                borderRadius: 2
+              }}>
+                <div style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  marginBottom: 24
+                }}>
+                  <Icon size={28} weight="duotone" style={{ color: 'var(--accent-1)' }} />
+                  <span className="mono" style={{
+                    fontSize: 11, letterSpacing: '0.2em', textTransform: 'uppercase',
+                    color: 'var(--text-muted)', fontWeight: 600
+                  }}>
+                    {label}
+                  </span>
+                </div>
+                <h3 style={{
+                  fontSize: 18, fontWeight: 600, marginBottom: 8,
+                  fontFamily: 'var(--font-body)', color: 'var(--text-primary)'
+                }}>{title}</h3>
+                <p style={{ fontSize: 14, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+                  {desc}
+                </p>
+              </div>
+            ))}
+          </div>
         </div>
       </section>
 
