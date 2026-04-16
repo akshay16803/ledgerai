@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 from typing import Optional, List
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, date as date_cls
 from motor.motor_asyncio import AsyncIOMotorClient
 from dotenv import load_dotenv
 import os
@@ -1553,6 +1553,148 @@ def _compute_recurring_summary(recurring_txns: list) -> tuple:
     return items, monthly_income, monthly_expense
 
 
+def _mandate_monthly_outflow(mandate: dict) -> float:
+    """Convert a mandate amount + frequency into its equivalent monthly
+    outflow, for use in cash-flow projection. Non-monthly frequencies
+    are amortised across months."""
+    try:
+        amt = float(mandate.get("amount") or 0)
+    except Exception:
+        amt = 0.0
+    if amt <= 0:
+        return 0.0
+    freq = (mandate.get("frequency") or "monthly").lower()
+    if freq == "monthly":
+        return amt
+    if freq == "weekly":
+        return amt * (52 / 12)
+    if freq == "yearly":
+        return amt / 12
+    if freq == "quarterly":
+        return amt / 3
+    return amt  # unknown frequency → treat as monthly
+
+
+def _mandate_active_in_month(mandate: dict, month_start: date_cls, month_end: date_cls) -> bool:
+    """A mandate contributes to a given month only if its status is
+    active and the month falls between its start/end dates."""
+    if (mandate.get("status") or "active").lower() != "active":
+        return False
+    sd_raw = mandate.get("start_date")
+    ed_raw = mandate.get("end_date")
+
+    def _parse(d):
+        if not d:
+            return None
+        if isinstance(d, datetime):
+            return d.date()
+        try:
+            return datetime.strptime(str(d)[:10], "%Y-%m-%d").date()
+        except Exception:
+            return None
+
+    sd = _parse(sd_raw)
+    ed = _parse(ed_raw)
+    if sd and sd > month_end:
+        return False
+    if ed and ed < month_start:
+        return False
+    return True
+
+
+@app.get("/api/mandates")
+async def list_mandates(user: dict = Depends(get_current_user)):
+    """List every mandate on this user, newest first."""
+    items = await db.mandates.find(
+        {"user_id": user["user_id"]}, {"_id": 0}
+    ).sort("created_at", -1).to_list(500)
+    return {"mandates": items}
+
+
+@app.post("/api/mandates")
+async def create_mandate(payload: dict = Body(...), user: dict = Depends(get_current_user)):
+    """Manually create a mandate (for cases the AI didn't catch, or
+    mandates the user knows about but didn't get an email for)."""
+    merchant = (payload.get("merchant") or "").strip()
+    amount = payload.get("amount")
+    if not merchant or amount is None:
+        raise HTTPException(status_code=400, detail="merchant and amount are required")
+    try:
+        amount = float(amount)
+    except Exception:
+        raise HTTPException(status_code=400, detail="amount must be a number")
+    now = datetime.now(timezone.utc)
+    doc = {
+        "mandate_id": f"mnd_{uuid.uuid4().hex[:12]}",
+        "user_id": user["user_id"],
+        "merchant": merchant,
+        "amount": amount,
+        "currency": (payload.get("currency") or "INR").upper(),
+        "frequency": (payload.get("frequency") or "monthly").lower(),
+        "mandate_type": (payload.get("mandate_type") or "other").lower(),
+        "start_date": payload.get("start_date"),
+        "end_date": payload.get("end_date"),
+        "debit_day": payload.get("debit_day"),
+        "account_id": payload.get("account_id"),
+        "detected_bank_name": payload.get("detected_bank_name"),
+        "status": (payload.get("status") or "active").lower(),
+        "source": "manual",
+        "created_at": now,
+        "updated_at": now,
+    }
+    await db.mandates.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@app.patch("/api/mandates/{mandate_id}")
+async def update_mandate(mandate_id: str, payload: dict = Body(...), user: dict = Depends(get_current_user)):
+    mandate = await db.mandates.find_one(
+        {"mandate_id": mandate_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    if not mandate:
+        raise HTTPException(status_code=404, detail="Mandate not found")
+
+    updatable = {
+        "merchant", "amount", "currency", "frequency", "mandate_type",
+        "start_date", "end_date", "debit_day", "account_id", "status",
+    }
+    set_fields: dict = {}
+    for k, v in payload.items():
+        if k not in updatable:
+            continue
+        if k == "amount" and v is not None:
+            try:
+                set_fields[k] = float(v)
+            except Exception:
+                raise HTTPException(status_code=400, detail="amount must be a number")
+        elif k in ("frequency", "mandate_type", "status", "currency") and v is not None:
+            set_fields[k] = str(v).lower()
+        else:
+            set_fields[k] = v
+    if not set_fields:
+        return mandate
+    set_fields["updated_at"] = datetime.now(timezone.utc)
+    await db.mandates.update_one(
+        {"mandate_id": mandate_id, "user_id": user["user_id"]},
+        {"$set": set_fields},
+    )
+    updated = await db.mandates.find_one(
+        {"mandate_id": mandate_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    return updated
+
+
+@app.delete("/api/mandates/{mandate_id}")
+async def delete_mandate(mandate_id: str, user: dict = Depends(get_current_user)):
+    res = await db.mandates.delete_one(
+        {"mandate_id": mandate_id, "user_id": user["user_id"]}
+    )
+    if not res.deleted_count:
+        raise HTTPException(status_code=404, detail="Mandate not found")
+    return {"message": "Mandate deleted"}
+
+
 @app.get("/api/cashflow/projection")
 async def cashflow_projection(user: dict = Depends(get_current_user)):
     user_id = user["user_id"]
@@ -1569,20 +1711,56 @@ async def cashflow_projection(user: dict = Depends(get_current_user)):
     )
 
     recurring_items, monthly_recurring_income, monthly_recurring_expense = _compute_recurring_summary(recurring_txns)
-    monthly_net = monthly_recurring_income - monthly_recurring_expense
+
+    # Mandates are committed future outflows. Add them to expense side
+    # only for the months they are active.
+    mandates = await db.mandates.find(
+        {"user_id": user_id, "status": "active"}, {"_id": 0}
+    ).to_list(500)
+    mandate_items = [
+        {
+            "mandate_id": m.get("mandate_id"),
+            "merchant": m.get("merchant"),
+            "amount": float(m.get("amount") or 0),
+            "frequency": m.get("frequency") or "monthly",
+            "mandate_type": m.get("mandate_type"),
+            "start_date": m.get("start_date"),
+            "end_date": m.get("end_date"),
+            "monthly_equivalent": round(_mandate_monthly_outflow(m), 2),
+            "source": m.get("source"),
+        }
+        for m in mandates
+    ]
+    monthly_mandate_expense = sum(i["monthly_equivalent"] for i in mandate_items)
 
     now = datetime.now(timezone.utc)
     running_balance = current_balance
     months = []
     for i in range(24):
-        month_date = now + timedelta(days=30 * (i + 1))
-        running_balance += monthly_net
+        month_anchor = now + timedelta(days=30 * (i + 1))
+        month_start = month_anchor.replace(day=1).date()
+        # Month end = last day; approx with +31 days then drop to month_start's month.
+        next_month = (month_anchor.replace(day=28) + timedelta(days=6)).replace(day=1)
+        month_end = (next_month - timedelta(days=1)).date()
+
+        # Mandate expense specifically for this month
+        month_mandate = sum(
+            _mandate_monthly_outflow(m)
+            for m in mandates
+            if _mandate_active_in_month(m, month_start, month_end)
+        )
+
+        projected_income = monthly_recurring_income
+        projected_expense = monthly_recurring_expense + month_mandate
+        net = projected_income - projected_expense
+        running_balance += net
         months.append({
             "month": i + 1,
-            "label": month_date.strftime("%b %Y"),
-            "projected_income": round(monthly_recurring_income, 2),
-            "projected_expense": round(monthly_recurring_expense, 2),
-            "net": round(monthly_net, 2),
+            "label": month_anchor.strftime("%b %Y"),
+            "projected_income": round(projected_income, 2),
+            "projected_expense": round(projected_expense, 2),
+            "mandate_expense": round(month_mandate, 2),
+            "net": round(net, 2),
             "running_balance": round(running_balance, 2),
         })
 
@@ -1590,8 +1768,10 @@ async def cashflow_projection(user: dict = Depends(get_current_user)):
         "current_balance": round(current_balance, 2),
         "monthly_recurring_income": round(monthly_recurring_income, 2),
         "monthly_recurring_expense": round(monthly_recurring_expense, 2),
-        "monthly_net": round(monthly_net, 2),
+        "monthly_mandate_expense": round(monthly_mandate_expense, 2),
+        "monthly_net": round(monthly_recurring_income - monthly_recurring_expense - monthly_mandate_expense, 2),
         "recurring_items": recurring_items,
+        "mandate_items": mandate_items,
         "projection": months,
     }
 
@@ -4160,6 +4340,80 @@ async def _create_transaction_from_ai_result(
     return True
 
 
+async def _create_mandate_from_ai_result(
+    user_id: str, email_doc: dict, result: dict, source_provider: str
+) -> bool:
+    """Persist a mandate detected in an email. Returns True if a new
+    mandate was stored (False on duplicate / missing fields)."""
+    merchant = (result.get("mandate_merchant") or "").strip()
+    amount = result.get("mandate_amount") or 0
+    frequency = (result.get("mandate_frequency") or "monthly").lower()
+    mandate_type = (result.get("mandate_type") or "other").lower()
+
+    # Require enough data to make the mandate meaningful for projection.
+    if not merchant or not amount or amount <= 0:
+        return False
+
+    # Try to match the debit account from the AI result or fallback to a
+    # per-user default if the AI detected a specific bank.
+    account_id = result.get("account_id")
+    detected_bank_name = result.get("detected_bank_name")
+
+    # De-dupe on (user, merchant, amount, frequency) so repeated mandate
+    # confirmation emails don't create piles of rows.
+    existing = await db.mandates.find_one({
+        "user_id": user_id,
+        "merchant": merchant,
+        "amount": float(amount),
+        "frequency": frequency,
+        "status": {"$ne": "cancelled"},
+    })
+    if existing:
+        # Keep latest email link for context but don't duplicate.
+        await db.mandates.update_one(
+            {"mandate_id": existing["mandate_id"]},
+            {"$set": {
+                "source_email_id": email_doc.get("email_id"),
+                "source_email_subject": email_doc.get("subject"),
+                "updated_at": datetime.now(timezone.utc),
+            }},
+        )
+        await db.synced_emails.update_one(
+            {"email_id": email_doc["email_id"]},
+            {"$set": {"ai_status": "mandate_detected", "ai_result": result}},
+        )
+        return False
+
+    now = datetime.now(timezone.utc)
+    mandate_doc = {
+        "mandate_id": f"mnd_{uuid.uuid4().hex[:12]}",
+        "user_id": user_id,
+        "merchant": merchant,
+        "amount": float(amount),
+        "currency": (result.get("currency") or "INR").upper(),
+        "frequency": frequency,
+        "mandate_type": mandate_type,
+        "start_date": result.get("mandate_start_date") or result.get("date"),
+        "end_date": result.get("mandate_end_date"),
+        "debit_day": result.get("mandate_debit_day"),
+        "account_id": account_id,
+        "detected_bank_name": detected_bank_name,
+        "status": "active",
+        "source": f"email:{source_provider}",
+        "source_email_id": email_doc.get("email_id"),
+        "source_email_subject": email_doc.get("subject"),
+        "created_at": now,
+        "updated_at": now,
+    }
+    await db.mandates.insert_one(mandate_doc)
+    await db.synced_emails.update_one(
+        {"email_id": email_doc["email_id"]},
+        {"$set": {"ai_status": "mandate_detected", "ai_result": result}},
+    )
+    logger.info(f"Mandate detected from email: {merchant} {amount} {frequency}")
+    return True
+
+
 async def _get_category_info_for_ai(user_id: str) -> list:
     """Fetch all categories and format them for AI analysis (optimized, no N+1 queries)."""
     all_categories = await db.categories.find({"user_id": user_id}, {"_id": 0}).to_list(200)
@@ -4220,7 +4474,9 @@ async def process_outlook_pending_emails(user_id: str, outlook_email: str = ""):
             try:
                 result = await analyze_email_with_ai(email_doc, account_names, category_info)
 
-                if result and result.get("is_transaction"):
+                if result and result.get("is_mandate"):
+                    await _create_mandate_from_ai_result(user_id, email_doc, result, "outlook")
+                elif result and result.get("is_transaction"):
                     await _create_transaction_from_ai_result(user_id, email_doc, result, accounts, "outlook")
                 else:
                     await db.synced_emails.update_one(
@@ -4540,7 +4796,9 @@ async def process_pending_emails(user_id: str, gmail_email: str = ""):
                 logger.info(f"Processing email {i+1}/{len(pending_emails)}: {email_doc.get('subject', '')[:50]}")
                 result = await analyze_email_with_ai(email_doc, account_names, category_info)
 
-                if result and result.get("is_transaction"):
+                if result and result.get("is_mandate"):
+                    await _create_mandate_from_ai_result(user_id, email_doc, result, "gmail")
+                elif result and result.get("is_transaction"):
                     await _create_transaction_from_ai_result(user_id, email_doc, result, accounts, "gmail")
                 else:
                     await db.synced_emails.update_one(
@@ -4727,6 +4985,17 @@ AVAILABLE ACCOUNTS:
 AVAILABLE CATEGORIES:
 {chr(10).join(category_info) if category_info else "No categories configured"}
 
+MANDATE / AUTO-PAY DETECTION (SEPARATE FROM TRANSACTIONS):
+Some emails are notifications that an AUTO-DEBIT MANDATE has been registered — not a transaction. Examples:
+  - "e-Mandate for ₹15,000/month to HDFC Home Loan registered"
+  - "UPI AutoPay set up for Netflix Premium ₹799/month"
+  - "NACH / ECS mandate activated for SIP of ₹10,000"
+  - "Standing instruction created for Airtel Postpaid ₹1,499/month"
+  - "Auto-debit enabled for Amazon Prime ₹1,499/year"
+If the email is a mandate creation / activation / registration (not a debit), set is_mandate=true and populate the mandate_* fields below.
+A mandate is FUTURE COMMITTED outflow — it is NOT is_transaction=true and is NOT is_recurring=true.
+A debit that happened BECAUSE of a mandate is a normal transaction (is_transaction=true, is_mandate=false).
+
 CRITICAL RULES — READ CAREFULLY:
 1. ONLY mark as a transaction if there is a CONFIRMED cash inflow or outflow from a bank account, wallet, or UPI.
 2. Set is_transaction to FALSE for ALL of the following:
@@ -4775,6 +5044,14 @@ Respond ONLY with valid JSON (no markdown, no explanation):
   "payment_method": "upi" | "credit_card" | "debit_card" | "net_banking" | "cash" | "wallet" | "cheque" | "neft" | "rtgs" | "imps" | "other" | null,
   "is_recurring": true/false,
   "recurring_frequency": "monthly" | "weekly" | "yearly" | null,
+  "is_mandate": true/false,
+  "mandate_type": "nach" | "enach" | "upi_autopay" | "ecs" | "sip" | "standing_instruction" | "credit_card_autopay" | "other" | null,
+  "mandate_merchant": "payee / merchant name the mandate is for (e.g. 'HDFC Home Loan', 'Netflix', 'ICICI Prudential SIP')" or null,
+  "mandate_amount": number or null,
+  "mandate_frequency": "monthly" | "weekly" | "yearly" | "quarterly" | null,
+  "mandate_start_date": "YYYY-MM-DD (first debit date, or mandate activation date)" or null,
+  "mandate_end_date": "YYYY-MM-DD (expiry, if stated)" or null,
+  "mandate_debit_day": integer 1-31 if a specific day of the month is mentioned, else null,
   "confidence": "high" | "medium" | "low",
   "reason": "brief reason for classification"
 }}"""
