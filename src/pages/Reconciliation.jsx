@@ -53,7 +53,13 @@ function ProcessingBar({ stmt, now }) {
         marginTop: 4, fontSize: 10.5, color: 'var(--text-muted)',
         letterSpacing: '0.02em'
       }}>
-        <span>{label} · {progress}%</span>
+        <span>
+          {label} · {progress}%
+          {typeof stmt.processing_chunks_total === 'number' && stmt.processing_chunks_total > 0
+            && stmt.processing_stage === 'ai_parsing' && (
+            <> · {stmt.processing_chunks_done || 0}/{stmt.processing_chunks_total} chunks</>
+          )}
+        </span>
         <span>
           {elapsedSec}s elapsed
           {etaSec != null && etaSec > 0 ? ` · ~${etaSec}s left` : ''}

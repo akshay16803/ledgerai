@@ -90,7 +90,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-client = AsyncIOMotorClient(MONGO_URL)
+client = AsyncIOMotorClient(MONGO_URL, tz_aware=True)
 db = client[DB_NAME]
 
 
@@ -2183,15 +2183,63 @@ async def unlock_statement(
 #   (stage_name, percent_complete_at_stage_start, rough_remaining_seconds_at_stage_start)
 # Used to drive the per-statement progress bar in the UI.
 PARSE_STAGES = {
-    "queued":          {"progress": 5,   "eta_seconds": 30, "label": "Queued"},
-    "decrypting":      {"progress": 15,  "eta_seconds": 25, "label": "Decrypting PDF"},
-    "extracting_text": {"progress": 35,  "eta_seconds": 20, "label": "Extracting text"},
-    "ai_parsing":      {"progress": 70,  "eta_seconds": 12, "label": "Reading transactions"},
-    "saving":          {"progress": 95,  "eta_seconds": 2,  "label": "Saving"},
+    "queued":          {"progress": 3,   "eta_seconds": 30, "label": "Queued"},
+    "decrypting":      {"progress": 8,   "eta_seconds": 25, "label": "Decrypting PDF"},
+    "extracting_text": {"progress": 20,  "eta_seconds": 20, "label": "Extracting text"},
+    # ai_parsing progress is driven by real chunk completion (see
+    # _set_chunk_progress); the value here is the floor we start at.
+    "ai_parsing":      {"progress": 30,  "eta_seconds": 60, "label": "Reading transactions"},
+    "auditing":        {"progress": 92,  "eta_seconds": 3,  "label": "Verifying completeness"},
+    "saving":          {"progress": 97,  "eta_seconds": 1,  "label": "Saving"},
     "parsed":          {"progress": 100, "eta_seconds": 0,  "label": "Done"},
     "parse_failed":    {"progress": 100, "eta_seconds": 0,  "label": "Failed"},
     "password_required": {"progress": 0, "eta_seconds": 0,  "label": "Password required"},
 }
+
+# The AI-parsing phase is what takes most of the wall-clock time, so we
+# spread real progress across this range and update it as each chunk
+# finishes. Stages before/after sit at the edges.
+_AI_PROGRESS_FLOOR = 30
+_AI_PROGRESS_CEIL = 90
+
+
+async def _set_chunk_progress(
+    statement_id: str,
+    chunks_done: int,
+    chunks_total: int,
+    phase_started_at: datetime,
+    extra_label: Optional[str] = None,
+):
+    """Update the statement row with real AI-parsing progress based on
+    how many chunks have actually completed. ETA is projected from the
+    observed average time per completed chunk."""
+    if chunks_total <= 0:
+        return
+    frac = max(0.0, min(1.0, chunks_done / chunks_total))
+    progress = int(_AI_PROGRESS_FLOOR + (_AI_PROGRESS_CEIL - _AI_PROGRESS_FLOOR) * frac)
+    now = datetime.now(timezone.utc)
+    elapsed = max(0.1, (now - phase_started_at).total_seconds())
+    if chunks_done > 0:
+        avg = elapsed / chunks_done
+        remaining = max(0, chunks_total - chunks_done)
+        eta = int(avg * remaining)
+    else:
+        eta = int(PARSE_STAGES["ai_parsing"]["eta_seconds"])
+    label = PARSE_STAGES["ai_parsing"]["label"]
+    if extra_label:
+        label = f"{label} ({extra_label})"
+    await db.statements.update_one(
+        {"statement_id": statement_id},
+        {"$set": {
+            "processing_stage": "ai_parsing",
+            "processing_stage_label": label,
+            "processing_progress": progress,
+            "processing_eta_seconds": eta,
+            "processing_updated_at": now,
+            "processing_chunks_done": chunks_done,
+            "processing_chunks_total": chunks_total,
+        }}
+    )
 
 
 async def _set_parse_stage(statement_id: str, stage: str, *, reset_start: bool = False):
@@ -2295,7 +2343,9 @@ async def parse_statement_background(statement_id: str, user_id: str, password: 
                 pdf_text_for_audit = pdf_text or ""
                 if pdf_text and len(pdf_text.strip()) >= 50:
                     await _set_parse_stage(statement_id, "ai_parsing")
-                    entries = await parse_statement_text_with_ai(pdf_text, stmt_type, user_id=user_id)
+                    entries = await parse_statement_text_with_ai(
+                        pdf_text, stmt_type, user_id=user_id, statement_id=statement_id,
+                    )
                 else:
                     entries = []
             else:
@@ -2303,6 +2353,7 @@ async def parse_statement_background(statement_id: str, user_id: str, password: 
 
             # ─── Audit + auto-correct + stamp account/category fields ───
             if entries:
+                await _set_parse_stage(statement_id, "auditing")
                 # Stamp account / statement / category metadata on every entry.
                 entries = await _stamp_entries_with_account(entries, stmt, user_id)
 
@@ -3160,13 +3211,21 @@ async def _build_category_hint(user_id: Optional[str]) -> str:
     )
 
 
-async def parse_statement_text_with_ai(text: str, statement_type: str, user_id: Optional[str] = None) -> list:
+async def parse_statement_text_with_ai(
+    text: str,
+    statement_type: str,
+    user_id: Optional[str] = None,
+    statement_id: Optional[str] = None,
+) -> list:
     """Parse statement text using the AI in overlapping chunks so nothing is
     truncated, then deterministically post-process the merged entries to
     correct income/expense flips and dedupe overlap-induced duplicates.
 
     user_id, if provided, is used to fetch the user's category list so the
-    AI can populate category/subcategory fields on every parsed entry."""
+    AI can populate category/subcategory fields on every parsed entry.
+    statement_id, if provided, is used to emit per-chunk progress updates
+    so the UI progress bar reflects actual work completed (not fixed
+    stage percentages)."""
     if not openai_client:
         logger.error("OpenAI not configured for statement parsing")
         return []
@@ -3174,16 +3233,30 @@ async def parse_statement_text_with_ai(text: str, statement_type: str, user_id: 
     category_hint = await _build_category_hint(user_id)
 
     chunks = _chunk_statement_text(text)
-    logger.info(f"AI parsing statement: {len(text)} chars in {len(chunks)} chunk(s) ({statement_type})")
+    total = len(chunks)
+    logger.info(f"AI parsing statement: {len(text)} chars in {total} chunk(s) ({statement_type})")
+
+    phase_started_at = datetime.now(timezone.utc)
+    # Initial 0/N update so the progress bar snaps to the floor immediately.
+    if statement_id and total > 0:
+        await _set_chunk_progress(statement_id, 0, total, phase_started_at)
 
     # Run chunk calls concurrently — they are independent. Cap concurrency
     # so we don't blow through the OpenAI rate limit on very large
     # statements.
     sem = asyncio.Semaphore(6)
+    done_counter = {"n": 0}
 
     async def _guarded(idx, chunk):
         async with sem:
-            return await _ai_parse_chunk(chunk, statement_type, idx, len(chunks), category_hint)
+            result = await _ai_parse_chunk(chunk, statement_type, idx, total, category_hint)
+        done_counter["n"] += 1
+        if statement_id:
+            try:
+                await _set_chunk_progress(statement_id, done_counter["n"], total, phase_started_at)
+            except Exception as pe:
+                logger.debug(f"progress update skipped: {pe}")
+        return result
 
     results = await asyncio.gather(
         *[_guarded(i, c) for i, c in enumerate(chunks)]
