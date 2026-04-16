@@ -2475,7 +2475,11 @@ async def _set_chunk_progress(
 ):
     """Update the statement row with real AI-parsing progress based on
     how many chunks have actually completed. ETA is projected from the
-    observed average time per completed chunk."""
+    observed average time per completed chunk.
+
+    processing_progress is written with ``$max`` so it is monotonic: a
+    corrective re-pass over a partially parsed statement will never cause
+    the UI bar to jump backwards."""
     if chunks_total <= 0:
         return
     frac = max(0.0, min(1.0, chunks_done / chunks_total))
@@ -2493,43 +2497,54 @@ async def _set_chunk_progress(
         label = f"{label} ({extra_label})"
     await db.statements.update_one(
         {"statement_id": statement_id},
-        {"$set": {
-            "processing_stage": "ai_parsing",
-            "processing_stage_label": label,
-            "processing_progress": progress,
-            "processing_eta_seconds": eta,
-            "processing_updated_at": now,
-            "processing_chunks_done": chunks_done,
-            "processing_chunks_total": chunks_total,
-        }}
+        {
+            "$set": {
+                "processing_stage": "ai_parsing",
+                "processing_stage_label": label,
+                "processing_eta_seconds": eta,
+                "processing_updated_at": now,
+                "processing_chunks_done": chunks_done,
+                "processing_chunks_total": chunks_total,
+            },
+            "$max": {"processing_progress": progress},
+        },
     )
 
 
 async def _set_parse_stage(statement_id: str, stage: str, *, reset_start: bool = False):
     """Write the current parsing stage + progress to the statement doc so the
-    UI can render a live progress bar. Call at every stage transition."""
+    UI can render a live progress bar. Call at every stage transition.
+
+    ``processing_progress`` is written with ``$max`` by default so it never
+    regresses mid-parse (e.g. a post-audit correction pass re-entering the
+    "ai_parsing" stage won't drop the bar back to the stage floor of 30%).
+    When ``reset_start=True`` (a fresh parse run), progress is force-set so
+    a retry correctly starts the bar from the beginning."""
     info = PARSE_STAGES.get(stage, {"progress": 0, "eta_seconds": 0, "label": stage})
     now = datetime.now(timezone.utc)
     set_fields = {
         "processing_stage": stage,
         "processing_stage_label": info["label"],
-        "processing_progress": info["progress"],
         "processing_eta_seconds": info["eta_seconds"],
         "processing_updated_at": now,
     }
-    update: dict = {"$set": set_fields}
     if reset_start:
+        # Fresh run — force progress to the stage floor, reset timers and
+        # chunk counters so a retry starts truly from scratch.
+        set_fields["processing_progress"] = info["progress"]
         set_fields["processing_started_at"] = now
+        set_fields["processing_chunks_done"] = 0
+        set_fields["processing_chunks_total"] = 0
+        update: dict = {"$set": set_fields}
     else:
         # Only set started_at if it doesn't already exist.
-        update["$setOnInsert"] = {}
-        # Use a separate update to avoid overwriting an existing started_at.
         existing = await db.statements.find_one(
             {"statement_id": statement_id}, {"processing_started_at": 1, "_id": 0}
         )
         if not existing or not existing.get("processing_started_at"):
             set_fields["processing_started_at"] = now
-        update = {"$set": set_fields}
+        # Monotonic: never let progress drop mid-parse.
+        update = {"$set": set_fields, "$max": {"processing_progress": info["progress"]}}
     await db.statements.update_one({"statement_id": statement_id}, update)
 
 

@@ -19,25 +19,19 @@ const thStyle = {
   color: 'var(--text-muted)'
 };
 const tdStyle = { padding: '10px 16px' };
+// Tighter variants used on the Uploaded Statements table so the whole
+// page (header + upload + history) fits in a single viewport.
+const thStyleCompact = { ...thStyle, padding: '8px 12px', fontSize: 10.5 };
+const tdStyleCompact = { padding: '8px 12px' };
 
-function ProcessingBar({ stmt, now }) {
+function ProcessingBar({ stmt }) {
+  // Simple, honest progress read-out: just a bar, a stage label, and a
+  // percentage. No elapsed / ETA / chunk-count noise — those distracted
+  // from what the user actually wants to know (how close is this to done).
   const progress = Math.max(0, Math.min(100, stmt.processing_progress || 5));
   const label = stmt.processing_stage_label || 'Queued';
-  const startedAt = stmt.processing_started_at
-    ? new Date(stmt.processing_started_at).getTime()
-    : null;
-  const elapsedSec = startedAt ? Math.max(0, Math.round((now - startedAt) / 1000)) : 0;
-  const etaRaw = typeof stmt.processing_eta_seconds === 'number' ? stmt.processing_eta_seconds : null;
-  // ETA shown = server-reported remaining-for-current-stage minus time spent
-  // in this stage, floored at a small positive number so it keeps moving.
-  const updatedAt = stmt.processing_updated_at
-    ? new Date(stmt.processing_updated_at).getTime()
-    : (startedAt || now);
-  const sinceStage = Math.max(0, Math.round((now - updatedAt) / 1000));
-  const etaSec = etaRaw != null ? Math.max(1, etaRaw - sinceStage) : null;
-
   return (
-    <div style={{ marginTop: 6, minWidth: 160 }}>
+    <div style={{ marginTop: 6, minWidth: 140 }}>
       <div style={{
         height: 4, borderRadius: 2, background: 'var(--bg-secondary)',
         overflow: 'hidden', position: 'relative'
@@ -49,21 +43,10 @@ function ProcessingBar({ stmt, now }) {
         }} />
       </div>
       <div className="mono" style={{
-        display: 'flex', justifyContent: 'space-between', gap: 8,
         marginTop: 4, fontSize: 10.5, color: 'var(--text-muted)',
-        letterSpacing: '0.02em'
+        letterSpacing: '0.02em', whiteSpace: 'nowrap',
       }}>
-        <span>
-          {label} · {progress}%
-          {typeof stmt.processing_chunks_total === 'number' && stmt.processing_chunks_total > 0
-            && stmt.processing_stage === 'ai_parsing' && (
-            <> · {stmt.processing_chunks_done || 0}/{stmt.processing_chunks_total} chunks</>
-          )}
-        </span>
-        <span>
-          {elapsedSec}s elapsed
-          {etaSec != null && etaSec > 0 ? ` · ~${etaSec}s left` : ''}
-        </span>
+        {label} · {progress}%
       </div>
     </div>
   );
@@ -350,13 +333,11 @@ export default function Reconciliation() {
 
   return (
     <div data-testid="reconciliation-page">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 32 }}>
-        <div>
-          <h1 style={{ fontSize: 28, fontWeight: 500, letterSpacing: '-0.02em' }}>Statement Reconciliation</h1>
-          <p className="mono" style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
-            Upload bank or credit card statements to detect missing entries, duplicates, and conflicts
-          </p>
-        </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 16, gap: 16, flexWrap: 'wrap' }}>
+        <h1 style={{ fontSize: 22, fontWeight: 500, letterSpacing: '-0.02em' }}>Statement Reconciliation</h1>
+        <p className="mono" style={{ fontSize: 11.5, color: 'var(--text-muted)', margin: 0 }}>
+          Upload bank or credit card statements to detect missing entries, duplicates, and conflicts
+        </p>
       </div>
 
       {error && (
@@ -372,31 +353,35 @@ export default function Reconciliation() {
         </div>
       )}
 
-      {/* Upload Section */}
+      {/* Upload Section — compact single-strip layout so the entire page
+          fits in one viewport without scrolling. */}
       <div data-testid="upload-section" style={{
         background: '#fff', border: '1px solid var(--border-subtle)', borderRadius: 2,
-        padding: '24px', marginBottom: 24
+        padding: '14px 16px', marginBottom: 16
       }}>
-        <h3 style={{ fontSize: 15, fontWeight: 600, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
-          <Upload size={18} weight="duotone" style={{ color: 'var(--accent-1)' }} /> Upload Statement
-        </h3>
-        <div style={{ display: 'flex', gap: 16, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          <h3 style={{
+            fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6,
+            marginRight: 4, paddingBottom: 6,
+          }}>
+            <Upload size={15} weight="duotone" style={{ color: 'var(--accent-1)' }} /> Upload
+          </h3>
           <div>
-            <label className="mono" style={{ fontSize: 11, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Sub-type</label>
+            <label className="mono" style={{ fontSize: 10.5, color: 'var(--text-muted)', display: 'block', marginBottom: 3 }}>Sub-type</label>
             <select data-testid="subtype-select" value={selectedSubType}
               onChange={e => setSelectedSubType(e.target.value)}
-              style={{ padding: '8px 14px', border: '1px solid var(--border-strong)', borderRadius: 2, fontSize: 13, fontFamily: 'var(--font-body)', minWidth: 160 }}>
+              style={{ padding: '6px 10px', border: '1px solid var(--border-strong)', borderRadius: 2, fontSize: 12.5, fontFamily: 'var(--font-body)', minWidth: 130 }}>
               {SUB_TYPE_OPTIONS.map(o => (
                 <option key={o.value} value={o.value}>{o.label}</option>
               ))}
             </select>
           </div>
           <div>
-            <label className="mono" style={{ fontSize: 11, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Account</label>
+            <label className="mono" style={{ fontSize: 10.5, color: 'var(--text-muted)', display: 'block', marginBottom: 3 }}>Account</label>
             <select data-testid="account-select" value={selectedAccountId}
               onChange={e => setSelectedAccountId(e.target.value)}
               disabled={filteredAccounts.length === 0}
-              style={{ padding: '8px 14px', border: '1px solid var(--border-strong)', borderRadius: 2, fontSize: 13, fontFamily: 'var(--font-body)', minWidth: 220 }}>
+              style={{ padding: '6px 10px', border: '1px solid var(--border-strong)', borderRadius: 2, fontSize: 12.5, fontFamily: 'var(--font-body)', minWidth: 180 }}>
               {filteredAccounts.length === 0 && (
                 <option value="">No {SUB_TYPE_OPTIONS.find(o => o.value === selectedSubType)?.label.toLowerCase()} accounts</option>
               )}
@@ -406,58 +391,59 @@ export default function Reconciliation() {
             </select>
           </div>
           <div>
-            <label className="mono" style={{ fontSize: 11, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Period From</label>
+            <label className="mono" style={{ fontSize: 10.5, color: 'var(--text-muted)', display: 'block', marginBottom: 3 }}>Period From</label>
             <input data-testid="period-from" type="date" value={periodFrom}
               onChange={e => setPeriodFrom(e.target.value)} max={periodTo}
-              style={{ padding: '8px 14px', border: '1px solid var(--border-strong)', borderRadius: 2, fontSize: 13, fontFamily: 'var(--font-body)', background: '#fff' }} />
+              style={{ padding: '6px 10px', border: '1px solid var(--border-strong)', borderRadius: 2, fontSize: 12.5, fontFamily: 'var(--font-body)', background: '#fff' }} />
           </div>
           <div>
-            <label className="mono" style={{ fontSize: 11, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Period To</label>
+            <label className="mono" style={{ fontSize: 10.5, color: 'var(--text-muted)', display: 'block', marginBottom: 3 }}>Period To</label>
             <input data-testid="period-to" type="date" value={periodTo}
               onChange={e => setPeriodTo(e.target.value)} min={periodFrom}
-              style={{ padding: '8px 14px', border: '1px solid var(--border-strong)', borderRadius: 2, fontSize: 13, fontFamily: 'var(--font-body)', background: '#fff' }} />
+              style={{ padding: '6px 10px', border: '1px solid var(--border-strong)', borderRadius: 2, fontSize: 12.5, fontFamily: 'var(--font-body)', background: '#fff' }} />
           </div>
           <div>
-            <label className="mono" style={{ fontSize: 11, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>File (CSV or PDF)</label>
+            <label className="mono" style={{ fontSize: 10.5, color: 'var(--text-muted)', display: 'block', marginBottom: 3 }}>File (CSV or PDF)</label>
             <input data-testid="file-input" type="file" accept=".csv,.pdf"
               onChange={handleUpload}
               disabled={uploading || filteredAccounts.length === 0 || !selectedAccountId || !periodFrom || !periodTo}
-              style={{ padding: '6px', border: '1px solid var(--border-strong)', borderRadius: 2, fontSize: 13, fontFamily: 'var(--font-body)' }} />
+              style={{ padding: '4px', border: '1px solid var(--border-strong)', borderRadius: 2, fontSize: 12.5, fontFamily: 'var(--font-body)' }} />
           </div>
           {uploading && (
-            <span className="mono" style={{ fontSize: 12, color: 'var(--info)', display: 'flex', alignItems: 'center', gap: 4 }}>
-              <ArrowClockwise size={14} className="spin" /> Uploading & parsing...
+            <span className="mono" style={{ fontSize: 11.5, color: 'var(--info)', display: 'flex', alignItems: 'center', gap: 4, paddingBottom: 6 }}>
+              <ArrowClockwise size={13} className="spin" /> Uploading & parsing...
             </span>
           )}
         </div>
       </div>
 
-      {/* Statement History */}
+      {/* Statement History — compact header + tighter rows to keep
+          the whole page in one viewport. */}
       {statements.length > 0 && (
         <div data-testid="statement-history" style={{
           background: '#fff', border: '1px solid var(--border-subtle)', borderRadius: 2,
-          overflowX: 'auto', marginBottom: 24
+          overflowX: 'auto', marginBottom: 16
         }}>
-          <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-secondary)' }}>
-            <h3 style={{ fontSize: 15, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
-              <FileText size={18} weight="duotone" style={{ color: 'var(--text-secondary)' }} />
+          <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-secondary)' }}>
+            <h3 style={{ fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <FileText size={15} weight="duotone" style={{ color: 'var(--text-secondary)' }} />
               Uploaded Statements
-              <span className="mono" style={{ fontSize: 12, padding: '2px 6px', background: 'var(--bg-primary)', borderRadius: 2, color: 'var(--text-muted)' }}>
+              <span className="mono" style={{ fontSize: 11, padding: '1px 6px', background: 'var(--bg-primary)', borderRadius: 2, color: 'var(--text-muted)' }}>
                 {statements.length}
               </span>
             </h3>
           </div>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 650 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5, minWidth: 650 }}>
             <thead>
               <tr style={{ borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-secondary)' }}>
-                <th style={thStyle}>File</th>
-                <th style={thStyle}>Account</th>
-                <th style={thStyle}>Type</th>
-                <th style={thStyle}>Entries</th>
-                <th style={thStyle}>Period</th>
-                <th style={thStyle}>Status</th>
-                <th style={thStyle}>Uploaded</th>
-                <th style={{ ...thStyle, textAlign: 'center' }}>Actions</th>
+                <th style={thStyleCompact}>File</th>
+                <th style={thStyleCompact}>Account</th>
+                <th style={thStyleCompact}>Type</th>
+                <th style={thStyleCompact}>Entries</th>
+                <th style={thStyleCompact}>Period</th>
+                <th style={thStyleCompact}>Status</th>
+                <th style={thStyleCompact}>Uploaded</th>
+                <th style={{ ...thStyleCompact, textAlign: 'center' }}>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -469,21 +455,21 @@ export default function Reconciliation() {
                       ? 'none' : '1px solid var(--border-subtle)',
                     background: activeStmt?.statement_id === stmt.statement_id ? 'rgba(194,109,92,0.05)' : '#fff'
                   }}>
-                  <td style={tdStyle}>
+                  <td style={tdStyleCompact}>
                     <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <FileText size={16} weight="duotone" style={{ color: stmt.file_ext === 'pdf' ? '#E53E3E' : '#38A169' }} />
+                      <FileText size={14} weight="duotone" style={{ color: stmt.file_ext === 'pdf' ? '#E53E3E' : '#38A169' }} />
                       {stmt.filename}
                     </span>
                   </td>
-                  <td style={tdStyle}>{stmt.account_name || getAccountName(stmt.account_id)}</td>
-                  <td style={tdStyle}>{stmt.statement_type === 'credit_card' ? 'Credit Card' : 'Bank'}</td>
-                  <td className="mono" style={tdStyle}>{stmt.entry_count ?? '—'}</td>
-                  <td className="mono" style={{ ...tdStyle, fontSize: 12, whiteSpace: 'nowrap' }}>
+                  <td style={tdStyleCompact}>{stmt.account_name || getAccountName(stmt.account_id)}</td>
+                  <td style={tdStyleCompact}>{stmt.statement_type === 'credit_card' ? 'Credit Card' : 'Bank'}</td>
+                  <td className="mono" style={tdStyleCompact}>{stmt.entry_count ?? '—'}</td>
+                  <td className="mono" style={{ ...tdStyleCompact, fontSize: 11.5, whiteSpace: 'nowrap' }}>
                     {stmt.period_from && stmt.period_to
                       ? `${stmt.period_from} → ${stmt.period_to}`
                       : '—'}
                   </td>
-                  <td style={tdStyle}>
+                  <td style={tdStyleCompact}>
                     <StatusBadge status={stmt.status} />
                     {stmt.status === 'parsing' && (() => {
                       const updatedAt = stmt.processing_updated_at ? new Date(stmt.processing_updated_at).getTime() : 0;
@@ -491,13 +477,13 @@ export default function Reconciliation() {
                       const looksStuck = updatedAt && idleSec > 180; // 3 minutes of no backend heartbeat
                       return (
                         <>
-                          <ProcessingBar stmt={stmt} now={nowTick} />
+                          <ProcessingBar stmt={stmt} />
                           {looksStuck && (
                             <div data-testid={`stmt-stuck-${stmt.statement_id}`} style={{
-                              marginTop: 8, padding: '8px 10px',
+                              marginTop: 6, padding: '6px 8px',
                               background: 'rgba(194,140,60,0.08)', border: '1px solid rgba(194,140,60,0.3)',
-                              borderRadius: 2, fontSize: 11, color: 'var(--text-secondary)',
-                              display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+                              borderRadius: 2, fontSize: 10.5, color: 'var(--text-secondary)',
+                              display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap',
                             }}>
                               <span style={{ fontWeight: 600, color: 'var(--warning)' }}>Looks stuck</span>
                               <span className="mono" style={{ color: 'var(--text-muted)' }}>
@@ -524,32 +510,32 @@ export default function Reconciliation() {
                       );
                     })()}
                   </td>
-                  <td className="mono" style={{ ...tdStyle, fontSize: 12 }}>
+                  <td className="mono" style={{ ...tdStyleCompact, fontSize: 11.5 }}>
                     {stmt.uploaded_at ? new Date(stmt.uploaded_at).toLocaleDateString() : ''}
                   </td>
-                  <td style={{ ...tdStyle, textAlign: 'center' }}>
+                  <td style={{ ...tdStyleCompact, textAlign: 'center' }}>
                     <div style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
                       {stmt.status !== 'password_required' && (
                         <button data-testid={`view-stmt-${stmt.statement_id}`}
                           onClick={() => handleViewStatement(stmt.statement_id)}
                           style={{
                             background: 'var(--brand-primary)', color: '#fff', border: 'none',
-                            borderRadius: 2, padding: '5px 12px', cursor: 'pointer', fontSize: 11,
+                            borderRadius: 2, padding: '4px 10px', cursor: 'pointer', fontSize: 10.5,
                             fontWeight: 600, fontFamily: 'var(--font-body)',
                             display: 'flex', alignItems: 'center', gap: 3
                           }}>
-                          <Eye size={12} weight="bold" /> View
+                          <Eye size={11} weight="bold" /> View
                         </button>
                       )}
                       <button data-testid={`delete-stmt-${stmt.statement_id}`}
                         onClick={() => handleDelete(stmt.statement_id)}
                         style={{
                           background: 'none', border: '1px solid var(--error)', color: 'var(--error)',
-                          borderRadius: 2, padding: '5px 12px', cursor: 'pointer', fontSize: 11,
+                          borderRadius: 2, padding: '4px 10px', cursor: 'pointer', fontSize: 10.5,
                           fontWeight: 600, fontFamily: 'var(--font-body)',
                           display: 'flex', alignItems: 'center', gap: 3
                         }}>
-                        <Trash size={12} weight="bold" /> Delete
+                        <Trash size={11} weight="bold" /> Delete
                       </button>
                     </div>
                   </td>
