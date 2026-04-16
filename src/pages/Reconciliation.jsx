@@ -474,7 +474,11 @@ export default function Reconciliation() {
                     {stmt.status === 'parsing' && (() => {
                       const updatedAt = stmt.processing_updated_at ? new Date(stmt.processing_updated_at).getTime() : 0;
                       const idleSec = updatedAt ? Math.max(0, (nowTick - updatedAt) / 1000) : 0;
-                      const looksStuck = updatedAt && idleSec > 180; // 3 minutes of no backend heartbeat
+                      // Only flag as stuck once we're past the backend watchdog
+                      // threshold (8 min). A single OpenAI chunk call can
+                      // legitimately take up to 4 min on large PDFs, so anything
+                      // shorter produces false positives during normal parsing.
+                      const looksStuck = updatedAt && idleSec > 8 * 60;
                       return (
                         <>
                           <ProcessingBar stmt={stmt} />
