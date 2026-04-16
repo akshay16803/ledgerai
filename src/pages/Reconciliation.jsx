@@ -112,6 +112,8 @@ export default function Reconciliation() {
     { value: 'credit_card', label: 'Credit Card', statementType: 'credit_card' },
     { value: 'wallet', label: 'Wallet', statementType: 'bank' },
     { value: 'cash', label: 'Cash', statementType: 'bank' },
+    { value: 'loan', label: 'Loan', statementType: 'loan' },
+    { value: 'mortgage', label: 'Mortgage', statementType: 'loan' },
   ];
 
   const filteredAccounts = accounts.filter(a => (a.sub_type || '').toLowerCase() === selectedSubType);
@@ -543,6 +545,31 @@ export default function Reconciliation() {
                     <> · {activeStmt.raw_text_chars.toLocaleString()} chars read</>
                   )}
                 </span>
+                {activeStmt.audit_status && activeStmt.audit_status !== 'skipped' && (
+                  <div style={{ marginTop: 4 }}>
+                    <span
+                      title={
+                        (activeStmt.audit_issues && activeStmt.audit_issues.length)
+                          ? activeStmt.audit_issues.join('\n')
+                          : `Parsed ${activeStmt.audit_parsed_count ?? '—'} of ~${activeStmt.audit_expected_count ?? '—'} detected rows`
+                      }
+                      style={{
+                        display: 'inline-block',
+                        padding: '2px 8px', borderRadius: 2, fontSize: 10.5, fontWeight: 600,
+                        textTransform: 'uppercase', letterSpacing: 0.3,
+                        color: activeStmt.audit_status === 'verified' || activeStmt.audit_status === 'corrected'
+                          ? 'var(--success)' : 'var(--warning, #8a6a1f)',
+                        background: activeStmt.audit_status === 'verified' || activeStmt.audit_status === 'corrected'
+                          ? 'rgba(58,92,74,0.1)' : 'rgba(200,150,40,0.12)',
+                      }}
+                    >
+                      {activeStmt.audit_status === 'verified' && '✓ Audit verified'}
+                      {activeStmt.audit_status === 'corrected' && '✓ Auto-corrected'}
+                      {activeStmt.audit_status === 'corrected_with_warnings' && `⚠ Corrected · ${activeStmt.audit_issues?.length || 0} issue(s)`}
+                      {activeStmt.audit_status === 'issues_found' && `⚠ ${activeStmt.audit_issues?.length || 0} audit issue(s)`}
+                    </span>
+                  </div>
+                )}
               </div>
               {activeStmt.status === 'parsed' && (
                 <button data-testid="reconcile-btn" data-guard onClick={handleReconcile} disabled={reconciling}
@@ -565,6 +592,8 @@ export default function Reconciliation() {
                     <th style={thStyle}>Date</th>
                     <th style={thStyle}>Type</th>
                     <th style={thStyle}>Description</th>
+                    <th style={thStyle}>Category</th>
+                    <th style={thStyle}>Subcategory</th>
                     <th style={{ ...thStyle, textAlign: 'right' }}>Amount</th>
                     <th style={{ ...thStyle, textAlign: 'right' }}>Balance</th>
                   </tr>
@@ -581,6 +610,12 @@ export default function Reconciliation() {
                         }}>{e.transaction_type}</span>
                       </td>
                       <td style={tdStyle}>{e.description || '—'}</td>
+                      <td style={{ ...tdStyle, color: e.category_name ? 'var(--text-primary)' : 'var(--text-muted)' }}>
+                        {e.category_name || '—'}
+                      </td>
+                      <td style={{ ...tdStyle, color: e.subcategory_name ? 'var(--text-primary)' : 'var(--text-muted)' }}>
+                        {e.subcategory_name || '—'}
+                      </td>
                       <td className="mono" style={{
                         ...tdStyle, textAlign: 'right', fontWeight: 600,
                         color: e.transaction_type === 'income' ? 'var(--success)' : 'var(--error)'

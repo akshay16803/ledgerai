@@ -2168,6 +2168,9 @@ async def parse_statement_background(statement_id: str, user_id: str, password: 
 
         stmt_type = stmt.get("statement_type", "bank")
         raw_text_chars = 0
+        pdf_text_for_audit = ""
+        audit_result: Optional[dict] = None
+        audit_status = "skipped"
         try:
             if ext == "csv":
                 await _set_parse_stage(statement_id, "extracting_text")
@@ -2189,13 +2192,51 @@ async def parse_statement_background(statement_id: str, user_id: str, password: 
                 await _set_parse_stage(statement_id, "extracting_text")
                 pdf_text = extract_pdf_text(file_path, password=effective_password)
                 raw_text_chars = len(pdf_text or "")
+                pdf_text_for_audit = pdf_text or ""
                 if pdf_text and len(pdf_text.strip()) >= 50:
                     await _set_parse_stage(statement_id, "ai_parsing")
-                    entries = await parse_statement_text_with_ai(pdf_text, stmt_type)
+                    entries = await parse_statement_text_with_ai(pdf_text, stmt_type, user_id=user_id)
                 else:
                     entries = []
             else:
                 entries = []
+
+            # ─── Audit + auto-correct + stamp account/category fields ───
+            if entries:
+                # Stamp account / statement / category metadata on every entry.
+                entries = await _stamp_entries_with_account(entries, stmt, user_id)
+
+                # Only run the completeness/balance audit when we have the
+                # original text (PDF path). CSV rows are already row-exact.
+                if pdf_text_for_audit:
+                    audit_result = _audit_parsed_entries(pdf_text_for_audit, entries, stmt_type)
+                    if not audit_result["ok"]:
+                        logger.info(
+                            f"Audit found {len(audit_result['issues'])} issue(s) on "
+                            f"{statement_id}; running corrective AI pass."
+                        )
+                        await _set_parse_stage(statement_id, "ai_parsing")
+                        category_hint = await _build_category_hint(user_id)
+                        corrected_raw = await _ai_correction_pass(
+                            pdf_text_for_audit, entries,
+                            audit_result["issues"], stmt_type, category_hint,
+                        )
+                        if corrected_raw:
+                            corrected = _post_process_entries(corrected_raw, stmt_type)
+                            corrected = await _stamp_entries_with_account(corrected, stmt, user_id)
+                            # Re-audit after correction.
+                            re_audit = _audit_parsed_entries(pdf_text_for_audit, corrected, stmt_type)
+                            # Keep the corrected list even if still not perfect —
+                            # it will at minimum be closer to complete.
+                            entries = corrected
+                            audit_result = re_audit
+                            audit_status = "corrected" if re_audit["ok"] else "corrected_with_warnings"
+                        else:
+                            audit_status = "issues_found"
+                    else:
+                        audit_status = "verified"
+                else:
+                    audit_status = "verified"
         except PdfPasswordRequired as e:
             # Encrypted PDF and we have no working password. Persist distinct status.
             logger.info(f"Statement {statement_id} requires a PDF password")
@@ -2238,6 +2279,11 @@ async def parse_statement_background(statement_id: str, user_id: str, password: 
                 "processing_progress": final_info["progress"],
                 "processing_eta_seconds": 0,
                 "processing_updated_at": datetime.now(timezone.utc),
+                "audit_status": audit_status,
+                "audit_issues": (audit_result or {}).get("issues", []),
+                "audit_expected_count": (audit_result or {}).get("expected_count", 0),
+                "audit_parsed_count": (audit_result or {}).get("parsed_count", len(entries)),
+                "audit_balance_mismatch": (audit_result or {}).get("balance_delta_mismatch"),
             }}
         )
         logger.info(f"Parsed {len(entries)} entries from statement {statement_id}")
@@ -2492,13 +2538,15 @@ def extract_pdf_text(file_path: str, password: Optional[str] = None) -> str:
     return joined
 
 
-async def parse_pdf_statement(file_path: str, password: Optional[str] = None, statement_type: str = "bank") -> list:
+async def parse_pdf_statement(file_path: str, password: Optional[str] = None,
+                              statement_type: str = "bank",
+                              user_id: Optional[str] = None) -> list:
     """Parse a PDF statement. Propagates PdfPasswordRequired if encrypted and
     the supplied password is missing or incorrect."""
     text = extract_pdf_text(file_path, password=password)
     if not text or len(text.strip()) < 50:
         return []
-    return await parse_statement_text_with_ai(text, statement_type)
+    return await parse_statement_text_with_ai(text, statement_type, user_id=user_id)
 
 
 # Strong income/expense hint keywords — used to override an obviously-wrong
@@ -2621,6 +2669,8 @@ def _post_process_entries(entries: list, statement_type: str) -> list:
             "amount": amount,
             "transaction_type": final_type,
             "balance": balance,
+            "category_name": (e.get("category_name") or "").strip() or None,
+            "subcategory_name": (e.get("subcategory_name") or "").strip() or None,
         })
 
     # Sort by date for predictable display
@@ -2651,14 +2701,21 @@ def _chunk_statement_text(text: str, chunk_chars: int = 4500, overlap: int = 800
     return chunks
 
 
-async def _ai_parse_chunk(chunk: str, statement_type: str, chunk_idx: int, chunk_total: int) -> list:
-    """Send a single chunk to the AI and return the raw entry list."""
+async def _ai_parse_chunk(chunk: str, statement_type: str, chunk_idx: int, chunk_total: int,
+                          category_hint: str = "") -> list:
+    """Send a single chunk to the AI and return the raw entry list.
+
+    category_hint: a pre-formatted string of the user's available income and
+    expense categories with their subcategories. If provided, the model is
+    asked to classify each transaction into one of these categories so we
+    get category/subcategory fields on every entry for free."""
     is_credit_card = (statement_type == "credit_card")
 
     # Conventions are spelled out explicitly because Indian bank statements
     # use a mix of (a) Dr/Cr suffix on the amount, (b) separate Withdrawal/
     # Deposit columns, and (c) inline narration markers. Credit-card
     # statements invert "credit"/"debit" relative to the cardholder's POV.
+    is_loan = (statement_type == "loan")
     if is_credit_card:
         type_rules = """This is a CREDIT CARD statement.
 - "transaction_type": "expense" for purchases, charges, fees, EMIs, cash advances, interest charged.
@@ -2666,6 +2723,13 @@ async def _ai_parse_chunk(chunk: str, statement_type: str, chunk_idx: int, chunk
 - The card statement may show charges as positive and payments as negative, or use "Dr"/"Cr" suffixes — read each row in context.
 - Words like "PAYMENT RECEIVED", "PAYMENT - THANK YOU", "REFUND", "REVERSAL", "CASHBACK" mean income.
 - Everything else (purchases at merchants, ATM cash, fees, GST, interest) is expense."""
+    elif is_loan:
+        type_rules = """This is a LOAN / MORTGAGE statement.
+- "transaction_type": "expense" for EMI payments, interest charged/accrued, principal portion of EMI, processing fees, late payment charges, prepayment penalties, and any charges debited to the loan account.
+- "transaction_type": "income" ONLY for disbursements (lender releasing loan amount), loan top-ups, and refunds/reversals of charges.
+- A typical loan statement shows EMI rows broken into Principal + Interest — treat each line item separately if listed separately.
+- Words like "EMI", "INTEREST CHARGED", "INT DR", "PRINCIPAL", "PROCESSING FEE", "LATE FEE", "FORECLOSURE" mean expense.
+- Words like "DISBURSEMENT", "DISBURSAL", "LOAN TOP-UP", "REFUND" mean income."""
     else:
         type_rules = """This is a BANK statement (savings / current).
 - "transaction_type": "income" for credits, deposits, salary, refunds, interest credited, money received via NEFT/IMPS/UPI/RTGS.
@@ -2688,7 +2752,7 @@ elements.
 
 Return STRICT JSON with this exact shape:
 {{"transactions": [
-  {{"date":"YYYY-MM-DD","description":"...","amount":1234.56,"transaction_type":"income","balance":98765.43,"raw_amount":"1,234.56 Cr"}},
+  {{"date":"YYYY-MM-DD","description":"...","amount":1234.56,"transaction_type":"income","balance":98765.43,"raw_amount":"1,234.56 Cr","category_name":"Food & Dining","subcategory_name":"Restaurants"}},
   ...
 ]}}
 
@@ -2698,6 +2762,9 @@ Field rules:
 - "transaction_type": "income" or "expense" — apply the rules above strictly.
 - "balance": the running balance after the transaction, or null if not shown.
 - "raw_amount": the amount text exactly as it appears in the statement, including any Dr/Cr suffix, parentheses, or sign. This is REQUIRED so we can verify your classification.
+- "category_name" and "subcategory_name": MUST be chosen from the user's category list below. If nothing fits well, use "Other Income" or "Other Expenses" as category_name and leave subcategory_name as null. Do NOT invent categories.
+
+{category_hint}
 
 Skip only: headers, column names, page numbers, separator lines, summary
 totals, and opening/closing balance lines that are not dated
@@ -2737,13 +2804,274 @@ STATEMENT CHUNK:
         return []
 
 
-async def parse_statement_text_with_ai(text: str, statement_type: str) -> list:
+async def _stamp_entries_with_account(entries: list, stmt: dict, user_id: str) -> list:
+    """Stamp every parsed entry with deterministic fields copied from the
+    statement doc, and resolve the AI-suggested category_name /
+    subcategory_name into category_id / subcategory_id from the user's
+    actual category list. Fields that can't be resolved stay as None.
+
+    Fields stamped on every entry:
+      - account_id, account_name, account_sub_type: from stmt / account
+      - statement_type: from stmt
+      - statement_id: link back to the source statement
+      - category_id, subcategory_id: resolved from category_name/subcategory_name
+    """
+    if not entries:
+        return entries
+
+    account_id = stmt.get("account_id")
+    account_name = stmt.get("account_name", "")
+    account_sub_type = stmt.get("account_sub_type")
+    statement_type = stmt.get("statement_type", "bank")
+    statement_id = stmt.get("statement_id")
+
+    # Build a name -> id map from the user's categories for resolution.
+    try:
+        cats = await db.categories.find(
+            {"user_id": user_id}, {"_id": 0, "category_id": 1, "name": 1, "parent_id": 1}
+        ).to_list(1000)
+    except Exception:
+        cats = []
+    top_by_name = {c["name"].strip().lower(): c for c in cats if not c.get("parent_id")}
+    # Subcategory map: (parent_id, sub_name_lower) -> sub
+    sub_by_parent_and_name = {
+        (c.get("parent_id"), c["name"].strip().lower()): c
+        for c in cats if c.get("parent_id")
+    }
+
+    stamped = []
+    for e in entries:
+        cat_name = (e.get("category_name") or "").strip()
+        sub_name = (e.get("subcategory_name") or "").strip()
+        cat_id = None
+        sub_id = None
+        if cat_name:
+            top = top_by_name.get(cat_name.lower())
+            if top:
+                cat_id = top["category_id"]
+                if sub_name:
+                    sub = sub_by_parent_and_name.get((cat_id, sub_name.lower()))
+                    if sub:
+                        sub_id = sub["category_id"]
+
+        stamped.append({
+            **e,
+            "account_id": account_id,
+            "account_name": account_name,
+            "account_sub_type": account_sub_type,
+            "statement_type": statement_type,
+            "statement_id": statement_id,
+            "category_id": cat_id,
+            "subcategory_id": sub_id,
+        })
+    return stamped
+
+
+# ─── Audit: verify the parse is complete and self-consistent ────────
+
+_DATE_LINE_PATTERNS = [
+    # DD-MM-YYYY, DD/MM/YYYY, DD.MM.YYYY at line start (with optional spaces)
+    re.compile(r'^\s*\d{1,2}[-/.]\d{1,2}[-/.](?:\d{2}|\d{4})\b'),
+    # DD-MMM-YYYY, DD MMM YYYY
+    re.compile(r'^\s*\d{1,2}[-\s](?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]{0,6}[-\s]\d{2,4}\b', re.IGNORECASE),
+    # YYYY-MM-DD
+    re.compile(r'^\s*\d{4}-\d{1,2}-\d{1,2}\b'),
+]
+
+
+def _count_dated_rows(text: str) -> int:
+    """Conservatively count lines that look like a dated transaction row.
+    Used as a lower-bound estimate for how many transactions SHOULD exist."""
+    if not text:
+        return 0
+    count = 0
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or len(line) < 8:
+            continue
+        if any(p.search(line) for p in _DATE_LINE_PATTERNS):
+            # Exclude obvious non-txn rows like "Statement Period: 01-Mar-2026"
+            lower = line.lower()
+            if any(x in lower for x in ("statement period", "period from", "period:", "generated on", "printed on", "date of issue")):
+                continue
+            count += 1
+    return count
+
+
+def _audit_parsed_entries(source_text: str, entries: list, statement_type: str) -> dict:
+    """Deterministic check that the AI parse looks complete and
+    self-consistent. Returns:
+      {
+        "ok": bool,
+        "issues": [str, ...],
+        "expected_count": int,        # best-guess lower bound from source text
+        "parsed_count": int,
+        "balance_delta_mismatch": float|None,   # rupees off, if checkable
+      }
+    """
+    issues = []
+    parsed_count = len(entries)
+    expected_count = _count_dated_rows(source_text)
+
+    # 1) Row-count completeness check (tolerate +/- 5% or 3 rows)
+    tolerance = max(3, int(expected_count * 0.05))
+    if expected_count > 0 and parsed_count < expected_count - tolerance:
+        issues.append(
+            f"Parsed {parsed_count} rows but source text has at least "
+            f"{expected_count} dated lines (gap = {expected_count - parsed_count})."
+        )
+
+    # 2) Balance-delta sanity check: if first and last entry both have
+    # balance values, the sum of (credits - debits) in between should
+    # roughly equal (last_balance - first_balance).
+    with_balance = [e for e in entries if isinstance(e.get("balance"), (int, float))]
+    if len(with_balance) >= 2:
+        first_b = with_balance[0]["balance"]
+        last_b = with_balance[-1]["balance"]
+        # Expected delta = net inflow across those rows inclusive of last
+        # but exclusive of first (since first_b is the balance AFTER the
+        # first txn, so we tally from second onwards).
+        tally = 0.0
+        for e in with_balance[1:]:
+            amt = e["amount"] if e["transaction_type"] == "income" else -e["amount"]
+            tally += amt
+        expected_delta = last_b - first_b
+        off = abs(tally - expected_delta)
+        threshold = max(1.0, abs(expected_delta) * 0.01)
+        if off > threshold:
+            issues.append(
+                f"Balance delta check: sum(credits)-sum(debits) = {tally:,.2f} "
+                f"but balance moved {expected_delta:,.2f} "
+                f"(off by {off:,.2f})."
+            )
+        balance_mismatch = off if off > threshold else None
+    else:
+        balance_mismatch = None
+
+    # 3) Empty description / zero amount sanity
+    empties = sum(1 for e in entries if not e.get("description") or e.get("amount", 0) <= 0)
+    if empties:
+        issues.append(f"{empties} entries have empty description or zero amount.")
+
+    return {
+        "ok": len(issues) == 0,
+        "issues": issues,
+        "expected_count": expected_count,
+        "parsed_count": parsed_count,
+        "balance_delta_mismatch": balance_mismatch,
+    }
+
+
+async def _ai_correction_pass(source_text: str, current_entries: list,
+                              issues: list, statement_type: str,
+                              category_hint: str) -> list:
+    """Run one corrective AI pass: feed the model the full source text,
+    the current parse, and the list of audit issues; ask for a corrected
+    full transaction list. Returns the corrected raw entry list (before
+    post-processing)."""
+    if not async_openai_client:
+        return current_entries
+
+    # Truncate source text for the correction prompt if huge — keep it
+    # bounded to fit in one call. The audit issues list already points to
+    # likely-wrong areas.
+    src = source_text if len(source_text) <= 20000 else source_text[:20000] + "\n...[truncated]"
+
+    prompt = f"""Your previous parse of this {statement_type} statement failed an audit.
+
+Audit issues:
+{chr(10).join(f'- {iss}' for iss in issues)}
+
+Current parse (JSON array):
+{json.dumps(current_entries[:400])}
+
+Full statement text:
+{src}
+
+{category_hint}
+
+Produce a CORRECTED complete list of transactions that fixes the audit
+issues. Add any missed rows. Remove any rows that are not in the source.
+Fix any income/expense misclassifications. Fix any wrong dates or
+amounts.
+
+Return STRICT JSON: {{"transactions": [ {{ same schema as before }} ]}}.
+"""
+
+    try:
+        response = await async_openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "You are a statement-parse auditor. Produce a corrected complete transaction list in JSON only."},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0,
+            max_tokens=16000,
+            response_format={"type": "json_object"},
+        )
+        data = json.loads(response.choices[0].message.content or "{}")
+        if isinstance(data, dict):
+            txns = data.get("transactions") or []
+            return txns if isinstance(txns, list) else current_entries
+        return current_entries
+    except Exception as e:
+        logger.error(f"AI correction pass failed: {e}")
+        return current_entries
+
+
+async def _build_category_hint(user_id: Optional[str]) -> str:
+    """Fetch the user's categories from the DB and render them as a prompt
+    fragment the AI can classify against. Returns '' if no user."""
+    if not user_id:
+        return ""
+    try:
+        cats = await db.categories.find(
+            {"user_id": user_id}, {"_id": 0, "category_id": 1, "name": 1, "category_type": 1, "parent_id": 1}
+        ).to_list(1000)
+    except Exception:
+        return ""
+    if not cats:
+        return ""
+
+    parents = {c["category_id"]: c for c in cats if not c.get("parent_id")}
+    children_by_parent: dict = {}
+    for c in cats:
+        if c.get("parent_id"):
+            children_by_parent.setdefault(c["parent_id"], []).append(c["name"])
+
+    def _fmt_section(kind: str) -> str:
+        lines = []
+        for cid, c in parents.items():
+            if c.get("category_type") != kind:
+                continue
+            subs = children_by_parent.get(cid, [])
+            if subs:
+                lines.append(f'  - "{c["name"]}"  (subcategories: {", ".join(subs)})')
+            else:
+                lines.append(f'  - "{c["name"]}"')
+        return "\n".join(lines) or "  (none defined)"
+
+    return (
+        "User's category list — pick category_name/subcategory_name from these:\n"
+        "INCOME CATEGORIES:\n"
+        f"{_fmt_section('income')}\n"
+        "EXPENSE CATEGORIES:\n"
+        f"{_fmt_section('expense')}\n"
+    )
+
+
+async def parse_statement_text_with_ai(text: str, statement_type: str, user_id: Optional[str] = None) -> list:
     """Parse statement text using the AI in overlapping chunks so nothing is
     truncated, then deterministically post-process the merged entries to
-    correct income/expense flips and dedupe overlap-induced duplicates."""
+    correct income/expense flips and dedupe overlap-induced duplicates.
+
+    user_id, if provided, is used to fetch the user's category list so the
+    AI can populate category/subcategory fields on every parsed entry."""
     if not openai_client:
         logger.error("OpenAI not configured for statement parsing")
         return []
+
+    category_hint = await _build_category_hint(user_id)
 
     chunks = _chunk_statement_text(text)
     logger.info(f"AI parsing statement: {len(text)} chars in {len(chunks)} chunk(s) ({statement_type})")
@@ -2755,7 +3083,7 @@ async def parse_statement_text_with_ai(text: str, statement_type: str) -> list:
 
     async def _guarded(idx, chunk):
         async with sem:
-            return await _ai_parse_chunk(chunk, statement_type, idx, len(chunks))
+            return await _ai_parse_chunk(chunk, statement_type, idx, len(chunks), category_hint)
 
     results = await asyncio.gather(
         *[_guarded(i, c) for i, c in enumerate(chunks)]
