@@ -2376,6 +2376,18 @@ PARSE_STAGES = {
     "password_required": {"progress": 0, "eta_seconds": 0,  "label": "Password required"},
 }
 
+# Hard ceiling on a single OpenAI chunk call. Chunks usually finish in
+# 10–60s even for very long statements; 4 minutes is comfortably above
+# the slowest observed and below "user abandons page".
+AI_CHUNK_TIMEOUT_SECONDS = 240
+
+# Stall thresholds for the stuck-statement watchdog. A live parse bumps
+# processing_updated_at on every chunk completion (~30–60s apart), so a
+# threshold much larger than that still safely catches dead tasks.
+STUCK_SWEEP_STARTUP_SECONDS = 5 * 60     # on boot, anything idle > 5 min is dead
+STUCK_WATCHDOG_SECONDS       = 8 * 60     # during runtime, 8 min of no progress = dead
+STUCK_WATCHDOG_INTERVAL_SECONDS = 60
+
 # The AI-parsing phase is what takes most of the wall-clock time, so we
 # spread real progress across this range and update it as each chunk
 # finishes. Stages before/after sit at the edges.
@@ -2633,6 +2645,59 @@ async def parse_statement_background(statement_id: str, user_id: str, password: 
                 "processing_updated_at": datetime.now(timezone.utc),
             }}
         )
+
+
+async def _mark_stuck_statements_failed(idle_threshold_seconds: int, reason: str) -> int:
+    """Flip any statement stuck in `status=parsing` whose
+    processing_updated_at is older than `idle_threshold_seconds` to
+    parse_failed with a clear message. Returns how many were reset.
+
+    Safe for long parses: _set_chunk_progress writes processing_updated_at
+    on every AI chunk completion (~30-60s apart), so a genuinely-working
+    large PDF never hits the threshold.
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=idle_threshold_seconds)
+    result = await db.statements.update_many(
+        {
+            "status": "parsing",
+            "$or": [
+                {"processing_updated_at": {"$lt": cutoff}},
+                {"processing_updated_at": {"$exists": False}},
+            ],
+        },
+        {"$set": {
+            "status": "parse_failed",
+            "parse_error": reason,
+            "processing_stage": "parse_failed",
+            "processing_stage_label": PARSE_STAGES["parse_failed"]["label"],
+            "processing_progress": 100,
+            "processing_eta_seconds": 0,
+            "processing_updated_at": datetime.now(timezone.utc),
+        }},
+    )
+    return result.modified_count
+
+
+async def stuck_statements_watchdog_loop():
+    """Runs forever after startup. Once a minute it checks for statements
+    that have been sitting in `parsing` with no progress heartbeat for
+    longer than STUCK_WATCHDOG_SECONDS and marks them parse_failed.
+
+    This catches the case where the backend is up (so the startup sweep
+    never ran) but a task died from an unhandled exception, OOM, or a
+    hung OpenAI request past the per-chunk timeout.
+    """
+    while True:
+        try:
+            n = await _mark_stuck_statements_failed(
+                STUCK_WATCHDOG_SECONDS,
+                "Parsing stalled with no progress — task likely died. Click Retry to re-run.",
+            )
+            if n:
+                logger.info(f"Watchdog: reset {n} stalled parsing statement(s)")
+        except Exception as e:
+            logger.error(f"Watchdog iteration failed: {e}")
+        await asyncio.sleep(STUCK_WATCHDOG_INTERVAL_SECONDS)
 
 
 def _detect_csv_columns(headers_lower: dict) -> dict:
@@ -3108,15 +3173,21 @@ STATEMENT CHUNK:
 """
 
     try:
-        response = await async_openai_client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": "You parse bank and credit card statements into structured JSON. You never skip transactions. You always respect Dr/Cr suffixes. Output JSON only."},
-                {"role": "user", "content": prompt},
-            ],
-            temperature=0,
-            max_tokens=16000,
-            response_format={"type": "json_object"},
+        # 4-minute hard ceiling per chunk: a hung OpenAI connection cannot
+        # freeze the whole parse — it raises TimeoutError, which the
+        # parent wraps as a clean parse_failed.
+        response = await asyncio.wait_for(
+            async_openai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": "You parse bank and credit card statements into structured JSON. You never skip transactions. You always respect Dr/Cr suffixes. Output JSON only."},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0,
+                max_tokens=16000,
+                response_format={"type": "json_object"},
+            ),
+            timeout=AI_CHUNK_TIMEOUT_SECONDS,
         )
         raw = response.choices[0].message.content or "{}"
         try:
@@ -3330,15 +3401,18 @@ Return STRICT JSON: {{"transactions": [ {{ same schema as before }} ]}}.
 """
 
     try:
-        response = await async_openai_client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": "You are a statement-parse auditor. Produce a corrected complete transaction list in JSON only."},
-                {"role": "user", "content": prompt},
-            ],
-            temperature=0,
-            max_tokens=16000,
-            response_format={"type": "json_object"},
+        response = await asyncio.wait_for(
+            async_openai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": "You are a statement-parse auditor. Produce a corrected complete transaction list in JSON only."},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0,
+                max_tokens=16000,
+                response_format={"type": "json_object"},
+            ),
+            timeout=AI_CHUNK_TIMEOUT_SECONDS,
         )
         data = json.loads(response.choices[0].message.content or "{}")
         if isinstance(data, dict):
@@ -5538,7 +5612,21 @@ async def startup_event():
     await db.email_sync_config.update_many({"syncing": True}, {"$set": {"syncing": False}})
     await db.outlook_sync_config.update_many({"syncing": True}, {"$set": {"syncing": False}})
 
+    # Recover any statement that was mid-parse when the previous worker died.
+    # A fresh boot means no parse tasks are running yet, so anything still
+    # flagged "parsing" with no recent heartbeat is definitely orphaned.
+    try:
+        stuck_n = await _mark_stuck_statements_failed(
+            STUCK_SWEEP_STARTUP_SECONDS,
+            "Processing was interrupted by a server restart. Click Retry to re-run.",
+        )
+        if stuck_n:
+            logger.info(f"Startup: marked {stuck_n} orphan parsing statement(s) as parse_failed")
+    except Exception as e:
+        logger.error(f"Startup: stuck-statement sweep failed: {e}")
+
     asyncio.create_task(auto_retry_loop())
+    asyncio.create_task(stuck_statements_watchdog_loop())
     await db.synced_emails.create_index([("user_id", 1), ("gmail_email", 1), ("message_id", 1)], unique=True, sparse=True)
     await db.gmail_tokens.create_index([("user_id", 1), ("gmail_email", 1)], unique=True)
     await db.email_sync_config.create_index([("user_id", 1), ("gmail_email", 1)], unique=True)

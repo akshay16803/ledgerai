@@ -304,6 +304,13 @@ export default function Reconciliation() {
     } catch (err) { setError(err.message); }
   };
 
+  const handleRetryParse = async (stmtId) => {
+    try {
+      await api.post(`/api/statements/${stmtId}/reaudit`);
+      loadData();
+    } catch (err) { setError(err.message); }
+  };
+
   const handleUnlock = async (stmtId) => {
     const pw = (pwInputs[stmtId] || '').trim();
     if (!pw) {
@@ -478,9 +485,44 @@ export default function Reconciliation() {
                   </td>
                   <td style={tdStyle}>
                     <StatusBadge status={stmt.status} />
-                    {stmt.status === 'parsing' && (
-                      <ProcessingBar stmt={stmt} now={nowTick} />
-                    )}
+                    {stmt.status === 'parsing' && (() => {
+                      const updatedAt = stmt.processing_updated_at ? new Date(stmt.processing_updated_at).getTime() : 0;
+                      const idleSec = updatedAt ? Math.max(0, (nowTick - updatedAt) / 1000) : 0;
+                      const looksStuck = updatedAt && idleSec > 180; // 3 minutes of no backend heartbeat
+                      return (
+                        <>
+                          <ProcessingBar stmt={stmt} now={nowTick} />
+                          {looksStuck && (
+                            <div data-testid={`stmt-stuck-${stmt.statement_id}`} style={{
+                              marginTop: 8, padding: '8px 10px',
+                              background: 'rgba(194,140,60,0.08)', border: '1px solid rgba(194,140,60,0.3)',
+                              borderRadius: 2, fontSize: 11, color: 'var(--text-secondary)',
+                              display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+                            }}>
+                              <span style={{ fontWeight: 600, color: 'var(--warning)' }}>Looks stuck</span>
+                              <span className="mono" style={{ color: 'var(--text-muted)' }}>
+                                no progress for {Math.round(idleSec / 60)} min
+                              </span>
+                              <button data-testid={`stmt-retry-${stmt.statement_id}`}
+                                onClick={() => handleRetryParse(stmt.statement_id)}
+                                style={{
+                                  background: 'var(--brand-primary)', color: '#fff', border: 'none',
+                                  borderRadius: 2, padding: '3px 10px', fontSize: 10.5, fontWeight: 600,
+                                  cursor: 'pointer', fontFamily: 'var(--font-body)',
+                                }}>Retry</button>
+                              <button data-testid={`stmt-cancel-${stmt.statement_id}`}
+                                onClick={() => handleDelete(stmt.statement_id)}
+                                style={{
+                                  background: 'none', color: 'var(--text-secondary)',
+                                  border: '1px solid var(--border-strong)',
+                                  borderRadius: 2, padding: '3px 10px', fontSize: 10.5, fontWeight: 600,
+                                  cursor: 'pointer', fontFamily: 'var(--font-body)',
+                                }}>Cancel</button>
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()}
                   </td>
                   <td className="mono" style={{ ...tdStyle, fontSize: 12 }}>
                     {stmt.uploaded_at ? new Date(stmt.uploaded_at).toLocaleDateString() : ''}
