@@ -19,6 +19,21 @@ export default function Categories() {
 
   const parentCats = categories.filter(c => !c.parent_id && c.category_type === activeTab);
   const getSubcats = (parentId) => categories.filter(c => c.parent_id === parentId);
+  const selectedParent = form.parent_id ? categories.find(c => c.category_id === form.parent_id) : null;
+
+  const openAddSubcategory = (parent) => {
+    // Make sure we're on the right tab so the parent shows in the dropdown options
+    if (parent.category_type && parent.category_type !== activeTab) setActiveTab(parent.category_type);
+    setForm({ name: '', parent_id: parent.category_id });
+    setError('');
+    setShowForm(true);
+  };
+
+  const closeForm = () => {
+    setShowForm(false);
+    setForm({ name: '', parent_id: '' });
+    setError('');
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -30,8 +45,7 @@ export default function Categories() {
         category_type: activeTab,
         parent_id: form.parent_id || null,
       });
-      setShowForm(false);
-      setForm({ name: '', parent_id: '' });
+      closeForm();
       load();
     } catch (err) { setError(err.message); }
   };
@@ -53,7 +67,7 @@ export default function Categories() {
           <h1 style={{ fontSize: 28, fontWeight: 500, letterSpacing: '-0.02em' }}>Categories</h1>
           <p className="mono" style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>Manage income and expense categories</p>
         </div>
-        <button data-testid="add-category-btn" onClick={() => setShowForm(!showForm)} style={{
+        <button data-testid="add-category-btn" onClick={() => { if (showForm) closeForm(); else { setForm({ name: '', parent_id: '' }); setShowForm(true); } }} style={{
           background: 'var(--brand-primary)', color: '#fff', border: 'none',
           padding: '10px 20px', borderRadius: 2, fontSize: 13, fontWeight: 600,
           cursor: 'pointer', fontFamily: 'var(--font-body)', display: 'flex', alignItems: 'center', gap: 6
@@ -65,7 +79,11 @@ export default function Categories() {
       {/* Tabs */}
       <div style={{ display: 'flex', gap: 0, marginBottom: 24, borderBottom: '1px solid var(--border-subtle)' }}>
         {['expense', 'income'].map(tab => (
-          <button key={tab} data-testid={`tab-${tab}`} onClick={() => setActiveTab(tab)}
+          <button key={tab} data-testid={`tab-${tab}`} onClick={() => {
+            setActiveTab(tab);
+            // If the form is open with a parent that doesn't belong to the new tab, clear the preselected parent
+            if (selectedParent && selectedParent.category_type !== tab) setForm(f => ({ ...f, parent_id: '' }));
+          }}
             style={{
               padding: '10px 24px', border: 'none',
               borderBottom: activeTab === tab ? '2px solid var(--accent-1)' : '2px solid transparent',
@@ -84,6 +102,11 @@ export default function Categories() {
         <div data-testid="add-category-form" style={{
           background: '#fff', border: '1px solid var(--border-subtle)', borderRadius: 2, padding: 24, marginBottom: 24
         }}>
+          {selectedParent && (
+            <div className="mono" style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 14, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              Adding sub-category under <span style={{ color: 'var(--text-primary)' }}>{selectedParent.name}</span>
+            </div>
+          )}
           <form onSubmit={handleSubmit}>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
               <div>
@@ -106,7 +129,7 @@ export default function Categories() {
                 background: 'var(--brand-primary)', color: '#fff', border: 'none',
                 padding: '10px 24px', borderRadius: 2, fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font-body)'
               }}>Save</button>
-              <button type="button" onClick={() => setShowForm(false)} style={{
+              <button type="button" onClick={closeForm} style={{
                 background: 'none', border: '1px solid var(--border-strong)', color: 'var(--text-secondary)',
                 padding: '10px 24px', borderRadius: 2, fontSize: 13, cursor: 'pointer', fontFamily: 'var(--font-body)'
               }}>Cancel</button>
@@ -137,10 +160,21 @@ export default function Categories() {
                       <span className="mono" style={{ fontSize: 11, color: 'var(--text-muted)' }}>({subcats.length})</span>
                     )}
                   </div>
-                  <button data-testid={`delete-category-${cat.category_id}`} data-guard onClick={() => handleDelete(cat.category_id)}
-                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4 }}>
-                    <Trash size={14} />
-                  </button>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <button data-testid={`add-subcategory-${cat.category_id}`} onClick={() => openAddSubcategory(cat)}
+                      title="Add sub-category"
+                      style={{
+                        background: 'none', border: '1px solid var(--border-strong)', color: 'var(--text-secondary)',
+                        padding: '4px 10px', borderRadius: 2, fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                        fontFamily: 'var(--font-body)', display: 'inline-flex', alignItems: 'center', gap: 4
+                      }}>
+                      <Plus size={11} weight="bold" /> Sub
+                    </button>
+                    <button data-testid={`delete-category-${cat.category_id}`} data-guard onClick={() => handleDelete(cat.category_id)}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4 }}>
+                      <Trash size={14} />
+                    </button>
+                  </div>
                 </div>
                 {subcats.length > 0 && (
                   <div style={{ borderTop: '1px solid var(--border-subtle)' }}>
