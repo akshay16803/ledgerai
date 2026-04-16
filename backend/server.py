@@ -2303,10 +2303,12 @@ async def update_statement_entry(
     payload: dict = Body(...),
     user: dict = Depends(get_current_user),
 ):
-    """Update a single parsed entry's category / subcategory on an
-    already-parsed statement. Accepts {category_id, subcategory_id}
-    (either may be null). Category names are resolved from the user's
-    own category list for display."""
+    """Update a single parsed entry's category / subcategory / transaction_type
+    on an already-parsed statement. Accepts any of
+    {category_id, subcategory_id, transaction_type} (each may be null/omitted).
+    When transaction_type flips, category/subcategory are cleared because
+    categories are typed (income vs expense). Category names are resolved
+    from the user's own category list for display."""
     stmt = await db.statements.find_one(
         {"statement_id": statement_id, "user_id": user["user_id"]}, {"_id": 0}
     )
@@ -2317,8 +2319,27 @@ async def update_statement_entry(
     if entry_index < 0 or entry_index >= len(entries):
         raise HTTPException(status_code=400, detail="Invalid entry index")
 
-    category_id = payload.get("category_id")
-    subcategory_id = payload.get("subcategory_id")
+    existing = entries[entry_index]
+
+    # Determine the final transaction_type: either the one being set, or
+    # the existing one. Only accept "income" or "expense".
+    new_type_raw = payload.get("transaction_type")
+    type_changing = False
+    if "transaction_type" in payload and new_type_raw in ("income", "expense"):
+        final_type = new_type_raw
+        if existing.get("transaction_type") != final_type:
+            type_changing = True
+    else:
+        final_type = existing.get("transaction_type")
+
+    # If the type is changing, clear category/subcategory regardless of
+    # what the client sent (old category_id would belong to the old type).
+    if type_changing:
+        category_id = None
+        subcategory_id = None
+    else:
+        category_id = payload.get("category_id")
+        subcategory_id = payload.get("subcategory_id")
 
     # Resolve names from ids (so the UI stays consistent with the
     # initial stamping). Unknown ids are treated as unset.
@@ -2345,7 +2366,8 @@ async def update_statement_entry(
     else:
         subcategory_id = None
 
-    entry = dict(entries[entry_index])
+    entry = dict(existing)
+    entry["transaction_type"] = final_type
     entry["category_id"] = category_id
     entry["subcategory_id"] = subcategory_id
     entry["category_name"] = cat_name

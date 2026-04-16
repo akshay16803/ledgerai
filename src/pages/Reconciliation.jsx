@@ -3,7 +3,7 @@ import { api } from '../lib/api';
 import { getCached, setCache } from '../lib/cache';
 import {
   FileText, Upload, ArrowClockwise, Check, X, Warning,
-  CheckCircle, XCircle, Question, Scales, Trash, Eye, LockKey
+  CheckCircle, XCircle, Question, Scales, Trash, Eye, LockKey, Plus
 } from '@phosphor-icons/react';
 
 const API = import.meta.env.REACT_APP_BACKEND_URL;
@@ -69,6 +69,95 @@ function StatusBadge({ status }) {
   );
 }
 
+// ─── Quick Create Category / Subcategory Modal ────────────────────────
+// Small dialog shown when the user clicks the "+" next to a Category or
+// Subcategory select on a parsed entry. Creates a category (top-level or
+// child) and hands the new id back to the caller so it can auto-select
+// it on the row that triggered the modal.
+function QuickCategoryModal({ mode, parentId, parentName, categoryType, onClose, onCreated }) {
+  const [name, setName] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState('');
+  const title = mode === 'subcategory' ? 'New Subcategory' : 'New Category';
+  const placeholder = mode === 'subcategory' ? 'e.g., Groceries' : 'e.g., Food';
+  const typeLabel = categoryType === 'income' ? 'Income' : 'Expense';
+
+  const submit = async (e) => {
+    e.preventDefault();
+    const trimmed = name.trim();
+    if (!trimmed) { setErr('Name is required'); return; }
+    setSaving(true); setErr('');
+    try {
+      const body = {
+        name: trimmed,
+        category_type: categoryType,
+        parent_id: mode === 'subcategory' ? (parentId || null) : null,
+      };
+      const created = await api.post('/api/categories', body);
+      onCreated(created);
+    } catch (e2) {
+      setErr(e2.message || 'Could not create');
+    }
+    setSaving(false);
+  };
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 1200, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div onClick={onClose} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)' }} />
+      <div data-testid="quick-category-modal" style={{
+        position: 'relative', background: '#fff', borderRadius: 2, width: '100%', maxWidth: 420,
+        boxShadow: '0 20px 60px rgba(0,0,0,0.2)', margin: '0 8px',
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '18px 24px', borderBottom: '1px solid var(--border-subtle)' }}>
+          <h2 style={{ fontSize: 16, fontWeight: 600 }}>{title}</h2>
+          <button type="button" onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4 }}>
+            <X size={18} />
+          </button>
+        </div>
+        <form onSubmit={submit}>
+          <div style={{ padding: '20px 24px' }}>
+            {mode === 'subcategory' && (
+              <p className="mono" style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 12, letterSpacing: '0.02em' }}>
+                Under: <span style={{ color: 'var(--text-secondary)' }}>{parentName || '—'}</span>
+              </p>
+            )}
+            <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 6 }}>
+              {mode === 'subcategory' ? 'Subcategory Name' : 'Category Name'} *
+            </label>
+            <input
+              data-testid="quick-cat-name-input"
+              autoFocus
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder={placeholder}
+              style={{
+                width: '100%', padding: '10px 14px', border: '1px solid var(--border-strong)',
+                borderRadius: 2, fontSize: 14, fontFamily: 'var(--font-body)', outline: 'none',
+                background: 'var(--bg-primary)', boxSizing: 'border-box',
+              }}
+            />
+            <p className="mono" style={{ fontSize: 10.5, color: 'var(--text-muted)', marginTop: 8, letterSpacing: '0.02em' }}>
+              Type: <span style={{ color: 'var(--text-secondary)' }}>{typeLabel}</span>
+            </p>
+            {err && <p data-testid="quick-cat-error" style={{ color: 'var(--error)', fontSize: 13, marginTop: 10 }}>{err}</p>}
+          </div>
+          <div style={{ display: 'flex', gap: 10, padding: '14px 24px', borderTop: '1px solid var(--border-subtle)', justifyContent: 'flex-end' }}>
+            <button type="button" onClick={onClose} style={{
+              background: 'none', border: '1px solid var(--border-strong)', color: 'var(--text-secondary)',
+              padding: '8px 18px', borderRadius: 2, fontSize: 13, cursor: 'pointer', fontFamily: 'var(--font-body)'
+            }}>Cancel</button>
+            <button data-testid="quick-cat-save-btn" type="submit" disabled={saving} style={{
+              background: saving ? 'var(--text-muted)' : 'var(--brand-primary)', color: '#fff', border: 'none',
+              padding: '8px 18px', borderRadius: 2, fontSize: 13, fontWeight: 600,
+              cursor: saving ? 'not-allowed' : 'pointer', fontFamily: 'var(--font-body)', opacity: saving ? 0.7 : 1,
+            }}>{saving ? 'Creating...' : 'Create'}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 export default function Reconciliation() {
   const cached = getCached('reconciliation');
   const [statements, setStatements] = useState(cached?.statements || []);
@@ -96,6 +185,11 @@ export default function Reconciliation() {
   const [reauditing, setReauditing] = useState(false);
   const [categories, setCategories] = useState([]);
   const [savingEntryIdx, setSavingEntryIdx] = useState(-1);
+  // Inline create-category / create-subcategory modal state. When open,
+  // `quickCat` describes which row triggered it and what kind of category
+  // to create, so that once the modal succeeds we can auto-assign the new
+  // id back onto that exact row.
+  const [quickCat, setQuickCat] = useState(null); // { mode, entryIndex, categoryType, parentId?, parentName? }
 
   const SUB_TYPE_OPTIONS = [
     { value: 'savings', label: 'Savings', statementType: 'bank' },
@@ -260,6 +354,45 @@ export default function Reconciliation() {
       });
     } catch (err) { setError(err.message); }
     setSavingEntryIdx(-1);
+  };
+
+  // Flip an entry between income and expense. Backend will clear
+  // category/subcategory on type-change (they're typed), so the row
+  // paints with empty selects after success.
+  const handleUpdateEntryType = async (entryIndex, newType) => {
+    if (!activeStmt) return;
+    setSavingEntryIdx(entryIndex);
+    try {
+      const res = await api.patch(
+        `/api/statements/${activeStmt.statement_id}/entries/${entryIndex}`,
+        { transaction_type: newType },
+      );
+      setActiveStmt(prev => {
+        if (!prev) return prev;
+        const entries = [...(prev.parsed_entries || [])];
+        entries[entryIndex] = res.entry;
+        return { ...prev, parsed_entries: entries };
+      });
+    } catch (err) { setError(err.message); }
+    setSavingEntryIdx(-1);
+  };
+
+  // Called by QuickCategoryModal after a successful POST /api/categories.
+  // Appends the new category to local state and auto-assigns it to the
+  // row that triggered the modal.
+  const handleQuickCategoryCreated = async (newCat) => {
+    if (!quickCat) return;
+    const { mode, entryIndex } = quickCat;
+    setCategories(prev => [...prev, newCat]);
+    api.invalidate('/api/categories');
+    // Close modal first so the UI returns to the row immediately.
+    setQuickCat(null);
+    if (mode === 'subcategory') {
+      const parentCatId = quickCat.parentId;
+      await handleUpdateEntryCategory(entryIndex, parentCatId, newCat.category_id);
+    } else {
+      await handleUpdateEntryCategory(entryIndex, newCat.category_id, null);
+    }
   };
 
   const handleAddMissing = async () => {
@@ -762,53 +895,120 @@ export default function Reconciliation() {
                   {activeStmt.parsed_entries.map((e, i) => (
                     <tr key={`${e.date}-${e.amount}-${i}`} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
                       <td className="mono" style={{ ...tdStyleCompact, fontSize: 11.5 }}>{e.date}</td>
-                      <td style={tdStyleCompact}>
-                        <span style={{
-                          padding: '2px 6px', borderRadius: 2, fontSize: 10.5, fontWeight: 600, textTransform: 'uppercase',
-                          color: e.transaction_type === 'income' ? 'var(--success)' : 'var(--error)',
-                          background: e.transaction_type === 'income' ? 'rgba(58,92,74,0.1)' : 'rgba(150,69,58,0.1)'
-                        }}>{e.transaction_type}</span>
-                      </td>
-                      <td style={{ ...tdStyleCompact, wordBreak: 'break-word' }}>{e.description || '—'}</td>
                       {(() => {
                         const kind = e.transaction_type === 'income' ? 'income' : 'expense';
                         const topCats = categories.filter(c => !c.parent_id && c.category_type === kind);
+                        const parentCatName = (categories.find(c => c.category_id === e.category_id) || {}).name;
                         const subCats = categories.filter(c => c.parent_id && c.parent_id === e.category_id);
+                        const saving = savingEntryIdx === i;
                         const selectStyle = {
                           padding: '4px 6px', border: '1px solid var(--border-subtle)',
                           borderRadius: 2, fontSize: 11.5, fontFamily: 'var(--font-body)',
-                          background: '#fff', width: '100%', boxSizing: 'border-box',
-                          opacity: savingEntryIdx === i ? 0.6 : 1,
+                          background: '#fff', boxSizing: 'border-box', flex: 1, minWidth: 0,
+                          opacity: saving ? 0.6 : 1,
+                        };
+                        // Small inline "+" button matching the compact row
+                        // aesthetic: square, subtle border, same color palette
+                        // as the existing select.
+                        const plusBtnStyle = (enabled) => ({
+                          flex: '0 0 auto', width: 22, height: 22,
+                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                          background: '#fff', border: '1px solid var(--border-subtle)',
+                          borderRadius: 2, padding: 0,
+                          color: enabled ? 'var(--text-secondary)' : 'var(--text-muted)',
+                          cursor: enabled ? 'pointer' : 'not-allowed',
+                          opacity: enabled ? 1 : 0.5,
+                        });
+                        const typeSelectStyle = {
+                          padding: '2px 6px', borderRadius: 2,
+                          fontSize: 10.5, fontWeight: 600, textTransform: 'uppercase',
+                          fontFamily: 'var(--font-body)', letterSpacing: '0.02em',
+                          color: e.transaction_type === 'income' ? 'var(--success)' : 'var(--error)',
+                          background: e.transaction_type === 'income' ? 'rgba(58,92,74,0.1)' : 'rgba(150,69,58,0.1)',
+                          border: '1px solid var(--border-subtle)',
+                          cursor: saving ? 'not-allowed' : 'pointer',
+                          opacity: saving ? 0.6 : 1,
                         };
                         return (
                           <>
                             <td style={tdStyleCompact}>
                               <select
-                                value={e.category_id || ''}
-                                disabled={savingEntryIdx === i}
-                                onChange={(ev) => handleUpdateEntryCategory(i, ev.target.value, null)}
-                                style={selectStyle}
-                                data-testid={`entry-cat-${i}`}
+                                value={e.transaction_type === 'income' ? 'income' : 'expense'}
+                                disabled={saving}
+                                onChange={(ev) => {
+                                  if (ev.target.value !== e.transaction_type) {
+                                    handleUpdateEntryType(i, ev.target.value);
+                                  }
+                                }}
+                                style={typeSelectStyle}
+                                data-testid={`entry-type-${i}`}
                               >
-                                <option value="">—</option>
-                                {topCats.map(c => (
-                                  <option key={c.category_id} value={c.category_id}>{c.name}</option>
-                                ))}
+                                <option value="expense">EXPENSE</option>
+                                <option value="income">INCOME</option>
                               </select>
                             </td>
+                            <td style={{ ...tdStyleCompact, wordBreak: 'break-word' }}>{e.description || '—'}</td>
                             <td style={tdStyleCompact}>
-                              <select
-                                value={e.subcategory_id || ''}
-                                disabled={savingEntryIdx === i || !e.category_id || subCats.length === 0}
-                                onChange={(ev) => handleUpdateEntryCategory(i, e.category_id, ev.target.value)}
-                                style={selectStyle}
-                                data-testid={`entry-sub-${i}`}
-                              >
-                                <option value="">—</option>
-                                {subCats.map(c => (
-                                  <option key={c.category_id} value={c.category_id}>{c.name}</option>
-                                ))}
-                              </select>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                <select
+                                  value={e.category_id || ''}
+                                  disabled={saving}
+                                  onChange={(ev) => handleUpdateEntryCategory(i, ev.target.value, null)}
+                                  style={selectStyle}
+                                  data-testid={`entry-cat-${i}`}
+                                >
+                                  <option value="">—</option>
+                                  {topCats.map(c => (
+                                    <option key={c.category_id} value={c.category_id}>{c.name}</option>
+                                  ))}
+                                </select>
+                                <button
+                                  type="button"
+                                  disabled={saving}
+                                  onClick={() => setQuickCat({
+                                    mode: 'category',
+                                    entryIndex: i,
+                                    categoryType: kind,
+                                  })}
+                                  style={plusBtnStyle(!saving)}
+                                  title="New category"
+                                  data-testid={`entry-add-cat-${i}`}
+                                >
+                                  <Plus size={12} weight="bold" />
+                                </button>
+                              </div>
+                            </td>
+                            <td style={tdStyleCompact}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                <select
+                                  value={e.subcategory_id || ''}
+                                  disabled={saving || !e.category_id || subCats.length === 0}
+                                  onChange={(ev) => handleUpdateEntryCategory(i, e.category_id, ev.target.value)}
+                                  style={selectStyle}
+                                  data-testid={`entry-sub-${i}`}
+                                >
+                                  <option value="">—</option>
+                                  {subCats.map(c => (
+                                    <option key={c.category_id} value={c.category_id}>{c.name}</option>
+                                  ))}
+                                </select>
+                                <button
+                                  type="button"
+                                  disabled={saving || !e.category_id}
+                                  onClick={() => setQuickCat({
+                                    mode: 'subcategory',
+                                    entryIndex: i,
+                                    categoryType: kind,
+                                    parentId: e.category_id,
+                                    parentName: parentCatName,
+                                  })}
+                                  style={plusBtnStyle(!saving && !!e.category_id)}
+                                  title={e.category_id ? 'New subcategory' : 'Pick a category first'}
+                                  data-testid={`entry-add-sub-${i}`}
+                                >
+                                  <Plus size={12} weight="bold" />
+                                </button>
+                              </div>
                             </td>
                           </>
                         );
@@ -1003,6 +1203,17 @@ export default function Reconciliation() {
             </div>
           )}
         </div>
+      )}
+
+      {quickCat && (
+        <QuickCategoryModal
+          mode={quickCat.mode}
+          parentId={quickCat.parentId}
+          parentName={quickCat.parentName}
+          categoryType={quickCat.categoryType}
+          onClose={() => setQuickCat(null)}
+          onCreated={handleQuickCategoryCreated}
+        />
       )}
     </div>
   );
