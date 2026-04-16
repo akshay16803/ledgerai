@@ -4,7 +4,7 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 from typing import Optional, List
 from datetime import datetime, timezone, timedelta, date as date_cls
-from motor.motor_asyncio import AsyncIOMotorClient
+from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorGridFSBucket
 from dotenv import load_dotenv
 import os
 import uuid
@@ -92,6 +92,13 @@ app.add_middleware(
 
 client = AsyncIOMotorClient(MONGO_URL, tz_aware=True)
 db = client[DB_NAME]
+
+# Durable storage for uploaded statement files. Host disk is ephemeral
+# on the preview infra, so we keep a canonical copy in Mongo (GridFS)
+# and lazily rehydrate the local copy when a parse/unlock/retry needs
+# it. Bucket name `statement_files` → collections `statement_files.files`
+# and `statement_files.chunks` get auto-created.
+statement_fs = AsyncIOMotorGridFSBucket(db, bucket_name="statement_files")
 
 
 # ─── Pydantic Models ───────────────────────────────────────────────
@@ -1998,6 +2005,44 @@ UPLOAD_DIR = "/app/uploads/statements"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 
+async def ensure_statement_file(stmt: dict) -> Optional[str]:
+    """Guarantee the statement's source file is present on local disk so
+    the rest of the parse pipeline (which reads from paths) keeps working
+    unchanged. If the on-disk copy is missing but we have a durable copy
+    in GridFS, re-hydrate to the expected path. Returns the path, or
+    None if no recoverable copy exists.
+    """
+    statement_id = stmt.get("statement_id")
+    ext = stmt.get("file_ext") or "pdf"
+    file_path = stmt.get("file_path") or os.path.join(UPLOAD_DIR, f"{statement_id}.{ext}")
+
+    if file_path and os.path.exists(file_path):
+        return file_path
+
+    # Disk copy is gone — try rehydrating from GridFS.
+    try:
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        stream = await statement_fs.open_download_stream(statement_id)
+        try:
+            data = await stream.read()
+        finally:
+            await stream.close()
+        with open(file_path, "wb") as out:
+            out.write(data)
+        if os.path.exists(file_path) and os.path.getsize(file_path) > 0:
+            logger.info(f"Rehydrated statement file from GridFS: {statement_id}")
+            # Keep the stored file_path authoritative for callers.
+            await db.statements.update_one(
+                {"statement_id": statement_id},
+                {"$set": {"file_path": file_path, "has_stored_bytes": True}},
+            )
+            return file_path
+    except Exception as e:
+        logger.error(f"GridFS rehydrate failed for {statement_id}: {e}")
+
+    return None
+
+
 @app.post("/api/statements/upload")
 async def upload_statement(
     file: UploadFile = File(...),
@@ -2029,6 +2074,19 @@ async def upload_statement(
     with open(file_path, "wb") as f:
         f.write(content)
 
+    # Durable copy in GridFS. Keyed by statement_id so rehydrate is trivial.
+    has_stored_bytes = False
+    try:
+        await statement_fs.upload_from_stream_with_id(
+            statement_id, f"{statement_id}.{ext}", content,
+            metadata={"user_id": user["user_id"], "file_ext": ext, "filename": file.filename},
+        )
+        has_stored_bytes = True
+    except Exception as e:
+        # Non-fatal: keep going with the on-disk copy. Retry after restart
+        # won't work for this one, but upload still succeeds.
+        logger.error(f"GridFS store failed for {statement_id}: {e}")
+
     stmt_doc = {
         "statement_id": statement_id,
         "user_id": user["user_id"],
@@ -2040,6 +2098,7 @@ async def upload_statement(
         "file_ext": ext,
         "file_path": file_path,
         "file_size": len(content),
+        "has_stored_bytes": has_stored_bytes,
         "status": "parsing",
         "parsed_entries": [],
         "reconciliation": None,
@@ -2188,6 +2247,12 @@ async def delete_statement(statement_id: str, user: dict = Depends(get_current_u
     if file_path and os.path.exists(file_path):
         os.remove(file_path)
 
+    # Best-effort delete the durable copy too.
+    try:
+        await statement_fs.delete(statement_id)
+    except Exception:
+        pass  # already gone or never existed
+
     await db.statements.delete_one({"statement_id": statement_id})
     return {"message": "Statement deleted"}
 
@@ -2204,9 +2269,12 @@ async def reaudit_statement(statement_id: str, user: dict = Depends(get_current_
     if not stmt:
         raise HTTPException(status_code=404, detail="Statement not found")
 
-    file_path = stmt.get("file_path")
-    if not file_path or not os.path.exists(file_path):
-        raise HTTPException(status_code=400, detail="Source file is no longer available for re-audit")
+    file_path = await ensure_statement_file(stmt)
+    if not file_path:
+        raise HTTPException(
+            status_code=410,
+            detail="Original file is no longer available. Please delete this statement and re-upload.",
+        )
 
     # Flip status back into the parsing state so the UI progress bar
     # picks it up the same way an unlock/upload would.
@@ -2312,9 +2380,12 @@ async def unlock_statement(
     if stmt.get("file_ext") != "pdf":
         raise HTTPException(status_code=400, detail="Only PDF statements can be unlocked")
 
-    file_path = stmt.get("file_path")
-    if not file_path or not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail="Statement file missing on server")
+    file_path = await ensure_statement_file(stmt)
+    if not file_path:
+        raise HTTPException(
+            status_code=410,
+            detail="Original file is no longer available. Please delete this statement and re-upload.",
+        )
 
     # Quick password validity check so we can give the user immediate
     # feedback on an incorrect password, without blocking the browser on
@@ -2497,9 +2568,26 @@ async def parse_statement_background(statement_id: str, user_id: str, password: 
         if not stmt:
             return
 
-        file_path = stmt["file_path"]
         ext = stmt["file_ext"]
         account_id = stmt.get("account_id")
+
+        # Ensure the source file is actually present — rehydrate from the
+        # durable GridFS copy if the ephemeral disk has been wiped.
+        file_path = await ensure_statement_file(stmt)
+        if not file_path:
+            await db.statements.update_one(
+                {"statement_id": statement_id},
+                {"$set": {
+                    "status": "parse_failed",
+                    "parse_error": "Original file is no longer available. Please delete and re-upload.",
+                    "processing_stage": "parse_failed",
+                    "processing_stage_label": PARSE_STAGES["parse_failed"]["label"],
+                    "processing_progress": 100,
+                    "processing_eta_seconds": 0,
+                    "processing_updated_at": datetime.now(timezone.utc),
+                }},
+            )
+            return
 
         # Resolve password for encrypted PDFs: prefer explicit, else saved.
         effective_password = password
