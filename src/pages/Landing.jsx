@@ -3,7 +3,7 @@ import { useAuth } from '../contexts/AuthContext.jsx';
 import {
   Brain, EnvelopeSimple, ChartPie, ArrowsLeftRight,
   Shield, ArrowRight, CheckCircle,
-  Files, TrendUp, Plugs, Sparkle, HandTap, TreeStructure
+  Files, TrendUp, Plugs, Sparkle, HandTap, FileArrowUp
 } from '@phosphor-icons/react';
 
 const features = [
@@ -15,7 +15,7 @@ const features = [
   { icon: TrendUp, title: '24-Month Cash Flow', desc: 'See the next two years before they happen. Recurring payments are detected automatically to power precise forward projections.' },
   { icon: Files, title: 'Records Vault', desc: 'Every source email, attachment, and .eml receipt is stored alongside its transaction — audit-ready the moment you need it.' },
   { icon: HandTap, title: 'You Stay in Control', desc: 'Nothing posts without your nod. AI drafts every entry; you approve, edit, or reject in a tap — so your books stay exactly as clean as you want them.' },
-  { icon: TreeStructure, title: 'Chart of Accounts on Autopilot', desc: 'Accounts and categories organise themselves as transactions arrive. Indian-standard COA out of the box — customise only if you want to.' },
+  { icon: FileArrowUp, title: 'Upload & Auto-Book', desc: 'No email sync? Just drop a bank, card, or loan statement. AI parses every line, drafts the full double-entry journal, and queues it for your one-tap approval.' },
 ];
 
 const steps = [
