@@ -645,31 +645,6 @@ export default function Reconciliation() {
                     <> · {activeStmt.raw_text_chars.toLocaleString()} chars read</>
                   )}
                 </span>
-                {activeStmt.audit_status && activeStmt.audit_status !== 'skipped' && (
-                  <div style={{ marginTop: 4 }}>
-                    <span
-                      title={
-                        (activeStmt.audit_issues && activeStmt.audit_issues.length)
-                          ? activeStmt.audit_issues.join('\n')
-                          : `Parsed ${activeStmt.audit_parsed_count ?? '—'} of ~${activeStmt.audit_expected_count ?? '—'} detected rows`
-                      }
-                      style={{
-                        display: 'inline-block',
-                        padding: '2px 8px', borderRadius: 2, fontSize: 10.5, fontWeight: 600,
-                        textTransform: 'uppercase', letterSpacing: 0.3,
-                        color: activeStmt.audit_status === 'verified' || activeStmt.audit_status === 'corrected'
-                          ? 'var(--success)' : 'var(--warning, #8a6a1f)',
-                        background: activeStmt.audit_status === 'verified' || activeStmt.audit_status === 'corrected'
-                          ? 'rgba(58,92,74,0.1)' : 'rgba(200,150,40,0.12)',
-                      }}
-                    >
-                      {activeStmt.audit_status === 'verified' && '✓ Audit verified'}
-                      {activeStmt.audit_status === 'corrected' && '✓ Auto-corrected'}
-                      {activeStmt.audit_status === 'corrected_with_warnings' && `⚠ Corrected · ${activeStmt.audit_issues?.length || 0} issue(s)`}
-                      {activeStmt.audit_status === 'issues_found' && `⚠ ${activeStmt.audit_issues?.length || 0} audit issue(s)`}
-                    </span>
-                  </div>
-                )}
               </div>
               {activeStmt.status === 'parsed' && (
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -702,6 +677,58 @@ export default function Reconciliation() {
                 </div>
               )}
             </div>
+
+            {/* Audit completeness check — sits above the first row so users
+                can see at a glance whether the whole statement was parsed. */}
+            {activeStmt.audit_status && activeStmt.audit_status !== 'skipped' && activeStmt.parsed_entries?.length > 0 && !recon && (() => {
+              const ok = activeStmt.audit_status === 'verified' || activeStmt.audit_status === 'corrected';
+              const parsedN = activeStmt.audit_parsed_count ?? activeStmt.parsed_entries.length;
+              const expectedN = activeStmt.audit_expected_count;
+              const issues = activeStmt.audit_issues || [];
+              const headline = ok
+                ? 'Statement fully parsed'
+                : activeStmt.audit_status === 'corrected_with_warnings'
+                  ? 'Parsed with minor issues'
+                  : 'Partial parse — review the issues below';
+              return (
+                <div data-testid="audit-check-banner" style={{
+                  padding: '14px 24px', borderBottom: '1px solid var(--border-subtle)',
+                  background: ok ? 'rgba(58,92,74,0.06)' : 'rgba(200,150,40,0.08)',
+                  display: 'flex', alignItems: 'flex-start', gap: 12,
+                }}>
+                  <div style={{
+                    flexShrink: 0, width: 30, height: 30, borderRadius: '50%',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    background: ok ? 'var(--success)' : 'var(--warning, #c28c3c)',
+                  }}>
+                    {ok
+                      ? <CheckCircle size={18} weight="fill" color="#fff" />
+                      : <Warning size={18} weight="fill" color="#fff" />}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{
+                      fontSize: 13.5, fontWeight: 600,
+                      color: ok ? 'var(--success)' : 'var(--warning, #8a6a1f)',
+                      marginBottom: 2,
+                    }}>{headline}</div>
+                    <div className="mono" style={{ fontSize: 11, color: 'var(--text-secondary)', letterSpacing: '0.02em' }}>
+                      {parsedN.toLocaleString()} transaction{parsedN === 1 ? '' : 's'} captured
+                      {expectedN ? ` · ~${expectedN.toLocaleString()} detected in the source file` : ''}
+                    </div>
+                    {!ok && issues.length > 0 && (
+                      <ul style={{
+                        margin: '8px 0 0', paddingLeft: 18,
+                        fontSize: 11.5, color: 'var(--text-secondary)', lineHeight: 1.55,
+                      }}>
+                        {issues.map((issue, i) => (
+                          <li key={i} style={{ marginBottom: 2 }}>{issue}</li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
 
             {activeStmt.parsed_entries?.length > 0 && !recon && (
               // table-layout:fixed + percentage column widths so long IMPS
