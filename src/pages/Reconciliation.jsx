@@ -130,7 +130,7 @@ export default function Reconciliation() {
   const loadData = useCallback(async () => {
     try {
       const [stmtRes, accs, cats] = await Promise.all([
-        api.get('/api/statements/list'),
+        api.get('/api/statements/list', { bypassCache: true }),
         api.get('/api/accounts'),
         api.get('/api/categories').catch(() => []),
       ]);
@@ -229,7 +229,7 @@ export default function Reconciliation() {
 
   const handleViewStatement = async (stmtId) => {
     try {
-      const stmt = await api.get(`/api/statements/${stmtId}`);
+      const stmt = await api.get(`/api/statements/${stmtId}`, { bypassCache: true });
       setActiveStmt(stmt);
       setSelectedMissing([]);
     } catch (err) { setError(err.message); }
@@ -288,7 +288,7 @@ export default function Reconciliation() {
         entry_indices: selectedMissing,
       });
       setSelectedMissing([]);
-      const stmt = await api.get(`/api/statements/${activeStmt.statement_id}`);
+      const stmt = await api.get(`/api/statements/${activeStmt.statement_id}`, { bypassCache: true });
       setActiveStmt(stmt);
       loadData();
     } catch (err) { setError(err.message); }

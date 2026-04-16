@@ -130,32 +130,45 @@ export default function CashFlow() {
   }, []);
 
   const toggleMandateStatus = async (mandateId, currentStatus) => {
-    setMandateBusyId(mandateId);
+    const next = currentStatus === 'active' ? 'paused' : 'active';
+    const prev = mandates;
+    // Optimistic: update UI immediately
+    setMandates(prev.map(m => m.mandate_id === mandateId ? { ...m, status: next } : m));
     try {
-      const next = currentStatus === 'active' ? 'paused' : 'active';
       await api.patch(`/api/mandates/${mandateId}`, { status: next });
-      await loadData();
-    } catch (err) { alert(err.message); }
-    setMandateBusyId('');
+      loadData(); // refresh projection totals in background
+    } catch (err) {
+      setMandates(prev); // rollback
+      alert(err.message);
+    }
   };
 
   const deleteMandate = async (mandateId) => {
     if (!confirm('Delete this mandate? It will be removed from cash flow projection.')) return;
-    setMandateBusyId(mandateId);
+    const prev = mandates;
+    // Optimistic: remove immediately
+    setMandates(prev.filter(m => m.mandate_id !== mandateId));
     try {
       await api.del(`/api/mandates/${mandateId}`);
-      await loadData();
-    } catch (err) { alert(err.message); }
-    setMandateBusyId('');
+      loadData();
+    } catch (err) {
+      setMandates(prev);
+      alert(err.message);
+    }
   };
 
   const updateMandateAmount = async (mandateId, newAmount) => {
-    setMandateBusyId(mandateId);
+    const amt = Number(newAmount);
+    const prev = mandates;
+    // Optimistic: update amount immediately
+    setMandates(prev.map(m => m.mandate_id === mandateId ? { ...m, amount: amt } : m));
     try {
-      await api.patch(`/api/mandates/${mandateId}`, { amount: Number(newAmount) });
-      await loadData();
-    } catch (err) { alert(err.message); }
-    setMandateBusyId('');
+      await api.patch(`/api/mandates/${mandateId}`, { amount: amt });
+      loadData();
+    } catch (err) {
+      setMandates(prev);
+      alert(err.message);
+    }
   };
 
   useEffect(() => {

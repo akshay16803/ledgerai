@@ -305,10 +305,10 @@ export default function EmailSync() {
   const loadStatus = useCallback(async () => {
     try {
       const [gStatus, oStatus, sStats, review, accs, cats] = await Promise.all([
-        api.get('/api/gmail/status'),
-        api.get('/api/outlook/status'),
-        api.get('/api/sms/stats'),
-        api.get('/api/email/pending-review'),
+        api.get('/api/gmail/status', { bypassCache: true }),
+        api.get('/api/outlook/status', { bypassCache: true }),
+        api.get('/api/sms/stats', { bypassCache: true }),
+        api.get('/api/email/pending-review', { bypassCache: true }),
         api.get('/api/accounts'),
         api.get('/api/categories'),
       ]);

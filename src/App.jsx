@@ -43,7 +43,7 @@ export default function App() {
       const btn = e.target.closest('button[type="submit"], button[data-guard]');
       if (!btn || btn.disabled) return;
       btn.disabled = true;
-      setTimeout(() => { if (btn) btn.disabled = false; }, 500);
+      setTimeout(() => { if (btn) btn.disabled = false; }, 120);
     };
     document.addEventListener('click', handler, true);
     return () => document.removeEventListener('click', handler, true);

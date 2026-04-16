@@ -29,8 +29,8 @@ export default function TaxSummary() {
   const loadSummaries = useCallback(async () => {
     try {
       const [res, emailsRes] = await Promise.all([
-        api.get('/api/tax-summary'),
-        api.get('/api/tax-summary/available-emails'),
+        api.get('/api/tax-summary', { bypassCache: true }),
+        api.get('/api/tax-summary/available-emails', { bypassCache: true }),
       ]);
       setSummaries(res.summaries);
       setAvailableEmails(emailsRes.emails);
