@@ -527,6 +527,10 @@ export default function Accounts() {
     setForm({ name: '', account_type: 'asset', sub_type: firstSubType, account_number: '', opening_balance: '', balance_as_of_date: new Date().toISOString().split('T')[0], currency: 'INR', description: '', loan_interest_rate: '', loan_tenure_months: '', loan_emi_amount: '', loan_emi_day: '' });
     setShowForm(true);
     setError('');
+    // Defensive: if a prior submit left `saving` stuck, a fresh open
+    // should not inherit it — otherwise `handleSubmit`'s early-return
+    // on `saving` would silently swallow the next click.
+    setSaving(false);
   };
 
   const openEdit = (acc) => {
@@ -548,6 +552,7 @@ export default function Accounts() {
     });
     setShowForm(true);
     setError('');
+    setSaving(false);
   };
 
   const handleTypeChange = (newType) => {
@@ -597,8 +602,13 @@ export default function Accounts() {
       setShowForm(false);
       setEditingAcc(null);
       loadAccounts();
-    } catch (err) { setError(err.message); }
-    setSaving(false);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      // Always clear `saving` — the `if (saving) return;` guard above
+      // would otherwise swallow every subsequent click.
+      setSaving(false);
+    }
   };
 
   const handleDelete = async (id) => {

@@ -50,6 +50,15 @@ async function request(path, options = {}) {
 
   // Mutations: dedupe identical in-flight requests within a short window,
   // then bust the matching resource prefix from the GET cache.
+  //
+  // IMPORTANT: on failure, evict the inflight entry IMMEDIATELY. If we
+  // kept a rejected promise in the map for 500 ms, the user's retry with
+  // the same body would receive the stale rejection without a new network
+  // call — and because `setError` would be called with the identical
+  // error string, React would bail on re-render. Visible symptom: the
+  // form looks frozen after the first failure (e.g., duplicate-name 400
+  // on "Save Account"). Success path still waits 500 ms to absorb genuine
+  // double-click storms.
   const key = `${method}:${path}:${options.body || ''}`;
   if (inflight.has(key)) {
     return inflight.get(key);
@@ -59,9 +68,10 @@ async function request(path, options = {}) {
     return data;
   });
   inflight.set(key, promise);
-  promise.finally(() => {
-    setTimeout(() => inflight.delete(key), 500);
-  });
+  promise.then(
+    () => { setTimeout(() => inflight.delete(key), 500); },
+    () => { inflight.delete(key); },
+  );
   return promise;
 }
 
