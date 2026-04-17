@@ -9,6 +9,7 @@ import Accounts from './pages/Accounts.jsx';
 import Categories from './pages/Categories.jsx';
 import Ledger from './pages/Ledger.jsx';
 import Pricing from './pages/Pricing.jsx';
+import Billing from './pages/Billing.jsx';
 import FeatureRequests from './pages/FeatureRequests.jsx';
 import EmailSync from './pages/EmailSync.jsx';
 import CashFlow from './pages/CashFlow.jsx';
@@ -23,7 +24,7 @@ import Settings from './pages/Settings.jsx';
 import Support from './pages/Support.jsx';
 import AppLayout from './components/AppLayout.jsx';
 
-function ProtectedRoute({ children }) {
+function ProtectedRoute({ children, requireSubscription = true }) {
   const { user, loading } = useAuth();
   if (loading) {
     return (
@@ -33,6 +34,10 @@ function ProtectedRoute({ children }) {
     );
   }
   if (!user) return <Navigate to="/login" replace />;
+  // Gate behind subscription — redirect to billing if no active plan
+  if (requireSubscription && user.subscription_status !== 'active') {
+    return <Navigate to="/billing" replace />;
+  }
   return children;
 }
 
@@ -65,6 +70,7 @@ export default function App() {
       <Route path="/" element={<Landing />} />
       <Route path="/login" element={<Login />} />
       <Route path="/pricing" element={<Pricing />} />
+      <Route path="/billing" element={<ProtectedRoute requireSubscription={false}><Billing /></ProtectedRoute>} />
       <Route path="/verify-email" element={<VerifyEmail />} />
       <Route path="/privacy" element={<Privacy />} />
       <Route path="/terms" element={<Terms />} />

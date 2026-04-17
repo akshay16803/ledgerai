@@ -417,8 +417,11 @@ async def google_callback(request: Request, response: Response, code: str = None
         "created_at": datetime.now(timezone.utc),
     })
 
-    # Build redirect response with session cookie
-    redirect_resp = RedirectResponse(f"{frontend_url}/dashboard", status_code=302)
+    # Build redirect response — send to /billing if no active subscription, else /dashboard
+    user_doc = existing_user or await db.users.find_one({"user_id": user_id}, {"_id": 0})
+    has_subscription = user_doc and user_doc.get("subscription_status") == "active"
+    redirect_target = "dashboard" if has_subscription else "billing"
+    redirect_resp = RedirectResponse(f"{frontend_url}/{redirect_target}", status_code=302)
     redirect_resp.set_cookie(
         key="session_token",
         value=session_token,
@@ -7300,6 +7303,74 @@ async def payment_history(user: dict = Depends(get_current_user)):
             if key in o and isinstance(o[key], datetime):
                 o[key] = o[key].isoformat()
     return {"orders": orders}
+
+
+# ─── Promo Codes ─────────────────────────────────────────────────────
+
+PROMO_CODES = {
+    "SPENTYFOUNDER": {"type": "lifetime", "description": "Founder access"},
+    "SPENTYFRIENDS": {"type": "lifetime", "description": "Friends & family"},
+    "SPENTYTEST2026": {"type": "lifetime", "description": "Testing access"},
+    "SPENTYBETA": {"type": "lifetime", "description": "Beta tester access"},
+    "SPENTYDEV": {"type": "lifetime", "description": "Developer access"},
+}
+
+
+class PromoCodeRequest(BaseModel):
+    code: str
+
+
+@app.post("/api/promo/validate")
+async def validate_promo_code(data: PromoCodeRequest, user: dict = Depends(get_current_user)):
+    """Check if a promo code is valid."""
+    code = data.code.strip().upper()
+    if code not in PROMO_CODES:
+        raise HTTPException(status_code=400, detail="Invalid promo code")
+
+    # Check if user already has active subscription
+    if user.get("subscription_status") == "active":
+        raise HTTPException(status_code=400, detail="You already have an active subscription")
+
+    return {"valid": True, "code": code, "description": PROMO_CODES[code]["description"]}
+
+
+@app.post("/api/promo/activate")
+async def activate_promo_code(data: PromoCodeRequest, user: dict = Depends(get_current_user)):
+    """Activate a promo code — grants lifetime subscription."""
+    code = data.code.strip().upper()
+    if code not in PROMO_CODES:
+        raise HTTPException(status_code=400, detail="Invalid promo code")
+
+    if user.get("subscription_status") == "active":
+        raise HTTPException(status_code=400, detail="You already have an active subscription")
+
+    now = datetime.now(timezone.utc)
+
+    # Grant lifetime subscription
+    await db.users.update_one(
+        {"user_id": user["user_id"]},
+        {"$set": {
+            "subscription_plan": "lifetime",
+            "subscription_status": "active",
+            "subscription_expiry": None,
+            "promo_code_used": code,
+            "subscription_updated_at": now,
+        }}
+    )
+
+    # Log the promo activation
+    await db.promo_activations.insert_one({
+        "user_id": user["user_id"],
+        "email": user.get("email"),
+        "code": code,
+        "activated_at": now,
+    })
+
+    return {
+        "message": "Promo code activated! You now have lifetime access.",
+        "subscription_plan": "lifetime",
+        "subscription_status": "active",
+    }
 
 
 # ─── Demat / Trading Income ──────────────────────────────────────────
