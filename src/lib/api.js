@@ -104,4 +104,21 @@ export const api = {
   del: (path) => request(path, { method: 'DELETE' }),
   // Manual cache bust — useful after a background action (upload, OAuth return, etc.)
   invalidate: (pathOrPrefix) => invalidatePrefix(pathOrPrefix),
+  // Upload a file via FormData — bypasses the JSON Content-Type header
+  upload: async (path, formData) => {
+    const res = await fetch(`${API}${path}`, {
+      method: 'POST',
+      credentials: 'include',
+      body: formData,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      let errorMessage = 'Upload failed';
+      if (typeof err.detail === 'string') errorMessage = err.detail;
+      else if (err.message) errorMessage = err.message;
+      throw new Error(errorMessage);
+    }
+    invalidatePrefix(resourcePrefix(path));
+    return res.json();
+  },
 };

@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { api } from '../lib/api';
 import {
   MagnifyingGlass, DownloadSimple, FileText, Paperclip,
-  FunnelSimple, CaretDown, CaretUp, EnvelopeSimple, Archive, Eye, X
+  FunnelSimple, CaretDown, CaretUp, EnvelopeSimple, Archive, Eye, X, Receipt, Image as ImageIcon
 } from '@phosphor-icons/react';
 
 const API = import.meta.env.REACT_APP_BACKEND_URL || '';
@@ -27,7 +27,27 @@ export default function Records() {
   const [previewRecord, setPreviewRecord] = useState(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [page, setPage] = useState(0);
+  const [activeTab, setActiveTab] = useState('emails'); // 'emails' | 'receipts'
+  const [receipts, setReceipts] = useState([]);
+  const [receiptsTotal, setReceiptsTotal] = useState(0);
+  const [receiptsLoading, setReceiptsLoading] = useState(false);
+  const [receiptPreviewUrl, setReceiptPreviewUrl] = useState(null);
+  const [receiptPreviewData, setReceiptPreviewData] = useState(null);
   const limit = 25;
+
+  const loadReceipts = useCallback(async () => {
+    setReceiptsLoading(true);
+    try {
+      const data = await api.get(`/api/receipts?limit=${limit}&skip=${page * limit}`);
+      setReceipts(data.receipts);
+      setReceiptsTotal(data.total);
+    } catch { /* will show empty state */ }
+    setReceiptsLoading(false);
+  }, [page]);
+
+  useEffect(() => {
+    if (activeTab === 'receipts') loadReceipts();
+  }, [activeTab, loadReceipts]);
 
   const loadRecords = useCallback(async () => {
     try {
@@ -131,32 +151,213 @@ export default function Records() {
 
   return (
     <div data-testid="records-page">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <div>
           <h1 style={{ fontSize: 28, fontWeight: 500, letterSpacing: '-0.02em' }}>Records</h1>
           <p className="mono" style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
-            Archived emails for approved transactions — {total} records
+            Emails & receipts — {activeTab === 'emails' ? total : receiptsTotal} records
           </p>
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button
-            data-testid="download-zip-btn"
-            onClick={downloadZip}
-            disabled={downloading || total === 0}
-            style={{
-              background: 'var(--brand-primary)', color: '#fff', border: 'none',
-              padding: '10px 20px', borderRadius: 2, fontSize: 13, fontWeight: 600,
-              cursor: (downloading || total === 0) ? 'not-allowed' : 'pointer',
-              fontFamily: 'var(--font-body)', display: 'flex', alignItems: 'center', gap: 6,
-              opacity: (downloading || total === 0) ? 0.6 : 1,
-            }}
-          >
-            <DownloadSimple size={16} weight="bold" />
-            {downloading ? 'Downloading...' : selected.size > 0 ? `Download ${selected.size} Selected` : 'Download All'}
-          </button>
-        </div>
+        {activeTab === 'emails' && (
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              data-testid="download-zip-btn"
+              onClick={downloadZip}
+              disabled={downloading || total === 0}
+              style={{
+                background: 'var(--brand-primary)', color: '#fff', border: 'none',
+                padding: '10px 20px', borderRadius: 2, fontSize: 13, fontWeight: 600,
+                cursor: (downloading || total === 0) ? 'not-allowed' : 'pointer',
+                fontFamily: 'var(--font-body)', display: 'flex', alignItems: 'center', gap: 6,
+                opacity: (downloading || total === 0) ? 0.6 : 1,
+              }}
+            >
+              <DownloadSimple size={16} weight="bold" />
+              {downloading ? 'Downloading...' : selected.size > 0 ? `Download ${selected.size} Selected` : 'Download All'}
+            </button>
+          </div>
+        )}
       </div>
 
+      {/* Tabs */}
+      <div style={{ display: 'flex', gap: 0, marginBottom: 20, borderBottom: '1px solid var(--border-subtle)' }}>
+        {[
+          { key: 'emails', label: 'Email Records', icon: EnvelopeSimple },
+          { key: 'receipts', label: 'Receipts & Bills', icon: Receipt },
+        ].map(({ key, label, icon: Icon }) => (
+          <button key={key} onClick={() => { setActiveTab(key); setPage(0); }}
+            style={{
+              padding: '10px 20px', border: 'none',
+              borderBottom: activeTab === key ? '2px solid var(--brand-primary)' : '2px solid transparent',
+              background: 'transparent', cursor: 'pointer', fontSize: 14,
+              fontWeight: activeTab === key ? 600 : 400,
+              color: activeTab === key ? 'var(--brand-primary)' : 'var(--text-muted)',
+              fontFamily: 'var(--font-body)', display: 'flex', alignItems: 'center', gap: 6,
+              transition: 'all 0.15s',
+            }}>
+            <Icon size={16} weight={activeTab === key ? 'bold' : 'regular'} /> {label}
+          </button>
+        ))}
+      </div>
+
+      {/* Receipts Tab */}
+      {activeTab === 'receipts' && (
+        <>
+          {receiptsLoading && receipts.length === 0 ? (
+            <div className="mono" style={{ color: 'var(--text-muted)', padding: 40 }}>Loading receipts...</div>
+          ) : receipts.length === 0 ? (
+            <div style={{
+              textAlign: 'center', padding: 60, background: '#fff',
+              border: '1px solid var(--border-subtle)', borderRadius: 2,
+            }}>
+              <Receipt size={40} weight="duotone" style={{ color: 'var(--text-muted)', marginBottom: 16 }} />
+              <h3 style={{ fontSize: 18, fontWeight: 600, marginBottom: 8 }}>No receipts uploaded yet</h3>
+              <p style={{ color: 'var(--text-muted)', fontSize: 14, maxWidth: 420, margin: '0 auto' }}>
+                Upload a receipt when creating a transaction and it will appear here.
+              </p>
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 16 }}>
+              {receipts.map(r => (
+                <div key={r.receipt_id} style={{
+                  background: '#fff', border: '1px solid var(--border-subtle)', borderRadius: 2,
+                  overflow: 'hidden', transition: 'box-shadow 0.15s',
+                }}
+                  onMouseEnter={e => e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.06)'}
+                  onMouseLeave={e => e.currentTarget.style.boxShadow = 'none'}
+                >
+                  {/* Receipt thumbnail / icon */}
+                  <div style={{
+                    height: 120, background: 'var(--bg-secondary)', display: 'flex',
+                    alignItems: 'center', justifyContent: 'center', borderBottom: '1px solid var(--border-subtle)',
+                    cursor: 'pointer', overflow: 'hidden',
+                  }} onClick={() => {
+                    setReceiptPreviewUrl(`${API}/api/receipts/${r.receipt_id}/download`);
+                    setReceiptPreviewData(r);
+                  }}>
+                    {r.mime_type?.startsWith('image/') ? (
+                      <img
+                        src={`${API}/api/receipts/${r.receipt_id}/download`}
+                        alt={r.filename}
+                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                        crossOrigin="use-credentials"
+                      />
+                    ) : (
+                      <FileText size={36} weight="duotone" style={{ color: 'var(--text-muted)' }} />
+                    )}
+                  </div>
+                  <div style={{ padding: '12px 14px' }}>
+                    <p style={{ fontSize: 13, fontWeight: 500, margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                      title={r.filename}>
+                      {r.filename}
+                    </p>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 }}>
+                      <span className="mono" style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                        {r.uploaded_at ? new Date(r.uploaded_at).toLocaleDateString('en-IN') : ''}
+                      </span>
+                      <span className="mono" style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                        {r.file_size ? `${(r.file_size / 1024).toFixed(0)} KB` : ''}
+                      </span>
+                    </div>
+                    {r.transaction_id && (
+                      <p style={{ fontSize: 11, color: 'var(--success)', margin: '6px 0 0', fontWeight: 600 }}>
+                        Linked to transaction
+                      </p>
+                    )}
+                    <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                      <button onClick={() => {
+                        setReceiptPreviewUrl(`${API}/api/receipts/${r.receipt_id}/download`);
+                        setReceiptPreviewData(r);
+                      }}
+                        style={{
+                          flex: 1, background: 'rgba(194,109,92,0.1)', border: 'none', borderRadius: 2,
+                          padding: '6px 0', cursor: 'pointer', fontSize: 11, fontWeight: 600,
+                          fontFamily: 'var(--font-body)', color: 'var(--brand-primary)',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
+                        }}>
+                        <Eye size={12} /> View
+                      </button>
+                      <button onClick={() => window.open(`${API}/api/receipts/${r.receipt_id}/download`, '_blank')}
+                        style={{
+                          flex: 1, background: 'var(--bg-primary)', border: '1px solid var(--border-strong)',
+                          borderRadius: 2, padding: '6px 0', cursor: 'pointer', fontSize: 11, fontWeight: 600,
+                          fontFamily: 'var(--font-body)', color: 'var(--text-secondary)',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
+                        }}>
+                        <DownloadSimple size={12} /> Download
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Receipts Pagination */}
+          {Math.ceil(receiptsTotal / limit) > 1 && (
+            <div style={{
+              marginTop: 20, padding: '12px 0',
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+            }}>
+              <span className="mono" style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                Showing {page * limit + 1}–{Math.min((page + 1) * limit, receiptsTotal)} of {receiptsTotal}
+              </span>
+              <div style={{ display: 'flex', gap: 4 }}>
+                <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0}
+                  style={pageBtnStyle(page === 0)}>Previous</button>
+                <button onClick={() => setPage(p => p + 1)} disabled={page >= Math.ceil(receiptsTotal / limit) - 1}
+                  style={pageBtnStyle(page >= Math.ceil(receiptsTotal / limit) - 1)}>Next</button>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Receipt Preview Modal */}
+      {receiptPreviewUrl && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div onClick={() => { setReceiptPreviewUrl(null); setReceiptPreviewData(null); }}
+            style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }} />
+          <div style={{
+            position: 'relative', background: '#fff', borderRadius: 2, width: '100%', maxWidth: 600,
+            maxHeight: '90vh', overflow: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.2)',
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 24px', borderBottom: '1px solid var(--border-subtle)' }}>
+              <h2 style={{ fontSize: 16, fontWeight: 600 }}>Receipt Preview</h2>
+              <button onClick={() => { setReceiptPreviewUrl(null); setReceiptPreviewData(null); }}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4 }}>
+                <X size={20} />
+              </button>
+            </div>
+            <div style={{ padding: '20px 24px' }}>
+              {receiptPreviewData?.mime_type?.startsWith('image/') ? (
+                <img src={receiptPreviewUrl} alt="Receipt" style={{ width: '100%', borderRadius: 2 }} crossOrigin="use-credentials" />
+              ) : (
+                <iframe src={receiptPreviewUrl} title="Receipt PDF" style={{ width: '100%', height: 500, border: 'none', borderRadius: 2 }} />
+              )}
+              <div style={{ marginTop: 16, display: 'flex', gap: 8, justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <p style={{ fontSize: 13, fontWeight: 500, margin: 0 }}>{receiptPreviewData?.filename}</p>
+                  <p className="mono" style={{ fontSize: 11, color: 'var(--text-muted)', margin: '2px 0 0' }}>
+                    {receiptPreviewData?.uploaded_at ? new Date(receiptPreviewData.uploaded_at).toLocaleString('en-IN') : ''}
+                  </p>
+                </div>
+                <button onClick={() => window.open(receiptPreviewUrl, '_blank')}
+                  style={{
+                    background: 'var(--brand-primary)', color: '#fff', border: 'none',
+                    borderRadius: 2, padding: '8px 16px', cursor: 'pointer', fontSize: 12,
+                    fontWeight: 600, fontFamily: 'var(--font-body)', display: 'flex', alignItems: 'center', gap: 4,
+                  }}>
+                  <DownloadSimple size={13} /> Download
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Email Records Tab */}
+      {activeTab === 'emails' && <>
       {/* Search and Filter Bar */}
       <div style={{
         background: '#fff', border: '1px solid var(--border-subtle)', borderRadius: 2,
@@ -373,6 +574,8 @@ export default function Records() {
           )}
         </div>
       )}
+
+      </>}
 
       {/* Email Preview Modal */}
       {(previewRecord || previewLoading) && (

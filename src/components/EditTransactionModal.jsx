@@ -1,6 +1,6 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { api } from '../lib/api';
-import { X, ArrowDown, ArrowUp, ArrowsLeftRight, Plus, Check, CheckCircle } from '@phosphor-icons/react';
+import { X, ArrowDown, ArrowUp, ArrowsLeftRight, Plus, Check, CheckCircle, Receipt, UploadSimple, SpinnerGap, Trash, Robot } from '@phosphor-icons/react';
 
 export function EditTransactionModal({ transaction, accounts, categories, onSave, onClose, isPendingReview = false }) {
   const isEdit = !!transaction;
@@ -33,8 +33,28 @@ export function EditTransactionModal({ transaction, accounts, categories, onSave
   const [localAccounts, setLocalAccounts] = useState(accounts);
   const [localCategories, setLocalCategories] = useState(categories);
 
+  // Receipt upload state
+  const [receiptFile, setReceiptFile] = useState(null);
+  const [receiptPreview, setReceiptPreview] = useState(null);
+  const [receiptId, setReceiptId] = useState(transaction?.receipt_id || null);
+  const [uploadingReceipt, setUploadingReceipt] = useState(false);
+  const [parsingReceipt, setParsingReceipt] = useState(false);
+  const [receiptError, setReceiptError] = useState('');
+  const [existingReceipt, setExistingReceipt] = useState(null);
+  const receiptInputRef = useRef(null);
+
   useEffect(() => { setLocalAccounts(accounts); }, [accounts]);
   useEffect(() => { setLocalCategories(categories); }, [categories]);
+
+  // Load existing receipt if transaction has one
+  useEffect(() => {
+    if (transaction?.receipt_id) {
+      api.get(`/api/receipts/by-transaction/${transaction.transaction_id}`).then(r => {
+        setExistingReceipt(r);
+        setReceiptId(r.receipt_id);
+      }).catch(() => {});
+    }
+  }, [transaction]);
 
   // Memoize expensive filter operations
   const parentCategories = useMemo(
@@ -86,6 +106,61 @@ export function EditTransactionModal({ transaction, accounts, categories, onSave
     } catch (err) { alert(err.message); }
   };
 
+  // Receipt upload handler
+  const handleReceiptUpload = async (file) => {
+    if (!file) return;
+    setReceiptFile(file);
+    setReceiptError('');
+    setExistingReceipt(null);
+    if (file.type.startsWith('image/')) {
+      const reader = new FileReader();
+      reader.onload = (e) => setReceiptPreview(e.target.result);
+      reader.readAsDataURL(file);
+    } else {
+      setReceiptPreview(null);
+    }
+    setUploadingReceipt(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await api.upload('/api/receipts/upload', fd);
+      setReceiptId(res.receipt_id);
+      // Auto-parse if form fields are mostly empty
+      const formIsEmpty = !form.amount && !form.description;
+      if (formIsEmpty && !isEdit) {
+        setParsingReceipt(true);
+        try {
+          const parseRes = await api.post(`/api/receipts/${res.receipt_id}/parse`, {});
+          if (parseRes.parsed_data) {
+            const pd = parseRes.parsed_data;
+            setForm(f => ({
+              ...f,
+              amount: pd.amount ? String(pd.amount) : f.amount,
+              date: pd.date || f.date,
+              description: pd.description || pd.vendor || f.description,
+              payment_method: pd.payment_method || f.payment_method,
+              category_id: pd.category_id || f.category_id,
+            }));
+            if (pd.amount && txnType !== 'expense') setTxnType('expense');
+          }
+        } catch { /* user fills manually */ }
+        finally { setParsingReceipt(false); }
+      }
+    } catch (err) {
+      setReceiptError(err.message);
+      setReceiptId(null);
+    } finally { setUploadingReceipt(false); }
+  };
+
+  const handleRemoveReceipt = () => {
+    setReceiptFile(null);
+    setReceiptPreview(null);
+    setReceiptId(null);
+    setReceiptError('');
+    setExistingReceipt(null);
+    if (receiptInputRef.current) receiptInputRef.current.value = '';
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
@@ -109,6 +184,7 @@ export function EditTransactionModal({ transaction, accounts, categories, onSave
         payment_method: form.payment_method || null,
         is_recurring: form.is_recurring,
         recurring_frequency: form.is_recurring ? form.recurring_frequency : null,
+        receipt_id: receiptId || null,
       };
 
       if (isEdit) {
@@ -143,6 +219,7 @@ export function EditTransactionModal({ transaction, accounts, categories, onSave
         subcategory_id: txnType !== 'transfer' ? form.subcategory_id : null,
         description: form.description,
         payment_method: form.payment_method || null,
+        receipt_id: receiptId || null,
         is_recurring: form.is_recurring,
         recurring_frequency: form.is_recurring ? form.recurring_frequency : null,
       };
@@ -160,6 +237,7 @@ export function EditTransactionModal({ transaction, accounts, categories, onSave
     <div data-testid="edit-transaction-modal" style={{
       position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center',
     }}>
+      <style>{`.spin { animation: spin-anim 1s linear infinite; } @keyframes spin-anim { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
       {/* Backdrop */}
       <div onClick={onClose} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)' }} />
 
@@ -363,11 +441,78 @@ export function EditTransactionModal({ transaction, accounts, categories, onSave
                 style={inputStyle} placeholder="Optional description" />
             </div>
 
+            {/* Receipt / Bill Upload */}
+            {txnType !== 'transfer' && (
+              <div style={{ marginBottom: 20 }}>
+                <label style={labelStyle}>
+                  <Receipt size={14} style={{ marginRight: 4, verticalAlign: 'middle' }} />
+                  Receipt / Bill
+                </label>
+                {!receiptFile && !existingReceipt ? (
+                  <div
+                    onClick={() => receiptInputRef.current?.click()}
+                    onDragOver={(e) => { e.preventDefault(); e.currentTarget.style.borderColor = 'var(--brand-primary)'; }}
+                    onDragLeave={(e) => { e.currentTarget.style.borderColor = 'var(--border-strong)'; }}
+                    onDrop={(e) => { e.preventDefault(); e.currentTarget.style.borderColor = 'var(--border-strong)'; const f = e.dataTransfer.files[0]; if (f) handleReceiptUpload(f); }}
+                    style={{
+                      border: '2px dashed var(--border-strong)', borderRadius: 2, padding: '16px 12px',
+                      textAlign: 'center', cursor: 'pointer', background: 'var(--bg-primary)',
+                      transition: 'border-color 0.15s',
+                    }}
+                  >
+                    <UploadSimple size={20} style={{ color: 'var(--text-muted)', marginBottom: 4 }} />
+                    <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: 0 }}>
+                      Drop receipt here or <span style={{ color: 'var(--brand-primary)', fontWeight: 600 }}>browse</span>
+                    </p>
+                    <p style={{ fontSize: 10, color: 'var(--text-muted)', margin: '3px 0 0' }}>
+                      JPG, PNG, PDF — max 10 MB
+                    </p>
+                    <input ref={receiptInputRef} type="file" accept="image/*,.pdf" style={{ display: 'none' }}
+                      onChange={(e) => { const f = e.target.files[0]; if (f) handleReceiptUpload(f); }} />
+                  </div>
+                ) : (
+                  <div style={{
+                    border: '1px solid var(--border-strong)', borderRadius: 2, padding: 10,
+                    display: 'flex', alignItems: 'center', gap: 10, background: 'var(--bg-primary)',
+                  }}>
+                    {receiptPreview ? (
+                      <img src={receiptPreview} alt="Receipt" style={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 2, border: '1px solid var(--border-subtle)' }} />
+                    ) : (
+                      <div style={{ width: 40, height: 40, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-secondary)', borderRadius: 2 }}>
+                        <Receipt size={18} style={{ color: 'var(--text-muted)' }} />
+                      </div>
+                    )}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <p style={{ fontSize: 12, fontWeight: 500, margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {receiptFile?.name || existingReceipt?.filename || 'Receipt attached'}
+                      </p>
+                      <p style={{ fontSize: 10, color: 'var(--text-muted)', margin: '2px 0 0' }}>
+                        {receiptFile ? `${(receiptFile.size / 1024).toFixed(0)} KB` : existingReceipt ? `${(existingReceipt.file_size / 1024).toFixed(0)} KB` : ''}
+                        {uploadingReceipt && <span> — Uploading...</span>}
+                        {parsingReceipt && <span style={{ color: 'var(--brand-primary)' }}> — <Robot size={11} style={{ verticalAlign: 'middle' }} /> AI reading...</span>}
+                        {receiptId && !uploadingReceipt && !parsingReceipt && <span style={{ color: 'var(--success)' }}> — Attached ✓</span>}
+                      </p>
+                    </div>
+                    {(uploadingReceipt || parsingReceipt) && (
+                      <SpinnerGap size={16} className="spin" style={{ color: 'var(--brand-primary)' }} />
+                    )}
+                    {!uploadingReceipt && !parsingReceipt && (
+                      <button type="button" onClick={handleRemoveReceipt} title="Remove receipt"
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4 }}>
+                        <Trash size={14} />
+                      </button>
+                    )}
+                  </div>
+                )}
+                {receiptError && <p style={{ color: 'var(--error)', fontSize: 11, marginTop: 4 }}>{receiptError}</p>}
+              </div>
+            )}
+
             {error && <p style={{ color: 'var(--error)', fontSize: 13, marginBottom: 12 }}>{error}</p>}
 
             <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
               {/* Save/Update Button */}
-              <button data-testid="modal-save-btn" type="submit" disabled={saving || approving}
+              <button data-testid="modal-save-btn" type="submit" disabled={saving || approving || uploadingReceipt || parsingReceipt}
                 style={{
                   background: 'var(--brand-primary)', color: '#fff', border: 'none',
                   padding: '10px 24px', borderRadius: 2, fontSize: 13, fontWeight: 600,

@@ -105,6 +105,10 @@ db = client[DB_NAME]
 # it. Bucket name `statement_files` → collections `statement_files.files`
 # and `statement_files.chunks` get auto-created.
 statement_fs = AsyncIOMotorGridFSBucket(db, bucket_name="statement_files")
+receipt_fs = AsyncIOMotorGridFSBucket(db, bucket_name="receipt_files")
+
+RECEIPT_UPLOAD_DIR = "/app/uploads/receipts"
+os.makedirs(RECEIPT_UPLOAD_DIR, exist_ok=True)
 
 
 # ─── Pydantic Models ───────────────────────────────────────────────
@@ -185,6 +189,7 @@ class TransactionCreate(BaseModel):
     recurring_frequency: Optional[str] = None  # monthly, weekly, yearly
     source: str = "manual"  # manual, email, sms
     status: str = "approved"  # approved, pending_review, rejected
+    receipt_id: Optional[str] = None
 
 class TransactionUpdate(BaseModel):
     amount: Optional[float] = None
@@ -197,6 +202,7 @@ class TransactionUpdate(BaseModel):
     payment_method: Optional[str] = None
     is_recurring: Optional[bool] = None
     recurring_frequency: Optional[str] = None
+    receipt_id: Optional[str] = None
 
 class FeatureRequestCreate(BaseModel):
     title: str
@@ -1269,6 +1275,7 @@ async def create_transaction(data: TransactionCreate, user: dict = Depends(get_c
         "recurring_frequency": data.recurring_frequency,
         "source": data.source,
         "status": data.status,
+        "receipt_id": data.receipt_id,
         "created_at": datetime.now(timezone.utc),
     }
     await db.transactions.insert_one(txn)
@@ -1276,6 +1283,13 @@ async def create_transaction(data: TransactionCreate, user: dict = Depends(get_c
 
     if data.status == "approved":
         await apply_transaction_to_balances(user["user_id"], txn)
+
+    # Link receipt to this transaction
+    if data.receipt_id:
+        await db.receipts.update_one(
+            {"receipt_id": data.receipt_id, "user_id": user["user_id"]},
+            {"$set": {"transaction_id": txn["transaction_id"], "linked_at": datetime.now(timezone.utc)}}
+        )
 
     return txn
 
@@ -7772,6 +7786,280 @@ async def reject_demat_statement(statement_id: str, user: dict = Depends(get_cur
     )
 
     return {"statement_id": statement_id, "message": "Statement rejected"}
+
+
+# ─── Receipt / Bill Upload ───────────────────────────────────────────
+
+@app.post("/api/receipts/upload")
+async def upload_receipt(
+    file: UploadFile = File(...),
+    user: dict = Depends(get_current_user),
+):
+    """Upload a receipt/bill image or PDF. Returns receipt_id and metadata."""
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No file provided")
+
+    ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else ""
+    allowed = ("jpg", "jpeg", "png", "webp", "pdf", "heic")
+    if ext not in allowed:
+        raise HTTPException(status_code=400, detail=f"Unsupported file type. Allowed: {', '.join(allowed)}")
+
+    content = await file.read()
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="File too large (max 10 MB)")
+
+    receipt_id = f"rcpt_{uuid.uuid4().hex[:12]}"
+    file_path = os.path.join(RECEIPT_UPLOAD_DIR, f"{receipt_id}.{ext}")
+    with open(file_path, "wb") as f:
+        f.write(content)
+
+    # Durable copy in GridFS
+    has_stored_bytes = False
+    try:
+        await receipt_fs.upload_from_stream_with_id(
+            receipt_id, f"{receipt_id}.{ext}", content,
+            metadata={"user_id": user["user_id"], "file_ext": ext, "filename": file.filename},
+        )
+        has_stored_bytes = True
+    except Exception as e:
+        logger.error(f"GridFS store failed for receipt {receipt_id}: {e}")
+
+    # Determine MIME type for preview
+    mime_map = {
+        "jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",
+        "webp": "image/webp", "pdf": "application/pdf", "heic": "image/heic",
+    }
+
+    receipt_doc = {
+        "receipt_id": receipt_id,
+        "user_id": user["user_id"],
+        "filename": file.filename,
+        "file_ext": ext,
+        "file_path": file_path,
+        "file_size": len(content),
+        "mime_type": mime_map.get(ext, "application/octet-stream"),
+        "has_stored_bytes": has_stored_bytes,
+        "transaction_id": None,
+        "parsed_data": None,
+        "uploaded_at": datetime.now(timezone.utc),
+    }
+    await db.receipts.insert_one(receipt_doc)
+    del receipt_doc["_id"]
+
+    # Convert datetime for JSON
+    receipt_doc["uploaded_at"] = receipt_doc["uploaded_at"].isoformat()
+
+    return receipt_doc
+
+
+@app.post("/api/receipts/{receipt_id}/parse")
+async def parse_receipt(receipt_id: str, user: dict = Depends(get_current_user)):
+    """Use AI (GPT-4o) to extract transaction details from a receipt image/PDF."""
+    receipt = await db.receipts.find_one(
+        {"receipt_id": receipt_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    if not receipt:
+        raise HTTPException(status_code=404, detail="Receipt not found")
+
+    if not async_openai_client:
+        raise HTTPException(status_code=500, detail="AI service not configured")
+
+    # Read file bytes — try disk first, then GridFS
+    file_path = receipt.get("file_path", "")
+    content = None
+    if os.path.isfile(file_path):
+        with open(file_path, "rb") as f:
+            content = f.read()
+    else:
+        try:
+            grid_out = await receipt_fs.open_download_stream(receipt_id)
+            content = await grid_out.read()
+        except Exception:
+            raise HTTPException(status_code=404, detail="Receipt file not found")
+
+    ext = receipt.get("file_ext", "")
+    mime = receipt.get("mime_type", "application/octet-stream")
+
+    # Fetch user's categories and accounts for better AI matching
+    user_categories = await db.categories.find(
+        {"user_id": user["user_id"]}, {"_id": 0, "category_id": 1, "name": 1, "category_type": 1, "parent_id": 1}
+    ).to_list(500)
+    expense_cats = [c for c in user_categories if c.get("category_type") == "expense" and not c.get("parent_id")]
+    cat_names = ", ".join([c["name"] for c in expense_cats]) if expense_cats else "No categories set up yet"
+
+    user_accounts = await db.accounts.find(
+        {"user_id": user["user_id"]}, {"_id": 0, "account_id": 1, "name": 1}
+    ).to_list(100)
+    acc_names = ", ".join([a["name"] for a in user_accounts]) if user_accounts else "No accounts set up yet"
+
+    # Build the AI prompt
+    system_prompt = f"""You are a receipt/bill parser for an Indian personal finance app.
+Extract transaction details from the receipt image or PDF.
+
+The user has these expense categories: {cat_names}
+The user has these accounts: {acc_names}
+
+Return a JSON object with these fields (use null for anything you can't determine with confidence):
+{{
+  "amount": <number or null>,
+  "date": "<YYYY-MM-DD or null>",
+  "description": "<vendor/merchant name and brief description or null>",
+  "category_name": "<best matching category from user's list or a suggested new one or null>",
+  "payment_method": "<upi|credit_card|debit_card|net_banking|cash|wallet|cheque|neft|rtgs|imps|other or null>",
+  "vendor": "<merchant/vendor name or null>",
+  "items": ["{{"item": "name", "qty": 1, "amount": 100}}"] or null
+}}
+
+Only return the JSON object, no extra text. Be conservative — only fill fields you're confident about."""
+
+    # Build message with image
+    if ext == "pdf":
+        # For PDFs, encode as base64 data URL
+        import base64 as b64mod
+        b64_content = b64mod.b64encode(content).decode("utf-8")
+        user_message = [
+            {"type": "text", "text": "Parse this receipt/bill and extract the transaction details:"},
+            {
+                "type": "image_url",
+                "image_url": {"url": f"data:{mime};base64,{b64_content}"}
+            }
+        ]
+    else:
+        import base64 as b64mod
+        b64_content = b64mod.b64encode(content).decode("utf-8")
+        user_message = [
+            {"type": "text", "text": "Parse this receipt/bill and extract the transaction details:"},
+            {
+                "type": "image_url",
+                "image_url": {"url": f"data:{mime};base64,{b64_content}"}
+            }
+        ]
+
+    try:
+        response = await async_openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message},
+            ],
+            max_tokens=1000,
+            temperature=0.1,
+        )
+
+        raw_text = response.choices[0].message.content.strip()
+        # Strip markdown code fences if present
+        if raw_text.startswith("```"):
+            raw_text = raw_text.split("\n", 1)[-1]
+            if raw_text.endswith("```"):
+                raw_text = raw_text[:-3].strip()
+
+        import json
+        parsed = json.loads(raw_text)
+
+        # Try to match category_name to actual category_id
+        matched_category_id = None
+        matched_category_name = parsed.get("category_name")
+        if matched_category_name:
+            for c in expense_cats:
+                if c["name"].lower() == matched_category_name.lower():
+                    matched_category_id = c["category_id"]
+                    break
+            # Fuzzy: check if category name is contained
+            if not matched_category_id:
+                for c in expense_cats:
+                    if matched_category_name.lower() in c["name"].lower() or c["name"].lower() in matched_category_name.lower():
+                        matched_category_id = c["category_id"]
+                        matched_category_name = c["name"]
+                        break
+
+        parsed["category_id"] = matched_category_id
+        parsed["category_name"] = matched_category_name
+
+        # Save parsed data to receipt doc
+        await db.receipts.update_one(
+            {"receipt_id": receipt_id},
+            {"$set": {"parsed_data": parsed, "parsed_at": datetime.now(timezone.utc)}}
+        )
+
+        return {"receipt_id": receipt_id, "parsed_data": parsed}
+
+    except json.JSONDecodeError:
+        return {"receipt_id": receipt_id, "parsed_data": None, "error": "AI could not parse the receipt clearly. Please fill in details manually."}
+    except Exception as e:
+        logger.error(f"Receipt parse error for {receipt_id}: {e}")
+        return {"receipt_id": receipt_id, "parsed_data": None, "error": "Failed to parse receipt. Please fill in details manually."}
+
+
+@app.get("/api/receipts/{receipt_id}/download")
+async def download_receipt(receipt_id: str, user: dict = Depends(get_current_user)):
+    """Download a receipt file."""
+    receipt = await db.receipts.find_one(
+        {"receipt_id": receipt_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    if not receipt:
+        raise HTTPException(status_code=404, detail="Receipt not found")
+
+    # Try disk first, then GridFS
+    file_path = receipt.get("file_path", "")
+    content = None
+    if os.path.isfile(file_path):
+        with open(file_path, "rb") as f:
+            content = f.read()
+    else:
+        try:
+            grid_out = await receipt_fs.open_download_stream(receipt_id)
+            content = await grid_out.read()
+        except Exception:
+            raise HTTPException(status_code=404, detail="Receipt file not found")
+
+    return Response(
+        content=content,
+        media_type=receipt.get("mime_type", "application/octet-stream"),
+        headers={"Content-Disposition": f'inline; filename="{receipt["filename"]}"'},
+    )
+
+
+@app.get("/api/receipts/by-transaction/{transaction_id}")
+async def get_receipt_by_transaction(transaction_id: str, user: dict = Depends(get_current_user)):
+    """Get receipt linked to a specific transaction."""
+    receipt = await db.receipts.find_one(
+        {"transaction_id": transaction_id, "user_id": user["user_id"]},
+        {"_id": 0, "file_path": 0}
+    )
+    if not receipt:
+        raise HTTPException(status_code=404, detail="No receipt found for this transaction")
+    if isinstance(receipt.get("uploaded_at"), datetime):
+        receipt["uploaded_at"] = receipt["uploaded_at"].isoformat()
+    if isinstance(receipt.get("parsed_at"), datetime):
+        receipt["parsed_at"] = receipt["parsed_at"].isoformat()
+    if isinstance(receipt.get("linked_at"), datetime):
+        receipt["linked_at"] = receipt["linked_at"].isoformat()
+    return receipt
+
+
+@app.get("/api/receipts")
+async def list_receipts(
+    user: dict = Depends(get_current_user),
+    limit: int = 50,
+    skip: int = 0,
+):
+    """List all receipts for the user (for Records section)."""
+    receipts = await db.receipts.find(
+        {"user_id": user["user_id"]},
+        {"_id": 0, "file_path": 0}
+    ).sort("uploaded_at", -1).skip(skip).limit(limit).to_list(limit)
+
+    total = await db.receipts.count_documents({"user_id": user["user_id"]})
+
+    for r in receipts:
+        if isinstance(r.get("uploaded_at"), datetime):
+            r["uploaded_at"] = r["uploaded_at"].isoformat()
+        if isinstance(r.get("parsed_at"), datetime):
+            r["parsed_at"] = r["parsed_at"].isoformat()
+        if isinstance(r.get("linked_at"), datetime):
+            r["linked_at"] = r["linked_at"].isoformat()
+
+    return {"receipts": receipts, "total": total}
 
 
 # ─── Health Check ────────────────────────────────────────────────────

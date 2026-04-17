@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { api } from '../lib/api';
 import { getCached, setCache } from '../lib/cache';
-import { Plus, ArrowDown, ArrowUp, ArrowsLeftRight, Check, X, Funnel, PencilSimple, Robot } from '@phosphor-icons/react';
+import { Plus, ArrowDown, ArrowUp, ArrowsLeftRight, Check, X, Funnel, PencilSimple, Robot, Receipt, UploadSimple, SpinnerGap, Eye, Trash } from '@phosphor-icons/react';
 import { EditTransactionModal } from '../components/EditTransactionModal';
 
 function formatCurrency(amount) {
@@ -26,6 +26,14 @@ export default function Transactions() {
     account_id: '', to_account_id: '', category_id: '', subcategory_id: '',
     description: '', payment_method: '', is_recurring: false, recurring_frequency: ''
   });
+  // Receipt upload state
+  const [receiptFile, setReceiptFile] = useState(null);
+  const [receiptPreview, setReceiptPreview] = useState(null);
+  const [receiptId, setReceiptId] = useState(null);
+  const [uploadingReceipt, setUploadingReceipt] = useState(false);
+  const [parsingReceipt, setParsingReceipt] = useState(false);
+  const [receiptError, setReceiptError] = useState('');
+  const receiptInputRef = useRef(null);
 
   const loadData = useCallback(async () => {
     try {
@@ -87,9 +95,11 @@ export default function Transactions() {
         recurring_frequency: form.is_recurring ? form.recurring_frequency : null,
         source: 'manual',
         status: 'approved',
+        receipt_id: receiptId || null,
       });
       setShowForm(false);
       setForm({ amount: '', date: new Date().toISOString().split('T')[0], account_id: '', to_account_id: '', category_id: '', subcategory_id: '', description: '', payment_method: '', is_recurring: false, recurring_frequency: '' });
+      handleRemoveReceipt();
       loadData();
     } catch (err) { setError(err.message); } finally { setSaving(false); }
   };
@@ -143,11 +153,77 @@ export default function Transactions() {
     } catch (err) { alert(err.message); }
   };
 
+  // Receipt upload handler
+  const handleReceiptUpload = async (file) => {
+    if (!file) return;
+    setReceiptFile(file);
+    setReceiptError('');
+
+    // Generate local preview
+    if (file.type.startsWith('image/')) {
+      const reader = new FileReader();
+      reader.onload = (e) => setReceiptPreview(e.target.result);
+      reader.readAsDataURL(file);
+    } else {
+      setReceiptPreview(null); // PDF — no image preview
+    }
+
+    setUploadingReceipt(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await api.upload('/api/receipts/upload', fd);
+      setReceiptId(res.receipt_id);
+
+      // Auto-parse with AI if form fields are mostly empty (upload-first flow)
+      const formIsEmpty = !form.amount && !form.description;
+      if (formIsEmpty) {
+        setParsingReceipt(true);
+        try {
+          const parseRes = await api.post(`/api/receipts/${res.receipt_id}/parse`, {});
+          if (parseRes.parsed_data) {
+            const pd = parseRes.parsed_data;
+            setForm(f => ({
+              ...f,
+              amount: pd.amount ? String(pd.amount) : f.amount,
+              date: pd.date || f.date,
+              description: pd.description || pd.vendor || f.description,
+              payment_method: pd.payment_method || f.payment_method,
+              category_id: pd.category_id || f.category_id,
+            }));
+            // If AI detected it's an expense, ensure txnType is expense
+            if (pd.amount && txnType !== 'expense') {
+              setTxnType('expense');
+            }
+          }
+        } catch {
+          // AI parse failed — user can fill manually
+        } finally {
+          setParsingReceipt(false);
+        }
+      }
+    } catch (err) {
+      setReceiptError(err.message);
+      setReceiptId(null);
+    } finally {
+      setUploadingReceipt(false);
+    }
+  };
+
+  const handleRemoveReceipt = () => {
+    setReceiptFile(null);
+    setReceiptPreview(null);
+    setReceiptId(null);
+    setReceiptError('');
+    if (receiptInputRef.current) receiptInputRef.current.value = '';
+  };
+
   const inputStyle = { width: '100%', padding: '10px 14px', border: '1px solid var(--border-strong)', borderRadius: 2, fontSize: 14, fontFamily: 'var(--font-body)', outline: 'none', background: 'var(--bg-primary)' };
   const labelStyle = { fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 6 };
 
   return (
     <div data-testid="transactions-page">
+      <style>{`.spin { animation: spin-anim 1s linear infinite; } @keyframes spin-anim { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
       <div className="action-bar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 32 }}>
         <div>
           <h1 className="page-title" style={{ fontSize: 28, fontWeight: 500, letterSpacing: '-0.02em' }}>Transactions</h1>
@@ -329,14 +405,84 @@ export default function Transactions() {
                 style={inputStyle} placeholder="Optional description" />
             </div>
 
+            {/* Receipt / Bill Upload */}
+            {txnType !== 'transfer' && (
+              <div style={{ marginBottom: 16 }}>
+                <label style={labelStyle}>
+                  <Receipt size={14} style={{ marginRight: 4, verticalAlign: 'middle' }} />
+                  Receipt / Bill
+                </label>
+                {!receiptFile ? (
+                  <div
+                    onClick={() => receiptInputRef.current?.click()}
+                    onDragOver={(e) => { e.preventDefault(); e.currentTarget.style.borderColor = 'var(--brand-primary)'; }}
+                    onDragLeave={(e) => { e.currentTarget.style.borderColor = 'var(--border-strong)'; }}
+                    onDrop={(e) => { e.preventDefault(); e.currentTarget.style.borderColor = 'var(--border-strong)'; const f = e.dataTransfer.files[0]; if (f) handleReceiptUpload(f); }}
+                    style={{
+                      border: '2px dashed var(--border-strong)', borderRadius: 2, padding: '20px 16px',
+                      textAlign: 'center', cursor: 'pointer', background: 'var(--bg-primary)',
+                      transition: 'border-color 0.15s',
+                    }}
+                  >
+                    <UploadSimple size={24} style={{ color: 'var(--text-muted)', marginBottom: 6 }} />
+                    <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: 0 }}>
+                      Drop receipt here or <span style={{ color: 'var(--brand-primary)', fontWeight: 600 }}>browse</span>
+                    </p>
+                    <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: '4px 0 0' }}>
+                      JPG, PNG, PDF — max 10 MB. AI will auto-fill details if form is empty.
+                    </p>
+                    <input ref={receiptInputRef} type="file" accept="image/*,.pdf" style={{ display: 'none' }}
+                      onChange={(e) => { const f = e.target.files[0]; if (f) handleReceiptUpload(f); }} />
+                  </div>
+                ) : (
+                  <div style={{
+                    border: '1px solid var(--border-strong)', borderRadius: 2, padding: 12,
+                    display: 'flex', alignItems: 'center', gap: 12, background: 'var(--bg-primary)',
+                  }}>
+                    {/* Thumbnail */}
+                    {receiptPreview ? (
+                      <img src={receiptPreview} alt="Receipt" style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 2, border: '1px solid var(--border-subtle)' }} />
+                    ) : (
+                      <div style={{ width: 48, height: 48, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-secondary)', borderRadius: 2 }}>
+                        <Receipt size={20} style={{ color: 'var(--text-muted)' }} />
+                      </div>
+                    )}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <p style={{ fontSize: 13, fontWeight: 500, margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {receiptFile.name}
+                      </p>
+                      <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: '2px 0 0' }}>
+                        {(receiptFile.size / 1024).toFixed(0)} KB
+                        {uploadingReceipt && <span> — Uploading...</span>}
+                        {parsingReceipt && <span style={{ color: 'var(--brand-primary)' }}> — <Robot size={12} style={{ verticalAlign: 'middle' }} /> AI reading receipt...</span>}
+                        {receiptId && !uploadingReceipt && !parsingReceipt && <span style={{ color: 'var(--success)' }}> — Uploaded ✓</span>}
+                      </p>
+                    </div>
+                    {(uploadingReceipt || parsingReceipt) && (
+                      <SpinnerGap size={18} className="spin" style={{ color: 'var(--brand-primary)' }} />
+                    )}
+                    {!uploadingReceipt && !parsingReceipt && (
+                      <button type="button" onClick={handleRemoveReceipt} title="Remove receipt"
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4 }}>
+                        <Trash size={16} />
+                      </button>
+                    )}
+                  </div>
+                )}
+                {receiptError && <p style={{ color: 'var(--error)', fontSize: 12, marginTop: 4 }}>{receiptError}</p>}
+              </div>
+            )}
+
             {error && <p data-testid="transaction-error" style={{ color: 'var(--error)', fontSize: 13, marginBottom: 12 }}>{error}</p>}
 
             <div style={{ display: 'flex', gap: 12 }}>
-              <button data-testid="save-transaction-btn" type="submit" disabled={saving} style={{
+              <button data-testid="save-transaction-btn" type="submit" disabled={saving || uploadingReceipt || parsingReceipt} style={{
                 background: 'var(--brand-primary)', color: '#fff', border: 'none',
-                padding: '10px 24px', borderRadius: 2, fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font-body)'
+                padding: '10px 24px', borderRadius: 2, fontSize: 13, fontWeight: 600,
+                cursor: (saving || uploadingReceipt || parsingReceipt) ? 'not-allowed' : 'pointer',
+                fontFamily: 'var(--font-body)', opacity: (saving || uploadingReceipt || parsingReceipt) ? 0.6 : 1,
               }}>{saving ? 'Saving...' : form.transaction_id ? 'Update' : 'Save Transaction'}</button>
-              <button type="button" onClick={() => setShowForm(false)} style={{
+              <button type="button" onClick={() => { setShowForm(false); handleRemoveReceipt(); }} style={{
                 background: 'none', border: '1px solid var(--border-strong)', color: 'var(--text-secondary)',
                 padding: '10px 24px', borderRadius: 2, fontSize: 13, cursor: 'pointer', fontFamily: 'var(--font-body)'
               }}>Cancel</button>
