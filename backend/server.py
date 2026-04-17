@@ -1004,6 +1004,7 @@ DEFAULT_SUB_TYPES = {
         {"name": "Credit Card", "sub_type_id": "default_credit_card", "icon": "credit_card"},
         {"name": "Loan", "sub_type_id": "default_loan", "icon": "loan"},
         {"name": "Mortgage", "sub_type_id": "default_mortgage", "icon": "house"},
+        {"name": "Overdraft", "sub_type_id": "default_overdraft", "icon": "bank"},
     ],
     "equity": [
         {"name": "Capital", "sub_type_id": "default_capital", "icon": "capital"},
