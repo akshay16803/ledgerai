@@ -91,15 +91,28 @@ function AIChatPanel() {
     <>
       <style>{`@keyframes ai-spin { to { transform: rotate(360deg); } } .spin { animation: ai-spin 1s linear infinite; } @media (max-width: 767px) { .ai-chat-panel { left: 8px !important; right: 8px !important; bottom: 80px !important; width: auto !important; max-height: 75vh !important; } }`}</style>
 
+      {/* Floating AI button */}
       <button onClick={() => setOpen(!open)} style={{
         position: 'fixed', bottom: 24, right: 24, zIndex: 1000,
-        width: 56, height: 56, borderRadius: '50%',
-        background: 'var(--brand-primary)', color: '#fff', border: 'none',
+        height: 48, borderRadius: 24,
+        background: 'linear-gradient(135deg, var(--brand-primary) 0%, #2d6a4f 100%)',
+        color: '#fff', border: 'none',
         boxShadow: '0 4px 20px rgba(26,54,45,0.3)',
-        cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+        cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
         transition: 'transform 0.2s, box-shadow 0.2s',
-      }}>
-        {open ? <X size={24} /> : <Robot size={24} weight="duotone" />}
+        padding: open ? '0 16px' : '0 18px 0 14px',
+      }}
+      onMouseEnter={e => { e.currentTarget.style.transform = 'scale(1.04)'; e.currentTarget.style.boxShadow = '0 6px 28px rgba(26,54,45,0.4)'; }}
+      onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.boxShadow = '0 4px 20px rgba(26,54,45,0.3)'; }}
+      >
+        {open ? (
+          <X size={20} />
+        ) : (
+          <>
+            <Robot size={20} weight="fill" />
+            <span style={{ fontSize: 13, fontWeight: 600, fontFamily: 'var(--font-body)', letterSpacing: '-0.01em' }}>Ask AI</span>
+          </>
+        )}
       </button>
 
       {open && (
@@ -130,17 +143,25 @@ function AIChatPanel() {
           {/* Messages */}
           <div style={{ flex: 1, overflowY: 'auto', padding: 16 }}>
             {messages.length === 0 ? (
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, padding: '12px 0' }}>
-                {quickPrompts.map((prompt, i) => (
-                  <button key={i} onClick={() => sendMessage(prompt)} style={{
-                    background: 'var(--bg-secondary)', border: '1px solid var(--border-subtle)',
-                    borderRadius: 16, padding: '8px 14px', fontSize: 12, color: 'var(--text-secondary)',
-                    cursor: 'pointer', fontFamily: 'var(--font-body)',
-                    transition: 'background 0.2s',
-                  }}>
-                    {prompt}
-                  </button>
-                ))}
+              <div style={{ padding: '8px 0' }}>
+                <p style={{ fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.5, marginBottom: 14 }}>
+                  I can analyse your finances, answer questions about your spending, and even post transactions for you. Try asking:
+                </p>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                  {quickPrompts.map((prompt, i) => (
+                    <button key={i} onClick={() => sendMessage(prompt)} style={{
+                      background: 'var(--bg-secondary)', border: '1px solid var(--border-subtle)',
+                      borderRadius: 16, padding: '8px 14px', fontSize: 12, color: 'var(--text-secondary)',
+                      cursor: 'pointer', fontFamily: 'var(--font-body)',
+                      transition: 'background 0.15s, border-color 0.15s',
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.background = 'rgba(58,92,74,0.06)'; e.currentTarget.style.borderColor = 'var(--brand-primary)'; e.currentTarget.style.color = 'var(--brand-primary)'; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'var(--bg-secondary)'; e.currentTarget.style.borderColor = 'var(--border-subtle)'; e.currentTarget.style.color = 'var(--text-secondary)'; }}
+                    >
+                      {prompt}
+                    </button>
+                  ))}
+                </div>
               </div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
