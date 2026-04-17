@@ -218,6 +218,10 @@ export default function CashFlow() {
           sub={`${recurringItems.filter(r => r.transaction_type === 'expense').length} sources`} />
         <SummaryCard label="Monthly Mandates" value={proj.monthly_mandate_expense || 0} color="var(--error)"
           sub={`${(mandates || []).filter(m => m.status === 'active').length} active`} />
+        {(proj.monthly_od_interest || 0) > 0 && (
+          <SummaryCard label="OD Interest" value={proj.monthly_od_interest} color="var(--error)"
+            sub={`${(proj.od_interest_items || []).length} OD account${(proj.od_interest_items || []).length !== 1 ? 's' : ''}`} />
+        )}
         <SummaryCard label="Monthly Net" value={proj.monthly_net}
           color={proj.monthly_net >= 0 ? 'var(--success)' : 'var(--error)'}
           sub="Projected savings" />
@@ -546,6 +550,7 @@ export default function CashFlow() {
                 <th style={{ ...thStyle, textAlign: 'right' }}>Income</th>
                 <th style={{ ...thStyle, textAlign: 'right' }}>Expense</th>
                 <th style={{ ...thStyle, textAlign: 'right' }}>Mandates</th>
+                {(proj.monthly_od_interest || 0) > 0 && <th style={{ ...thStyle, textAlign: 'right' }}>OD Interest</th>}
                 <th style={{ ...thStyle, textAlign: 'right' }}>Net</th>
               </tr>
             </thead>
@@ -565,6 +570,11 @@ export default function CashFlow() {
                   <td className="mono" style={{ ...tdStyle, textAlign: 'right', color: 'var(--text-secondary)' }}>
                     {formatCurrency(m.mandate_expense || 0)}
                   </td>
+                  {(proj.monthly_od_interest || 0) > 0 && (
+                    <td className="mono" style={{ ...tdStyle, textAlign: 'right', color: 'var(--error)', fontWeight: 500 }}>
+                      {formatCurrency(m.od_interest || 0)}
+                    </td>
+                  )}
                   <td className="mono" style={{
                     ...tdStyle, textAlign: 'right', fontWeight: 600,
                     color: m.net >= 0 ? 'var(--success)' : 'var(--error)'

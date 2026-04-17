@@ -1740,6 +1740,92 @@ async def delete_mandate(mandate_id: str, user: dict = Depends(get_current_user)
     return {"message": "Mandate deleted"}
 
 
+async def _compute_od_monthly_interest(user_id: str, account: dict) -> float:
+    """
+    Compute the current month's daily interest for an OD account.
+    Uses the same timeline-replay logic as the OD interest endpoint.
+    Returns the total interest amount for the current month.
+    """
+    rate = account.get("loan_interest_rate")
+    if not rate or rate <= 0:
+        return 0.0
+
+    now = datetime.now(timezone.utc)
+    year, mon = now.year, now.month
+    month_start = date_cls(year, mon, 1)
+    if mon == 12:
+        month_end = date_cls(year + 1, 1, 1)
+    else:
+        month_end = date_cls(year, mon + 1, 1)
+
+    num_days = (month_end - month_start).days
+    daily_rate = rate / 100.0 / 365.0
+
+    opening = account.get("opening_balance", 0)
+    as_of_date = account.get("balance_as_of_date") or month_start.isoformat()
+    as_of_str = as_of_date if isinstance(as_of_date, str) else as_of_date.isoformat()
+    month_end_str = month_end.isoformat()
+    account_id = account["account_id"]
+
+    txn_query = {
+        "user_id": user_id,
+        "status": "approved",
+        "transaction_type": "transfer",
+        "date": {"$gte": as_of_str, "$lt": month_end_str},
+        "source": {"$ne": "loan_emi"},
+    }
+
+    withdrawals = await db.transactions.find(
+        {**txn_query, "account_id": account_id},
+        {"_id": 0, "date": 1, "amount": 1}
+    ).sort("date", 1).to_list(10000)
+
+    repayments = await db.transactions.find(
+        {**txn_query, "to_account_id": account_id},
+        {"_id": 0, "date": 1, "amount": 1}
+    ).sort("date", 1).to_list(10000)
+
+    expense_query = {
+        "user_id": user_id,
+        "status": "approved",
+        "account_id": account_id,
+        "transaction_type": "expense",
+        "date": {"$gte": as_of_str, "$lt": month_end_str},
+        "source": {"$ne": "loan_emi"},
+    }
+    expenses = await db.transactions.find(
+        expense_query, {"_id": 0, "date": 1, "amount": 1}
+    ).sort("date", 1).to_list(10000)
+
+    events = []
+    for w in withdrawals:
+        events.append({"date": w["date"], "delta": w["amount"]})
+    for r in repayments:
+        events.append({"date": r["date"], "delta": -r["amount"]})
+    for e in expenses:
+        events.append({"date": e["date"], "delta": -e["amount"]})
+    events.sort(key=lambda x: x["date"])
+
+    balance = opening
+    pre_month_events = [e for e in events if e["date"] < month_start.isoformat()]
+    for e in pre_month_events:
+        balance += e["delta"]
+
+    month_events = [e for e in events if month_start.isoformat() <= e["date"] < month_end_str]
+
+    total_interest = 0.0
+    event_idx = 0
+    for day_offset in range(num_days):
+        current_date = month_start + timedelta(days=day_offset)
+        current_str = current_date.isoformat()
+        while event_idx < len(month_events) and month_events[event_idx]["date"] <= current_str:
+            balance += month_events[event_idx]["delta"]
+            event_idx += 1
+        total_interest += max(0, balance) * daily_rate
+
+    return round(total_interest, 2)
+
+
 @app.get("/api/cashflow/projection")
 async def cashflow_projection(user: dict = Depends(get_current_user)):
     user_id = user["user_id"]
@@ -1754,6 +1840,25 @@ async def cashflow_projection(user: dict = Depends(get_current_user)):
         a["balance"] if a["account_type"] == "asset" else -a["balance"]
         for a in accounts
     )
+
+    # Compute projected monthly OD interest for overdraft accounts
+    od_accounts = [
+        a for a in accounts
+        if (a.get("sub_type") or "").lower() == "overdraft" and a.get("loan_interest_rate")
+    ]
+    od_interest_items = []
+    monthly_od_interest = 0.0
+    for od_acc in od_accounts:
+        interest = await _compute_od_monthly_interest(user_id, od_acc)
+        if interest > 0:
+            od_interest_items.append({
+                "account_id": od_acc["account_id"],
+                "account_name": od_acc.get("name", "OD Account"),
+                "interest_rate": od_acc.get("loan_interest_rate"),
+                "interest_charge_day": od_acc.get("loan_emi_day"),
+                "projected_monthly_interest": interest,
+            })
+            monthly_od_interest += interest
 
     recurring_items, monthly_recurring_income, monthly_recurring_expense = _compute_recurring_summary(recurring_txns)
 
@@ -1796,7 +1901,7 @@ async def cashflow_projection(user: dict = Depends(get_current_user)):
         )
 
         projected_income = monthly_recurring_income
-        projected_expense = monthly_recurring_expense + month_mandate
+        projected_expense = monthly_recurring_expense + month_mandate + monthly_od_interest
         net = projected_income - projected_expense
         running_balance += net
         months.append({
@@ -1805,6 +1910,7 @@ async def cashflow_projection(user: dict = Depends(get_current_user)):
             "projected_income": round(projected_income, 2),
             "projected_expense": round(projected_expense, 2),
             "mandate_expense": round(month_mandate, 2),
+            "od_interest": round(monthly_od_interest, 2),
             "net": round(net, 2),
             "running_balance": round(running_balance, 2),
         })
@@ -1814,9 +1920,11 @@ async def cashflow_projection(user: dict = Depends(get_current_user)):
         "monthly_recurring_income": round(monthly_recurring_income, 2),
         "monthly_recurring_expense": round(monthly_recurring_expense, 2),
         "monthly_mandate_expense": round(monthly_mandate_expense, 2),
-        "monthly_net": round(monthly_recurring_income - monthly_recurring_expense - monthly_mandate_expense, 2),
+        "monthly_od_interest": round(monthly_od_interest, 2),
+        "monthly_net": round(monthly_recurring_income - monthly_recurring_expense - monthly_mandate_expense - monthly_od_interest, 2),
         "recurring_items": recurring_items,
         "mandate_items": mandate_items,
+        "od_interest_items": od_interest_items,
         "projection": months,
     }
 

@@ -447,6 +447,7 @@ function AccountsGroupedList({ accounts, onEdit, onDelete, expandedSubTypes, tog
                                   <span className="mono" style={{ fontSize: 10, color: 'var(--accent-1)' }}>
                                     Limit: {formatCurrency(acc.loan_sanctioned_amount || 0)}
                                     {acc.loan_interest_rate ? ` · ${acc.loan_interest_rate}% p.a.` : ' · Manual mode'}
+                                    {acc.loan_emi_day ? ` · Charge day: ${acc.loan_emi_day}` : ''}
                                     {acc.loan_sanctioned_amount ? ` · Avail: ${formatCurrency((acc.loan_sanctioned_amount || 0) - (acc.balance || 0))}` : ''}
                                   </span>
                                 )}
@@ -814,6 +815,7 @@ export default function Accounts() {
       if (isOD) {
         if (form.loan_interest_rate) loanFields.loan_interest_rate = parseFloat(form.loan_interest_rate);
         if (form.loan_sanctioned_amount) loanFields.loan_sanctioned_amount = parseFloat(form.loan_sanctioned_amount);
+        if (form.loan_emi_day) loanFields.loan_emi_day = parseInt(form.loan_emi_day);
       }
 
       if (editingAcc) {
@@ -1103,7 +1105,7 @@ export default function Accounts() {
                       Record withdrawals as transfers <strong>from</strong> this OD account to your bank, and repayments
                       as transfers <strong>to</strong> this OD account.
                     </p>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
                       <div>
                         <label style={labelStyle}>Sanctioned Limit *</label>
                         <input data-testid="od-sanctioned-input" type="number" step="0.01"
@@ -1122,6 +1124,16 @@ export default function Accounts() {
                           style={{ ...inputStyle, fontFamily: 'var(--font-mono)' }} placeholder="e.g., 10.5 (optional)" />
                         <span style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4, display: 'block' }}>
                           {form.loan_interest_rate ? 'Auto-interest calculation enabled — you can calculate monthly interest from the account card' : 'Leave blank for manual mode — you\'ll add interest entries yourself'}
+                        </span>
+                      </div>
+                      <div>
+                        <label style={labelStyle}>Interest Charge Day</label>
+                        <input data-testid="od-emi-day-input" type="number" min="1" max="31"
+                          value={form.loan_emi_day}
+                          onChange={e => setForm(f => ({ ...f, loan_emi_day: e.target.value }))}
+                          style={{ ...inputStyle, fontFamily: 'var(--font-mono)' }} placeholder="e.g., 5 (optional)" />
+                        <span style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4, display: 'block' }}>
+                          Day of month your bank charges interest — used in cash flow projection
                         </span>
                       </div>
                     </div>
