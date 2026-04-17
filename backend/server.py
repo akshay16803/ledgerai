@@ -30,6 +30,8 @@ from google.auth.transport.requests import Request as GoogleRequest
 from googleapiclient.discovery import build
 from openai import OpenAI, AsyncOpenAI
 import resend
+import razorpay
+import hmac
 
 load_dotenv()
 
@@ -75,6 +77,10 @@ openai_client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 # is not blocked while we wait on OpenAI (a long statement can take minutes).
 async_openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 
+RAZORPAY_KEY_ID = os.environ.get("RAZORPAY_KEY_ID", "rzp_test_SeasQ218doVXEa")
+RAZORPAY_KEY_SECRET = os.environ.get("RAZORPAY_KEY_SECRET", "ShpBIk1l8SWIkHhUqtTcBJzE")
+razorpay_client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
+
 # CORS origins from environment variable, defaults to allow all for flexibility
 CORS_ORIGINS = os.environ.get("CORS_ORIGINS", "*")
 if CORS_ORIGINS == "*":
@@ -109,6 +115,9 @@ class UserOut(BaseModel):
     name: str
     picture: Optional[str] = None
     email_verified: bool = False
+    subscription_plan: Optional[str] = None
+    subscription_status: Optional[str] = None
+    subscription_expiry: Optional[str] = None
 
 class AccountCreate(BaseModel):
     name: str
@@ -427,6 +436,10 @@ async def get_me(user: dict = Depends(get_current_user)):
         "base_currency": (settings or {}).get("base_currency", "INR"),
         "date_format": (settings or {}).get("date_format", "DD/MM/YYYY"),
     }
+    # Include subscription info
+    user_out["subscription_plan"] = user.get("subscription_plan")
+    user_out["subscription_status"] = user.get("subscription_status")
+    user_out["subscription_expiry"] = user.get("subscription_expiry")
     return user_out
 
 
@@ -7136,6 +7149,148 @@ You can help the user post transactions. STRICT RULES:
         "transaction_posted": transaction_posted,
         "transaction": posted_txn,
     }
+
+
+# ─── Razorpay Payments ───────────────────────────────────────────────
+
+PLAN_PRICES = {
+    "monthly": {"amount": 19900, "currency": "INR", "description": "SpentyAI Monthly Plan", "duration_days": 30},
+    "quarterly": {"amount": 44900, "currency": "INR", "description": "SpentyAI Quarterly Plan", "duration_days": 90},
+    "yearly": {"amount": 149900, "currency": "INR", "description": "SpentyAI Yearly Plan", "duration_days": 365},
+    "lifetime": {"amount": 499900, "currency": "INR", "description": "SpentyAI Lifetime Access", "duration_days": 36500},
+}
+
+
+@app.post("/api/payments/create-order")
+async def create_payment_order(body: dict = Body(...), user: dict = Depends(get_current_user)):
+    """Create a Razorpay order for the selected plan."""
+    plan_key = body.get("plan")
+    if plan_key not in PLAN_PRICES:
+        raise HTTPException(status_code=400, detail=f"Invalid plan: {plan_key}")
+
+    plan = PLAN_PRICES[plan_key]
+
+    try:
+        order = razorpay_client.order.create({
+            "amount": plan["amount"],
+            "currency": plan["currency"],
+            "receipt": f"rcpt_{user['user_id']}_{plan_key}_{uuid.uuid4().hex[:8]}",
+            "notes": {
+                "user_id": user["user_id"],
+                "plan": plan_key,
+                "email": user["email"],
+            },
+        })
+    except Exception as e:
+        logger.error(f"Razorpay order creation failed: {e}")
+        raise HTTPException(status_code=502, detail="Payment service temporarily unavailable")
+
+    # Store the order in DB for verification later
+    await db.payment_orders.insert_one({
+        "order_id": order["id"],
+        "user_id": user["user_id"],
+        "plan": plan_key,
+        "amount": plan["amount"],
+        "currency": plan["currency"],
+        "status": "created",
+        "created_at": datetime.now(timezone.utc),
+    })
+
+    return {
+        "order_id": order["id"],
+        "amount": plan["amount"],
+        "currency": plan["currency"],
+        "key_id": RAZORPAY_KEY_ID,
+        "description": plan["description"],
+        "prefill": {
+            "name": user.get("name", ""),
+            "email": user.get("email", ""),
+        },
+    }
+
+
+@app.post("/api/payments/verify")
+async def verify_payment(body: dict = Body(...), user: dict = Depends(get_current_user)):
+    """Verify Razorpay payment signature and activate subscription."""
+    razorpay_order_id = body.get("razorpay_order_id")
+    razorpay_payment_id = body.get("razorpay_payment_id")
+    razorpay_signature = body.get("razorpay_signature")
+
+    if not all([razorpay_order_id, razorpay_payment_id, razorpay_signature]):
+        raise HTTPException(status_code=400, detail="Missing payment details")
+
+    # Verify signature
+    message = f"{razorpay_order_id}|{razorpay_payment_id}"
+    expected_signature = hmac.new(
+        RAZORPAY_KEY_SECRET.encode("utf-8"),
+        message.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+    if expected_signature != razorpay_signature:
+        logger.warning(f"Payment signature mismatch for order {razorpay_order_id}")
+        raise HTTPException(status_code=400, detail="Payment verification failed")
+
+    # Look up the order
+    order_doc = await db.payment_orders.find_one({
+        "order_id": razorpay_order_id,
+        "user_id": user["user_id"],
+    })
+    if not order_doc:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    if order_doc.get("status") == "paid":
+        return {"message": "Payment already verified", "subscription_plan": order_doc["plan"]}
+
+    plan_key = order_doc["plan"]
+    plan = PLAN_PRICES[plan_key]
+    now = datetime.now(timezone.utc)
+    expiry = now + timedelta(days=plan["duration_days"])
+
+    # Update the order
+    await db.payment_orders.update_one(
+        {"order_id": razorpay_order_id},
+        {"$set": {
+            "status": "paid",
+            "razorpay_payment_id": razorpay_payment_id,
+            "razorpay_signature": razorpay_signature,
+            "paid_at": now,
+        }},
+    )
+
+    # Update user's subscription
+    await db.users.update_one(
+        {"user_id": user["user_id"]},
+        {"$set": {
+            "subscription_plan": plan_key,
+            "subscription_status": "active",
+            "subscription_expiry": expiry.isoformat(),
+            "subscription_payment_id": razorpay_payment_id,
+            "subscription_updated_at": now,
+        }},
+    )
+
+    return {
+        "message": "Payment verified successfully",
+        "subscription_plan": plan_key,
+        "subscription_status": "active",
+        "subscription_expiry": expiry.isoformat(),
+    }
+
+
+@app.get("/api/payments/history")
+async def payment_history(user: dict = Depends(get_current_user)):
+    """Get user's payment history."""
+    orders = await db.payment_orders.find(
+        {"user_id": user["user_id"]},
+        {"_id": 0}
+    ).sort("created_at", -1).to_list(50)
+    # Make datetime fields serializable
+    for o in orders:
+        for key in ("created_at", "paid_at"):
+            if key in o and isinstance(o[key], datetime):
+                o[key] = o[key].isoformat()
+    return {"orders": orders}
 
 
 # ─── Health Check ────────────────────────────────────────────────────

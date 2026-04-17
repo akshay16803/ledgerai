@@ -1,6 +1,8 @@
+import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext.jsx';
-import { Check, ArrowLeft, Sparkle } from '@phosphor-icons/react';
+import { api } from '../lib/api';
+import { Check, ArrowLeft, Sparkle, SpinnerGap, CheckCircle } from '@phosphor-icons/react';
 
 const plans = [
   {
@@ -67,10 +69,91 @@ const includedFeatures = [
 
 export default function Pricing() {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, checkAuth } = useAuth();
+  const [loadingPlan, setLoadingPlan] = useState(null);
+  const [paymentSuccess, setPaymentSuccess] = useState(null);
+
+  const handleSelectPlan = async (planKey) => {
+    // If not logged in, redirect to login first
+    if (!user) {
+      navigate('/login');
+      return;
+    }
+
+    if (loadingPlan) return;
+    setLoadingPlan(planKey);
+
+    try {
+      // 1. Create order on backend
+      const orderData = await api.post('/api/payments/create-order', { plan: planKey });
+
+      // 2. Open Razorpay checkout
+      const options = {
+        key: orderData.key_id,
+        amount: orderData.amount,
+        currency: orderData.currency,
+        name: 'SpentyAI',
+        description: orderData.description,
+        order_id: orderData.order_id,
+        prefill: orderData.prefill,
+        theme: { color: '#1A3632' },
+        handler: async function (response) {
+          // 3. Verify payment on backend
+          try {
+            const result = await api.post('/api/payments/verify', {
+              razorpay_order_id: response.razorpay_order_id,
+              razorpay_payment_id: response.razorpay_payment_id,
+              razorpay_signature: response.razorpay_signature,
+            });
+            setPaymentSuccess(result.subscription_plan);
+            checkAuth(); // Refresh user data with subscription info
+          } catch (err) {
+            alert('Payment verification failed. Please contact support.');
+          }
+          setLoadingPlan(null);
+        },
+        modal: {
+          ondismiss: function () {
+            setLoadingPlan(null);
+          },
+        },
+      };
+
+      const rzp = new window.Razorpay(options);
+      rzp.on('payment.failed', function () {
+        alert('Payment failed. Please try again.');
+        setLoadingPlan(null);
+      });
+      rzp.open();
+    } catch (err) {
+      alert(err.message || 'Failed to initiate payment. Please try again.');
+      setLoadingPlan(null);
+    }
+  };
 
   return (
     <div style={{ background: 'var(--bg-primary)', minHeight: '100vh' }}>
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } } .spin { animation: spin 0.8s linear infinite; }`}</style>
+
+      {/* Payment success banner */}
+      {paymentSuccess && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, zIndex: 200,
+          background: 'var(--brand-primary)', color: '#fff',
+          padding: '14px 24px', textAlign: 'center',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
+          fontSize: 14, fontWeight: 600, fontFamily: 'var(--font-body)',
+        }}>
+          <CheckCircle size={18} weight="fill" />
+          Payment successful! You're now on the {paymentSuccess} plan.
+          <button onClick={() => navigate('/dashboard')} style={{
+            background: '#fff', color: 'var(--brand-primary)', border: 'none',
+            padding: '6px 16px', borderRadius: 2, fontSize: 12, fontWeight: 600,
+            cursor: 'pointer', marginLeft: 8, fontFamily: 'var(--font-body)',
+          }}>Go to Dashboard</button>
+        </div>
+      )}
+
       {/* Nav */}
       <nav style={{
         position: 'fixed', top: 0, left: 0, right: 0, zIndex: 100,
@@ -194,23 +277,30 @@ export default function Pricing() {
 
               <button
                 data-testid={`pricing-cta-${plan.key}`}
-                onClick={() => navigate(user ? '/dashboard' : '/login')}
+                onClick={() => handleSelectPlan(plan.key)}
+                disabled={!!loadingPlan}
                 style={{
                   width: '100%',
                   padding: '12px 20px',
                   borderRadius: 2,
                   fontSize: 13,
                   fontWeight: 600,
-                  cursor: 'pointer',
+                  cursor: loadingPlan ? 'not-allowed' : 'pointer',
                   fontFamily: 'var(--font-body)',
                   transition: 'all 0.2s',
                   background: plan.highlighted ? '#fff' : 'var(--brand-primary)',
                   color: plan.highlighted ? 'var(--brand-primary)' : '#fff',
                   border: 'none',
                   marginTop: 'auto',
+                  opacity: loadingPlan && loadingPlan !== plan.key ? 0.5 : 1,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 8,
                 }}
               >
-                {plan.cta}
+                {loadingPlan === plan.key && <SpinnerGap size={14} className="spin" />}
+                {loadingPlan === plan.key ? 'Processing…' : plan.cta}
               </button>
             </div>
           ))}

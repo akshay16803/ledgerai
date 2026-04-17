@@ -23,7 +23,7 @@ function StatCard({ testId, label, value, icon: Icon, color, accent }) {
         </span>
         <Icon size={20} weight="duotone" style={{ color: accent || 'var(--text-muted)' }} />
       </div>
-      <div className="mono" style={{ fontSize: 28, fontWeight: 600, color: color || 'var(--text-primary)', letterSpacing: '-0.02em' }}>
+      <div className="mono" style={{ fontSize: 'clamp(18px, 2.2vw, 28px)', fontWeight: 600, color: color || 'var(--text-primary)', letterSpacing: '-0.02em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
         {value}
       </div>
     </div>
