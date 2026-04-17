@@ -1,15 +1,16 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { api } from '../lib/api';
 import { getCached, setCache } from '../lib/cache';
-import { Plus, Trash, PencilSimple, Bank, Wallet, CreditCard, X, Gear, Tag, Check, Warning, CaretRight, CaretDown, CalendarBlank, CurrencyCircleDollar, SpinnerGap } from '@phosphor-icons/react';
+import { Plus, Trash, PencilSimple, Bank, Wallet, CreditCard, X, Gear, Tag, Check, Warning, CaretRight, CaretDown, CalendarBlank, CurrencyCircleDollar, SpinnerGap, ChartLineUp, UploadSimple, PencilLine, FileText, Robot } from '@phosphor-icons/react';
 
 const accountTypes = [
   { value: 'asset', label: 'Asset' },
   { value: 'liability', label: 'Liability' },
   { value: 'equity', label: 'Equity' },
+  { value: 'investment', label: 'Investment' },
 ];
 
-const typeIcons = { bank: Bank, cash: Wallet, wallet: Wallet, credit_card: CreditCard };
+const typeIcons = { bank: Bank, cash: Wallet, wallet: Wallet, credit_card: CreditCard, demat: ChartLineUp, chart_line: ChartLineUp };
 
 function formatCurrency(amount) {
   return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(amount);
@@ -316,7 +317,7 @@ function AmortizationModal({ accountId, accountName, onClose }) {
 
 
 // ─── Grouped Accounts List ──────────────────────────────────────────
-function AccountsGroupedList({ accounts, onEdit, onDelete, expandedSubTypes, toggleSubType, onViewSchedule, onCalcInterest }) {
+function AccountsGroupedList({ accounts, onEdit, onDelete, expandedSubTypes, toggleSubType, onViewSchedule, onCalcInterest, onUploadStatement, onManualEntry }) {
   // Group accounts: account_type → sub_type → accounts[]
   const grouped = useMemo(() => {
     const map = {};
@@ -330,8 +331,8 @@ function AccountsGroupedList({ accounts, onEdit, onDelete, expandedSubTypes, tog
     return map;
   }, [accounts]);
 
-  const typeOrder = ['asset', 'liability', 'equity'];
-  const typeLabels = { asset: 'Assets', liability: 'Liabilities', equity: 'Equity' };
+  const typeOrder = ['asset', 'investment', 'liability', 'equity'];
+  const typeLabels = { asset: 'Assets', investment: 'Investments', liability: 'Liabilities', equity: 'Equity' };
 
   return (
     <div data-testid="accounts-grouped-list" style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
@@ -451,6 +452,12 @@ function AccountsGroupedList({ accounts, onEdit, onDelete, expandedSubTypes, tog
                                     {acc.loan_sanctioned_amount ? ` · Avail: ${formatCurrency((acc.loan_sanctioned_amount || 0) - (acc.balance || 0))}` : ''}
                                   </span>
                                 )}
+                                {acc.sub_type === 'demat' && (
+                                  <span className="mono" style={{ fontSize: 10, color: 'var(--accent-1)' }}>
+                                    {acc.broker_name ? `${acc.broker_name}` : 'Demat'}
+                                    {' · '}P&L tracked via statement upload or manual entry
+                                  </span>
+                                )}
                               </div>
                             </div>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -485,6 +492,38 @@ function AccountsGroupedList({ accounts, onEdit, onDelete, expandedSubTypes, tog
                                 >
                                   <CurrencyCircleDollar size={11} /> Calc Interest
                                 </button>
+                              )}
+                              {acc.sub_type === 'demat' && (
+                                <>
+                                  <button data-testid={`upload-statement-${acc.account_id}`}
+                                    onClick={(e) => { e.stopPropagation(); if (typeof onUploadStatement === 'function') onUploadStatement(acc); }}
+                                    style={{
+                                      background: 'none', border: '1px solid var(--border-strong)', padding: '3px 10px',
+                                      borderRadius: 2, fontSize: 11, fontWeight: 500, cursor: 'pointer',
+                                      fontFamily: 'var(--font-body)', color: 'var(--text-secondary)',
+                                      display: 'flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap',
+                                      transition: 'background 0.1s',
+                                    }}
+                                    onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-secondary)'; }}
+                                    onMouseLeave={e => { e.currentTarget.style.background = 'none'; }}
+                                  >
+                                    <UploadSimple size={11} /> Upload Statement
+                                  </button>
+                                  <button data-testid={`manual-entry-${acc.account_id}`}
+                                    onClick={(e) => { e.stopPropagation(); if (typeof onManualEntry === 'function') onManualEntry(acc); }}
+                                    style={{
+                                      background: 'none', border: '1px solid var(--border-strong)', padding: '3px 10px',
+                                      borderRadius: 2, fontSize: 11, fontWeight: 500, cursor: 'pointer',
+                                      fontFamily: 'var(--font-body)', color: 'var(--text-secondary)',
+                                      display: 'flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap',
+                                      transition: 'background 0.1s',
+                                    }}
+                                    onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-secondary)'; }}
+                                    onMouseLeave={e => { e.currentTarget.style.background = 'none'; }}
+                                  >
+                                    <PencilLine size={11} /> Manual Entry
+                                  </button>
+                                </>
                               )}
                               <span className="mono" style={{ fontSize: 14, fontWeight: 600, color: acc.balance >= 0 ? 'var(--success)' : 'var(--error)', whiteSpace: 'nowrap' }}>
                                 {formatCurrency(acc.balance)}
@@ -709,6 +748,284 @@ function ODInterestModal({ account, onClose }) {
 }
 
 
+// ─── Demat Upload Statement Modal ───────────────────────────────────
+function DematUploadModal({ account, onClose }) {
+  const [file, setFile] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState('');
+
+  const handleUpload = async () => {
+    if (!file || uploading) return;
+    setUploading(true);
+    setError('');
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('account_id', account.account_id);
+      const res = await fetch(`${window.__API_BASE || ''}/api/demat/upload-statement`, {
+        method: 'POST',
+        body: formData,
+        credentials: 'include',
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || 'Upload failed');
+      }
+      const data = await res.json();
+      setResult(data);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div onClick={onClose} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)' }} />
+      <div data-testid="demat-upload-modal" style={{
+        position: 'relative', background: '#fff', borderRadius: 2, width: '100%', maxWidth: 540,
+        maxHeight: '90vh', overflow: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.2)', margin: '0 8px',
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 28px', borderBottom: '1px solid var(--border-subtle)' }}>
+          <div>
+            <h2 style={{ fontSize: 18, fontWeight: 600 }}>Upload Broker Statement</h2>
+            <span className="mono" style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+              {account.name}{account.broker_name ? ` · ${account.broker_name}` : ''}
+            </span>
+          </div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4 }}>
+            <X size={20} />
+          </button>
+        </div>
+        <div style={{ padding: '24px 28px' }}>
+          {!result ? (
+            <>
+              <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 16, lineHeight: 1.6 }}>
+                Upload your broker's contract note or trade report (PDF or CSV). AI will parse the trades and calculate your net P&L and charges.
+              </p>
+              <div style={{
+                border: '2px dashed var(--border-strong)', borderRadius: 2, padding: '24px 16px',
+                textAlign: 'center', marginBottom: 16, background: file ? 'rgba(58,92,74,0.04)' : 'transparent',
+                cursor: 'pointer', transition: 'background 0.15s',
+              }}
+              onClick={() => document.getElementById('demat-file-input')?.click()}
+              >
+                <input id="demat-file-input" type="file" accept=".pdf,.csv" style={{ display: 'none' }}
+                  onChange={e => { if (e.target.files?.[0]) setFile(e.target.files[0]); }} />
+                {file ? (
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                    <FileText size={20} style={{ color: 'var(--success)' }} />
+                    <span style={{ fontSize: 13, fontWeight: 500 }}>{file.name}</span>
+                    <span className="mono" style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                      ({(file.size / 1024).toFixed(0)} KB)
+                    </span>
+                  </div>
+                ) : (
+                  <>
+                    <UploadSimple size={28} style={{ color: 'var(--text-muted)', marginBottom: 8 }} />
+                    <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>Click to select PDF or CSV</p>
+                    <p className="mono" style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4 }}>Zerodha, Groww, Angel One, Upstox, etc.</p>
+                  </>
+                )}
+              </div>
+              {error && <p style={{ color: 'var(--error)', fontSize: 13, marginBottom: 12 }}>{error}</p>}
+              <div style={{ display: 'flex', gap: 12 }}>
+                <button data-testid="demat-upload-btn" onClick={handleUpload} disabled={!file || uploading}
+                  style={{
+                    flex: 1, padding: '10px 20px', borderRadius: 2, fontSize: 13, fontWeight: 600,
+                    cursor: !file || uploading ? 'not-allowed' : 'pointer',
+                    fontFamily: 'var(--font-body)', border: 'none',
+                    background: 'var(--brand-primary)', color: '#fff',
+                    opacity: !file || uploading ? 0.5 : 1,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                  }}>
+                  {uploading && <SpinnerGap size={14} className="spin" />}
+                  {uploading ? 'AI is parsing...' : 'Upload & Parse'}
+                </button>
+                <button onClick={onClose} style={{
+                  padding: '10px 20px', borderRadius: 2, fontSize: 13, fontWeight: 500,
+                  cursor: 'pointer', fontFamily: 'var(--font-body)',
+                  background: 'none', border: '1px solid var(--border-strong)', color: 'var(--text-secondary)',
+                }}>Cancel</button>
+              </div>
+            </>
+          ) : (
+            <div>
+              <div style={{ padding: '16px 18px', background: 'rgba(58,92,74,0.06)', borderRadius: 2, border: '1px solid var(--success)', marginBottom: 16 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                  <Check size={18} weight="bold" style={{ color: 'var(--success)' }} />
+                  <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--success)' }}>Statement Parsed Successfully</span>
+                </div>
+                {result.parsed_summary && (
+                  <div className="mono" style={{ fontSize: 12, lineHeight: 1.8, color: 'var(--text-primary)' }}>
+                    <div>Trades: {result.parsed_summary.num_trades || 'N/A'}</div>
+                    <div>Total Buy Value: {formatCurrency(result.parsed_summary.total_buy_value || 0)}</div>
+                    <div>Total Sell Value: {formatCurrency(result.parsed_summary.total_sell_value || 0)}</div>
+                    <div style={{ borderTop: '1px solid var(--border-subtle)', marginTop: 6, paddingTop: 6 }}>
+                      Total Charges: {formatCurrency(result.parsed_summary.charges?.total || 0)}
+                    </div>
+                    <div style={{ fontWeight: 700, fontSize: 14, color: (result.parsed_summary.net_realized_pnl || 0) >= 0 ? 'var(--success)' : 'var(--error)' }}>
+                      Net P&L: {formatCurrency(result.parsed_summary.net_realized_pnl || 0)}
+                    </div>
+                  </div>
+                )}
+              </div>
+              <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 16 }}>
+                {result.transactions_created || 0} pending transaction(s) created. Go to Transactions to review and approve.
+              </p>
+              <button onClick={onClose} style={{
+                width: '100%', padding: '10px 20px', borderRadius: 2, fontSize: 13, fontWeight: 600,
+                cursor: 'pointer', fontFamily: 'var(--font-body)',
+                background: 'var(--brand-primary)', color: '#fff', border: 'none',
+              }}>Done</button>
+            </div>
+          )}
+        </div>
+      </div>
+      <style>{`.spin { animation: spin-anim 1s linear infinite; } @keyframes spin-anim { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+    </div>
+  );
+}
+
+
+// ─── Demat Manual Entry Modal ───────────────────────────────────────
+function DematManualEntryModal({ account, onClose }) {
+  const [form, setForm] = useState({
+    date: new Date().toISOString().split('T')[0],
+    net_pnl: '',
+    charges: '',
+    description: '',
+  });
+  const [saving, setSaving] = useState(false);
+  const [success, setSuccess] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (saving) return;
+    if (!form.net_pnl && !form.charges) { setError('Enter P&L amount or charges'); return; }
+    setSaving(true);
+    setError('');
+    try {
+      await api.post('/api/demat/manual-entry', {
+        account_id: account.account_id,
+        date: form.date,
+        net_pnl: parseFloat(form.net_pnl) || 0,
+        charges: parseFloat(form.charges) || 0,
+        description: form.description,
+      });
+      setSuccess(true);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div onClick={onClose} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)' }} />
+      <div data-testid="demat-manual-modal" style={{
+        position: 'relative', background: '#fff', borderRadius: 2, width: '100%', maxWidth: 460,
+        maxHeight: '90vh', overflow: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.2)', margin: '0 8px',
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 28px', borderBottom: '1px solid var(--border-subtle)' }}>
+          <div>
+            <h2 style={{ fontSize: 18, fontWeight: 600 }}>Manual Trading Entry</h2>
+            <span className="mono" style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+              {account.name}{account.broker_name ? ` · ${account.broker_name}` : ''}
+            </span>
+          </div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4 }}>
+            <X size={20} />
+          </button>
+        </div>
+        <div style={{ padding: '24px 28px' }}>
+          {!success ? (
+            <form onSubmit={handleSubmit}>
+              <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 16, lineHeight: 1.6 }}>
+                Manually enter your trading P&L and charges. Positive P&L = profit (income), negative P&L = loss (expense).
+              </p>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+                <div>
+                  <label style={labelStyle}>Date *</label>
+                  <input data-testid="demat-manual-date" type="date" value={form.date}
+                    onChange={e => setForm(f => ({ ...f, date: e.target.value }))}
+                    style={{ ...inputStyle, fontFamily: 'var(--font-mono)' }} />
+                </div>
+                <div>
+                  <label style={labelStyle}>Net P&L (₹) *</label>
+                  <input data-testid="demat-manual-pnl" type="number" step="0.01"
+                    value={form.net_pnl}
+                    onChange={e => setForm(f => ({ ...f, net_pnl: e.target.value }))}
+                    style={{ ...inputStyle, fontFamily: 'var(--font-mono)' }}
+                    placeholder="e.g., 5000 or -2000" />
+                  <span style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4, display: 'block' }}>
+                    Positive = profit, Negative = loss
+                  </span>
+                </div>
+              </div>
+              <div style={{ marginBottom: 16 }}>
+                <label style={labelStyle}>Charges (₹)</label>
+                <input data-testid="demat-manual-charges" type="number" step="0.01"
+                  value={form.charges}
+                  onChange={e => setForm(f => ({ ...f, charges: e.target.value }))}
+                  style={{ ...inputStyle, fontFamily: 'var(--font-mono)' }}
+                  placeholder="Brokerage + STT + GST etc. (optional)" />
+              </div>
+              <div style={{ marginBottom: 16 }}>
+                <label style={labelStyle}>Description</label>
+                <input data-testid="demat-manual-desc" type="text"
+                  value={form.description}
+                  onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
+                  style={inputStyle}
+                  placeholder="e.g., Nifty options expiry (optional)" />
+              </div>
+              {error && <p style={{ color: 'var(--error)', fontSize: 13, marginBottom: 12 }}>{error}</p>}
+              <div style={{ display: 'flex', gap: 12 }}>
+                <button data-testid="demat-manual-submit" type="submit" disabled={saving}
+                  style={{
+                    flex: 1, padding: '10px 20px', borderRadius: 2, fontSize: 13, fontWeight: 600,
+                    cursor: saving ? 'not-allowed' : 'pointer',
+                    fontFamily: 'var(--font-body)', border: 'none',
+                    background: 'var(--brand-primary)', color: '#fff',
+                    opacity: saving ? 0.5 : 1,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                  }}>
+                  {saving && <SpinnerGap size={14} className="spin" />}
+                  {saving ? 'Saving...' : 'Add Entry'}
+                </button>
+                <button type="button" onClick={onClose} style={{
+                  padding: '10px 20px', borderRadius: 2, fontSize: 13, fontWeight: 500,
+                  cursor: 'pointer', fontFamily: 'var(--font-body)',
+                  background: 'none', border: '1px solid var(--border-strong)', color: 'var(--text-secondary)',
+                }}>Cancel</button>
+              </div>
+            </form>
+          ) : (
+            <div style={{ padding: '16px 18px', background: 'rgba(58,92,74,0.06)', borderRadius: 2, border: '1px solid var(--success)', textAlign: 'center' }}>
+              <Check size={20} weight="bold" style={{ color: 'var(--success)', marginBottom: 4 }} />
+              <p style={{ fontSize: 14, fontWeight: 600, color: 'var(--success)' }}>Entry Added!</p>
+              <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4, marginBottom: 12 }}>
+                Pending transaction(s) created. Go to Transactions to review and approve.
+              </p>
+              <button onClick={onClose} style={{
+                padding: '10px 24px', borderRadius: 2, fontSize: 13, fontWeight: 600,
+                cursor: 'pointer', fontFamily: 'var(--font-body)',
+                background: 'var(--brand-primary)', color: '#fff', border: 'none',
+              }}>Done</button>
+            </div>
+          )}
+        </div>
+      </div>
+      <style>{`.spin { animation: spin-anim 1s linear infinite; } @keyframes spin-anim { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+    </div>
+  );
+}
+
+
 // ─── Main Accounts Page ─────────────────────────────────────────────
 export default function Accounts() {
   const [accounts, setAccounts] = useState(() => getCached('accounts') || []);
@@ -716,10 +1033,10 @@ export default function Accounts() {
   const [showForm, setShowForm] = useState(false);
   const [showSubTypeManager, setShowSubTypeManager] = useState(false);
   const [editingAcc, setEditingAcc] = useState(null);
-  const [form, setForm] = useState({ name: '', account_type: 'asset', sub_type: '', account_number: '', opening_balance: '', balance_as_of_date: new Date().toISOString().split('T')[0], currency: 'INR', description: '', loan_interest_rate: '', loan_tenure_months: '', loan_emi_amount: '', loan_emi_day: '', loan_sanctioned_amount: '' });
+  const [form, setForm] = useState({ name: '', account_type: 'asset', sub_type: '', account_number: '', opening_balance: '', balance_as_of_date: new Date().toISOString().split('T')[0], currency: 'INR', description: '', loan_interest_rate: '', loan_tenure_months: '', loan_emi_amount: '', loan_emi_day: '', loan_sanctioned_amount: '', broker_name: '' });
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
-  const [subTypesMap, setSubTypesMap] = useState(() => getCached('account_sub_types') || { asset: [], liability: [], equity: [] });
+  const [subTypesMap, setSubTypesMap] = useState(() => getCached('account_sub_types') || { asset: [], liability: [], equity: [], investment: [] });
 
   const loadAccounts = useCallback(() => {
     api.get('/api/accounts').then(data => { setAccounts(data); setCache('accounts', data); }).catch(() => {}).finally(() => setLoading(false));
@@ -739,7 +1056,7 @@ export default function Accounts() {
   const openCreate = () => {
     setEditingAcc(null);
     const firstSubType = getSubTypeOptions('asset')[0]?.value || '';
-    setForm({ name: '', account_type: 'asset', sub_type: firstSubType, account_number: '', opening_balance: '', balance_as_of_date: new Date().toISOString().split('T')[0], currency: 'INR', description: '', loan_interest_rate: '', loan_tenure_months: '', loan_emi_amount: '', loan_emi_day: '', loan_sanctioned_amount: '' });
+    setForm({ name: '', account_type: 'asset', sub_type: firstSubType, account_number: '', opening_balance: '', balance_as_of_date: new Date().toISOString().split('T')[0], currency: 'INR', description: '', loan_interest_rate: '', loan_tenure_months: '', loan_emi_amount: '', loan_emi_day: '', loan_sanctioned_amount: '', broker_name: '' });
     setShowForm(true);
     setError('');
     // Defensive: if a prior submit left `saving` stuck, a fresh open
@@ -765,6 +1082,7 @@ export default function Accounts() {
       loan_emi_amount: acc.loan_emi_amount || '',
       loan_emi_day: acc.loan_emi_day || '',
       loan_sanctioned_amount: acc.loan_sanctioned_amount || '',
+      broker_name: acc.broker_name || '',
     });
     setShowForm(true);
     setError('');
@@ -817,9 +1135,12 @@ export default function Accounts() {
         if (form.loan_sanctioned_amount) loanFields.loan_sanctioned_amount = parseFloat(form.loan_sanctioned_amount);
         if (form.loan_emi_day) loanFields.loan_emi_day = parseInt(form.loan_emi_day);
       }
+      const isDemat = form.sub_type === 'demat';
+      const dematFields = {};
+      if (isDemat && form.broker_name) dematFields.broker_name = form.broker_name;
 
       if (editingAcc) {
-        const update = { name: form.name, sub_type: form.sub_type, account_number: form.account_number, description: form.description, currency: form.currency, ...loanFields };
+        const update = { name: form.name, sub_type: form.sub_type, account_number: form.account_number, description: form.description, currency: form.currency, ...loanFields, ...dematFields };
         if (form.opening_balance !== undefined) update.opening_balance = parseFloat(form.opening_balance) || 0;
         if (form.balance_as_of_date) update.balance_as_of_date = form.balance_as_of_date;
         await api.put(`/api/accounts/${editingAcc.account_id}`, update);
@@ -835,6 +1156,7 @@ export default function Accounts() {
           currency: form.currency,
           description: form.description,
           ...loanFields,
+          ...dematFields,
         };
         await api.post('/api/accounts', payload);
       }
@@ -879,6 +1201,10 @@ export default function Accounts() {
 
   // OD Interest modal state
   const [interestAcc, setInterestAcc] = useState(null);
+
+  // Demat modals state
+  const [uploadStatementAcc, setUploadStatementAcc] = useState(null);
+  const [manualEntryAcc, setManualEntryAcc] = useState(null);
 
   return (
     <div data-testid="accounts-page">
@@ -1090,6 +1416,28 @@ export default function Accounts() {
                     </p>
                   </div>
                 )}
+                {form.sub_type === 'demat' && (
+                  <div data-testid="demat-details-section" style={{
+                    marginBottom: 16, padding: '16px 18px', background: 'var(--bg-secondary)', borderRadius: 2,
+                    border: '1px solid var(--border-subtle)',
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                      <ChartLineUp size={16} weight="duotone" style={{ color: 'var(--accent-1)' }} />
+                      <span style={{ fontSize: 13, fontWeight: 600 }}>Demat Account Details</span>
+                    </div>
+                    <p style={{ fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 14, lineHeight: 1.6 }}>
+                      Enter your Demat account's current value as the opening balance above.
+                      You can track trading P&L by uploading broker statements or adding manual entries from the account card.
+                    </p>
+                    <div>
+                      <label style={labelStyle}>Broker Name (optional)</label>
+                      <input data-testid="demat-broker-input" type="text"
+                        value={form.broker_name}
+                        onChange={e => setForm(f => ({ ...f, broker_name: e.target.value }))}
+                        style={inputStyle} placeholder="e.g., Zerodha, Groww, Angel One" />
+                    </div>
+                  </div>
+                )}
                 {form.sub_type === 'overdraft' && (
                   <div data-testid="od-details-section" style={{
                     marginBottom: 16, padding: '16px 18px', background: 'var(--bg-secondary)', borderRadius: 2,
@@ -1193,6 +1541,8 @@ export default function Accounts() {
           toggleSubType={toggleSubType}
           onViewSchedule={(acc) => setAmortAcc(acc)}
           onCalcInterest={(acc) => setInterestAcc(acc)}
+          onUploadStatement={(acc) => setUploadStatementAcc(acc)}
+          onManualEntry={(acc) => setManualEntryAcc(acc)}
         />
       )}
 
@@ -1210,6 +1560,22 @@ export default function Accounts() {
           accountId={amortAcc.account_id}
           accountName={amortAcc.name}
           onClose={() => setAmortAcc(null)}
+        />
+      )}
+
+      {/* Demat Upload Statement Modal */}
+      {uploadStatementAcc && (
+        <DematUploadModal
+          account={uploadStatementAcc}
+          onClose={() => { setUploadStatementAcc(null); loadAccounts(); }}
+        />
+      )}
+
+      {/* Demat Manual Entry Modal */}
+      {manualEntryAcc && (
+        <DematManualEntryModal
+          account={manualEntryAcc}
+          onClose={() => { setManualEntryAcc(null); loadAccounts(); }}
         />
       )}
     </div>

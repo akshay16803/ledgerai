@@ -134,6 +134,8 @@ class AccountCreate(BaseModel):
     loan_emi_amount: Optional[float] = None  # monthly EMI amount
     loan_emi_day: Optional[int] = None  # day of month EMI is due (1-31)
     loan_sanctioned_amount: Optional[float] = None  # original sanctioned loan amount
+    # Demat/Trading-specific fields (optional)
+    broker_name: Optional[str] = None  # e.g., "Zerodha", "Groww"
 
 class AccountUpdate(BaseModel):
     name: Optional[str] = None
@@ -150,6 +152,7 @@ class AccountUpdate(BaseModel):
     loan_emi_amount: Optional[float] = None
     loan_emi_day: Optional[int] = None
     loan_sanctioned_amount: Optional[float] = None
+    broker_name: Optional[str] = None
 
 class AccountSubTypeCreate(BaseModel):
     name: str
@@ -743,6 +746,9 @@ async def create_account(data: AccountCreate, user: dict = Depends(get_current_u
     if data.loan_sanctioned_amount is not None:
         account["loan_sanctioned_amount"] = data.loan_sanctioned_amount
 
+    if data.broker_name:
+        account["broker_name"] = data.broker_name
+
     await db.accounts.insert_one(account)
     del account["_id"]
     # Recalculate balance if date is in the past (there might be transactions after that date)
@@ -1022,6 +1028,9 @@ DEFAULT_SUB_TYPES = {
     "equity": [
         {"name": "Capital", "sub_type_id": "default_capital", "icon": "capital"},
         {"name": "Retained Earnings", "sub_type_id": "default_retained", "icon": "savings"},
+    ],
+    "investment": [
+        {"name": "Demat", "sub_type_id": "default_demat", "icon": "chart_line"},
     ],
 }
 
@@ -1850,7 +1859,7 @@ async def cashflow_projection(user: dict = Depends(get_current_user)):
 
     accounts = await db.accounts.find({"user_id": user_id}, {"_id": 0}).to_list(100)
     current_balance = sum(
-        a["balance"] if a["account_type"] == "asset" else -a["balance"]
+        a["balance"] if a["account_type"] in ("asset", "investment") else -a["balance"]
         for a in accounts
     )
 
@@ -1949,7 +1958,7 @@ async def dashboard_summary(user: dict = Depends(get_current_user)):
     user_id = user["user_id"]
     accounts = await db.accounts.find({"user_id": user_id}, {"_id": 0}).to_list(100)
 
-    total_assets = sum(a["balance"] for a in accounts if a["account_type"] == "asset")
+    total_assets = sum(a["balance"] for a in accounts if a["account_type"] in ("asset", "investment"))
     total_liabilities = sum(a["balance"] for a in accounts if a["account_type"] == "liability")
     net_worth = total_assets - total_liabilities
 
@@ -6957,7 +6966,7 @@ async def ai_chat(body: dict = Body(...), user: dict = Depends(get_current_user)
     month_start = now.replace(day=1).strftime("%Y-%m-%d")
     today_str = now.strftime("%Y-%m-%d")
 
-    total_assets = sum(a["balance"] for a in accounts if a["account_type"] == "asset")
+    total_assets = sum(a["balance"] for a in accounts if a["account_type"] in ("asset", "investment"))
     total_liabilities = sum(a["balance"] for a in accounts if a["account_type"] == "liability")
     net_worth = total_assets - total_liabilities
 
@@ -7291,6 +7300,343 @@ async def payment_history(user: dict = Depends(get_current_user)):
             if key in o and isinstance(o[key], datetime):
                 o[key] = o[key].isoformat()
     return {"orders": orders}
+
+
+# ─── Demat / Trading Income ──────────────────────────────────────────
+
+DEMAT_UPLOAD_DIR = "/app/uploads/demat_statements"
+os.makedirs(DEMAT_UPLOAD_DIR, exist_ok=True)
+
+
+class DematManualEntry(BaseModel):
+    account_id: str
+    date: str  # ISO date string
+    net_pnl: float  # positive = profit, negative = loss
+    charges: float = 0.0
+    description: Optional[str] = None
+
+
+@app.post("/api/demat/upload-statement")
+async def upload_demat_statement(
+    file: UploadFile = File(...),
+    account_id: str = Form(...),
+    period_from: Optional[str] = Form(None),
+    period_to: Optional[str] = Form(None),
+    user: dict = Depends(get_current_user),
+):
+    """Upload a broker/demat statement (PDF or CSV) and parse trading P&L."""
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No file provided")
+
+    ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else ""
+    if ext not in ("csv", "pdf"):
+        raise HTTPException(status_code=400, detail="Only CSV and PDF files are supported")
+
+    account = await db.accounts.find_one(
+        {"account_id": account_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+    if account.get("account_type") != "investment":
+        raise HTTPException(status_code=400, detail="Account must be an investment/demat type")
+
+    content = await file.read()
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="File too large (max 10MB)")
+
+    statement_id = f"demat_{uuid.uuid4().hex[:12]}"
+    file_path = os.path.join(DEMAT_UPLOAD_DIR, f"{statement_id}.{ext}")
+    with open(file_path, "wb") as f:
+        f.write(content)
+
+    # Durable copy in GridFS
+    has_stored_bytes = False
+    try:
+        await statement_fs.upload_from_stream_with_id(
+            statement_id, f"{statement_id}.{ext}", content,
+            metadata={"user_id": user["user_id"], "file_ext": ext, "filename": file.filename, "type": "demat"},
+        )
+        has_stored_bytes = True
+    except Exception as e:
+        logger.error(f"GridFS store failed for demat {statement_id}: {e}")
+
+    # Extract text from file
+    text = ""
+    if ext == "pdf":
+        try:
+            with pdfplumber.open(file_path) as pdf:
+                for page in pdf.pages:
+                    page_text = page.extract_text()
+                    if page_text:
+                        text += page_text + "\n"
+        except Exception as e:
+            logger.error(f"PDF extraction failed for {statement_id}: {e}")
+            raise HTTPException(status_code=400, detail=f"Failed to read PDF: {e}")
+    elif ext == "csv":
+        try:
+            text = content.decode("utf-8", errors="replace")
+        except Exception:
+            text = content.decode("latin-1", errors="replace")
+
+    if not text.strip():
+        raise HTTPException(status_code=400, detail="Could not extract text from file")
+
+    # Parse via OpenAI
+    if not async_openai_client:
+        raise HTTPException(status_code=500, detail="OpenAI client not configured")
+
+    prompt = f"""You are a financial statement parser. Parse this broker/demat account statement and extract a NET SUMMARY.
+
+Return ONLY valid JSON:
+{{
+  "period_from": "YYYY-MM-DD or null",
+  "period_to": "YYYY-MM-DD or null",
+  "total_buy_value": number,
+  "total_sell_value": number,
+  "charges": {{
+    "brokerage": number,
+    "stt": number,
+    "gst": number,
+    "exchange_fees": number,
+    "dp_charges": number,
+    "stamp_duty": number,
+    "other": number,
+    "total": number
+  }},
+  "net_realized_pnl": number (positive = profit, negative = loss),
+  "num_trades": number,
+  "notes": "any relevant notes"
+}}
+
+If the statement is not a valid broker/trading statement, return:
+{{"error": "Not a valid trading statement"}}
+
+Statement text:
+{text}"""
+
+    try:
+        response = await async_openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0,
+        )
+        raw_reply = response.choices[0].message.content.strip()
+        # Strip markdown code fences if present
+        if raw_reply.startswith("```"):
+            raw_reply = raw_reply.split("\n", 1)[-1]
+        if raw_reply.endswith("```"):
+            raw_reply = raw_reply.rsplit("```", 1)[0]
+        parsed = json.loads(raw_reply)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=500, detail="Failed to parse OpenAI response as JSON")
+    except Exception as e:
+        logger.error(f"OpenAI demat parse error: {e}")
+        raise HTTPException(status_code=500, detail=f"OpenAI parsing failed: {e}")
+
+    if "error" in parsed:
+        raise HTTPException(status_code=400, detail=parsed["error"])
+
+    # Use provided period or parsed period
+    final_period_from = period_from or parsed.get("period_from")
+    final_period_to = period_to or parsed.get("period_to")
+    period_label = f"{final_period_from or '?'} to {final_period_to or '?'}"
+
+    now = datetime.now(timezone.utc)
+    user_id = user["user_id"]
+    transaction_ids = []
+
+    net_pnl = parsed.get("net_realized_pnl", 0)
+    total_charges = parsed.get("charges", {}).get("total", 0)
+
+    # Create P&L transaction
+    if net_pnl > 0:
+        txn_id = f"txn_{uuid.uuid4().hex[:12]}"
+        txn = {
+            "transaction_id": txn_id,
+            "user_id": user_id,
+            "account_id": account_id,
+            "transaction_type": "income",
+            "amount": round(abs(net_pnl), 2),
+            "date": final_period_to or now.strftime("%Y-%m-%d"),
+            "description": f"Trading P&L: {period_label}",
+            "category_id": None,
+            "status": "pending",
+            "source": "demat_statement",
+            "demat_statement_id": statement_id,
+            "created_at": now,
+        }
+        await db.transactions.insert_one(txn)
+        transaction_ids.append(txn_id)
+    elif net_pnl < 0:
+        txn_id = f"txn_{uuid.uuid4().hex[:12]}"
+        txn = {
+            "transaction_id": txn_id,
+            "user_id": user_id,
+            "account_id": account_id,
+            "transaction_type": "expense",
+            "amount": round(abs(net_pnl), 2),
+            "date": final_period_to or now.strftime("%Y-%m-%d"),
+            "description": f"Trading Loss: {period_label}",
+            "category_id": None,
+            "status": "pending",
+            "source": "demat_statement",
+            "demat_statement_id": statement_id,
+            "created_at": now,
+        }
+        await db.transactions.insert_one(txn)
+        transaction_ids.append(txn_id)
+
+    # Create charges transaction
+    if total_charges > 0:
+        charges_txn_id = f"txn_{uuid.uuid4().hex[:12]}"
+        charges_txn = {
+            "transaction_id": charges_txn_id,
+            "user_id": user_id,
+            "account_id": account_id,
+            "transaction_type": "expense",
+            "amount": round(abs(total_charges), 2),
+            "date": final_period_to or now.strftime("%Y-%m-%d"),
+            "description": f"Trading Charges: {period_label}",
+            "category_id": None,
+            "status": "pending",
+            "source": "demat_statement",
+            "demat_statement_id": statement_id,
+            "created_at": now,
+        }
+        await db.transactions.insert_one(charges_txn)
+        transaction_ids.append(charges_txn_id)
+
+    # Store in demat_statements collection
+    demat_doc = {
+        "statement_id": statement_id,
+        "user_id": user_id,
+        "account_id": account_id,
+        "filename": file.filename,
+        "file_ext": ext,
+        "file_path": file_path,
+        "file_size": len(content),
+        "has_stored_bytes": has_stored_bytes,
+        "status": "parsed",
+        "parsed_summary": parsed,
+        "period_from": final_period_from,
+        "period_to": final_period_to,
+        "transaction_ids": transaction_ids,
+        "created_at": now,
+    }
+    await db.demat_statements.insert_one(demat_doc)
+
+    return {
+        "statement_id": statement_id,
+        "parsed_summary": parsed,
+        "transaction_ids": transaction_ids,
+        "message": "Demat statement parsed successfully",
+    }
+
+
+@app.post("/api/demat/manual-entry")
+async def demat_manual_entry(
+    data: DematManualEntry,
+    user: dict = Depends(get_current_user),
+):
+    """Manually record trading P&L and charges for a demat account."""
+    account = await db.accounts.find_one(
+        {"account_id": data.account_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+    if account.get("account_type") != "investment":
+        raise HTTPException(status_code=400, detail="Account must be an investment/demat type")
+
+    now = datetime.now(timezone.utc)
+    user_id = user["user_id"]
+    transaction_ids = []
+    txn_date = data.date or now.strftime("%Y-%m-%d")
+    desc_suffix = data.description or txn_date
+
+    # P&L transaction
+    if data.net_pnl > 0:
+        txn_id = f"txn_{uuid.uuid4().hex[:12]}"
+        txn = {
+            "transaction_id": txn_id,
+            "user_id": user_id,
+            "account_id": data.account_id,
+            "transaction_type": "income",
+            "amount": round(abs(data.net_pnl), 2),
+            "date": txn_date,
+            "description": f"Trading P&L: {desc_suffix}",
+            "category_id": None,
+            "status": "pending",
+            "source": "demat_manual",
+            "created_at": now,
+        }
+        await db.transactions.insert_one(txn)
+        transaction_ids.append(txn_id)
+    elif data.net_pnl < 0:
+        txn_id = f"txn_{uuid.uuid4().hex[:12]}"
+        txn = {
+            "transaction_id": txn_id,
+            "user_id": user_id,
+            "account_id": data.account_id,
+            "transaction_type": "expense",
+            "amount": round(abs(data.net_pnl), 2),
+            "date": txn_date,
+            "description": f"Trading Loss: {desc_suffix}",
+            "category_id": None,
+            "status": "pending",
+            "source": "demat_manual",
+            "created_at": now,
+        }
+        await db.transactions.insert_one(txn)
+        transaction_ids.append(txn_id)
+
+    # Charges transaction
+    if data.charges > 0:
+        charges_txn_id = f"txn_{uuid.uuid4().hex[:12]}"
+        charges_txn = {
+            "transaction_id": charges_txn_id,
+            "user_id": user_id,
+            "account_id": data.account_id,
+            "transaction_type": "expense",
+            "amount": round(abs(data.charges), 2),
+            "date": txn_date,
+            "description": f"Trading Charges: {desc_suffix}",
+            "category_id": None,
+            "status": "pending",
+            "source": "demat_manual",
+            "created_at": now,
+        }
+        await db.transactions.insert_one(charges_txn)
+        transaction_ids.append(charges_txn_id)
+
+    return {
+        "transaction_ids": transaction_ids,
+        "message": "Manual demat entry recorded",
+    }
+
+
+@app.get("/api/demat/statements/{account_id}")
+async def list_demat_statements(
+    account_id: str,
+    user: dict = Depends(get_current_user),
+):
+    """List uploaded demat statements for a given account."""
+    account = await db.accounts.find_one(
+        {"account_id": account_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+
+    stmts = await db.demat_statements.find(
+        {"account_id": account_id, "user_id": user["user_id"]},
+        {"_id": 0, "file_path": 0}
+    ).sort("created_at", -1).to_list(100)
+
+    # Ensure datetime fields are serializable
+    for s in stmts:
+        if "created_at" in s and isinstance(s["created_at"], datetime):
+            s["created_at"] = s["created_at"].isoformat()
+
+    return {"statements": stmts}
 
 
 # ─── Health Check ────────────────────────────────────────────────────
