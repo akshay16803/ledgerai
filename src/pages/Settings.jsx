@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
-import { Check, Globe, CalendarBlank, Buildings, Bank } from '@phosphor-icons/react';
+import { Check, Globe, CalendarBlank, Buildings, Bank, Warning, ArrowLeft, Receipt } from '@phosphor-icons/react';
 
 const INDIAN_STATES = [
   'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chhattisgarh', 'Goa', 'Gujarat',
@@ -70,6 +71,14 @@ const DATE_FORMATS = [
 
 export default function Settings() {
   const { user, checkAuth } = useAuth();
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const invoiceSectionRef = useRef(null);
+
+  // setup=invoice means user was redirected to fill simple invoice fields
+  // setup=gst means user tried GST invoice and needs GSTIN + state
+  const setupMode = searchParams.get('setup'); // 'invoice' | 'gst' | null
+
   const [baseCurrency, setBaseCurrency] = useState('INR');
   const [dateFormat, setDateFormat] = useState('DD/MM/YYYY');
   // Business / Firm fields
@@ -116,7 +125,34 @@ export default function Settings() {
     }).catch(() => {}).finally(() => setLoading(false));
   }, []);
 
+  // Auto-scroll to invoice settings section when in setup mode
+  useEffect(() => {
+    if (setupMode && !loading && invoiceSectionRef.current) {
+      setTimeout(() => {
+        invoiceSectionRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 150);
+    }
+  }, [setupMode, loading]);
+
+  // Validate required fields for setup modes
+  const simpleFieldsMissing = !firmName.trim();
+  const gstFieldsMissing = !firmGstin.trim() || !firmState;
+
   const handleSave = async () => {
+    // In setup mode, validate required fields before saving
+    if (setupMode === 'invoice' && simpleFieldsMissing) {
+      alert('Please fill in your Firm / Business Name to create invoices.');
+      return;
+    }
+    if (setupMode === 'gst' && (simpleFieldsMissing || gstFieldsMissing)) {
+      const missing = [];
+      if (!firmName.trim()) missing.push('Firm / Business Name');
+      if (!firmGstin.trim()) missing.push('GSTIN');
+      if (!firmState) missing.push('State');
+      alert(`Please fill in: ${missing.join(', ')}`);
+      return;
+    }
+
     setSaving(true);
     setSaved(false);
     try {
@@ -131,6 +167,11 @@ export default function Settings() {
       });
       setSaved(true);
       checkAuth();
+      // If in setup mode, redirect back to invoices after a brief confirmation
+      if (setupMode) {
+        setTimeout(() => navigate('/invoices'), 800);
+        return;
+      }
       setTimeout(() => setSaved(false), 3000);
     } catch (err) { alert(err.message); } finally { setSaving(false); }
   };
@@ -142,6 +183,16 @@ export default function Settings() {
     width: '100%', padding: '10px 14px', border: '1px solid var(--border-strong)', borderRadius: 2,
     fontSize: 13, fontFamily: 'var(--font-body)', background: '#fff', boxSizing: 'border-box',
   };
+  // Highlighted border for empty required fields in setup mode
+  const requiredFieldStyle = (value, mode = 'invoice') => {
+    const isRequired = setupMode === mode || setupMode === 'gst';
+    const isEmpty = typeof value === 'string' ? !value.trim() : !value;
+    if (isRequired && isEmpty) {
+      return { ...fieldStyle, borderColor: 'var(--brand-primary)', boxShadow: '0 0 0 1px rgba(194,109,92,0.2)' };
+    }
+    return fieldStyle;
+  };
+  const requiredStar = <span style={{ color: 'var(--brand-primary)', fontWeight: 700 }}> *</span>;
 
   if (loading) return <div className="mono" style={{ color: 'var(--text-muted)', padding: 40 }}>Loading settings...</div>;
 
@@ -242,17 +293,55 @@ export default function Settings() {
       </div>
 
       {/* Invoice Settings — consolidated section */}
-      <div style={{
-        background: '#fff', border: '1px solid var(--border-subtle)', borderRadius: 2,
+      <div ref={invoiceSectionRef} style={{
+        background: '#fff', border: setupMode ? '2px solid var(--brand-primary)' : '1px solid var(--border-subtle)', borderRadius: 2,
         padding: 28, marginBottom: 24,
+        transition: 'border-color 0.3s ease',
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
           <Buildings size={18} weight="duotone" style={{ color: 'var(--info)' }} />
           <h2 style={{ fontSize: 16, fontWeight: 600 }}>Invoice Settings</h2>
         </div>
-        <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 24 }}>
-          Fill in your business details, bank account, and invoice preferences. These will appear on every invoice you create — fill once and forget.
-        </p>
+
+        {/* Setup mode banners */}
+        {setupMode === 'invoice' && (
+          <div style={{
+            display: 'flex', alignItems: 'flex-start', gap: 12, padding: '14px 18px', marginBottom: 20,
+            background: 'rgba(194,109,92,0.06)', border: '1px solid rgba(194,109,92,0.2)', borderRadius: 4,
+          }}>
+            <Receipt size={20} weight="duotone" style={{ color: 'var(--brand-primary)', flexShrink: 0, marginTop: 1 }} />
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4 }}>
+                Set up your business details to create invoices
+              </div>
+              <div style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                Fill in the fields marked with <span style={{ color: 'var(--brand-primary)', fontWeight: 700 }}>*</span> below. These details will appear on every invoice you create. You only need to do this once — you can always come back and edit them later.
+              </div>
+            </div>
+          </div>
+        )}
+        {setupMode === 'gst' && (
+          <div style={{
+            display: 'flex', alignItems: 'flex-start', gap: 12, padding: '14px 18px', marginBottom: 20,
+            background: 'rgba(74,110,125,0.06)', border: '1px solid rgba(74,110,125,0.2)', borderRadius: 4,
+          }}>
+            <Warning size={20} weight="duotone" style={{ color: 'var(--info)', flexShrink: 0, marginTop: 1 }} />
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4 }}>
+                GST invoices need a few more details
+              </div>
+              <div style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                To create GST-compliant invoices, fill in your <strong>GSTIN</strong> and <strong>State</strong> below. These are needed to calculate CGST/SGST vs IGST correctly. Fields marked with <span style={{ color: 'var(--brand-primary)', fontWeight: 700 }}>*</span> are required.
+              </div>
+            </div>
+          </div>
+        )}
+
+        {!setupMode && (
+          <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 24 }}>
+            Fill in your business details, bank account, and invoice preferences. These will appear on every invoice you create — fill once and forget.
+          </p>
+        )}
 
         {/* Firm / Trade Name & Contact */}
         <div style={{ marginBottom: 24 }}>
@@ -261,8 +350,8 @@ export default function Settings() {
           </h3>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, maxWidth: 700 }}>
             <div style={{ gridColumn: '1 / -1' }}>
-              <label style={labelStyle}>Firm / Business Name <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>— shown as invoice header</span></label>
-              <input data-testid="firm-name" value={firmName} onChange={e => setFirmName(e.target.value)} placeholder="e.g. Niprasha Technologies Pvt. Ltd." style={fieldStyle} />
+              <label style={labelStyle}>Firm / Business Name{setupMode && requiredStar} <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>— shown as invoice header</span></label>
+              <input data-testid="firm-name" value={firmName} onChange={e => setFirmName(e.target.value)} placeholder="e.g. Niprasha Technologies Pvt. Ltd." style={requiredFieldStyle(firmName, 'invoice')} />
             </div>
             <div style={{ gridColumn: '1 / -1' }}>
               <label style={labelStyle}>Address</label>
@@ -273,8 +362,8 @@ export default function Settings() {
               <input data-testid="firm-city" value={firmCity} onChange={e => setFirmCity(e.target.value)} placeholder="e.g. Mumbai" style={fieldStyle} />
             </div>
             <div>
-              <label style={labelStyle}>State / UT</label>
-              <select data-testid="firm-state" value={firmState} onChange={e => setFirmState(e.target.value)} style={fieldStyle}>
+              <label style={labelStyle}>State / UT{setupMode === 'gst' && requiredStar} <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>{setupMode === 'gst' ? '— needed for GST calculation' : ''}</span></label>
+              <select data-testid="firm-state" value={firmState} onChange={e => setFirmState(e.target.value)} style={setupMode === 'gst' ? requiredFieldStyle(firmState, 'gst') : fieldStyle}>
                 <option value="">Select state</option>
                 {INDIAN_STATES.map(st => <option key={st} value={st}>{st}</option>)}
               </select>
@@ -292,8 +381,8 @@ export default function Settings() {
               <input data-testid="firm-email" value={firmEmail} onChange={e => setFirmEmail(e.target.value)} placeholder="billing@yourfirm.com" type="email" style={fieldStyle} />
             </div>
             <div>
-              <label style={labelStyle}>GSTIN <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>— optional, for GST invoices</span></label>
-              <input data-testid="firm-gstin" value={firmGstin} onChange={e => setFirmGstin(e.target.value.toUpperCase())} placeholder="e.g. 27AABCU9603R1ZM" maxLength={15} style={{ ...fieldStyle, textTransform: 'uppercase' }} />
+              <label style={labelStyle}>GSTIN{setupMode === 'gst' && requiredStar} <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>{setupMode === 'gst' ? '— required for GST invoices' : '— for GST invoices'}</span></label>
+              <input data-testid="firm-gstin" value={firmGstin} onChange={e => setFirmGstin(e.target.value.toUpperCase())} placeholder="e.g. 27AABCU9603R1ZM" maxLength={15} style={setupMode === 'gst' ? { ...requiredFieldStyle(firmGstin, 'gst'), textTransform: 'uppercase' } : { ...fieldStyle, textTransform: 'uppercase' }} />
             </div>
             <div>
               <label style={labelStyle}>PAN <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>— optional</span></label>
@@ -361,7 +450,7 @@ export default function Settings() {
       </div>
 
       {/* Save Button */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
         <button
           data-testid="save-settings-btn"
           onClick={handleSave}
@@ -373,11 +462,23 @@ export default function Settings() {
             opacity: saving ? 0.6 : 1, display: 'flex', alignItems: 'center', gap: 6,
           }}
         >
-          {saving ? 'Saving...' : 'Save Settings'}
+          {saving ? 'Saving...' : setupMode ? 'Save & Continue to Invoices' : 'Save Settings'}
         </button>
+        {setupMode && !saving && (
+          <button
+            onClick={() => navigate('/invoices')}
+            style={{
+              background: 'none', color: 'var(--text-secondary)', border: '1px solid var(--border-strong)',
+              padding: '12px 20px', borderRadius: 2, fontSize: 13, fontWeight: 500,
+              cursor: 'pointer', fontFamily: 'var(--font-body)', display: 'flex', alignItems: 'center', gap: 6,
+            }}
+          >
+            <ArrowLeft size={14} /> Skip for now
+          </button>
+        )}
         {saved && (
           <span style={{ display: 'flex', alignItems: 'center', gap: 4, color: 'var(--success)', fontSize: 13, fontWeight: 600 }}>
-            <Check size={16} weight="bold" /> Saved!
+            <Check size={16} weight="bold" /> {setupMode ? 'Saved! Redirecting...' : 'Saved!'}
           </span>
         )}
       </div>

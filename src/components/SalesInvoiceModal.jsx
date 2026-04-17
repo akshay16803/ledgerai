@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
-import { X, Plus, Trash, Receipt, SpinnerGap, Check, MagnifyingGlass, CaretDown } from '@phosphor-icons/react';
+import { X, Plus, Trash, Receipt, SpinnerGap, Check, MagnifyingGlass, CaretDown, Warning, Gear } from '@phosphor-icons/react';
 
 const INDIAN_STATES = [
   'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chhattisgarh', 'Goa', 'Gujarat',
@@ -46,6 +47,7 @@ function emptyCustomerForm() {
 
 export function SalesInvoiceModal({ invoice, accounts, onSave, onClose }) {
   const isEdit = !!invoice;
+  const navigate = useNavigate();
 
   // Invoice type
   const [invoiceType, setInvoiceType] = useState(invoice?.invoice_type || 'simple');
@@ -71,8 +73,9 @@ export function SalesInvoiceModal({ invoice, accounts, onSave, onClose }) {
   // Place of supply (GST)
   const [placeOfSupply, setPlaceOfSupply] = useState(invoice?.place_of_supply || '');
 
-  // Firm state from settings
+  // Firm state & GSTIN from settings
   const [firmState, setFirmState] = useState('');
+  const [firmGstin, setFirmGstin] = useState('');
 
   // Payment
   const [paymentStatus, setPaymentStatus] = useState(invoice?.payment_status || 'unpaid');
@@ -94,8 +97,12 @@ export function SalesInvoiceModal({ invoice, accounts, onSave, onClose }) {
   useEffect(() => {
     api.get('/api/settings').then(settings => {
       if (settings?.firm_state) setFirmState(settings.firm_state);
+      if (settings?.firm_gstin) setFirmGstin(settings.firm_gstin);
     }).catch(() => {});
   }, []);
+
+  // Check if GST settings are incomplete
+  const gstSettingsMissing = !firmGstin || !firmState;
 
   // Close customer dropdown on outside click
   useEffect(() => {
@@ -341,6 +348,38 @@ export function SalesInvoiceModal({ invoice, accounts, onSave, onClose }) {
               </button>
             ))}
           </div>
+
+          {/* GST settings warning */}
+          {invoiceType === 'gst' && gstSettingsMissing && (
+            <div style={{
+              display: 'flex', alignItems: 'flex-start', gap: 12, padding: '14px 18px', marginBottom: 20,
+              background: 'rgba(245,158,11,0.06)', border: '1px solid rgba(245,158,11,0.3)', borderRadius: 4,
+            }}>
+              <Warning size={20} weight="duotone" style={{ color: '#f59e0b', flexShrink: 0, marginTop: 1 }} />
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4 }}>
+                  GST details missing in Settings
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5, marginBottom: 10 }}>
+                  {!firmGstin && !firmState
+                    ? 'Your GSTIN and State are not set. These are required to calculate CGST/SGST vs IGST on GST invoices.'
+                    : !firmGstin
+                    ? 'Your GSTIN is not set. It will appear on the invoice header and is needed for GST compliance.'
+                    : 'Your State is not set. It is needed to determine same-state (CGST+SGST) vs inter-state (IGST) tax.'}
+                </div>
+                <button type="button"
+                  onClick={() => { onClose(); navigate('/settings?setup=gst'); }}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 6,
+                    padding: '7px 16px', background: '#f59e0b', color: '#fff', border: 'none',
+                    borderRadius: 2, fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                    fontFamily: 'var(--font-body)',
+                  }}>
+                  <Gear size={14} /> Go to Settings
+                </button>
+              </div>
+            </div>
+          )}
 
           <form onSubmit={handleSubmit}>
             {/* ── Customer Section ── */}

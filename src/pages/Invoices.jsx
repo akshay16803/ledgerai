@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { SalesInvoiceModal } from '../components/SalesInvoiceModal';
-import { Plus, Eye, PencilSimple, Trash, Printer, CurrencyInr, Receipt, X } from '@phosphor-icons/react';
+import { Plus, Eye, PencilSimple, Trash, Printer, CurrencyInr, Receipt, X, Gear } from '@phosphor-icons/react';
 
 const PAYMENT_METHODS = [
   { value: 'upi', label: 'UPI' },
@@ -479,10 +480,13 @@ function RecordPaymentModal({ invoice, accounts, onClose, onSuccess }) {
 
 // ─── Main Invoices Page ────────────────────────────────────────────────
 export default function Invoices() {
+  const navigate = useNavigate();
   const [invoices, setInvoices] = useState([]);
   const [accounts, setAccounts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
+  const [firmName, setFirmName] = useState('');
 
   const [showNewInvoice, setShowNewInvoice] = useState(false);
   const [editingInvoice, setEditingInvoice] = useState(null);
@@ -504,10 +508,29 @@ export default function Invoices() {
     } catch (_) { /* non-critical */ }
   }, []);
 
+  // Load settings to check if firm name is set
+  const loadSettings = useCallback(async () => {
+    try {
+      const s = await api.get('/api/settings');
+      setFirmName(s.firm_name || '');
+    } catch (_) { /* non-critical */ }
+    finally { setSettingsLoaded(true); }
+  }, []);
+
   useEffect(() => {
     loadInvoices();
     loadAccounts();
-  }, [loadInvoices, loadAccounts]);
+    loadSettings();
+  }, [loadInvoices, loadAccounts, loadSettings]);
+
+  // Gate: redirect to settings if firm name is not set
+  const handleNewInvoice = () => {
+    if (settingsLoaded && !firmName.trim()) {
+      navigate('/settings?setup=invoice');
+      return;
+    }
+    setShowNewInvoice(true);
+  };
 
   const handleDelete = async (inv) => {
     const id = inv.id || inv.invoice_id;
@@ -544,7 +567,7 @@ export default function Invoices() {
           <Receipt size={26} weight="duotone" style={{ color: 'var(--brand-primary)' }} />
           Invoices
         </h1>
-        <button onClick={() => setShowNewInvoice(true)} style={{
+        <button onClick={handleNewInvoice} style={{
           display: 'flex', alignItems: 'center', gap: 6, padding: '10px 20px',
           background: 'var(--brand-primary)', color: '#fff', border: 'none', borderRadius: 2,
           fontSize: 14, fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font-body)',
@@ -584,7 +607,7 @@ export default function Invoices() {
           <div style={{ fontSize: 13, marginBottom: 20 }}>
             Create your first invoice to get started.
           </div>
-          <button onClick={() => setShowNewInvoice(true)} style={{
+          <button onClick={handleNewInvoice} style={{
             padding: '10px 20px', background: 'var(--brand-primary)', color: '#fff',
             border: 'none', borderRadius: 2, fontSize: 14, fontWeight: 600, cursor: 'pointer',
             fontFamily: 'var(--font-body)',
