@@ -225,14 +225,26 @@ export function normalizeAiConfig(value: unknown): AiConfig {
   };
 }
 
+/** Auth mode used for a given AI worker call. Exposed via thrown errors so callers
+ * (and logs) can distinguish bearer-JWT 401s from shared-key 401s from "no auth
+ * configured" failures without sniffing header strings.
+ */
+type AiAuthMode = "bearer" | "shared-key" | "none";
+
+function resolveAiAuthMode(aiConfig: AiConfig): AiAuthMode {
+  if (asString(aiConfig.bearerToken)) return "bearer";
+  if (aiConfig.secret) return "shared-key";
+  return "none";
+}
+
 function aiAuthHeaders(aiConfig: AiConfig, includeJson = true) {
   const headers: Record<string, string> = {
     ...(includeJson ? { "Content-Type": "application/json" } : {}),
   };
-  const bearer = asString(aiConfig.bearerToken);
-  if (bearer) {
-    headers.Authorization = `Bearer ${bearer}`;
-  } else if (aiConfig.secret) {
+  const mode = resolveAiAuthMode(aiConfig);
+  if (mode === "bearer") {
+    headers.Authorization = `Bearer ${asString(aiConfig.bearerToken)}`;
+  } else if (mode === "shared-key") {
     headers["x-ledgerai-key"] = aiConfig.secret;
   }
   return headers;
@@ -307,9 +319,17 @@ async function callAiWorker(aiConfig: AiConfig, messages: Array<{ role: "user"; 
     });
 
     if (!response.ok) {
-      const err = new Error(asString(data.error || data.message || text || `AI ${response.status}`));
-      (err as Error & { status?: number }).status = response.status;
-      aiAnalysisLogger.error("AI worker failed", { status: response.status, error: err.message });
+      const authMode = resolveAiAuthMode(aiConfig);
+      const isAuth = response.status === 401 || response.status === 403;
+      const baseMessage = asString(data.error || data.message || text || `AI ${response.status}`);
+      const errMessage = isAuth
+        ? `AI worker rejected ${authMode} auth (HTTP ${response.status}): ${baseMessage}`
+        : baseMessage;
+      const err = new Error(errMessage) as Error & { status?: number; authMode?: AiAuthMode; authFailure?: boolean };
+      err.status = response.status;
+      err.authMode = authMode;
+      err.authFailure = isAuth;
+      aiAnalysisLogger.error("AI worker failed", { status: response.status, authMode, authFailure: isAuth, error: errMessage });
       throw err;
     }
     return normalizeAIText(data.text ?? data.output_text ?? data.output ?? data.content) || "";
@@ -399,9 +419,17 @@ async function callCloudQueueEndpoint(
     });
 
     if (!response.ok) {
-      const err = new Error(asString(data.error || data.message || text || `${label} ${response.status}`));
-      (err as Error & { status?: number }).status = response.status;
-      cloudQueueLogger.error("Cloud queue request failed", { path, status: response.status, error: err.message });
+      const authMode = resolveAiAuthMode(aiConfig);
+      const isAuth = response.status === 401 || response.status === 403;
+      const baseMessage = asString(data.error || data.message || text || `${label} ${response.status}`);
+      const errMessage = isAuth
+        ? `${label} rejected ${authMode} auth (HTTP ${response.status}): ${baseMessage}`
+        : baseMessage;
+      const err = new Error(errMessage) as Error & { status?: number; authMode?: AiAuthMode; authFailure?: boolean };
+      err.status = response.status;
+      err.authMode = authMode;
+      err.authFailure = isAuth;
+      cloudQueueLogger.error("Cloud queue request failed", { path, status: response.status, authMode, authFailure: isAuth, error: errMessage });
       throw err;
     }
     return data;

@@ -2265,21 +2265,39 @@ export function createLedgerRepository(): LedgerRepository {
         throw new Error("AI authentication unavailable. Sign in again before retrying email extraction.");
       }
 
+      // When the user explicitly forces a retry (manual "Retry AI Pending" button),
+      // skip the cloud pull entirely. The cloud queue is drained asynchronously by
+      // the worker's 5-minute cron, so a synchronous pull here either returns nothing
+      // (and wastes the pull timeout) or returns stale results. In both cases the
+      // user wants immediate processing, which the direct-AI fallback below already
+      // provides. For scheduled/background retries (force=false) we keep the cloud
+      // pull so items that the cron already processed can be applied.
+      const cloudForceSkipped = opts.force === true;
       let cloudApplyFailed = false;
-      const cloudApplied = await applyCloudEmailRetryJobs({
-        userId: user.id,
-        baseCurrency: context.baseCurrency,
-        acts: context.acts,
-        cats: context.cats,
-        accounts: context.accounts,
-        aiConfig: context.aiConfig,
-      }).catch((err) => {
-        emailRetryLogger.warn("Initial cloud apply failed", { error: err?.message });
-        cloudApplyFailed = true;
-        return { processed: 0, recovered: 0 };
-      });
+      const cloudApplied = cloudForceSkipped
+        ? { processed: 0, recovered: 0 }
+        : await applyCloudEmailRetryJobs({
+            userId: user.id,
+            baseCurrency: context.baseCurrency,
+            acts: context.acts,
+            cats: context.cats,
+            accounts: context.accounts,
+            aiConfig: context.aiConfig,
+          }).catch((err) => {
+            emailRetryLogger.warn("Initial cloud apply failed", { error: err?.message });
+            cloudApplyFailed = true;
+            return { processed: 0, recovered: 0 };
+          });
 
-      emailRetryLogger.debug("Initial cloud apply result", { recovered: cloudApplied.recovered, cloudApplyFailed });
+      // Both "force skipped" and "cloud apply failed" mean we should reset all
+      // cloud-queued rows so the direct-AI path picks them up on this pass.
+      const resetAllCloudRows = cloudForceSkipped || cloudApplyFailed;
+
+      emailRetryLogger.debug("Initial cloud apply result", {
+        recovered: cloudApplied.recovered,
+        cloudApplyFailed,
+        cloudForceSkipped,
+      });
 
       // Reset cloud-queued items so they can be retried via direct AI analysis.
       // If the cloud apply failed (e.g. 401 auth error), reset ALL cloud-queued items
@@ -2291,9 +2309,14 @@ export function createLedgerRepository(): LedgerRepository {
 
       let cloudReset = 0;
       const staleThreshold = Date.now() - STALE_QUEUE_THRESHOLD_MS;
+      const resetReason = cloudForceSkipped
+        ? "manual_force_retry"
+        : cloudApplyFailed
+        ? "cloud_auth_failed_reset"
+        : "cloud_processing_timeout";
       for (const row of allPendingRows) {
         if (!row.cloud_queued) continue;
-        const shouldReset = cloudApplyFailed
+        const shouldReset = resetAllCloudRows
           || !row.last_tried_at
           || (() => {
               const lastTriedMs = Date.parse(asString(row.last_tried_at));
@@ -2306,7 +2329,7 @@ export function createLedgerRepository(): LedgerRepository {
             .update({
               cloud_queued: false,
               cloud_job_id: null,
-              last_error: cloudApplyFailed ? "cloud_auth_failed_reset" : "cloud_processing_timeout",
+              last_error: resetReason,
               next_retry_at: nowIso(),
             })
             .eq("client_id", asString(row.client_id));
@@ -2315,7 +2338,7 @@ export function createLedgerRepository(): LedgerRepository {
       }
 
       if (cloudReset > 0) {
-        emailRetryLogger.info("Reset cloud-queued items for direct retry", { count: cloudReset, reason: cloudApplyFailed ? "cloud_apply_failed" : "stale" });
+        emailRetryLogger.info("Reset cloud-queued items for direct retry", { count: cloudReset, reason: resetReason });
       }
 
       const rows = (await listPendingEmailRows(asString(opts.connectorId)))

@@ -81,8 +81,17 @@ export const STALE_QUEUE_THRESHOLD_MS = 30 * 60 * 1000; // 30 minutes
 /** Maximum items to process in a single retry batch */
 export const MAX_RETRY_BATCH_SIZE = 60;
 
-/** Timeout for cloud queue pull operations (ms) */
-export const CLOUD_PULL_TIMEOUT_MS = 120_000; // 2 minutes
+/** Timeout for cloud queue pull operations (ms).
+ *
+ * Historical value was 120_000 (2 min) which caused the "Retry AI Pending"
+ * button to hang for 2 minutes whenever the Cloudflare worker's KV-backed
+ * queue had nothing to return (the worker's cron drains jobs every 5 min,
+ * so an idle pull blocks for the full abort window before the code falls
+ * through to direct AI analysis in createLedgerRepository.retryEmailPending).
+ * Shortened to 15 s: a successful pull from KV is sub-second in practice,
+ * and when nothing is ready we want to fall through to direct analysis fast.
+ */
+export const CLOUD_PULL_TIMEOUT_MS = 15_000; // 15 seconds
 
 /** Timeout for cloud queue enqueue operations (ms) */
 export const CLOUD_ENQUEUE_TIMEOUT_MS = 30_000; // 30 seconds
