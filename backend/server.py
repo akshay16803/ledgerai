@@ -7439,74 +7439,12 @@ Statement text:
     # Use provided period or parsed period
     final_period_from = period_from or parsed.get("period_from")
     final_period_to = period_to or parsed.get("period_to")
-    period_label = f"{final_period_from or '?'} to {final_period_to or '?'}"
 
     now = datetime.now(timezone.utc)
     user_id = user["user_id"]
-    transaction_ids = []
 
-    net_pnl = parsed.get("net_realized_pnl", 0)
-    total_charges = parsed.get("charges", {}).get("total", 0)
-
-    # Create P&L transaction
-    if net_pnl > 0:
-        txn_id = f"txn_{uuid.uuid4().hex[:12]}"
-        txn = {
-            "transaction_id": txn_id,
-            "user_id": user_id,
-            "account_id": account_id,
-            "transaction_type": "income",
-            "amount": round(abs(net_pnl), 2),
-            "date": final_period_to or now.strftime("%Y-%m-%d"),
-            "description": f"Trading P&L: {period_label}",
-            "category_id": None,
-            "status": "pending",
-            "source": "demat_statement",
-            "demat_statement_id": statement_id,
-            "created_at": now,
-        }
-        await db.transactions.insert_one(txn)
-        transaction_ids.append(txn_id)
-    elif net_pnl < 0:
-        txn_id = f"txn_{uuid.uuid4().hex[:12]}"
-        txn = {
-            "transaction_id": txn_id,
-            "user_id": user_id,
-            "account_id": account_id,
-            "transaction_type": "expense",
-            "amount": round(abs(net_pnl), 2),
-            "date": final_period_to or now.strftime("%Y-%m-%d"),
-            "description": f"Trading Loss: {period_label}",
-            "category_id": None,
-            "status": "pending",
-            "source": "demat_statement",
-            "demat_statement_id": statement_id,
-            "created_at": now,
-        }
-        await db.transactions.insert_one(txn)
-        transaction_ids.append(txn_id)
-
-    # Create charges transaction
-    if total_charges > 0:
-        charges_txn_id = f"txn_{uuid.uuid4().hex[:12]}"
-        charges_txn = {
-            "transaction_id": charges_txn_id,
-            "user_id": user_id,
-            "account_id": account_id,
-            "transaction_type": "expense",
-            "amount": round(abs(total_charges), 2),
-            "date": final_period_to or now.strftime("%Y-%m-%d"),
-            "description": f"Trading Charges: {period_label}",
-            "category_id": None,
-            "status": "pending",
-            "source": "demat_statement",
-            "demat_statement_id": statement_id,
-            "created_at": now,
-        }
-        await db.transactions.insert_one(charges_txn)
-        transaction_ids.append(charges_txn_id)
-
-    # Store in demat_statements collection
+    # Store in demat_statements collection — NO transactions created yet.
+    # User must approve from the UI before anything hits the ledger.
     demat_doc = {
         "statement_id": statement_id,
         "user_id": user_id,
@@ -7516,11 +7454,11 @@ Statement text:
         "file_path": file_path,
         "file_size": len(content),
         "has_stored_bytes": has_stored_bytes,
-        "status": "parsed",
+        "status": "pending_approval",
         "parsed_summary": parsed,
         "period_from": final_period_from,
         "period_to": final_period_to,
-        "transaction_ids": transaction_ids,
+        "transaction_ids": [],
         "created_at": now,
     }
     await db.demat_statements.insert_one(demat_doc)
@@ -7528,8 +7466,9 @@ Statement text:
     return {
         "statement_id": statement_id,
         "parsed_summary": parsed,
-        "transaction_ids": transaction_ids,
-        "message": "Demat statement parsed successfully",
+        "period_from": final_period_from,
+        "period_to": final_period_to,
+        "message": "Statement parsed — review and approve to post to ledger",
     }
 
 
@@ -7553,7 +7492,7 @@ async def demat_manual_entry(
     txn_date = data.date or now.strftime("%Y-%m-%d")
     desc_suffix = data.description or txn_date
 
-    # P&L transaction
+    # P&L transaction — manual entries are posted directly (no approval needed)
     if data.net_pnl > 0:
         txn_id = f"txn_{uuid.uuid4().hex[:12]}"
         txn = {
@@ -7565,8 +7504,9 @@ async def demat_manual_entry(
             "date": txn_date,
             "description": f"Trading P&L: {desc_suffix}",
             "category_id": None,
-            "status": "pending",
+            "status": "approved",
             "source": "demat_manual",
+            "approved_at": now,
             "created_at": now,
         }
         await db.transactions.insert_one(txn)
@@ -7582,8 +7522,9 @@ async def demat_manual_entry(
             "date": txn_date,
             "description": f"Trading Loss: {desc_suffix}",
             "category_id": None,
-            "status": "pending",
+            "status": "approved",
             "source": "demat_manual",
+            "approved_at": now,
             "created_at": now,
         }
         await db.transactions.insert_one(txn)
@@ -7601,16 +7542,20 @@ async def demat_manual_entry(
             "date": txn_date,
             "description": f"Trading Charges: {desc_suffix}",
             "category_id": None,
-            "status": "pending",
+            "status": "approved",
             "source": "demat_manual",
+            "approved_at": now,
             "created_at": now,
         }
         await db.transactions.insert_one(charges_txn)
         transaction_ids.append(charges_txn_id)
 
+    # Recalculate account balance since transactions are posted directly
+    await recalculate_account_balance(user_id, data.account_id)
+
     return {
         "transaction_ids": transaction_ids,
-        "message": "Manual demat entry recorded",
+        "message": "Entry posted to ledger",
     }
 
 
@@ -7637,6 +7582,125 @@ async def list_demat_statements(
             s["created_at"] = s["created_at"].isoformat()
 
     return {"statements": stmts}
+
+
+@app.post("/api/demat/approve-statement/{statement_id}")
+async def approve_demat_statement(statement_id: str, user: dict = Depends(get_current_user)):
+    """Approve a parsed demat statement — creates approved transactions and updates balance."""
+    stmt = await db.demat_statements.find_one(
+        {"statement_id": statement_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    if not stmt:
+        raise HTTPException(status_code=404, detail="Statement not found")
+    if stmt.get("status") != "pending_approval":
+        raise HTTPException(status_code=400, detail=f"Statement already {stmt.get('status', 'processed')}")
+
+    parsed = stmt.get("parsed_summary", {})
+    account_id = stmt["account_id"]
+    user_id = user["user_id"]
+    now = datetime.now(timezone.utc)
+    final_period_from = stmt.get("period_from")
+    final_period_to = stmt.get("period_to")
+    period_label = f"{final_period_from or '?'} to {final_period_to or '?'}"
+
+    net_pnl = parsed.get("net_realized_pnl", 0)
+    total_charges = parsed.get("charges", {}).get("total", 0)
+    transaction_ids = []
+
+    # Create P&L transaction (approved immediately)
+    if net_pnl > 0:
+        txn_id = f"txn_{uuid.uuid4().hex[:12]}"
+        txn = {
+            "transaction_id": txn_id,
+            "user_id": user_id,
+            "account_id": account_id,
+            "transaction_type": "income",
+            "amount": round(abs(net_pnl), 2),
+            "date": final_period_to or now.strftime("%Y-%m-%d"),
+            "description": f"Trading P&L: {period_label}",
+            "category_id": None,
+            "status": "approved",
+            "source": "demat_statement",
+            "demat_statement_id": statement_id,
+            "approved_at": now,
+            "created_at": now,
+        }
+        await db.transactions.insert_one(txn)
+        transaction_ids.append(txn_id)
+    elif net_pnl < 0:
+        txn_id = f"txn_{uuid.uuid4().hex[:12]}"
+        txn = {
+            "transaction_id": txn_id,
+            "user_id": user_id,
+            "account_id": account_id,
+            "transaction_type": "expense",
+            "amount": round(abs(net_pnl), 2),
+            "date": final_period_to or now.strftime("%Y-%m-%d"),
+            "description": f"Trading Loss: {period_label}",
+            "category_id": None,
+            "status": "approved",
+            "source": "demat_statement",
+            "demat_statement_id": statement_id,
+            "approved_at": now,
+            "created_at": now,
+        }
+        await db.transactions.insert_one(txn)
+        transaction_ids.append(txn_id)
+
+    # Create charges transaction (approved immediately)
+    if total_charges > 0:
+        charges_txn_id = f"txn_{uuid.uuid4().hex[:12]}"
+        charges_txn = {
+            "transaction_id": charges_txn_id,
+            "user_id": user_id,
+            "account_id": account_id,
+            "transaction_type": "expense",
+            "amount": round(abs(total_charges), 2),
+            "date": final_period_to or now.strftime("%Y-%m-%d"),
+            "description": f"Trading Charges: {period_label}",
+            "category_id": None,
+            "status": "approved",
+            "source": "demat_statement",
+            "demat_statement_id": statement_id,
+            "approved_at": now,
+            "created_at": now,
+        }
+        await db.transactions.insert_one(charges_txn)
+        transaction_ids.append(charges_txn_id)
+
+    # Update statement status and link transactions
+    await db.demat_statements.update_one(
+        {"statement_id": statement_id},
+        {"$set": {"status": "approved", "approved_at": now, "transaction_ids": transaction_ids}}
+    )
+
+    # Recalculate account balance
+    await recalculate_account_balance(user_id, account_id)
+
+    return {
+        "statement_id": statement_id,
+        "transaction_ids": transaction_ids,
+        "message": "Statement approved — transactions posted to ledger",
+    }
+
+
+@app.post("/api/demat/reject-statement/{statement_id}")
+async def reject_demat_statement(statement_id: str, user: dict = Depends(get_current_user)):
+    """Reject a parsed demat statement — no transactions are created."""
+    stmt = await db.demat_statements.find_one(
+        {"statement_id": statement_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    if not stmt:
+        raise HTTPException(status_code=404, detail="Statement not found")
+    if stmt.get("status") != "pending_approval":
+        raise HTTPException(status_code=400, detail=f"Statement already {stmt.get('status', 'processed')}")
+
+    await db.demat_statements.update_one(
+        {"statement_id": statement_id},
+        {"$set": {"status": "rejected", "rejected_at": datetime.now(timezone.utc)}}
+    )
+
+    return {"statement_id": statement_id, "message": "Statement rejected"}
 
 
 # ─── Health Check ────────────────────────────────────────────────────

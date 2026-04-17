@@ -753,6 +753,9 @@ function DematUploadModal({ account, onClose }) {
   const [file, setFile] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [result, setResult] = useState(null);
+  const [approving, setApproving] = useState(false);
+  const [approved, setApproved] = useState(false);
+  const [rejected, setRejected] = useState(false);
   const [error, setError] = useState('');
 
   const handleUpload = async () => {
@@ -781,11 +784,39 @@ function DematUploadModal({ account, onClose }) {
     }
   };
 
+  const handleApprove = async () => {
+    if (!result?.statement_id || approving) return;
+    setApproving(true);
+    setError('');
+    try {
+      await api.post(`/api/demat/approve-statement/${result.statement_id}`);
+      setApproved(true);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setApproving(false);
+    }
+  };
+
+  const handleReject = async () => {
+    if (!result?.statement_id) return;
+    try {
+      await api.post(`/api/demat/reject-statement/${result.statement_id}`);
+      setRejected(true);
+    } catch (e) {
+      setError(e.message);
+    }
+  };
+
+  const ps = result?.parsed_summary || {};
+  const pnl = ps.net_realized_pnl || 0;
+  const charges = ps.charges || {};
+
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       <div onClick={onClose} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)' }} />
       <div data-testid="demat-upload-modal" style={{
-        position: 'relative', background: '#fff', borderRadius: 2, width: '100%', maxWidth: 540,
+        position: 'relative', background: '#fff', borderRadius: 2, width: '100%', maxWidth: 560,
         maxHeight: '90vh', overflow: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.2)', margin: '0 8px',
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 28px', borderBottom: '1px solid var(--border-subtle)' }}>
@@ -800,7 +831,9 @@ function DematUploadModal({ account, onClose }) {
           </button>
         </div>
         <div style={{ padding: '24px 28px' }}>
-          {!result ? (
+
+          {/* ── Step 1: File picker ── */}
+          {!result && !approved && !rejected && (
             <>
               <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 16, lineHeight: 1.6 }}>
                 Upload your broker's contract note or trade report (PDF or CSV). AI will parse the trades and calculate your net P&L and charges.
@@ -851,37 +884,146 @@ function DematUploadModal({ account, onClose }) {
                 }}>Cancel</button>
               </div>
             </>
-          ) : (
+          )}
+
+          {/* ── Step 2: Review & Approve ── */}
+          {result && !approved && !rejected && (
             <div>
-              <div style={{ padding: '16px 18px', background: 'rgba(58,92,74,0.06)', borderRadius: 2, border: '1px solid var(--success)', marginBottom: 16 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                  <Check size={18} weight="bold" style={{ color: 'var(--success)' }} />
-                  <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--success)' }}>Statement Parsed Successfully</span>
-                </div>
-                {result.parsed_summary && (
-                  <div className="mono" style={{ fontSize: 12, lineHeight: 1.8, color: 'var(--text-primary)' }}>
-                    <div>Trades: {result.parsed_summary.num_trades || 'N/A'}</div>
-                    <div>Total Buy Value: {formatCurrency(result.parsed_summary.total_buy_value || 0)}</div>
-                    <div>Total Sell Value: {formatCurrency(result.parsed_summary.total_sell_value || 0)}</div>
-                    <div style={{ borderTop: '1px solid var(--border-subtle)', marginTop: 6, paddingTop: 6 }}>
-                      Total Charges: {formatCurrency(result.parsed_summary.charges?.total || 0)}
-                    </div>
-                    <div style={{ fontWeight: 700, fontSize: 14, color: (result.parsed_summary.net_realized_pnl || 0) >= 0 ? 'var(--success)' : 'var(--error)' }}>
-                      Net P&L: {formatCurrency(result.parsed_summary.net_realized_pnl || 0)}
-                    </div>
-                  </div>
-                )}
+              {/* Header badge */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 20 }}>
+                <Robot size={18} style={{ color: 'var(--accent-1)' }} />
+                <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--accent-1)' }}>AI-Parsed Summary</span>
+                <span className="mono" style={{ fontSize: 10, color: 'var(--text-muted)', marginLeft: 'auto' }}>
+                  {file?.name}
+                </span>
               </div>
-              <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 16 }}>
-                {result.transactions_created || 0} pending transaction(s) created. Go to Transactions to review and approve.
+
+              {/* Period */}
+              {(result.period_from || result.period_to) && (
+                <div className="mono" style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 14, letterSpacing: '0.03em' }}>
+                  Period: {result.period_from || '?'} to {result.period_to || '?'}
+                </div>
+              )}
+
+              {/* Trade summary card */}
+              <div style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-subtle)', borderRadius: 2, padding: '18px 20px', marginBottom: 14 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px 20px', fontSize: 13 }}>
+                  <div style={{ color: 'var(--text-secondary)' }}>Trades</div>
+                  <div className="mono" style={{ textAlign: 'right', fontWeight: 600 }}>{ps.num_trades || 'N/A'}</div>
+                  <div style={{ color: 'var(--text-secondary)' }}>Total Buy Value</div>
+                  <div className="mono" style={{ textAlign: 'right' }}>{formatCurrency(ps.total_buy_value || 0)}</div>
+                  <div style={{ color: 'var(--text-secondary)' }}>Total Sell Value</div>
+                  <div className="mono" style={{ textAlign: 'right' }}>{formatCurrency(ps.total_sell_value || 0)}</div>
+                </div>
+              </div>
+
+              {/* Charges breakdown card */}
+              <div style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-subtle)', borderRadius: 2, padding: '18px 20px', marginBottom: 14 }}>
+                <div className="mono" style={{ fontSize: 10, letterSpacing: '0.15em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 10, fontWeight: 600 }}>Charges Breakdown</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 20px', fontSize: 12.5 }}>
+                  {charges.brokerage > 0 && <><div style={{ color: 'var(--text-secondary)' }}>Brokerage</div><div className="mono" style={{ textAlign: 'right' }}>{formatCurrency(charges.brokerage)}</div></>}
+                  {charges.stt > 0 && <><div style={{ color: 'var(--text-secondary)' }}>STT</div><div className="mono" style={{ textAlign: 'right' }}>{formatCurrency(charges.stt)}</div></>}
+                  {charges.gst > 0 && <><div style={{ color: 'var(--text-secondary)' }}>GST</div><div className="mono" style={{ textAlign: 'right' }}>{formatCurrency(charges.gst)}</div></>}
+                  {charges.exchange_fees > 0 && <><div style={{ color: 'var(--text-secondary)' }}>Exchange Fees</div><div className="mono" style={{ textAlign: 'right' }}>{formatCurrency(charges.exchange_fees)}</div></>}
+                  {charges.dp_charges > 0 && <><div style={{ color: 'var(--text-secondary)' }}>DP Charges</div><div className="mono" style={{ textAlign: 'right' }}>{formatCurrency(charges.dp_charges)}</div></>}
+                  {charges.stamp_duty > 0 && <><div style={{ color: 'var(--text-secondary)' }}>Stamp Duty</div><div className="mono" style={{ textAlign: 'right' }}>{formatCurrency(charges.stamp_duty)}</div></>}
+                  {charges.other > 0 && <><div style={{ color: 'var(--text-secondary)' }}>Other</div><div className="mono" style={{ textAlign: 'right' }}>{formatCurrency(charges.other)}</div></>}
+                  <div style={{ color: 'var(--text-primary)', fontWeight: 600, borderTop: '1px solid var(--border-subtle)', paddingTop: 6, marginTop: 4 }}>Total Charges</div>
+                  <div className="mono" style={{ textAlign: 'right', fontWeight: 600, borderTop: '1px solid var(--border-subtle)', paddingTop: 6, marginTop: 4 }}>{formatCurrency(charges.total || 0)}</div>
+                </div>
+              </div>
+
+              {/* Net P&L highlight */}
+              <div style={{
+                background: pnl >= 0 ? 'rgba(58,92,74,0.08)' : 'rgba(194,109,92,0.08)',
+                border: `1px solid ${pnl >= 0 ? 'var(--success)' : 'var(--error)'}`,
+                borderRadius: 2, padding: '16px 20px', marginBottom: 20,
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              }}>
+                <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>Net Realized P&L</span>
+                <span className="mono" style={{
+                  fontSize: 20, fontWeight: 700, letterSpacing: '-0.02em',
+                  color: pnl >= 0 ? 'var(--success)' : 'var(--error)',
+                }}>
+                  {pnl >= 0 ? '+' : ''}{formatCurrency(pnl)}
+                </span>
+              </div>
+
+              {/* What happens on approve */}
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 16, lineHeight: 1.6, padding: '0 2px' }}>
+                {pnl !== 0 && charges.total > 0
+                  ? `Approving will post ${pnl >= 0 ? 'a profit' : 'a loss'} of ${formatCurrency(Math.abs(pnl))} and charges of ${formatCurrency(charges.total)} to your ledger.`
+                  : pnl !== 0
+                  ? `Approving will post ${pnl >= 0 ? 'a profit' : 'a loss'} of ${formatCurrency(Math.abs(pnl))} to your ledger.`
+                  : charges.total > 0
+                  ? `Approving will post charges of ${formatCurrency(charges.total)} to your ledger.`
+                  : 'No P&L or charges detected in this statement.'}
+              </div>
+
+              {error && <p style={{ color: 'var(--error)', fontSize: 13, marginBottom: 12 }}>{error}</p>}
+
+              {/* Action buttons */}
+              <div style={{ display: 'flex', gap: 12 }}>
+                <button data-testid="demat-approve-btn" onClick={handleApprove} disabled={approving || (pnl === 0 && (charges.total || 0) === 0)}
+                  style={{
+                    flex: 1, padding: '12px 20px', borderRadius: 2, fontSize: 13, fontWeight: 600,
+                    cursor: approving ? 'not-allowed' : 'pointer',
+                    fontFamily: 'var(--font-body)', border: 'none',
+                    background: 'var(--success)', color: '#fff',
+                    opacity: approving ? 0.6 : 1,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                  }}>
+                  {approving ? <SpinnerGap size={14} className="spin" /> : <Check size={14} weight="bold" />}
+                  {approving ? 'Posting...' : 'Approve & Post to Ledger'}
+                </button>
+                <button data-testid="demat-reject-btn" onClick={handleReject}
+                  style={{
+                    padding: '12px 20px', borderRadius: 2, fontSize: 13, fontWeight: 500,
+                    cursor: 'pointer', fontFamily: 'var(--font-body)',
+                    background: 'none', border: '1px solid var(--border-strong)', color: 'var(--text-secondary)',
+                  }}>Reject</button>
+              </div>
+            </div>
+          )}
+
+          {/* ── Step 3: Approved confirmation ── */}
+          {approved && (
+            <div style={{ textAlign: 'center', padding: '20px 0' }}>
+              <div style={{
+                width: 48, height: 48, borderRadius: '50%', background: 'rgba(58,92,74,0.1)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px',
+              }}>
+                <Check size={24} weight="bold" style={{ color: 'var(--success)' }} />
+              </div>
+              <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 6 }}>Posted to Ledger</h3>
+              <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 20, lineHeight: 1.5 }}>
+                {pnl !== 0 && <>{pnl >= 0 ? 'Profit' : 'Loss'} of <strong>{formatCurrency(Math.abs(pnl))}</strong></>}
+                {pnl !== 0 && charges.total > 0 && ' and '}
+                {charges.total > 0 && <>charges of <strong>{formatCurrency(charges.total)}</strong></>}
+                {' '}recorded in your {account.name} account.
               </p>
               <button onClick={onClose} style={{
-                width: '100%', padding: '10px 20px', borderRadius: 2, fontSize: 13, fontWeight: 600,
+                padding: '10px 32px', borderRadius: 2, fontSize: 13, fontWeight: 600,
                 cursor: 'pointer', fontFamily: 'var(--font-body)',
                 background: 'var(--brand-primary)', color: '#fff', border: 'none',
               }}>Done</button>
             </div>
           )}
+
+          {/* ── Rejected confirmation ── */}
+          {rejected && (
+            <div style={{ textAlign: 'center', padding: '20px 0' }}>
+              <p style={{ fontSize: 14, color: 'var(--text-secondary)', marginBottom: 16 }}>
+                Statement rejected. No transactions were created.
+              </p>
+              <button onClick={onClose} style={{
+                padding: '10px 32px', borderRadius: 2, fontSize: 13, fontWeight: 600,
+                cursor: 'pointer', fontFamily: 'var(--font-body)',
+                background: 'var(--brand-primary)', color: '#fff', border: 'none',
+              }}>Close</button>
+            </div>
+          )}
+
         </div>
       </div>
       <style>{`.spin { animation: spin-anim 1s linear infinite; } @keyframes spin-anim { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
@@ -1005,14 +1147,19 @@ function DematManualEntryModal({ account, onClose }) {
               </div>
             </form>
           ) : (
-            <div style={{ padding: '16px 18px', background: 'rgba(58,92,74,0.06)', borderRadius: 2, border: '1px solid var(--success)', textAlign: 'center' }}>
-              <Check size={20} weight="bold" style={{ color: 'var(--success)', marginBottom: 4 }} />
-              <p style={{ fontSize: 14, fontWeight: 600, color: 'var(--success)' }}>Entry Added!</p>
-              <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4, marginBottom: 12 }}>
-                Pending transaction(s) created. Go to Transactions to review and approve.
+            <div style={{ textAlign: 'center', padding: '8px 0' }}>
+              <div style={{
+                width: 48, height: 48, borderRadius: '50%', background: 'rgba(58,92,74,0.1)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 14px',
+              }}>
+                <Check size={24} weight="bold" style={{ color: 'var(--success)' }} />
+              </div>
+              <p style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4 }}>Posted to Ledger</p>
+              <p style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 18, lineHeight: 1.5 }}>
+                Your trading entry has been recorded directly in your {account.name} account.
               </p>
               <button onClick={onClose} style={{
-                padding: '10px 24px', borderRadius: 2, fontSize: 13, fontWeight: 600,
+                padding: '10px 32px', borderRadius: 2, fontSize: 13, fontWeight: 600,
                 cursor: 'pointer', fontFamily: 'var(--font-body)',
                 background: 'var(--brand-primary)', color: '#fff', border: 'none',
               }}>Done</button>
