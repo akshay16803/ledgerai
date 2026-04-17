@@ -70,6 +70,9 @@ function AIChatPanel() {
       if (res.transaction_posted && res.transaction) {
         assistantMessage.transaction = res.transaction;
       }
+      if (res.invoice_created && res.invoice) {
+        assistantMessage.invoice = res.invoice;
+      }
       setMessages(prev => [...prev, assistantMessage]);
     } catch (err) {
       setMessages(prev => [...prev, { role: 'assistant', content: 'Sorry, something went wrong. Please try again.' }]);
@@ -188,6 +191,16 @@ function AIChatPanel() {
                           </div>
                           <div className="mono" style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
                             {msg.transaction.transaction_type} · ₹{msg.transaction.amount.toLocaleString('en-IN')} · {msg.transaction.date}
+                          </div>
+                        </div>
+                      )}
+                      {msg.invoice && (
+                        <div style={{ marginTop: 8, padding: '10px 14px', background: 'rgba(74,110,125,0.08)', borderRadius: 6, border: '1px solid rgba(74,110,125,0.15)' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 600, color: 'var(--info)', marginBottom: 4 }}>
+                            <CheckCircle size={14} weight="fill" /> Invoice Created
+                          </div>
+                          <div className="mono" style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
+                            {msg.invoice.invoice_number} · {msg.invoice.customer_name} · ₹{(msg.invoice.grand_total || 0).toLocaleString('en-IN')} · {msg.invoice.payment_status}
                           </div>
                         </div>
                       )}

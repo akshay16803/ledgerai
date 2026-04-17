@@ -6989,6 +6989,16 @@ async def ai_chat(body: dict = Body(...), user: dict = Depends(get_current_user)
          "description": 1, "source": 1}
     ).sort("date", -1).limit(200).to_list(200)
 
+    # ── Fetch invoices, customers, and settings for invoice context ──
+    customers = await db.customers.find({"user_id": user_id}, {"_id": 0}).to_list(200)
+    recent_invoices = await db.invoices.find(
+        {"user_id": user_id},
+        {"_id": 0, "invoice_id": 1, "invoice_number": 1, "invoice_type": 1,
+         "invoice_date": 1, "due_date": 1, "customer_id": 1, "customer_name": 1,
+         "grand_total": 1, "amount_paid": 1, "payment_status": 1, "line_items": 1}
+    ).sort("invoice_date", -1).limit(100).to_list(100)
+    user_settings = await db.user_settings.find_one({"user_id": user_id}, {"_id": 0}) or {}
+
     # Summary stats
     now = datetime.now(timezone.utc)
     month_start = now.replace(day=1).strftime("%Y-%m-%d")
@@ -7000,6 +7010,13 @@ async def ai_chat(body: dict = Body(...), user: dict = Depends(get_current_user)
 
     income_this_month = sum(t["amount"] for t in recent_txns if t["transaction_type"] == "income" and t["date"] >= month_start)
     expense_this_month = sum(t["amount"] for t in recent_txns if t["transaction_type"] == "expense" and t["date"] >= month_start)
+
+    # Invoice stats
+    total_invoiced = sum(inv.get("grand_total", 0) for inv in recent_invoices)
+    total_received = sum(inv.get("amount_paid", 0) for inv in recent_invoices)
+    total_outstanding = total_invoiced - total_received
+    invoices_this_month = [inv for inv in recent_invoices if inv.get("invoice_date", "") >= month_start]
+    invoiced_this_month = sum(inv.get("grand_total", 0) for inv in invoices_this_month)
 
     # Build compact account list
     acc_lines = []
@@ -7014,6 +7031,36 @@ async def ai_chat(body: dict = Body(...), user: dict = Depends(get_current_user)
 
     # Build compact category list
     cat_lines = [f"- {c['name']} (ID: {c['category_id']}, type: {c.get('category_type','expense')})" for c in categories]
+
+    # Build compact customer list
+    cust_lines = []
+    for c in customers:
+        cust_line = f"- {c['name']} (ID: {c.get('customer_id', c.get('id', '?'))}"
+        extras = []
+        if c.get("city"): extras.append(c["city"])
+        if c.get("state"): extras.append(c["state"])
+        if c.get("gstin"): extras.append(f"GSTIN: {c['gstin']}")
+        if c.get("phone"): extras.append(f"Ph: {c['phone']}")
+        if extras:
+            cust_line += f", {', '.join(extras)}"
+        cust_line += ")"
+        cust_lines.append(cust_line)
+
+    # Build compact invoice list
+    inv_lines = []
+    for inv in recent_invoices:
+        status = inv.get("payment_status", "unpaid")
+        outstanding = inv.get("grand_total", 0) - inv.get("amount_paid", 0)
+        items_summary = ", ".join(li.get("description", "?") for li in (inv.get("line_items") or [])[:3])
+        inv_lines.append(
+            f"  {inv.get('invoice_number','?')} | {inv.get('invoice_date','')} | {inv.get('customer_name','?')} "
+            f"| ₹{inv.get('grand_total',0):,.2f} | {status} | outstanding: ₹{outstanding:,.2f} | items: {items_summary}"
+        )
+
+    # Build invoice settings summary
+    firm_name = user_settings.get("firm_name", "")
+    firm_state = user_settings.get("firm_state", "")
+    has_bank = bool(user_settings.get("invoice_bank_name") or user_settings.get("invoice_bank_account_no"))
 
     # Build compact recent transactions
     acc_map = {a["account_id"]: a["name"] for a in accounts}
@@ -7054,6 +7101,19 @@ Savings This Month: ₹{income_this_month - expense_this_month:,.2f}
 ═══ RECENT APPROVED TRANSACTIONS (newest first) ═══
 {chr(10).join(txn_lines) if txn_lines else "No transactions yet."}
 
+═══ CUSTOMERS ═══
+{chr(10).join(cust_lines) if cust_lines else "No customers yet."}
+
+═══ INVOICES (newest first) ═══
+Total Invoiced: ₹{total_invoiced:,.2f} | Total Received: ₹{total_received:,.2f} | Outstanding: ₹{total_outstanding:,.2f}
+Invoiced This Month: ₹{invoiced_this_month:,.2f}
+{chr(10).join(inv_lines) if inv_lines else "No invoices yet."}
+
+═══ INVOICE SETTINGS ═══
+Firm Name: {firm_name or "(not set)"}
+Firm State: {firm_state or "(not set)"}
+Bank Details Configured: {"Yes" if has_bank else "No"}
+
 ═══ POSTING TRANSACTIONS ═══
 You can help the user post transactions. STRICT RULES:
 1. For income/expense you MUST have ALL of: transaction_type, amount, date (YYYY-MM-DD), account_id, category_id, description.
@@ -7067,7 +7127,22 @@ You can help the user post transactions. STRICT RULES:
 {{"transaction_type": "...", "amount": ..., "date": "YYYY-MM-DD", "account_id": "...", "category_id": "...", "to_account_id": "...", "description": "..."}}
 |||TRANSACTION|||
 8. Only include to_account_id for transfers. Only include category_id for income/expense.
-9. NEVER post without explicit user confirmation of the details."""
+9. NEVER post without explicit user confirmation of the details.
+
+═══ CREATING INVOICES ═══
+You can help the user create sales invoices. STRICT RULES:
+1. You MUST have AT MINIMUM: customer_id (pick from existing customers or ask to create), at least one line item with description and rate, invoice_type ("simple" or "gst"), and payment_status ("paid", "partial", or "unpaid").
+2. For GST invoices you also need: place_of_supply (Indian state), and each line item should have gst_rate (0, 5, 12, 18, or 28).
+3. If the customer exists in the list above, use their customer_id. If it's a new customer, tell the user to create them first from the Invoices page, or ask if they'd like you to just use the name.
+4. If payment is "paid" or "partial", you need: payment_account_id (from accounts list), payment_date, payment_method (upi/cash/neft/cheque/etc).
+5. Before creating, show a clear summary: customer, items with qty × rate, taxes (if GST), total, payment status.
+6. When ALL fields are confirmed, output the invoice JSON wrapped EXACTLY like this:
+|||INVOICE|||
+{{"invoice_type": "simple or gst", "customer_id": "...", "customer_name": "...", "customer_state": "...", "invoice_date": "YYYY-MM-DD", "due_date": "YYYY-MM-DD or null", "place_of_supply": "state or null", "line_items": [{{"description": "...", "quantity": 1, "rate": 1000, "discount_percent": 0, "gst_rate": 18, "hsn_sac": "..."}}], "payment_status": "unpaid", "amount_paid": 0, "payment_account_id": null, "payment_date": null, "payment_method": null, "notes": "..."}}
+|||INVOICE|||
+7. The server will auto-calculate taxes, totals, round-off, and invoice number.
+8. NEVER create an invoice without explicit user confirmation of the details.
+9. You can answer questions about existing invoices, outstanding amounts, debtor status, and customer sales history using the data above."""
 
     # Build messages
     messages = [{"role": "system", "content": system_prompt}]
@@ -7181,10 +7256,135 @@ You can help the user post transactions. STRICT RULES:
                 clean_reply = ai_reply.replace(f"|||TRANSACTION|||{parts[1]}|||TRANSACTION|||", "")
                 clean_reply += "\n\n⚠️ I tried to create a transaction but the format was invalid. Let me try again — please confirm the details."
 
+    # ── Check for invoice creation ──
+    invoice_created = False
+    created_invoice = None
+
+    if "|||INVOICE|||" in clean_reply:
+        inv_parts = clean_reply.split("|||INVOICE|||")
+        if len(inv_parts) >= 3:
+            inv_json_str = inv_parts[1].strip()
+            try:
+                inv_data = json.loads(inv_json_str)
+                inv_errors = []
+
+                # Validate basics
+                inv_type = inv_data.get("invoice_type", "simple")
+                raw_items = inv_data.get("line_items", [])
+                if not raw_items:
+                    inv_errors.append("At least one line item is required")
+                for idx, item in enumerate(raw_items):
+                    if not item.get("description"):
+                        inv_errors.append(f"Line item {idx+1} needs a description")
+                    if not item.get("rate") or float(item.get("rate", 0)) <= 0:
+                        inv_errors.append(f"Line item {idx+1} needs a valid rate")
+
+                customer_id = inv_data.get("customer_id", "")
+                customer_name = inv_data.get("customer_name", "")
+                if not customer_id and not customer_name:
+                    inv_errors.append("Customer is required")
+
+                # Validate payment account if paid/partial
+                pay_status = inv_data.get("payment_status", "unpaid")
+                if pay_status in ("paid", "partial"):
+                    pay_acc_id = inv_data.get("payment_account_id")
+                    if not pay_acc_id:
+                        inv_errors.append("Payment account is required for paid/partial invoices")
+                    else:
+                        pay_acc = await db.accounts.find_one({"account_id": pay_acc_id, "user_id": user_id})
+                        if not pay_acc:
+                            inv_errors.append(f"Payment account {pay_acc_id} not found")
+
+                if inv_errors:
+                    clean_reply = clean_reply.replace(f"|||INVOICE|||{inv_parts[1]}|||INVOICE|||", "")
+                    clean_reply += f"\n\n⚠️ Could not create invoice: {', '.join(inv_errors)}"
+                else:
+                    # Look up customer details if customer_id provided
+                    if customer_id:
+                        cust_doc = await db.customers.find_one({"customer_id": customer_id, "user_id": user_id})
+                        if cust_doc:
+                            customer_name = cust_doc.get("name", customer_name)
+                            inv_data["customer_state"] = inv_data.get("customer_state") or cust_doc.get("state", "")
+
+                    # Determine same-state for GST calc
+                    inv_firm_state = user_settings.get("firm_state", "")
+                    inv_cust_state = inv_data.get("customer_state") or inv_data.get("place_of_supply") or ""
+                    inv_is_same_state = (inv_firm_state.strip().lower() == inv_cust_state.strip().lower()) if inv_firm_state and inv_cust_state else True
+
+                    # Calculate line items and totals
+                    calc_items = _calculate_line_items(raw_items, inv_type, inv_is_same_state)
+                    inv_totals = _calculate_invoice_totals(calc_items)
+
+                    inv_number = await _get_next_invoice_number(user_id)
+                    inv_now = datetime.now(timezone.utc)
+
+                    amount_paid = float(inv_data.get("amount_paid", 0))
+                    if pay_status == "paid":
+                        amount_paid = inv_totals["grand_total"]
+
+                    invoice_doc = {
+                        "invoice_id": uuid.uuid4().hex[:16],
+                        "user_id": user_id,
+                        "invoice_number": inv_number,
+                        "invoice_type": inv_type,
+                        "invoice_date": inv_data.get("invoice_date", today_str),
+                        "due_date": inv_data.get("due_date"),
+                        "customer_id": customer_id,
+                        "customer_name": customer_name,
+                        "customer_gstin": inv_data.get("customer_gstin"),
+                        "customer_address": inv_data.get("customer_address"),
+                        "customer_state": inv_cust_state,
+                        "place_of_supply": inv_data.get("place_of_supply"),
+                        "line_items": calc_items,
+                        **inv_totals,
+                        "amount_in_words": amount_to_words_inr(inv_totals["grand_total"]),
+                        "payment_status": pay_status,
+                        "amount_paid": amount_paid,
+                        "payment_account_id": inv_data.get("payment_account_id"),
+                        "payment_method": inv_data.get("payment_method"),
+                        "payment_date": inv_data.get("payment_date"),
+                        "transaction_id": None,
+                        "notes": inv_data.get("notes"),
+                        "terms_conditions": inv_data.get("terms_conditions", user_settings.get("invoice_terms")),
+                        "created_at": inv_now,
+                        "updated_at": inv_now,
+                        "source": "ai_chat",
+                    }
+
+                    # Auto-post transaction if paid/partial
+                    if pay_status == "paid":
+                        txn_id = await _auto_post_invoice_transaction(user_id, invoice_doc, inv_totals["grand_total"])
+                        invoice_doc["transaction_id"] = txn_id
+                    elif pay_status == "partial" and amount_paid > 0:
+                        txn_id = await _auto_post_invoice_transaction(user_id, invoice_doc, amount_paid)
+                        invoice_doc["transaction_id"] = txn_id
+
+                    await db.invoices.insert_one(invoice_doc)
+                    del invoice_doc["_id"]
+
+                    invoice_created = True
+                    created_invoice = {
+                        "invoice_id": invoice_doc["invoice_id"],
+                        "invoice_number": inv_number,
+                        "grand_total": inv_totals["grand_total"],
+                        "customer_name": customer_name,
+                        "payment_status": pay_status,
+                    }
+
+                    clean_reply = clean_reply.replace(f"|||INVOICE|||{inv_parts[1]}|||INVOICE|||", "").strip()
+                    if not clean_reply:
+                        clean_reply = f"✅ Invoice {inv_number} created successfully for {customer_name} — ₹{inv_totals['grand_total']:,.2f}"
+
+            except json.JSONDecodeError:
+                clean_reply = clean_reply.replace(f"|||INVOICE|||{inv_parts[1]}|||INVOICE|||", "")
+                clean_reply += "\n\n⚠️ I tried to create an invoice but the format was invalid. Let me try again — please confirm the details."
+
     return {
         "reply": clean_reply.strip(),
         "transaction_posted": transaction_posted,
         "transaction": posted_txn,
+        "invoice_created": invoice_created,
+        "invoice": created_invoice,
     }
 
 
