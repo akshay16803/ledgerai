@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../lib/api';
+import { useNavigate } from 'react-router-dom';
 import {
   MagnifyingGlass, DownloadSimple, FileText, Paperclip,
-  FunnelSimple, CaretDown, CaretUp, EnvelopeSimple, Archive, Eye, X, Receipt, Image as ImageIcon
+  FunnelSimple, CaretDown, CaretUp, EnvelopeSimple, Archive, Eye, X, Receipt, Image as ImageIcon, ArrowsLeftRight
 } from '@phosphor-icons/react';
 
 const API = import.meta.env.REACT_APP_BACKEND_URL || '';
@@ -13,6 +14,7 @@ function formatCurrency(amount) {
 }
 
 export default function Records() {
+  const navigate = useNavigate();
   const [records, setRecords] = useState([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -260,9 +262,14 @@ export default function Records() {
                       </span>
                     </div>
                     {r.transaction_id && (
-                      <p style={{ fontSize: 11, color: 'var(--success)', margin: '6px 0 0', fontWeight: 600 }}>
-                        Linked to transaction
-                      </p>
+                      <button onClick={() => navigate('/transactions')} title="View linked transaction"
+                        style={{
+                          width: '100%', margin: '6px 0 0', padding: '5px 0', border: 'none', borderRadius: 2,
+                          background: 'rgba(58,92,74,0.08)', color: 'var(--success)', fontSize: 11, fontWeight: 600,
+                          cursor: 'pointer', fontFamily: 'var(--font-body)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
+                        }}>
+                        <ArrowsLeftRight size={12} /> View Transaction
+                      </button>
                     )}
                     <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
                       <button onClick={() => {
@@ -342,14 +349,26 @@ export default function Records() {
                     {receiptPreviewData?.uploaded_at ? new Date(receiptPreviewData.uploaded_at).toLocaleString('en-IN') : ''}
                   </p>
                 </div>
-                <button onClick={() => window.open(receiptPreviewUrl, '_blank')}
-                  style={{
-                    background: 'var(--brand-primary)', color: '#fff', border: 'none',
-                    borderRadius: 2, padding: '8px 16px', cursor: 'pointer', fontSize: 12,
-                    fontWeight: 600, fontFamily: 'var(--font-body)', display: 'flex', alignItems: 'center', gap: 4,
-                  }}>
-                  <DownloadSimple size={13} /> Download
-                </button>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  {receiptPreviewData?.transaction_id && (
+                    <button onClick={() => { setReceiptPreviewUrl(null); setReceiptPreviewData(null); navigate('/transactions'); }}
+                      style={{
+                        background: 'rgba(58,92,74,0.1)', color: 'var(--success)', border: 'none',
+                        borderRadius: 2, padding: '8px 16px', cursor: 'pointer', fontSize: 12,
+                        fontWeight: 600, fontFamily: 'var(--font-body)', display: 'flex', alignItems: 'center', gap: 4,
+                      }}>
+                      <ArrowsLeftRight size={13} /> Transaction
+                    </button>
+                  )}
+                  <button onClick={() => window.open(receiptPreviewUrl, '_blank')}
+                    style={{
+                      background: 'var(--brand-primary)', color: '#fff', border: 'none',
+                      borderRadius: 2, padding: '8px 16px', cursor: 'pointer', fontSize: 12,
+                      fontWeight: 600, fontFamily: 'var(--font-body)', display: 'flex', alignItems: 'center', gap: 4,
+                    }}>
+                    <DownloadSimple size={13} /> Download
+                  </button>
+                </div>
               </div>
             </div>
           </div>

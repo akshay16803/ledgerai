@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import {
-  House, ArrowsLeftRight, Bank, Tag, BookOpen,
+  House, ArrowsLeftRight, Bank, Tag,
   Lightbulb, SignOut, Gear, EnvelopeSimple, TrendUp, Scales, ChartBar, Archive, Receipt, List, X, Headset
 } from '@phosphor-icons/react';
 
@@ -11,7 +11,6 @@ const navItems = [
   { to: '/transactions', icon: ArrowsLeftRight, label: 'Transactions' },
   { to: '/accounts', icon: Bank, label: 'Accounts' },
   { to: '/categories', icon: Tag, label: 'Categories' },
-  { to: '/ledger', icon: BookOpen, label: 'Ledger' },
   { to: '/cashflow', icon: TrendUp, label: 'Cash Flow' },
   { to: '/reports', icon: ChartBar, label: 'Reports' },
   { to: '/reconciliation', icon: Scales, label: 'Reconciliation' },

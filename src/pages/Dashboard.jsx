@@ -6,6 +6,7 @@ import {
   TrendUp, TrendDown, Scales, Clock, ArrowRight, Plus,
   Robot, PaperPlaneTilt, X, SpinnerGap, CheckCircle
 } from '@phosphor-icons/react';
+import { EditTransactionModal } from '../components/EditTransactionModal';
 
 function StatCard({ testId, label, value, icon: Icon, color, accent }) {
   return (
@@ -243,6 +244,23 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(!getCached('dashboard'));
   const navigate = useNavigate();
 
+  // New Transaction modal state
+  const [showNewTxn, setShowNewTxn] = useState(false);
+  const [modalAccounts, setModalAccounts] = useState([]);
+  const [modalCategories, setModalCategories] = useState([]);
+
+  const openNewTxnModal = async () => {
+    setShowNewTxn(true);
+    try {
+      const [accs, cats] = await Promise.all([
+        api.get('/api/accounts'),
+        api.get('/api/categories'),
+      ]);
+      setModalAccounts(accs);
+      setModalCategories(cats);
+    } catch { /* modal will show empty selects */ }
+  };
+
   const loadData = useCallback(async () => {
     try {
       const data = await api.get('/api/dashboard/summary');
@@ -276,7 +294,7 @@ export default function Dashboard() {
             Financial overview
           </p>
         </div>
-        <button data-testid="add-transaction-btn" onClick={() => navigate('/transactions')} style={{
+        <button data-testid="add-transaction-btn" onClick={openNewTxnModal} style={{
           background: 'var(--brand-primary)', color: '#fff', border: 'none',
           padding: '10px 20px', borderRadius: 2, fontSize: 13, fontWeight: 600,
           cursor: 'pointer', fontFamily: 'var(--font-body)',
@@ -380,6 +398,17 @@ export default function Dashboard() {
       </div>
 
       <AIChatPanel />
+
+      {/* New Transaction Modal */}
+      {showNewTxn && (
+        <EditTransactionModal
+          transaction={null}
+          accounts={modalAccounts}
+          categories={modalCategories}
+          onSave={() => { setShowNewTxn(false); loadData(); }}
+          onClose={() => setShowNewTxn(false)}
+        />
+      )}
     </div>
   );
 }

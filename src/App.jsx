@@ -7,7 +7,7 @@ import Dashboard from './pages/Dashboard.jsx';
 import Transactions from './pages/Transactions.jsx';
 import Accounts from './pages/Accounts.jsx';
 import Categories from './pages/Categories.jsx';
-import Ledger from './pages/Ledger.jsx';
+// Ledger removed — merged into Transactions page
 import Pricing from './pages/Pricing.jsx';
 import Billing from './pages/Billing.jsx';
 import FeatureRequests from './pages/FeatureRequests.jsx';
@@ -78,7 +78,7 @@ export default function App() {
       <Route path="/transactions" element={<ProtectedRoute><AppLayout><Transactions /></AppLayout></ProtectedRoute>} />
       <Route path="/accounts" element={<ProtectedRoute><AppLayout><Accounts /></AppLayout></ProtectedRoute>} />
       <Route path="/categories" element={<ProtectedRoute><AppLayout><Categories /></AppLayout></ProtectedRoute>} />
-      <Route path="/ledger" element={<ProtectedRoute><AppLayout><Ledger /></AppLayout></ProtectedRoute>} />
+      <Route path="/ledger" element={<Navigate to="/transactions" replace />} /> {/* Redirect old ledger URL */}
       <Route path="/cashflow" element={<ProtectedRoute><AppLayout><CashFlow /></AppLayout></ProtectedRoute>} />
       <Route path="/reconciliation" element={<ProtectedRoute><AppLayout><Reconciliation /></AppLayout></ProtectedRoute>} />
       <Route path="/reports" element={<ProtectedRoute><AppLayout><Reports /></AppLayout></ProtectedRoute>} />
