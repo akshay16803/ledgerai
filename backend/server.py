@@ -6641,6 +6641,17 @@ async def update_settings(request: Request, user: dict = Depends(get_current_use
     if "date_format" in body:
         update_fields["date_format"] = body["date_format"]
 
+    # Firm / invoicing settings
+    invoicing_keys = [
+        "firm_name", "firm_address", "firm_city", "firm_state", "firm_pincode",
+        "firm_gstin", "firm_pan", "firm_phone", "firm_email",
+        "invoice_bank_name", "invoice_bank_account_no", "invoice_bank_ifsc", "invoice_bank_branch",
+        "invoice_prefix", "invoice_terms",
+    ]
+    for key in invoicing_keys:
+        if key in body:
+            update_fields[key] = body[key]
+
     if not update_fields:
         raise HTTPException(status_code=400, detail="No fields to update")
 
@@ -8060,6 +8071,632 @@ async def list_receipts(
             r["linked_at"] = r["linked_at"].isoformat()
 
     return {"receipts": receipts, "total": total}
+
+
+# ─── Amount to Words (INR) Helper ────────────────────────────────────
+
+def amount_to_words_inr(amount: float) -> str:
+    """Convert a numeric amount to Indian Rupee words.
+    E.g. 1234.50 -> 'One Thousand Two Hundred Thirty Four Rupees and Fifty Paise Only'
+    """
+    ones = ["", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine",
+            "Ten", "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen",
+            "Seventeen", "Eighteen", "Nineteen"]
+    tens = ["", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"]
+
+    def two_digits(n):
+        if n == 0:
+            return ""
+        if n < 20:
+            return ones[n]
+        return (tens[n // 10] + " " + ones[n % 10]).strip()
+
+    def three_digits(n):
+        if n == 0:
+            return ""
+        if n >= 100:
+            return (ones[n // 100] + " Hundred " + two_digits(n % 100)).strip()
+        return two_digits(n)
+
+    if amount < 0:
+        amount = abs(amount)
+
+    rupees = int(amount)
+    paise = round((amount - rupees) * 100)
+
+    if rupees == 0 and paise == 0:
+        return "Zero Rupees Only"
+
+    # Indian numbering: last 3 digits, then groups of 2
+    parts = []
+    if rupees >= 10000000:
+        parts.append(two_digits(rupees // 10000000) + " Crore")
+        rupees %= 10000000
+    if rupees >= 100000:
+        parts.append(two_digits(rupees // 100000) + " Lakh")
+        rupees %= 100000
+    if rupees >= 1000:
+        parts.append(two_digits(rupees // 1000) + " Thousand")
+        rupees %= 1000
+    if rupees > 0:
+        parts.append(three_digits(rupees))
+
+    result = " ".join(p for p in parts if p)
+    if result:
+        result += " Rupees"
+    if paise > 0:
+        if result:
+            result += " and "
+        result += two_digits(paise) + " Paise"
+    result += " Only"
+    return result
+
+
+# ─── Customers CRUD ──────────────────────────────────────────────────
+
+@app.post("/api/customers")
+async def create_customer(request: Request, user: dict = Depends(get_current_user)):
+    body = await request.json()
+    now = datetime.now(timezone.utc)
+    customer = {
+        "customer_id": uuid.uuid4().hex[:16],
+        "user_id": user["user_id"],
+        "name": body.get("name", ""),
+        "gstin": body.get("gstin"),
+        "pan": body.get("pan"),
+        "phone": body.get("phone"),
+        "email": body.get("email"),
+        "billing_address": body.get("billing_address"),
+        "city": body.get("city"),
+        "state": body.get("state"),
+        "pincode": body.get("pincode"),
+        "notes": body.get("notes"),
+        "created_at": now,
+        "updated_at": now,
+    }
+    if not customer["name"]:
+        raise HTTPException(status_code=400, detail="Customer name is required")
+    await db.customers.insert_one(customer)
+    del customer["_id"]
+    return customer
+
+
+@app.get("/api/customers")
+async def list_customers(
+    request: Request,
+    user: dict = Depends(get_current_user),
+    q: Optional[str] = None,
+    limit: int = 100,
+    skip: int = 0,
+):
+    query: dict = {"user_id": user["user_id"]}
+    if q:
+        regex = {"$regex": q, "$options": "i"}
+        query["$or"] = [
+            {"name": regex},
+            {"email": regex},
+            {"phone": regex},
+            {"gstin": regex},
+        ]
+    customers = await db.customers.find(query, {"_id": 0}).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
+    total = await db.customers.count_documents(query)
+    return {"items": customers, "total": total}
+
+
+@app.get("/api/customers/{customer_id}")
+async def get_customer(customer_id: str, user: dict = Depends(get_current_user)):
+    customer = await db.customers.find_one(
+        {"customer_id": customer_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    return customer
+
+
+@app.put("/api/customers/{customer_id}")
+async def update_customer(customer_id: str, request: Request, user: dict = Depends(get_current_user)):
+    body = await request.json()
+    customer = await db.customers.find_one(
+        {"customer_id": customer_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+
+    allowed = ["name", "gstin", "pan", "phone", "email", "billing_address", "city", "state", "pincode", "notes"]
+    update_fields = {k: body[k] for k in allowed if k in body}
+    if not update_fields:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    update_fields["updated_at"] = datetime.now(timezone.utc)
+
+    await db.customers.update_one(
+        {"customer_id": customer_id, "user_id": user["user_id"]},
+        {"$set": update_fields},
+    )
+    updated = await db.customers.find_one(
+        {"customer_id": customer_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    return updated
+
+
+@app.delete("/api/customers/{customer_id}")
+async def delete_customer(customer_id: str, user: dict = Depends(get_current_user)):
+    result = await db.customers.delete_one(
+        {"customer_id": customer_id, "user_id": user["user_id"]}
+    )
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    return {"detail": "Customer deleted"}
+
+
+# ─── Invoices ─────────────────────────────────────────────────────────
+
+async def _get_next_invoice_number(user_id: str) -> str:
+    """Generate the next invoice number from user settings (prefix + auto-increment)."""
+    settings = await db.user_settings.find_one({"user_id": user_id}, {"_id": 0})
+    prefix = (settings or {}).get("invoice_prefix", "INV")
+    next_num = (settings or {}).get("invoice_next_number", 1)
+    inv_number = f"{prefix}-{next_num:04d}"
+    await db.user_settings.update_one(
+        {"user_id": user_id},
+        {"$set": {"invoice_next_number": next_num + 1}},
+        upsert=True,
+    )
+    return inv_number
+
+
+def _calculate_line_items(line_items: list, invoice_type: str, is_same_state: bool) -> list:
+    """Recalculate tax fields for each line item."""
+    calculated = []
+    for item in line_items:
+        qty = float(item.get("quantity", 0))
+        rate = float(item.get("rate", 0))
+        discount_pct = float(item.get("discount_percent", 0))
+        taxable = round(qty * rate * (1 - discount_pct / 100), 2)
+        gst_rate = float(item.get("gst_rate", 0)) if invoice_type == "gst" else 0
+
+        if invoice_type == "gst" and gst_rate > 0:
+            if is_same_state:
+                cgst = round(taxable * (gst_rate / 2) / 100, 2)
+                sgst = round(taxable * (gst_rate / 2) / 100, 2)
+                igst = 0.0
+            else:
+                cgst = 0.0
+                sgst = 0.0
+                igst = round(taxable * gst_rate / 100, 2)
+        else:
+            cgst = 0.0
+            sgst = 0.0
+            igst = 0.0
+
+        total = round(taxable + cgst + sgst + igst, 2)
+
+        calculated.append({
+            "description": item.get("description", ""),
+            "hsn_sac": item.get("hsn_sac"),
+            "quantity": qty,
+            "unit": item.get("unit", "pcs"),
+            "rate": rate,
+            "discount_percent": discount_pct,
+            "taxable_amount": taxable,
+            "gst_rate": gst_rate,
+            "cgst": cgst,
+            "sgst": sgst,
+            "igst": igst,
+            "total": total,
+        })
+    return calculated
+
+
+def _calculate_invoice_totals(line_items: list, grand_total_override: float | None = None) -> dict:
+    """Aggregate totals from calculated line items."""
+    subtotal = sum(i["quantity"] * i["rate"] for i in line_items)
+    total_discount = sum(i["quantity"] * i["rate"] - i["taxable_amount"] for i in line_items)
+    taxable_value = sum(i["taxable_amount"] for i in line_items)
+    total_cgst = sum(i["cgst"] for i in line_items)
+    total_sgst = sum(i["sgst"] for i in line_items)
+    total_igst = sum(i["igst"] for i in line_items)
+    raw_total = taxable_value + total_cgst + total_sgst + total_igst
+    grand_total = round(raw_total)
+    round_off = round(grand_total - raw_total, 2)
+
+    return {
+        "subtotal": round(subtotal, 2),
+        "total_discount": round(total_discount, 2),
+        "taxable_value": round(taxable_value, 2),
+        "total_cgst": round(total_cgst, 2),
+        "total_sgst": round(total_sgst, 2),
+        "total_igst": round(total_igst, 2),
+        "round_off": round_off,
+        "grand_total": float(grand_total),
+    }
+
+
+async def _auto_post_invoice_transaction(user_id: str, invoice: dict, amount: float) -> str | None:
+    """Create an income transaction for an invoice payment. Returns the transaction_id."""
+    if amount <= 0:
+        return None
+
+    txn_id = f"txn_{uuid.uuid4().hex[:12]}"
+    txn = {
+        "transaction_id": txn_id,
+        "user_id": user_id,
+        "transaction_type": "income",
+        "amount": amount,
+        "date": invoice.get("payment_date") or invoice["invoice_date"],
+        "account_id": invoice.get("payment_account_id", ""),
+        "to_account_id": None,
+        "category_id": None,
+        "subcategory_id": None,
+        "description": f"Invoice {invoice['invoice_number']} - {invoice.get('customer_name', '')}",
+        "payment_method": invoice.get("payment_method"),
+        "is_recurring": False,
+        "recurring_frequency": None,
+        "source": "invoice",
+        "status": "approved",
+        "receipt_id": None,
+        "created_at": datetime.now(timezone.utc),
+    }
+    await db.transactions.insert_one(txn)
+    # Apply to balances
+    if txn["account_id"]:
+        await apply_transaction_to_balances(user_id, txn)
+    return txn_id
+
+
+@app.get("/api/invoices/count")
+async def get_invoice_count(user: dict = Depends(get_current_user)):
+    count = await db.invoices.count_documents({"user_id": user["user_id"]})
+    return {"count": count}
+
+
+@app.get("/api/invoices/debtors")
+async def get_debtors(user: dict = Depends(get_current_user)):
+    pipeline = [
+        {"$match": {"user_id": user["user_id"], "payment_status": {"$in": ["unpaid", "partial"]}}},
+        {"$group": {
+            "_id": "$customer_id",
+            "customer_name": {"$first": "$customer_name"},
+            "total_outstanding": {"$sum": {"$subtract": ["$grand_total", "$amount_paid"]}},
+            "invoice_count": {"$sum": 1},
+            "oldest_date": {"$min": "$invoice_date"},
+        }},
+        {"$project": {
+            "_id": 0,
+            "customer_id": "$_id",
+            "customer_name": 1,
+            "total_outstanding": 1,
+            "invoice_count": 1,
+            "oldest_date": 1,
+        }},
+        {"$sort": {"total_outstanding": -1}},
+    ]
+    results = await db.invoices.aggregate(pipeline).to_list(1000)
+    return {"items": results, "total": len(results)}
+
+
+@app.get("/api/invoices/aging")
+async def get_aging(user: dict = Depends(get_current_user)):
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    invoices = await db.invoices.find(
+        {"user_id": user["user_id"], "payment_status": {"$in": ["unpaid", "partial"]}},
+        {"_id": 0},
+    ).to_list(10000)
+
+    buckets = {
+        "current": {"amount": 0, "count": 0, "invoices": []},
+        "1_30": {"amount": 0, "count": 0, "invoices": []},
+        "31_60": {"amount": 0, "count": 0, "invoices": []},
+        "61_90": {"amount": 0, "count": 0, "invoices": []},
+        "90_plus": {"amount": 0, "count": 0, "invoices": []},
+    }
+
+    for inv in invoices:
+        due = inv.get("due_date") or inv.get("invoice_date", today)
+        try:
+            due_dt = datetime.strptime(due[:10], "%Y-%m-%d")
+            today_dt = datetime.strptime(today, "%Y-%m-%d")
+            days = (today_dt - due_dt).days
+        except Exception:
+            days = 0
+
+        outstanding = inv.get("grand_total", 0) - inv.get("amount_paid", 0)
+        summary = {
+            "invoice_id": inv["invoice_id"],
+            "invoice_number": inv.get("invoice_number"),
+            "customer_name": inv.get("customer_name"),
+            "outstanding": outstanding,
+            "due_date": due,
+            "days_overdue": max(days, 0),
+        }
+
+        if days <= 0:
+            bucket = "current"
+        elif days <= 30:
+            bucket = "1_30"
+        elif days <= 60:
+            bucket = "31_60"
+        elif days <= 90:
+            bucket = "61_90"
+        else:
+            bucket = "90_plus"
+
+        buckets[bucket]["amount"] += outstanding
+        buckets[bucket]["count"] += 1
+        buckets[bucket]["invoices"].append(summary)
+
+    # Round amounts
+    for b in buckets.values():
+        b["amount"] = round(b["amount"], 2)
+
+    return buckets
+
+
+@app.get("/api/invoices/sales-by-customer")
+async def get_sales_by_customer(user: dict = Depends(get_current_user)):
+    pipeline = [
+        {"$match": {"user_id": user["user_id"]}},
+        {"$group": {
+            "_id": "$customer_id",
+            "customer_name": {"$first": "$customer_name"},
+            "total_sales": {"$sum": "$grand_total"},
+            "invoice_count": {"$sum": 1},
+            "last_invoice_date": {"$max": "$invoice_date"},
+        }},
+        {"$project": {
+            "_id": 0,
+            "customer_id": "$_id",
+            "customer_name": 1,
+            "total_sales": 1,
+            "invoice_count": 1,
+            "last_invoice_date": 1,
+        }},
+        {"$sort": {"total_sales": -1}},
+    ]
+    results = await db.invoices.aggregate(pipeline).to_list(1000)
+    return {"items": results, "total": len(results)}
+
+
+@app.post("/api/invoices")
+async def create_invoice(request: Request, user: dict = Depends(get_current_user)):
+    body = await request.json()
+    now = datetime.now(timezone.utc)
+
+    # Determine same-state for GST
+    settings = await db.user_settings.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    firm_state = (settings or {}).get("firm_state", "")
+    customer_state = body.get("customer_state") or body.get("place_of_supply") or ""
+    is_same_state = firm_state.strip().lower() == customer_state.strip().lower() if firm_state and customer_state else True
+
+    invoice_type = body.get("invoice_type", "simple")
+    raw_items = body.get("line_items", [])
+    if not raw_items:
+        raise HTTPException(status_code=400, detail="At least one line item is required")
+
+    line_items = _calculate_line_items(raw_items, invoice_type, is_same_state)
+    totals = _calculate_invoice_totals(line_items)
+
+    invoice_number = await _get_next_invoice_number(user["user_id"])
+
+    payment_status = body.get("payment_status", "unpaid")
+    amount_paid = float(body.get("amount_paid", 0))
+    if payment_status == "paid":
+        amount_paid = totals["grand_total"]
+
+    invoice = {
+        "invoice_id": uuid.uuid4().hex[:16],
+        "user_id": user["user_id"],
+        "invoice_number": invoice_number,
+        "invoice_type": invoice_type,
+        "invoice_date": body.get("invoice_date", now.strftime("%Y-%m-%d")),
+        "due_date": body.get("due_date"),
+        "payment_terms": body.get("payment_terms"),
+        "customer_id": body.get("customer_id", ""),
+        "customer_name": body.get("customer_name", ""),
+        "customer_gstin": body.get("customer_gstin"),
+        "customer_address": body.get("customer_address"),
+        "customer_state": customer_state,
+        "place_of_supply": body.get("place_of_supply"),
+        "line_items": line_items,
+        **totals,
+        "amount_in_words": amount_to_words_inr(totals["grand_total"]),
+        "payment_status": payment_status,
+        "amount_paid": amount_paid,
+        "payment_account_id": body.get("payment_account_id"),
+        "payment_method": body.get("payment_method"),
+        "payment_date": body.get("payment_date"),
+        "transaction_id": None,
+        "po_number": body.get("po_number"),
+        "notes": body.get("notes"),
+        "terms_conditions": body.get("terms_conditions", (settings or {}).get("invoice_terms")),
+        "created_at": now,
+        "updated_at": now,
+    }
+
+    # Auto-post transaction for paid / partial
+    if payment_status == "paid":
+        txn_id = await _auto_post_invoice_transaction(user["user_id"], invoice, totals["grand_total"])
+        invoice["transaction_id"] = txn_id
+    elif payment_status == "partial" and amount_paid > 0:
+        txn_id = await _auto_post_invoice_transaction(user["user_id"], invoice, amount_paid)
+        invoice["transaction_id"] = txn_id
+
+    await db.invoices.insert_one(invoice)
+    del invoice["_id"]
+    return invoice
+
+
+@app.get("/api/invoices")
+async def list_invoices(
+    user: dict = Depends(get_current_user),
+    status: Optional[str] = None,
+    customer_id: Optional[str] = None,
+    from_date: Optional[str] = None,
+    to_date: Optional[str] = None,
+    limit: int = 50,
+    skip: int = 0,
+):
+    query: dict = {"user_id": user["user_id"]}
+    if status:
+        query["payment_status"] = status
+    if customer_id:
+        query["customer_id"] = customer_id
+    if from_date:
+        query.setdefault("invoice_date", {})["$gte"] = from_date
+    if to_date:
+        query.setdefault("invoice_date", {})["$lte"] = to_date
+
+    invoices = await db.invoices.find(query, {"_id": 0}).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
+    total = await db.invoices.count_documents(query)
+    return {"items": invoices, "total": total}
+
+
+@app.get("/api/invoices/{invoice_id}")
+async def get_invoice(invoice_id: str, user: dict = Depends(get_current_user)):
+    invoice = await db.invoices.find_one(
+        {"invoice_id": invoice_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    return invoice
+
+
+@app.put("/api/invoices/{invoice_id}")
+async def update_invoice(invoice_id: str, request: Request, user: dict = Depends(get_current_user)):
+    body = await request.json()
+    invoice = await db.invoices.find_one(
+        {"invoice_id": invoice_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+
+    update_fields: dict = {}
+
+    # Recalculate line items if provided
+    if "line_items" in body:
+        settings = await db.user_settings.find_one({"user_id": user["user_id"]}, {"_id": 0})
+        firm_state = (settings or {}).get("firm_state", "")
+        customer_state = body.get("customer_state", invoice.get("customer_state", ""))
+        is_same_state = firm_state.strip().lower() == customer_state.strip().lower() if firm_state and customer_state else True
+        invoice_type = body.get("invoice_type", invoice.get("invoice_type", "simple"))
+
+        line_items = _calculate_line_items(body["line_items"], invoice_type, is_same_state)
+        totals = _calculate_invoice_totals(line_items)
+        update_fields["line_items"] = line_items
+        update_fields.update(totals)
+        update_fields["amount_in_words"] = amount_to_words_inr(totals["grand_total"])
+
+    # Copy simple fields
+    simple_keys = [
+        "invoice_type", "invoice_date", "due_date", "payment_terms",
+        "customer_id", "customer_name", "customer_gstin", "customer_address",
+        "customer_state", "place_of_supply", "payment_status", "amount_paid",
+        "payment_account_id", "payment_method", "payment_date",
+        "po_number", "notes", "terms_conditions",
+    ]
+    for k in simple_keys:
+        if k in body:
+            update_fields[k] = body[k]
+
+    update_fields["updated_at"] = datetime.now(timezone.utc)
+
+    await db.invoices.update_one(
+        {"invoice_id": invoice_id, "user_id": user["user_id"]},
+        {"$set": update_fields},
+    )
+    updated = await db.invoices.find_one(
+        {"invoice_id": invoice_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    return updated
+
+
+@app.delete("/api/invoices/{invoice_id}")
+async def delete_invoice(invoice_id: str, user: dict = Depends(get_current_user)):
+    invoice = await db.invoices.find_one(
+        {"invoice_id": invoice_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+
+    # Delete linked transaction if any
+    if invoice.get("transaction_id"):
+        await db.transactions.delete_one(
+            {"transaction_id": invoice["transaction_id"], "user_id": user["user_id"]}
+        )
+        # Recalculate balance for the account
+        if invoice.get("payment_account_id"):
+            await recalculate_account_balance(user["user_id"], invoice["payment_account_id"])
+
+    await db.invoices.delete_one(
+        {"invoice_id": invoice_id, "user_id": user["user_id"]}
+    )
+    return {"detail": "Invoice deleted"}
+
+
+@app.post("/api/invoices/{invoice_id}/record-payment")
+async def record_payment(invoice_id: str, request: Request, user: dict = Depends(get_current_user)):
+    body = await request.json()
+    invoice = await db.invoices.find_one(
+        {"invoice_id": invoice_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+
+    pay_amount = float(body.get("amount", 0))
+    if pay_amount <= 0:
+        raise HTTPException(status_code=400, detail="Payment amount must be positive")
+
+    new_paid = invoice.get("amount_paid", 0) + pay_amount
+    grand_total = invoice.get("grand_total", 0)
+
+    if new_paid >= grand_total:
+        new_status = "paid"
+        new_paid = grand_total
+    else:
+        new_status = "partial"
+
+    payment_info = {
+        "payment_account_id": body.get("account_id", invoice.get("payment_account_id")),
+        "payment_method": body.get("payment_method", invoice.get("payment_method")),
+        "payment_date": body.get("date", datetime.now(timezone.utc).strftime("%Y-%m-%d")),
+    }
+
+    # Create or update transaction
+    existing_txn_id = invoice.get("transaction_id")
+    if existing_txn_id:
+        # Update existing transaction amount
+        await db.transactions.update_one(
+            {"transaction_id": existing_txn_id, "user_id": user["user_id"]},
+            {"$set": {
+                "amount": new_paid,
+                "date": payment_info["payment_date"],
+                "account_id": payment_info["payment_account_id"] or "",
+                "payment_method": payment_info["payment_method"],
+            }},
+        )
+        # Recalculate balances
+        if payment_info["payment_account_id"]:
+            await recalculate_account_balance(user["user_id"], payment_info["payment_account_id"])
+        txn_id = existing_txn_id
+    else:
+        # Create new transaction
+        inv_for_txn = {**invoice, **payment_info, "payment_account_id": payment_info["payment_account_id"]}
+        txn_id = await _auto_post_invoice_transaction(user["user_id"], inv_for_txn, new_paid)
+
+    await db.invoices.update_one(
+        {"invoice_id": invoice_id, "user_id": user["user_id"]},
+        {"$set": {
+            "payment_status": new_status,
+            "amount_paid": new_paid,
+            "transaction_id": txn_id,
+            **payment_info,
+            "updated_at": datetime.now(timezone.utc),
+        }},
+    )
+
+    updated = await db.invoices.find_one(
+        {"invoice_id": invoice_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    return updated
 
 
 # ─── Health Check ────────────────────────────────────────────────────

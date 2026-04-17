@@ -1,7 +1,16 @@
 import { useState, useEffect } from 'react';
 import { api } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
-import { Check, Globe, CalendarBlank } from '@phosphor-icons/react';
+import { Check, Globe, CalendarBlank, Buildings, Bank } from '@phosphor-icons/react';
+
+const INDIAN_STATES = [
+  'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chhattisgarh', 'Goa', 'Gujarat',
+  'Haryana', 'Himachal Pradesh', 'Jharkhand', 'Karnataka', 'Kerala', 'Madhya Pradesh',
+  'Maharashtra', 'Manipur', 'Meghalaya', 'Mizoram', 'Nagaland', 'Odisha', 'Punjab',
+  'Rajasthan', 'Sikkim', 'Tamil Nadu', 'Telangana', 'Tripura', 'Uttar Pradesh', 'Uttarakhand',
+  'West Bengal', 'Andaman and Nicobar Islands', 'Chandigarh', 'Dadra and Nagar Haveli and Daman and Diu',
+  'Delhi', 'Jammu and Kashmir', 'Ladakh', 'Lakshadweep', 'Puducherry',
+];
 
 const CURRENCIES = [
   { code: 'INR', name: 'Indian Rupee', symbol: '₹' },
@@ -63,6 +72,24 @@ export default function Settings() {
   const { user, checkAuth } = useAuth();
   const [baseCurrency, setBaseCurrency] = useState('INR');
   const [dateFormat, setDateFormat] = useState('DD/MM/YYYY');
+  // Business / Firm fields
+  const [firmName, setFirmName] = useState('');
+  const [firmAddress, setFirmAddress] = useState('');
+  const [firmCity, setFirmCity] = useState('');
+  const [firmState, setFirmState] = useState('');
+  const [firmPincode, setFirmPincode] = useState('');
+  const [firmGstin, setFirmGstin] = useState('');
+  const [firmPan, setFirmPan] = useState('');
+  const [firmPhone, setFirmPhone] = useState('');
+  const [firmEmail, setFirmEmail] = useState('');
+  // Invoice bank details
+  const [invoiceBankName, setInvoiceBankName] = useState('');
+  const [invoiceBankAccountNo, setInvoiceBankAccountNo] = useState('');
+  const [invoiceBankIfsc, setInvoiceBankIfsc] = useState('');
+  const [invoiceBankBranch, setInvoiceBankBranch] = useState('');
+  // Invoice settings
+  const [invoicePrefix, setInvoicePrefix] = useState('INV-');
+  const [invoiceTerms, setInvoiceTerms] = useState('');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -71,6 +98,21 @@ export default function Settings() {
     api.get('/api/settings').then(s => {
       setBaseCurrency(s.base_currency || 'INR');
       setDateFormat(s.date_format || 'DD/MM/YYYY');
+      setFirmName(s.firm_name || '');
+      setFirmAddress(s.firm_address || '');
+      setFirmCity(s.firm_city || '');
+      setFirmState(s.firm_state || '');
+      setFirmPincode(s.firm_pincode || '');
+      setFirmGstin(s.firm_gstin || '');
+      setFirmPan(s.firm_pan || '');
+      setFirmPhone(s.firm_phone || '');
+      setFirmEmail(s.firm_email || '');
+      setInvoiceBankName(s.invoice_bank_name || '');
+      setInvoiceBankAccountNo(s.invoice_bank_account_no || '');
+      setInvoiceBankIfsc(s.invoice_bank_ifsc || '');
+      setInvoiceBankBranch(s.invoice_bank_branch || '');
+      setInvoicePrefix(s.invoice_prefix || 'INV-');
+      setInvoiceTerms(s.invoice_terms || '');
     }).catch(() => {}).finally(() => setLoading(false));
   }, []);
 
@@ -78,7 +120,15 @@ export default function Settings() {
     setSaving(true);
     setSaved(false);
     try {
-      await api.put('/api/settings', { base_currency: baseCurrency, date_format: dateFormat });
+      await api.put('/api/settings', {
+        base_currency: baseCurrency, date_format: dateFormat,
+        firm_name: firmName, firm_address: firmAddress, firm_city: firmCity,
+        firm_state: firmState, firm_pincode: firmPincode, firm_gstin: firmGstin,
+        firm_pan: firmPan, firm_phone: firmPhone, firm_email: firmEmail,
+        invoice_bank_name: invoiceBankName, invoice_bank_account_no: invoiceBankAccountNo,
+        invoice_bank_ifsc: invoiceBankIfsc, invoice_bank_branch: invoiceBankBranch,
+        invoice_prefix: invoicePrefix, invoice_terms: invoiceTerms,
+      });
       setSaved(true);
       checkAuth();
       setTimeout(() => setSaved(false), 3000);
@@ -86,6 +136,12 @@ export default function Settings() {
   };
 
   const selectedCurrency = CURRENCIES.find(c => c.code === baseCurrency);
+
+  const labelStyle = { display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 6 };
+  const fieldStyle = {
+    width: '100%', padding: '10px 14px', border: '1px solid var(--border-strong)', borderRadius: 2,
+    fontSize: 13, fontFamily: 'var(--font-body)', background: '#fff', boxSizing: 'border-box',
+  };
 
   if (loading) return <div className="mono" style={{ color: 'var(--text-muted)', padding: 40 }}>Loading settings...</div>;
 
@@ -182,6 +238,122 @@ export default function Settings() {
               <span className="mono" style={{ fontSize: 11, color: 'var(--text-muted)' }}>{df.example}</span>
             </button>
           ))}
+        </div>
+      </div>
+
+      {/* Business / Firm Details */}
+      <div style={{
+        background: '#fff', border: '1px solid var(--border-subtle)', borderRadius: 2,
+        padding: 28, marginBottom: 20,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+          <Buildings size={18} weight="duotone" style={{ color: 'var(--info)' }} />
+          <h2 style={{ fontSize: 16, fontWeight: 600 }}>Business / Firm Details</h2>
+        </div>
+        <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 20 }}>
+          Your business details will appear on all invoices you create. Fill these once and every invoice will carry your firm's identity.
+        </p>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, maxWidth: 700 }}>
+          <div style={{ gridColumn: '1 / -1' }}>
+            <label style={labelStyle}>Firm / Business Name <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>— shown as invoice header</span></label>
+            <input data-testid="firm-name" value={firmName} onChange={e => setFirmName(e.target.value)} placeholder="e.g. Niprasha Technologies Pvt. Ltd." style={fieldStyle} />
+          </div>
+          <div style={{ gridColumn: '1 / -1' }}>
+            <label style={labelStyle}>Address</label>
+            <input data-testid="firm-address" value={firmAddress} onChange={e => setFirmAddress(e.target.value)} placeholder="Street address, building, floor" style={fieldStyle} />
+          </div>
+          <div>
+            <label style={labelStyle}>City</label>
+            <input data-testid="firm-city" value={firmCity} onChange={e => setFirmCity(e.target.value)} placeholder="e.g. Mumbai" style={fieldStyle} />
+          </div>
+          <div>
+            <label style={labelStyle}>State / UT</label>
+            <select data-testid="firm-state" value={firmState} onChange={e => setFirmState(e.target.value)} style={fieldStyle}>
+              <option value="">Select state</option>
+              {INDIAN_STATES.map(st => <option key={st} value={st}>{st}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={labelStyle}>Pincode</label>
+            <input data-testid="firm-pincode" value={firmPincode} onChange={e => setFirmPincode(e.target.value)} placeholder="e.g. 400001" maxLength={6} style={fieldStyle} />
+          </div>
+          <div>
+            <label style={labelStyle}>Phone</label>
+            <input data-testid="firm-phone" value={firmPhone} onChange={e => setFirmPhone(e.target.value)} placeholder="+91 98765 43210" style={fieldStyle} />
+          </div>
+          <div>
+            <label style={labelStyle}>Email</label>
+            <input data-testid="firm-email" value={firmEmail} onChange={e => setFirmEmail(e.target.value)} placeholder="billing@yourfirm.com" type="email" style={fieldStyle} />
+          </div>
+          <div>
+            <label style={labelStyle}>GSTIN <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>— optional</span></label>
+            <input data-testid="firm-gstin" value={firmGstin} onChange={e => setFirmGstin(e.target.value.toUpperCase())} placeholder="e.g. 27AABCU9603R1ZM" maxLength={15} style={{ ...fieldStyle, textTransform: 'uppercase' }} />
+          </div>
+          <div>
+            <label style={labelStyle}>PAN <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>— optional</span></label>
+            <input data-testid="firm-pan" value={firmPan} onChange={e => setFirmPan(e.target.value.toUpperCase())} placeholder="e.g. AABCU9603R" maxLength={10} style={{ ...fieldStyle, textTransform: 'uppercase' }} />
+          </div>
+        </div>
+      </div>
+
+      {/* Invoice Bank Details */}
+      <div style={{
+        background: '#fff', border: '1px solid var(--border-subtle)', borderRadius: 2,
+        padding: 28, marginBottom: 20,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+          <Bank size={18} weight="duotone" style={{ color: 'var(--info)' }} />
+          <h2 style={{ fontSize: 16, fontWeight: 600 }}>Invoice Bank Details</h2>
+        </div>
+        <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 20 }}>
+          These bank details will be printed on your invoices so customers know where to send payment.
+        </p>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, maxWidth: 700 }}>
+          <div>
+            <label style={labelStyle}>Bank Name</label>
+            <input data-testid="bank-name" value={invoiceBankName} onChange={e => setInvoiceBankName(e.target.value)} placeholder="e.g. State Bank of India" style={fieldStyle} />
+          </div>
+          <div>
+            <label style={labelStyle}>Account Number</label>
+            <input data-testid="bank-account" value={invoiceBankAccountNo} onChange={e => setInvoiceBankAccountNo(e.target.value)} placeholder="e.g. 39201234567" style={fieldStyle} />
+          </div>
+          <div>
+            <label style={labelStyle}>IFSC Code</label>
+            <input data-testid="bank-ifsc" value={invoiceBankIfsc} onChange={e => setInvoiceBankIfsc(e.target.value.toUpperCase())} placeholder="e.g. SBIN0001234" maxLength={11} style={{ ...fieldStyle, textTransform: 'uppercase' }} />
+          </div>
+          <div>
+            <label style={labelStyle}>Branch</label>
+            <input data-testid="bank-branch" value={invoiceBankBranch} onChange={e => setInvoiceBankBranch(e.target.value)} placeholder="e.g. Andheri West, Mumbai" style={fieldStyle} />
+          </div>
+        </div>
+      </div>
+
+      {/* Invoice Settings */}
+      <div style={{
+        background: '#fff', border: '1px solid var(--border-subtle)', borderRadius: 2,
+        padding: 28, marginBottom: 24,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+          <CalendarBlank size={18} weight="duotone" style={{ color: 'var(--info)' }} />
+          <h2 style={{ fontSize: 16, fontWeight: 600 }}>Invoice Settings</h2>
+        </div>
+        <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 20 }}>
+          Configure how your invoices are numbered and what default terms appear at the bottom.
+        </p>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, maxWidth: 700 }}>
+          <div>
+            <label style={labelStyle}>Invoice Number Prefix <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>— e.g. INV-, SI-, or your firm initials</span></label>
+            <input data-testid="invoice-prefix" value={invoicePrefix} onChange={e => setInvoicePrefix(e.target.value)} placeholder="INV-" style={fieldStyle} />
+            <div className="mono" style={{ marginTop: 4, fontSize: 11, color: 'var(--text-muted)' }}>
+              Preview: {invoicePrefix || 'INV-'}0001
+            </div>
+          </div>
+          <div style={{ gridColumn: '1 / -1' }}>
+            <label style={labelStyle}>Default Terms & Conditions <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>— printed at the bottom of every invoice</span></label>
+            <textarea data-testid="invoice-terms" value={invoiceTerms} onChange={e => setInvoiceTerms(e.target.value)}
+              placeholder="e.g. Payment is due within 30 days of invoice date. Late payments may attract interest at 18% p.a."
+              rows={3} style={{ ...fieldStyle, resize: 'vertical', minHeight: 60 }} />
+          </div>
         </div>
       </div>
 

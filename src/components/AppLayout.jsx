@@ -1,12 +1,13 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext.jsx';
+import { api } from '../lib/api.js';
 import {
   House, ArrowsLeftRight, Bank, Tag,
-  Lightbulb, SignOut, Gear, EnvelopeSimple, TrendUp, Scales, ChartBar, Archive, Receipt, List, X, Headset
+  Lightbulb, SignOut, Gear, EnvelopeSimple, TrendUp, Scales, ChartBar, Archive, Receipt, List, X, Headset, Users
 } from '@phosphor-icons/react';
 
-const navItems = [
+const baseNavItems = [
   { to: '/dashboard', icon: House, label: 'Dashboard' },
   { to: '/transactions', icon: ArrowsLeftRight, label: 'Transactions' },
   { to: '/accounts', icon: Bank, label: 'Accounts' },
@@ -22,14 +23,32 @@ const navItems = [
   { to: '/settings', icon: Gear, label: 'Settings' },
 ];
 
+const invoiceNavItems = [
+  { to: '/invoices', icon: Receipt, label: 'Invoices' },
+  { to: '/customers', icon: Users, label: 'Customers' },
+];
+
 export default function AppLayout({ children }) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const initializedRef = useRef(false);
-  
+
   // null = use CSS default, true/false = user toggled
   const [userToggled, setUserToggled] = useState(null);
   const [isMobile, setIsMobile] = useState(true);
+  const [hasInvoices, setHasInvoices] = useState(false);
+
+  // Check invoice count to conditionally show Invoices & Customers tabs
+  useEffect(() => {
+    api.get('/api/invoices/count').then(res => {
+      setHasInvoices((res?.count || 0) > 0);
+    }).catch(() => {});
+  }, []);
+
+  // Build dynamic nav items — insert Invoices & Customers after Dashboard if invoices exist
+  const navItems = hasInvoices
+    ? [baseNavItems[0], ...invoiceNavItems, ...baseNavItems.slice(1)]
+    : baseNavItems;
 
   // Detect mobile
   useEffect(() => {

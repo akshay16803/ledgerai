@@ -22,6 +22,8 @@ import Records from './pages/Records.jsx';
 import TaxSummary from './pages/TaxSummary.jsx';
 import Settings from './pages/Settings.jsx';
 import Support from './pages/Support.jsx';
+import Invoices from './pages/Invoices.jsx';
+import Customers from './pages/Customers.jsx';
 import AppLayout from './components/AppLayout.jsx';
 
 function ProtectedRoute({ children, requireSubscription = true }) {
@@ -87,6 +89,8 @@ export default function App() {
       <Route path="/past-insights" element={<ProtectedRoute><AppLayout><TaxSummary /></AppLayout></ProtectedRoute>} />
       <Route path="/feature-requests" element={<ProtectedRoute><AppLayout><FeatureRequests /></AppLayout></ProtectedRoute>} />
       <Route path="/support" element={<ProtectedRoute><AppLayout><Support /></AppLayout></ProtectedRoute>} />
+      <Route path="/invoices" element={<ProtectedRoute><AppLayout><Invoices /></AppLayout></ProtectedRoute>} />
+      <Route path="/customers" element={<ProtectedRoute><AppLayout><Customers /></AppLayout></ProtectedRoute>} />
       <Route path="/settings" element={<ProtectedRoute><AppLayout><Settings /></AppLayout></ProtectedRoute>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
