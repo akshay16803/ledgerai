@@ -6913,6 +6913,231 @@ async def save_od_interest(account_id: str, body: dict = Body(...), user: dict =
     return {"transaction": txn, "message": "Interest entry added to your overdraft account"}
 
 
+# ─── AI Chat Assistant ───────────────────────────────────────────────
+
+@app.post("/api/ai/chat")
+async def ai_chat(body: dict = Body(...), user: dict = Depends(get_current_user)):
+    """
+    AI chat assistant that answers questions about the user's finances
+    and can post transactions when all required fields are provided.
+    """
+    if not async_openai_client:
+        raise HTTPException(status_code=503, detail="AI service not configured")
+
+    user_id = user["user_id"]
+    message = body.get("message", "").strip()
+    if not message:
+        raise HTTPException(status_code=400, detail="Message is required")
+
+    # ── Fetch user's financial snapshot (approved only) ──
+    accounts = await db.accounts.find({"user_id": user_id}, {"_id": 0}).to_list(100)
+    categories = await db.categories.find({"user_id": user_id}, {"_id": 0}).to_list(500)
+    recent_txns = await db.transactions.find(
+        {"user_id": user_id, "status": "approved", "source": {"$ne": "loan_emi"}},
+        {"_id": 0, "transaction_id": 1, "transaction_type": 1, "amount": 1,
+         "date": 1, "account_id": 1, "to_account_id": 1, "category_id": 1,
+         "description": 1, "source": 1}
+    ).sort("date", -1).limit(200).to_list(200)
+
+    # Summary stats
+    now = datetime.now(timezone.utc)
+    month_start = now.replace(day=1).strftime("%Y-%m-%d")
+    today_str = now.strftime("%Y-%m-%d")
+
+    total_assets = sum(a["balance"] for a in accounts if a["account_type"] == "asset")
+    total_liabilities = sum(a["balance"] for a in accounts if a["account_type"] == "liability")
+    net_worth = total_assets - total_liabilities
+
+    income_this_month = sum(t["amount"] for t in recent_txns if t["transaction_type"] == "income" and t["date"] >= month_start)
+    expense_this_month = sum(t["amount"] for t in recent_txns if t["transaction_type"] == "expense" and t["date"] >= month_start)
+
+    # Build compact account list
+    acc_lines = []
+    for a in accounts:
+        line = f"- {a['name']} (ID: {a['account_id']}, type: {a['account_type']}/{a.get('sub_type','general')}, balance: {a['balance']}"
+        if a.get("loan_interest_rate"):
+            line += f", rate: {a['loan_interest_rate']}%"
+        if a.get("loan_sanctioned_amount"):
+            line += f", limit: {a['loan_sanctioned_amount']}"
+        line += ")"
+        acc_lines.append(line)
+
+    # Build compact category list
+    cat_lines = [f"- {c['name']} (ID: {c['category_id']}, type: {c.get('category_type','expense')})" for c in categories]
+
+    # Build compact recent transactions
+    acc_map = {a["account_id"]: a["name"] for a in accounts}
+    cat_map = {c["category_id"]: c["name"] for c in categories}
+    txn_lines = []
+    for t in recent_txns[:200]:
+        acc_name = acc_map.get(t.get("account_id"), "?")
+        cat_name = cat_map.get(t.get("category_id"), "")
+        to_acc = f" → {acc_map.get(t.get('to_account_id'), '?')}" if t.get("to_account_id") else ""
+        desc = t.get("description", "") or ""
+        txn_lines.append(f"  {t['date']} | {t['transaction_type']} | ₹{t['amount']} | {acc_name}{to_acc} | {cat_name} | {desc}")
+
+    system_prompt = f"""You are SpentyAI Assistant — a smart financial assistant for the user's personal accounting app.
+
+CRITICAL RULES:
+1. You ONLY answer based on the user's ACTUAL ledger data (approved transactions listed below) and their account balances. NEVER make up or hallucinate transactions or numbers.
+2. If the user asks about something not in the data, say "I don't have that information in your ledger."
+3. Use Indian number formatting for currency (₹1,00,000 not ₹100,000).
+4. Be concise but helpful. Use plain language.
+5. You know general financial concepts and can give advice, but ALWAYS tie it back to the user's actual numbers.
+6. Today's date is {today_str}.
+
+═══ USER'S FINANCIAL SNAPSHOT ═══
+
+Net Worth: ₹{net_worth:,.2f}
+Total Assets: ₹{total_assets:,.2f}
+Total Liabilities: ₹{total_liabilities:,.2f}
+Income This Month: ₹{income_this_month:,.2f}
+Expenses This Month: ₹{expense_this_month:,.2f}
+Savings This Month: ₹{income_this_month - expense_this_month:,.2f}
+
+═══ ACCOUNTS ═══
+{chr(10).join(acc_lines) if acc_lines else "No accounts yet."}
+
+═══ CATEGORIES ═══
+{chr(10).join(cat_lines) if cat_lines else "No categories yet."}
+
+═══ RECENT APPROVED TRANSACTIONS (newest first) ═══
+{chr(10).join(txn_lines) if txn_lines else "No transactions yet."}
+
+═══ POSTING TRANSACTIONS ═══
+You can help the user post transactions. STRICT RULES:
+1. For income/expense you MUST have ALL of: transaction_type, amount, date (YYYY-MM-DD), account_id, category_id, description.
+2. For transfer you MUST have ALL of: transaction_type, amount, date (YYYY-MM-DD), account_id (source), to_account_id (destination), description.
+3. If ANY required field is missing or ambiguous, ASK the user. Do NOT guess account or category — show them the options and ask them to pick.
+4. If the user says "today" use {today_str}. If they say a date like "15th April", convert to ISO format.
+5. Before posting, show a clear summary of what you'll record.
+6. Check recent transactions for duplicates — if a similar transaction exists within 3 days, WARN the user.
+7. When ALL fields are confirmed, output the transaction JSON wrapped EXACTLY like this (on its own lines):
+|||TRANSACTION|||
+{{"transaction_type": "...", "amount": ..., "date": "YYYY-MM-DD", "account_id": "...", "category_id": "...", "to_account_id": "...", "description": "..."}}
+|||TRANSACTION|||
+8. Only include to_account_id for transfers. Only include category_id for income/expense.
+9. NEVER post without explicit user confirmation of the details."""
+
+    # Build messages
+    messages = [{"role": "system", "content": system_prompt}]
+    for msg in (body.get("conversation") or [])[-20:]:
+        if msg.get("role") in ("user", "assistant") and msg.get("content"):
+            messages.append({"role": msg["role"], "content": msg["content"]})
+    messages.append({"role": "user", "content": message})
+
+    try:
+        response = await async_openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=messages,
+            temperature=0.3,
+            max_tokens=2000,
+        )
+        ai_reply = response.choices[0].message.content or ""
+    except Exception as e:
+        logger.error(f"OpenAI error in AI chat: {e}")
+        raise HTTPException(status_code=502, detail="AI service temporarily unavailable")
+
+    # ── Check for transaction posting ──
+    transaction_posted = False
+    posted_txn = None
+    clean_reply = ai_reply
+
+    if "|||TRANSACTION|||" in ai_reply:
+        parts = ai_reply.split("|||TRANSACTION|||")
+        if len(parts) >= 3:
+            txn_json_str = parts[1].strip()
+            try:
+                txn_data = json.loads(txn_json_str)
+
+                # Validate required fields
+                t_type = txn_data.get("transaction_type")
+                amount = txn_data.get("amount")
+                date_str = txn_data.get("date")
+                account_id = txn_data.get("account_id")
+
+                errors = []
+                if t_type not in ("income", "expense", "transfer"):
+                    errors.append("Invalid transaction type")
+                if not amount or float(amount) <= 0:
+                    errors.append("Invalid amount")
+                if not date_str:
+                    errors.append("Date is required")
+                if not account_id:
+                    errors.append("Account is required")
+
+                # Verify account belongs to user
+                acc = await db.accounts.find_one({"account_id": account_id, "user_id": user_id})
+                if not acc:
+                    errors.append(f"Account {account_id} not found")
+
+                if t_type in ("income", "expense"):
+                    cat_id = txn_data.get("category_id")
+                    if not cat_id:
+                        errors.append("Category is required for income/expense")
+                    else:
+                        cat = await db.categories.find_one({"category_id": cat_id, "user_id": user_id})
+                        if not cat:
+                            errors.append(f"Category {cat_id} not found")
+
+                if t_type == "transfer":
+                    to_acc_id = txn_data.get("to_account_id")
+                    if not to_acc_id:
+                        errors.append("Destination account is required for transfer")
+                    else:
+                        to_acc = await db.accounts.find_one({"account_id": to_acc_id, "user_id": user_id})
+                        if not to_acc:
+                            errors.append(f"Destination account {to_acc_id} not found")
+
+                if errors:
+                    clean_reply = ai_reply.replace(f"|||TRANSACTION|||{parts[1]}|||TRANSACTION|||", "")
+                    clean_reply += f"\n\n⚠️ Could not post: {', '.join(errors)}"
+                else:
+                    # Create the transaction
+                    txn = {
+                        "transaction_id": f"txn_{uuid.uuid4().hex[:12]}",
+                        "user_id": user_id,
+                        "transaction_type": t_type,
+                        "amount": float(amount),
+                        "date": date_str,
+                        "account_id": account_id,
+                        "to_account_id": txn_data.get("to_account_id"),
+                        "category_id": txn_data.get("category_id"),
+                        "subcategory_id": None,
+                        "description": txn_data.get("description", ""),
+                        "payment_method": None,
+                        "is_recurring": False,
+                        "recurring_frequency": None,
+                        "source": "ai_chat",
+                        "status": "approved",
+                        "created_at": datetime.now(timezone.utc),
+                    }
+                    await db.transactions.insert_one(txn)
+                    del txn["_id"]
+                    await apply_transaction_to_balances(user_id, txn)
+
+                    transaction_posted = True
+                    posted_txn = {k: v for k, v in txn.items() if k != "_id"}
+                    # Make datetime serializable
+                    if "created_at" in posted_txn:
+                        posted_txn["created_at"] = posted_txn["created_at"].isoformat()
+
+                    # Clean up the reply — remove the raw JSON block
+                    clean_reply = ai_reply.replace(f"|||TRANSACTION|||{parts[1]}|||TRANSACTION|||", "").strip()
+                    if not clean_reply:
+                        clean_reply = "✅ Transaction posted successfully!"
+
+            except json.JSONDecodeError:
+                clean_reply = ai_reply.replace(f"|||TRANSACTION|||{parts[1]}|||TRANSACTION|||", "")
+                clean_reply += "\n\n⚠️ I tried to create a transaction but the format was invalid. Let me try again — please confirm the details."
+
+    return {
+        "reply": clean_reply.strip(),
+        "transaction_posted": transaction_posted,
+        "transaction": posted_txn,
+    }
+
+
 # ─── Health Check ────────────────────────────────────────────────────
 
 @app.get("/api/health")

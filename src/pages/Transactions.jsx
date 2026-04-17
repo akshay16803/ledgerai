@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { api } from '../lib/api';
 import { getCached, setCache } from '../lib/cache';
-import { Plus, ArrowDown, ArrowUp, ArrowsLeftRight, Check, X, Funnel, PencilSimple } from '@phosphor-icons/react';
+import { Plus, ArrowDown, ArrowUp, ArrowsLeftRight, Check, X, Funnel, PencilSimple, Robot } from '@phosphor-icons/react';
 import { EditTransactionModal } from '../components/EditTransactionModal';
 
 function formatCurrency(amount) {
@@ -398,7 +398,19 @@ export default function Transactions() {
                     </span>
                   </td>
                   <td style={{ padding: '12px 16px', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {txn.description || '-'}
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                      {txn.description || '-'}
+                      {txn.source === 'ai_chat' && (
+                        <span title="Posted by AI Assistant" style={{
+                          display: 'inline-flex', alignItems: 'center', gap: 3,
+                          padding: '1px 7px', borderRadius: 10, fontSize: 9.5, fontWeight: 600,
+                          background: 'rgba(26,54,45,0.08)', color: 'var(--brand-primary)',
+                          whiteSpace: 'nowrap', letterSpacing: '0.03em', flexShrink: 0,
+                        }}>
+                          <Robot size={10} weight="fill" /> AI
+                        </span>
+                      )}
+                    </span>
                   </td>
                   <td style={{ padding: '12px 16px', fontSize: 12 }}>
                     {getAccountName(txn.account_id)}

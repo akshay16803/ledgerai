@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../lib/api';
 import { getCached, setCache } from '../lib/cache';
-import { Funnel, PencilSimple } from '@phosphor-icons/react';
+import { Funnel, PencilSimple, Robot } from '@phosphor-icons/react';
 import { EditTransactionModal } from '../components/EditTransactionModal';
 
 function formatCurrency(amount) {
@@ -151,7 +151,19 @@ export default function Ledger() {
                   <tr key={txn.transaction_id} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
                     <td className="mono" style={{ padding: '10px 16px', fontSize: 12, whiteSpace: 'nowrap' }}>{txn.date}</td>
                     <td style={{ padding: '10px 16px', maxWidth: 200 }}>
-                      <div style={{ fontWeight: 500 }}>{txn.description || getCategoryName(txn.category_id) || txn.transaction_type}</div>
+                      <div style={{ fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        {txn.description || getCategoryName(txn.category_id) || txn.transaction_type}
+                        {txn.source === 'ai_chat' && (
+                          <span title="Posted by AI Assistant" style={{
+                            display: 'inline-flex', alignItems: 'center', gap: 3,
+                            padding: '1px 7px', borderRadius: 10, fontSize: 9.5, fontWeight: 600,
+                            background: 'rgba(26,54,45,0.08)', color: 'var(--brand-primary)',
+                            whiteSpace: 'nowrap', letterSpacing: '0.03em',
+                          }}>
+                            <Robot size={10} weight="fill" /> AI
+                          </span>
+                        )}
+                      </div>
                       {txn.category_id && <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{getCategoryName(txn.category_id)}</span>}
                     </td>
                     <td style={{ padding: '10px 16px', fontSize: 12 }}>

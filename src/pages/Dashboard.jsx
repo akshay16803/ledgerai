@@ -1,9 +1,10 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { getCached, setCache } from '../lib/cache';
 import {
-  TrendUp, TrendDown, Scales, Clock, ArrowRight, Plus
+  TrendUp, TrendDown, Scales, Clock, ArrowRight, Plus,
+  Robot, PaperPlaneTilt, X, SpinnerGap, CheckCircle
 } from '@phosphor-icons/react';
 
 function StatCard({ testId, label, value, icon: Icon, color, accent }) {
@@ -31,6 +32,189 @@ function StatCard({ testId, label, value, icon: Icon, color, accent }) {
 
 function formatCurrency(amount) {
   return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(amount);
+}
+
+function AIChatPanel() {
+  const [open, setOpen] = useState(false);
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState('');
+  const [sending, setSending] = useState(false);
+  const messagesEndRef = useRef(null);
+
+  const quickPrompts = [
+    "What's my spending breakdown this month?",
+    "Which category am I spending the most on?",
+    "How much have I saved this month?",
+    "What are my upcoming loan EMIs?",
+    "Show me my account balances",
+    "What was my biggest expense recently?",
+  ];
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  const sendMessage = async (text) => {
+    const inputText = text || input;
+    if (sending || !inputText.trim()) return;
+
+    const userMessage = { role: 'user', content: inputText.trim() };
+    setMessages(prev => [...prev, userMessage]);
+    setInput('');
+    setSending(true);
+
+    try {
+      const res = await api.post('/api/ai/chat', { message: inputText.trim(), conversation: [...messages, userMessage] });
+      const assistantMessage = { role: 'assistant', content: res.reply || res.message || res.content || '' };
+      if (res.transaction_posted && res.transaction) {
+        assistantMessage.transaction = res.transaction;
+      }
+      setMessages(prev => [...prev, assistantMessage]);
+    } catch (err) {
+      setMessages(prev => [...prev, { role: 'assistant', content: 'Sorry, something went wrong. Please try again.' }]);
+    }
+
+    setSending(false);
+    setTimeout(scrollToBottom, 100);
+  };
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    sendMessage();
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
+
+  return (
+    <>
+      <style>{`@keyframes ai-spin { to { transform: rotate(360deg); } } .spin { animation: ai-spin 1s linear infinite; } @media (max-width: 767px) { .ai-chat-panel { left: 8px !important; right: 8px !important; bottom: 80px !important; width: auto !important; max-height: 75vh !important; } }`}</style>
+
+      <button onClick={() => setOpen(!open)} style={{
+        position: 'fixed', bottom: 24, right: 24, zIndex: 1000,
+        width: 56, height: 56, borderRadius: '50%',
+        background: 'var(--brand-primary)', color: '#fff', border: 'none',
+        boxShadow: '0 4px 20px rgba(26,54,45,0.3)',
+        cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+        transition: 'transform 0.2s, box-shadow 0.2s',
+      }}>
+        {open ? <X size={24} /> : <Robot size={24} weight="duotone" />}
+      </button>
+
+      {open && (
+        <div className="ai-chat-panel" style={{
+          position: 'fixed', bottom: 92, right: 24, zIndex: 999,
+          width: 420, height: 560, maxHeight: '70vh',
+          background: '#fff', border: '1px solid var(--border-subtle)',
+          boxShadow: '0 8px 32px rgba(26,54,45,0.12)',
+          borderRadius: 8, display: 'flex', flexDirection: 'column',
+        }}>
+          {/* Header */}
+          <div style={{
+            padding: '16px 20px', borderBottom: '1px solid var(--border-subtle)',
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+            background: 'var(--brand-primary)', color: '#fff', borderRadius: '8px 8px 0 0',
+          }}>
+            <div>
+              <div style={{ fontSize: 15, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Robot size={18} weight="duotone" /> SpentyAI Assistant
+              </div>
+              <div className="mono" style={{ fontSize: 10, opacity: 0.6, marginTop: 2 }}>Ask anything about your finances</div>
+            </div>
+            <button onClick={() => setOpen(false)} style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.7)', cursor: 'pointer', padding: 4 }}>
+              <X size={18} />
+            </button>
+          </div>
+
+          {/* Messages */}
+          <div style={{ flex: 1, overflowY: 'auto', padding: 16 }}>
+            {messages.length === 0 ? (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, padding: '12px 0' }}>
+                {quickPrompts.map((prompt, i) => (
+                  <button key={i} onClick={() => sendMessage(prompt)} style={{
+                    background: 'var(--bg-secondary)', border: '1px solid var(--border-subtle)',
+                    borderRadius: 16, padding: '8px 14px', fontSize: 12, color: 'var(--text-secondary)',
+                    cursor: 'pointer', fontFamily: 'var(--font-body)',
+                    transition: 'background 0.2s',
+                  }}>
+                    {prompt}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                {messages.map((msg, i) => (
+                  <div key={i} style={{
+                    display: 'flex',
+                    justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start',
+                  }}>
+                    <div style={{
+                      maxWidth: '80%',
+                      padding: '10px 14px',
+                      fontSize: 13,
+                      lineHeight: 1.5,
+                      background: msg.role === 'user' ? 'var(--brand-primary)' : 'var(--bg-secondary)',
+                      color: msg.role === 'user' ? '#fff' : 'var(--text-primary)',
+                      borderRadius: msg.role === 'user' ? '12px 12px 2px 12px' : '12px 12px 12px 2px',
+                    }}>
+                      {msg.content}
+                      {msg.transaction && (
+                        <div style={{ marginTop: 8, padding: '10px 14px', background: 'rgba(45,106,79,0.08)', borderRadius: 6, border: '1px solid rgba(45,106,79,0.15)' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 600, color: 'var(--success)', marginBottom: 4 }}>
+                            <CheckCircle size={14} weight="fill" /> Transaction Posted
+                          </div>
+                          <div className="mono" style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
+                            {msg.transaction.transaction_type} · ₹{msg.transaction.amount.toLocaleString('en-IN')} · {msg.transaction.date}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+                {sending && (
+                  <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
+                    <div style={{
+                      padding: '10px 14px', fontSize: 13, background: 'var(--bg-secondary)',
+                      borderRadius: '12px 12px 12px 2px', color: 'var(--text-muted)',
+                      display: 'flex', alignItems: 'center', gap: 8,
+                    }}>
+                      <SpinnerGap size={14} className="spin" /> Thinking...
+                    </div>
+                  </div>
+                )}
+                <div ref={messagesEndRef} />
+              </div>
+            )}
+          </div>
+
+          {/* Input */}
+          <form onSubmit={handleSubmit} style={{
+            padding: '12px 16px', borderTop: '1px solid var(--border-subtle)',
+            display: 'flex', gap: 8, background: '#fff', borderRadius: '0 0 8px 8px',
+          }}>
+            <input value={input} onChange={e => setInput(e.target.value)}
+              placeholder="Ask about your finances..."
+              disabled={sending}
+              style={{
+                flex: 1, padding: '10px 14px', border: '1px solid var(--border-strong)',
+                borderRadius: 20, fontSize: 13, fontFamily: 'var(--font-body)',
+                background: '#fff', outline: 'none',
+              }} />
+            <button type="submit" disabled={sending || !input.trim()}
+              style={{
+                background: 'var(--brand-primary)', color: '#fff', border: 'none',
+                width: 38, height: 38, borderRadius: '50%', cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                opacity: (sending || !input.trim()) ? 0.5 : 1,
+              }}>
+              {sending ? <SpinnerGap size={16} className="spin" /> : <PaperPlaneTilt size={16} weight="fill" />}
+            </button>
+          </form>
+        </div>
+      )}
+    </>
+  );
 }
 
 export default function Dashboard() {
@@ -173,6 +357,8 @@ export default function Dashboard() {
           )}
         </div>
       </div>
+
+      <AIChatPanel />
     </div>
   );
 }
