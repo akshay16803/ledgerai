@@ -64,8 +64,7 @@ export default function TaxSummary() {
       setShowForm(false);
       setForm({ name: '', date_from: '', date_to: '', email_address: '', provider: 'gmail' });
       loadSummaries();
-    } catch (err) { setError(err.message); }
-    setCreating(false);
+    } catch (err) { setError(err.message); } finally { setCreating(false); }
   };
 
   const handleDelete = async (summaryId) => {
@@ -84,16 +83,18 @@ export default function TaxSummary() {
     setConnecting('gmail');
     try {
       const res = await api.get('/api/gmail/connect');
-      if (res.auth_url) window.location.href = res.auth_url;
-    } catch (err) { setError(err.message); setConnecting(''); }
+      if (res.auth_url) { window.location.href = res.auth_url; return; }
+    } catch (err) { setError(err.message); }
+    setConnecting('');
   };
 
   const handleConnectOutlook = async () => {
     setConnecting('outlook');
     try {
       const res = await api.get('/api/outlook/connect');
-      if (res.auth_url) window.location.href = res.auth_url;
-    } catch (err) { setError(err.message); setConnecting(''); }
+      if (res.auth_url) { window.location.href = res.auth_url; return; }
+    } catch (err) { setError(err.message); }
+    setConnecting('');
   };
 
   if (activeDetail) {
@@ -397,12 +398,15 @@ function TaxSummaryDetail({ summaryId, onBack }) {
     setEditForm({ transaction_type: txn.transaction_type, amount: txn.amount, date: txn.date, description: txn.description, category: txn.category || '' });
   };
 
+  const [savingEdit, setSavingEdit] = useState(false);
   const handleSaveEdit = async (txnId) => {
+    if (savingEdit) return;
+    setSavingEdit(true);
     try {
       await api.put(`/api/tax-summary/${summaryId}/transactions/${txnId}`, editForm);
       setEditingTxn(null);
       loadDetail();
-    } catch (err) { alert(err.message); }
+    } catch (err) { alert(err.message); } finally { setSavingEdit(false); }
   };
 
   const handleDelete = async (txnId) => {
@@ -413,15 +417,18 @@ function TaxSummaryDetail({ summaryId, onBack }) {
     } catch (err) { alert(err.message); }
   };
 
+  const [adding, setAdding] = useState(false);
   const handleAdd = async (e) => {
     e.preventDefault();
+    if (adding) return;
     if (!addForm.amount || !addForm.date) { alert('Amount and date are required'); return; }
+    setAdding(true);
     try {
       await api.post(`/api/tax-summary/${summaryId}/transactions`, { ...addForm, amount: parseFloat(addForm.amount) });
       setShowAddForm(false);
       setAddForm({ transaction_type: 'expense', amount: '', date: '', description: '', category: '' });
       loadDetail();
-    } catch (err) { alert(err.message); }
+    } catch (err) { alert(err.message); } finally { setAdding(false); }
   };
 
   const handleExport = () => {
@@ -504,7 +511,7 @@ function TaxSummaryDetail({ summaryId, onBack }) {
                 <input type="text" placeholder="Description" value={addForm.description}
                   onChange={e => setAddForm({ ...addForm, description: e.target.value })} style={inputStyle} />
               </div>
-              <button type="submit" style={cardBtnStyle('var(--success)', '#fff')}><Check size={14} /> Add</button>
+              <button type="submit" disabled={adding} style={cardBtnStyle('var(--success)', '#fff')}>{adding ? 'Adding...' : <><Check size={14} /> Add</>}</button>
               <button type="button" onClick={() => setShowAddForm(false)} style={cardBtnStyle('none', 'var(--text-muted)', true)}><X size={14} /></button>
             </div>
           </form>
@@ -557,7 +564,7 @@ function TaxSummaryDetail({ summaryId, onBack }) {
                   <td />
                   <td style={{ padding: '8px 12px', textAlign: 'center' }}>
                     <div style={{ display: 'flex', gap: 4, justifyContent: 'center' }}>
-                      <button onClick={() => handleSaveEdit(txn.txn_id)} style={smallBtnStyle('var(--success)', '#fff')}><Check size={12} /></button>
+                      <button onClick={() => handleSaveEdit(txn.txn_id)} disabled={savingEdit} style={smallBtnStyle('var(--success)', '#fff')}><Check size={12} /></button>
                       <button onClick={() => setEditingTxn(null)} style={smallBtnStyle('var(--bg-primary)', 'var(--text-muted)', true)}><X size={12} /></button>
                     </div>
                   </td>

@@ -8,6 +8,7 @@ export default function FeatureRequests() {
   const [loading, setLoading] = useState(!getCached('featurerequests'));
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ title: '', description: '', category: 'general' });
+  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
@@ -19,17 +20,19 @@ export default function FeatureRequests() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (submitting) return;
     setError('');
     setSuccess('');
     if (!form.title.trim()) { setError('Title is required'); return; }
     if (!form.description.trim()) { setError('Description is required'); return; }
+    setSubmitting(true);
     try {
       await api.post('/api/feature-requests', form);
       setSuccess('Feature request submitted! Thank you for your feedback.');
       setForm({ title: '', description: '', category: 'general' });
       setShowForm(false);
       load();
-    } catch (err) { setError(err.message); }
+    } catch (err) { setError(err.message); } finally { setSubmitting(false); }
   };
 
   const inputStyle = { width: '100%', padding: '10px 14px', border: '1px solid var(--border-strong)', borderRadius: 2, fontSize: 14, fontFamily: 'var(--font-body)', outline: 'none', background: 'var(--bg-primary)' };
@@ -91,10 +94,10 @@ export default function FeatureRequests() {
             </div>
             {error && <p style={{ color: 'var(--error)', fontSize: 13, marginBottom: 12 }}>{error}</p>}
             <div style={{ display: 'flex', gap: 12 }}>
-              <button data-testid="submit-request-btn" type="submit" style={{
+              <button data-testid="submit-request-btn" type="submit" disabled={submitting} style={{
                 background: 'var(--brand-primary)', color: '#fff', border: 'none',
                 padding: '10px 24px', borderRadius: 2, fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font-body)'
-              }}>Submit Request</button>
+              }}>{submitting ? 'Submitting...' : 'Submit Request'}</button>
               <button type="button" onClick={() => setShowForm(false)} style={{
                 background: 'none', border: '1px solid var(--border-strong)', color: 'var(--text-secondary)',
                 padding: '10px 24px', borderRadius: 2, fontSize: 13, cursor: 'pointer', fontFamily: 'var(--font-body)'

@@ -9,6 +9,7 @@ export default function Categories() {
   const [activeTab, setActiveTab] = useState('expense');
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ name: '', parent_id: '' });
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
   const load = () => {
@@ -37,8 +38,10 @@ export default function Categories() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (saving) return;
     setError('');
     if (!form.name.trim()) { setError('Name is required'); return; }
+    setSaving(true);
     try {
       await api.post('/api/categories', {
         name: form.name.trim(),
@@ -47,7 +50,7 @@ export default function Categories() {
       });
       closeForm();
       load();
-    } catch (err) { setError(err.message); }
+    } catch (err) { setError(err.message); } finally { setSaving(false); }
   };
 
   const handleDelete = async (id) => {
@@ -125,10 +128,10 @@ export default function Categories() {
             </div>
             {error && <p style={{ color: 'var(--error)', fontSize: 13, marginBottom: 12 }}>{error}</p>}
             <div style={{ display: 'flex', gap: 12 }}>
-              <button data-testid="save-category-btn" type="submit" style={{
+              <button data-testid="save-category-btn" type="submit" disabled={saving} style={{
                 background: 'var(--brand-primary)', color: '#fff', border: 'none',
                 padding: '10px 24px', borderRadius: 2, fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font-body)'
-              }}>Save</button>
+              }}>{saving ? 'Saving...' : 'Save'}</button>
               <button type="button" onClick={closeForm} style={{
                 background: 'none', border: '1px solid var(--border-strong)', color: 'var(--text-secondary)',
                 padding: '10px 24px', borderRadius: 2, fontSize: 13, cursor: 'pointer', fontFamily: 'var(--font-body)'

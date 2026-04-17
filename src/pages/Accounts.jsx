@@ -41,7 +41,7 @@ function SubTypeManager({ subTypesMap, onClose, onRefresh }) {
       setNewName(''); setCreating(false);
       onRefresh();
     } catch (e) { setError(e.message); }
-    setBusy(false);
+    finally { setBusy(false); }
   };
 
   const handleUpdate = async (id) => {
@@ -52,7 +52,7 @@ function SubTypeManager({ subTypesMap, onClose, onRefresh }) {
       setEditingId(null); setEditName('');
       onRefresh();
     } catch (e) { setError(e.message); }
-    setBusy(false);
+    finally { setBusy(false); }
   };
 
   const handleDelete = async (id, name) => {
@@ -62,7 +62,7 @@ function SubTypeManager({ subTypesMap, onClose, onRefresh }) {
       await api.del(`/api/account-sub-types/${id}`);
       onRefresh();
     } catch (e) { setError(e.message); }
-    setBusy(false);
+    finally { setBusy(false); }
   };
 
   const startEdit = (item) => {

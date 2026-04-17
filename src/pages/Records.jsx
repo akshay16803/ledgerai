@@ -85,8 +85,7 @@ export default function Records() {
     try {
       const data = await api.get(`/api/records/${archiveId}/preview`);
       setPreviewRecord(data);
-    } catch (err) { alert('Failed to load preview: ' + err.message); }
-    setPreviewLoading(false);
+    } catch (err) { alert('Failed to load preview: ' + err.message); } finally { setPreviewLoading(false); }
   };
 
   const downloadZip = async () => {
@@ -111,8 +110,7 @@ export default function Records() {
       URL.revokeObjectURL(url);
     } catch (err) {
       alert('Failed to download: ' + err.message);
-    }
-    setDownloading(false);
+    } finally { setDownloading(false); }
   };
 
   const clearFilters = () => {

@@ -20,6 +20,7 @@ export default function Transactions() {
   const [filterType, setFilterType] = useState('');
   const [error, setError] = useState('');
   const [editingTxn, setEditingTxn] = useState(null);
+  const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
     amount: '', date: new Date().toISOString().split('T')[0],
     account_id: '', to_account_id: '', category_id: '', subcategory_id: '',
@@ -62,6 +63,7 @@ export default function Transactions() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (saving) return;
     setError('');
     if (!form.amount || parseFloat(form.amount) <= 0) { setError('Amount must be positive'); return; }
     if (!form.date) { setError('Date is required'); return; }
@@ -69,6 +71,7 @@ export default function Transactions() {
     if (txnType !== 'transfer' && !form.category_id) { setError('Category is required'); return; }
     if (txnType === 'transfer' && !form.to_account_id) { setError('Destination account is required'); return; }
 
+    setSaving(true);
     try {
       await api.post('/api/transactions', {
         transaction_type: txnType,
@@ -88,7 +91,7 @@ export default function Transactions() {
       setShowForm(false);
       setForm({ amount: '', date: new Date().toISOString().split('T')[0], account_id: '', to_account_id: '', category_id: '', subcategory_id: '', description: '', payment_method: '', is_recurring: false, recurring_frequency: '' });
       loadData();
-    } catch (err) { setError(err.message); }
+    } catch (err) { setError(err.message); } finally { setSaving(false); }
   };
 
   const handleApprove = async (id) => {
@@ -329,10 +332,10 @@ export default function Transactions() {
             {error && <p data-testid="transaction-error" style={{ color: 'var(--error)', fontSize: 13, marginBottom: 12 }}>{error}</p>}
 
             <div style={{ display: 'flex', gap: 12 }}>
-              <button data-testid="save-transaction-btn" type="submit" style={{
+              <button data-testid="save-transaction-btn" type="submit" disabled={saving} style={{
                 background: 'var(--brand-primary)', color: '#fff', border: 'none',
                 padding: '10px 24px', borderRadius: 2, fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font-body)'
-              }}>Save Transaction</button>
+              }}>{saving ? 'Saving...' : form.transaction_id ? 'Update' : 'Save Transaction'}</button>
               <button type="button" onClick={() => setShowForm(false)} style={{
                 background: 'none', border: '1px solid var(--border-strong)', color: 'var(--text-secondary)',
                 padding: '10px 24px', borderRadius: 2, fontSize: 13, cursor: 'pointer', fontFamily: 'var(--font-body)'

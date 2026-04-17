@@ -97,8 +97,7 @@ function QuickCategoryModal({ mode, parentId, parentName, categoryType, onClose,
       onCreated(created);
     } catch (e2) {
       setErr(e2.message || 'Could not create');
-    }
-    setSaving(false);
+    } finally { setSaving(false); }
   };
 
   return (
@@ -320,8 +319,7 @@ export default function Reconciliation() {
       const result = await api.post(`/api/statements/${activeStmt.statement_id}/reconcile`);
       setActiveStmt(prev => ({ ...prev, reconciliation: result, status: 'reconciled' }));
       loadData();
-    } catch (err) { setError(err.message); }
-    setReconciling(false);
+    } catch (err) { setError(err.message); } finally { setReconciling(false); }
   };
 
   const handleReaudit = async () => {
@@ -334,8 +332,7 @@ export default function Reconciliation() {
       // exactly like unlock/upload does.
       setActiveStmt(null);
       loadData();
-    } catch (err) { setError(err.message); }
-    setReauditing(false);
+    } catch (err) { setError(err.message); } finally { setReauditing(false); }
   };
 
   const handleUpdateEntryCategory = async (entryIndex, categoryId, subcategoryId) => {
@@ -407,8 +404,7 @@ export default function Reconciliation() {
       const stmt = await api.get(`/api/statements/${activeStmt.statement_id}`, { bypassCache: true });
       setActiveStmt(stmt);
       loadData();
-    } catch (err) { setError(err.message); }
-    setAddingMissing(false);
+    } catch (err) { setError(err.message); } finally { setAddingMissing(false); }
   };
 
   const handleDelete = async (stmtId) => {

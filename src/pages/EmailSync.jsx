@@ -351,6 +351,7 @@ export default function EmailSync() {
       window.location.href = res.auth_url;
     } catch (err) {
       setError(err.message);
+    } finally {
       setConnectingGmail(false);
     }
   };
@@ -363,6 +364,7 @@ export default function EmailSync() {
       window.location.href = res.auth_url;
     } catch (err) {
       setError(err.message);
+    } finally {
       setConnectingOutlook(false);
     }
   };
@@ -376,8 +378,9 @@ export default function EmailSync() {
       setShowSyncForm(null);
       setSyncDate('');
       setTimeout(loadStatus, 1000);
-    } catch (err) { setError(err.message); }
-    setSyncing(false);
+    } catch (err) { setError(err.message); } finally {
+      setSyncing(false);
+    }
   };
 
   const handleGmailRetry = async (gmail_email) => {
@@ -388,8 +391,9 @@ export default function EmailSync() {
         setError('Emails are already being processed. Please wait.');
       }
       setTimeout(loadStatus, 1000);
-    } catch (err) { setError(err.message); }
-    setRetrying(false);
+    } catch (err) { setError(err.message); } finally {
+      setRetrying(false);
+    }
   };
 
   const handleGmailDisconnect = async (gmail_email) => {
@@ -409,8 +413,9 @@ export default function EmailSync() {
       setShowSyncForm(null);
       setSyncDate('');
       setTimeout(loadStatus, 1000);
-    } catch (err) { setError(err.message); }
-    setSyncing(false);
+    } catch (err) { setError(err.message); } finally {
+      setSyncing(false);
+    }
   };
 
   const handleOutlookRetry = async (outlook_email) => {
@@ -421,8 +426,9 @@ export default function EmailSync() {
         setError('Emails are already being processed. Please wait.');
       }
       setTimeout(loadStatus, 1000);
-    } catch (err) { setError(err.message); }
-    setRetrying(false);
+    } catch (err) { setError(err.message); } finally {
+      setRetrying(false);
+    }
   };
 
   const handleOutlookDisconnect = async (outlook_email) => {
@@ -454,8 +460,9 @@ export default function EmailSync() {
     try {
       await api.post('/api/sms/retry-pending');
       setTimeout(loadStatus, 3000);
-    } catch (err) { setError(err.message); }
-    setSmsRetrying(false);
+    } catch (err) { setError(err.message); } finally {
+      setSmsRetrying(false);
+    }
   };
 
   const handleApprove = async (txnId) => {

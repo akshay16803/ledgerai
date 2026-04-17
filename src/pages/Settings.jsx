@@ -82,8 +82,7 @@ export default function Settings() {
       setSaved(true);
       checkAuth();
       setTimeout(() => setSaved(false), 3000);
-    } catch (err) { alert(err.message); }
-    setSaving(false);
+    } catch (err) { alert(err.message); } finally { setSaving(false); }
   };
 
   const selectedCurrency = CURRENCIES.find(c => c.code === baseCurrency);

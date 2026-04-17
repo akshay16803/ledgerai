@@ -47,9 +47,16 @@ export default function AppLayout({ children }) {
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
+  const [loggingOut, setLoggingOut] = useState(false);
   const handleLogout = async () => {
-    await logout();
-    navigate('/');
+    if (loggingOut) return;
+    setLoggingOut(true);
+    try {
+      await logout();
+      navigate('/');
+    } catch (err) {
+      console.error('Logout failed:', err);
+    } finally { setLoggingOut(false); }
   };
   
   // Toggle sidebar
@@ -175,17 +182,19 @@ export default function AppLayout({ children }) {
           <button
             data-testid="logout-button"
             onClick={handleLogout}
+            disabled={loggingOut}
             style={{
               width: '100%', display: 'flex', alignItems: 'center', gap: 10,
               padding: '8px 12px', borderRadius: 4, border: 'none',
               background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.7)',
-              cursor: 'pointer', fontSize: 13, fontFamily: 'var(--font-body)',
+              cursor: loggingOut ? 'not-allowed' : 'pointer', fontSize: 13, fontFamily: 'var(--font-body)',
               transition: 'background 0.15s', whiteSpace: 'nowrap',
+              opacity: loggingOut ? 0.6 : 1,
             }}
             onMouseEnter={e => e.target.style.background = 'rgba(255,255,255,0.15)'}
             onMouseLeave={e => e.target.style.background = 'rgba(255,255,255,0.08)'}
           >
-            <SignOut size={16} /> Sign Out
+            <SignOut size={16} /> {loggingOut ? 'Signing Out...' : 'Sign Out'}
           </button>
         </div>
       </aside>

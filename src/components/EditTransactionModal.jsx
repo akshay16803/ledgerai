@@ -118,7 +118,7 @@ export function EditTransactionModal({ transaction, accounts, categories, onSave
       }
       onSave();
     } catch (err) { setError(err.message); }
-    setSaving(false);
+    finally { setSaving(false); }
   };
 
   // Save changes and approve transaction in one action
@@ -153,7 +153,7 @@ export function EditTransactionModal({ transaction, accounts, categories, onSave
       
       onSave();
     } catch (err) { setError(err.message); }
-    setApproving(false);
+    finally { setApproving(false); }
   };
 
   return (
