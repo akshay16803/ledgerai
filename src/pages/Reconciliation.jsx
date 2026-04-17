@@ -199,6 +199,7 @@ export default function Reconciliation() {
     { value: 'cash', label: 'Cash', statementType: 'bank' },
     { value: 'loan', label: 'Loan', statementType: 'loan' },
     { value: 'mortgage', label: 'Mortgage', statementType: 'loan' },
+    { value: 'overdraft', label: 'Overdraft', statementType: 'bank' },
   ];
 
   const filteredAccounts = accounts.filter(a => (a.sub_type || '').toLowerCase() === selectedSubType);

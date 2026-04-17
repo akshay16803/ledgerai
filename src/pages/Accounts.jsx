@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { api } from '../lib/api';
 import { getCached, setCache } from '../lib/cache';
-import { Plus, Trash, PencilSimple, Bank, Wallet, CreditCard, X, Gear, Tag, Check, Warning, CaretRight, CaretDown, CalendarBlank, CurrencyCircleDollar } from '@phosphor-icons/react';
+import { Plus, Trash, PencilSimple, Bank, Wallet, CreditCard, X, Gear, Tag, Check, Warning, CaretRight, CaretDown, CalendarBlank, CurrencyCircleDollar, SpinnerGap } from '@phosphor-icons/react';
 
 const accountTypes = [
   { value: 'asset', label: 'Asset' },
@@ -316,7 +316,7 @@ function AmortizationModal({ accountId, accountName, onClose }) {
 
 
 // ─── Grouped Accounts List ──────────────────────────────────────────
-function AccountsGroupedList({ accounts, onEdit, onDelete, expandedSubTypes, toggleSubType, onViewSchedule }) {
+function AccountsGroupedList({ accounts, onEdit, onDelete, expandedSubTypes, toggleSubType, onViewSchedule, onCalcInterest }) {
   // Group accounts: account_type → sub_type → accounts[]
   const grouped = useMemo(() => {
     const map = {};
@@ -443,6 +443,13 @@ function AccountsGroupedList({ accounts, onEdit, onDelete, expandedSubTypes, tog
                                     Add loan details for EMI tracking
                                   </span>
                                 )}
+                                {acc.sub_type === 'overdraft' && (
+                                  <span className="mono" style={{ fontSize: 10, color: 'var(--accent-1)' }}>
+                                    Limit: {formatCurrency(acc.loan_sanctioned_amount || 0)}
+                                    {acc.loan_interest_rate ? ` · ${acc.loan_interest_rate}% p.a.` : ' · Manual mode'}
+                                    {acc.loan_sanctioned_amount ? ` · Avail: ${formatCurrency((acc.loan_sanctioned_amount || 0) - (acc.balance || 0))}` : ''}
+                                  </span>
+                                )}
                               </div>
                             </div>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -460,6 +467,22 @@ function AccountsGroupedList({ accounts, onEdit, onDelete, expandedSubTypes, tog
                                   onMouseLeave={e => { e.currentTarget.style.background = 'none'; }}
                                 >
                                   <CalendarBlank size={11} /> Schedule
+                                </button>
+                              )}
+                              {acc.sub_type === 'overdraft' && acc.loan_interest_rate && (
+                                <button data-testid={`calc-interest-${acc.account_id}`}
+                                  onClick={(e) => { e.stopPropagation(); onCalcInterest(acc); }}
+                                  style={{
+                                    background: 'none', border: '1px solid var(--border-strong)', padding: '3px 10px',
+                                    borderRadius: 2, fontSize: 11, fontWeight: 500, cursor: 'pointer',
+                                    fontFamily: 'var(--font-body)', color: 'var(--text-secondary)',
+                                    display: 'flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap',
+                                    transition: 'background 0.1s',
+                                  }}
+                                  onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-secondary)'; }}
+                                  onMouseLeave={e => { e.currentTarget.style.background = 'none'; }}
+                                >
+                                  <CurrencyCircleDollar size={11} /> Calc Interest
                                 </button>
                               )}
                               <span className="mono" style={{ fontSize: 14, fontWeight: 600, color: acc.balance >= 0 ? 'var(--success)' : 'var(--error)', whiteSpace: 'nowrap' }}>
@@ -489,6 +512,197 @@ function AccountsGroupedList({ accounts, onEdit, onDelete, expandedSubTypes, tog
           </div>
         );
       })}
+    </div>
+  );
+}
+
+
+// ─── OD Interest Calculator Modal ─────────────────────────────────
+function ODInterestModal({ account, onClose }) {
+  const now = new Date();
+  const defaultMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const [month, setMonth] = useState(defaultMonth);
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [editAmount, setEditAmount] = useState('');
+  const [error, setError] = useState('');
+  const [saved, setSaved] = useState(false);
+
+  const calculate = async () => {
+    setLoading(true); setError(''); setData(null); setSaved(false);
+    try {
+      const res = await api.get(`/api/accounts/${account.account_id}/od-interest?month=${month}`);
+      setData(res);
+      setEditAmount(String(res.total_interest));
+    } catch (err) { setError(err.message); } finally { setLoading(false); }
+  };
+
+  const saveInterest = async () => {
+    if (saving) return;
+    const amt = parseFloat(editAmount);
+    if (!amt || amt <= 0) { setError('Enter a valid amount'); return; }
+    setSaving(true); setError('');
+    try {
+      // Last day of the selected month
+      const [y, m] = month.split('-').map(Number);
+      const lastDay = new Date(y, m, 0).getDate();
+      const txnDate = `${month}-${String(lastDay).padStart(2, '0')}`;
+      await api.post(`/api/accounts/${account.account_id}/od-interest`, {
+        amount: amt, date: txnDate, month,
+        description: `OD Interest — ${month}`,
+      });
+      setSaved(true);
+    } catch (err) { setError(err.message); } finally { setSaving(false); }
+  };
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div onClick={onClose} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)' }} />
+      <div data-testid="od-interest-modal" style={{
+        position: 'relative', background: '#fff', borderRadius: 2, width: '100%', maxWidth: 620,
+        maxHeight: '90vh', overflow: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.2)', margin: '0 8px',
+      }}>
+        {/* Header */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 28px', borderBottom: '1px solid var(--border-subtle)' }}>
+          <div>
+            <h2 style={{ fontSize: 18, fontWeight: 600 }}>Calculate OD Interest</h2>
+            <span className="mono" style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+              {account.name} · {account.loan_interest_rate}% p.a.
+            </span>
+          </div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4 }}>
+            <X size={20} />
+          </button>
+        </div>
+
+        <div style={{ padding: '24px 28px' }}>
+          {/* Instructions */}
+          <div style={{
+            padding: '12px 16px', background: 'rgba(74,110,125,0.06)', borderRadius: 2,
+            marginBottom: 20, fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.6,
+          }}>
+            Interest is calculated daily on your outstanding balance. Each time you withdraw or repay,
+            the outstanding changes — and interest adjusts accordingly. The total shown below is the sum
+            of daily interest for the selected month. You can edit the amount to match your bank's figure
+            before saving.
+          </div>
+
+          {/* Month Picker + Calculate */}
+          <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', marginBottom: 20 }}>
+            <div>
+              <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 6 }}>Month</label>
+              <input data-testid="od-month-input" type="month" value={month}
+                onChange={e => { setMonth(e.target.value); setData(null); setSaved(false); }}
+                style={{ padding: '10px 14px', border: '1px solid var(--border-strong)', borderRadius: 2, fontSize: 14, fontFamily: 'var(--font-body)' }} />
+            </div>
+            <button data-testid="od-calc-btn" onClick={calculate} disabled={loading}
+              style={{
+                background: 'var(--brand-primary)', color: '#fff', border: 'none',
+                padding: '10px 20px', borderRadius: 2, fontSize: 13, fontWeight: 600,
+                cursor: loading ? 'not-allowed' : 'pointer', fontFamily: 'var(--font-body)',
+                opacity: loading ? 0.6 : 1, display: 'flex', alignItems: 'center', gap: 6,
+              }}>
+              {loading ? <><SpinnerGap size={14} className="spin" /> Calculating...</> : 'Calculate'}
+            </button>
+          </div>
+
+          {error && (
+            <div style={{ background: 'rgba(150,69,58,0.1)', border: '1px solid var(--error)', borderRadius: 2, padding: '10px 16px', marginBottom: 16, fontSize: 13, color: 'var(--error)' }}>
+              {error}
+            </div>
+          )}
+
+          {/* Results */}
+          {data && (
+            <>
+              {/* Summary strip */}
+              <div style={{
+                display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 20,
+              }}>
+                <div style={{ padding: '14px 16px', background: 'var(--bg-secondary)', borderRadius: 2, textAlign: 'center' }}>
+                  <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 }}>Opening Outstanding</div>
+                  <div className="mono" style={{ fontSize: 16, fontWeight: 700 }}>{formatCurrency(data.daily_breakdown[0]?.outstanding || 0)}</div>
+                </div>
+                <div style={{ padding: '14px 16px', background: 'var(--bg-secondary)', borderRadius: 2, textAlign: 'center' }}>
+                  <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 }}>Closing Outstanding</div>
+                  <div className="mono" style={{ fontSize: 16, fontWeight: 700 }}>{formatCurrency(data.closing_outstanding)}</div>
+                </div>
+                <div style={{ padding: '14px 16px', background: 'rgba(150,69,58,0.06)', borderRadius: 2, textAlign: 'center' }}>
+                  <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--error)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 }}>Total Interest</div>
+                  <div className="mono" style={{ fontSize: 16, fontWeight: 700, color: 'var(--error)' }}>{formatCurrency(data.total_interest)}</div>
+                </div>
+              </div>
+
+              {/* Daily breakdown (scrollable) */}
+              <details style={{ marginBottom: 20 }}>
+                <summary style={{ cursor: 'pointer', fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 8 }}>
+                  Day-by-day breakdown ({data.daily_breakdown.length} days)
+                </summary>
+                <div style={{ maxHeight: 240, overflow: 'auto', border: '1px solid var(--border-subtle)', borderRadius: 2 }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                    <thead>
+                      <tr style={{ background: 'var(--bg-secondary)', position: 'sticky', top: 0 }}>
+                        <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 600, fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Date</th>
+                        <th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 600, fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Outstanding</th>
+                        <th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 600, fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Interest</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.daily_breakdown.map(d => (
+                        <tr key={d.date} style={{ borderTop: '1px solid var(--border-subtle)' }}>
+                          <td className="mono" style={{ padding: '6px 12px' }}>{d.date}</td>
+                          <td className="mono" style={{ padding: '6px 12px', textAlign: 'right' }}>{formatCurrency(d.outstanding)}</td>
+                          <td className="mono" style={{ padding: '6px 12px', textAlign: 'right', color: 'var(--error)' }}>{formatCurrency(d.interest)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </details>
+
+              {/* Editable amount + Save */}
+              {!saved ? (
+                <div style={{ padding: '16px 18px', background: 'var(--bg-secondary)', borderRadius: 2, border: '1px solid var(--border-subtle)' }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-end', gap: 12, marginBottom: 8 }}>
+                    <div style={{ flex: 1 }}>
+                      <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 6 }}>
+                        Interest Amount (editable)
+                      </label>
+                      <input data-testid="od-interest-amount" type="number" step="0.01"
+                        value={editAmount}
+                        onChange={e => setEditAmount(e.target.value)}
+                        style={{ width: '100%', padding: '10px 14px', border: '1px solid var(--border-strong)', borderRadius: 2, fontSize: 16, fontFamily: 'var(--font-mono)', fontWeight: 600 }} />
+                    </div>
+                    <button data-testid="od-save-interest-btn" onClick={saveInterest} disabled={saving}
+                      style={{
+                        background: saving ? 'var(--text-muted)' : 'var(--success)', color: '#fff', border: 'none',
+                        padding: '10px 20px', borderRadius: 2, fontSize: 13, fontWeight: 600,
+                        cursor: saving ? 'not-allowed' : 'pointer', fontFamily: 'var(--font-body)',
+                        opacity: saving ? 0.7 : 1, whiteSpace: 'nowrap',
+                      }}>
+                      {saving ? 'Saving...' : 'Add as Interest Entry'}
+                    </button>
+                  </div>
+                  <p style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                    Edit the amount if your bank's figure differs, then save. This creates an expense
+                    transaction on your OD account for the last day of the month, increasing the outstanding balance.
+                  </p>
+                </div>
+              ) : (
+                <div style={{ padding: '16px 18px', background: 'rgba(58,92,74,0.06)', borderRadius: 2, border: '1px solid var(--success)', textAlign: 'center' }}>
+                  <Check size={20} weight="bold" style={{ color: 'var(--success)', marginBottom: 4 }} />
+                  <p style={{ fontSize: 14, fontWeight: 600, color: 'var(--success)' }}>Interest entry saved!</p>
+                  <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
+                    {formatCurrency(parseFloat(editAmount))} added as an expense on your OD account. Your outstanding balance has been updated.
+                  </p>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+      <style>{`.spin { animation: spin-anim 1s linear infinite; } @keyframes spin-anim { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 }
@@ -589,11 +803,16 @@ export default function Accounts() {
       // Build loan fields payload
       const loanFields = {};
       const isLoan = form.sub_type === 'loan' || form.sub_type === 'mortgage';
+      const isOD = form.sub_type === 'overdraft';
       if (isLoan) {
         if (form.loan_interest_rate) loanFields.loan_interest_rate = parseFloat(form.loan_interest_rate);
         if (form.loan_tenure_months) loanFields.loan_tenure_months = parseInt(form.loan_tenure_months);
         if (form.loan_emi_amount) loanFields.loan_emi_amount = parseFloat(form.loan_emi_amount);
         if (form.loan_emi_day) loanFields.loan_emi_day = parseInt(form.loan_emi_day);
+        if (form.loan_sanctioned_amount) loanFields.loan_sanctioned_amount = parseFloat(form.loan_sanctioned_amount);
+      }
+      if (isOD) {
+        if (form.loan_interest_rate) loanFields.loan_interest_rate = parseFloat(form.loan_interest_rate);
         if (form.loan_sanctioned_amount) loanFields.loan_sanctioned_amount = parseFloat(form.loan_sanctioned_amount);
       }
 
@@ -655,6 +874,9 @@ export default function Accounts() {
 
   // Amortization modal state
   const [amortAcc, setAmortAcc] = useState(null);
+
+  // OD Interest modal state
+  const [interestAcc, setInterestAcc] = useState(null);
 
   return (
     <div data-testid="accounts-page">
@@ -747,12 +969,13 @@ export default function Accounts() {
                   </div>
                   {(() => {
                     const isLoan = form.sub_type === 'loan' || form.sub_type === 'mortgage';
+                    const isOD = form.sub_type === 'overdraft';
                     const loanAutoCalc = isLoan
                       && parseFloat(form.loan_sanctioned_amount) > 0
                       && parseFloat(form.loan_emi_amount) > 0
                       && parseFloat(form.loan_interest_rate) > 0
                       && parseInt(form.loan_tenure_months) > 0;
-                    const balLabel = isLoan ? 'Outstanding Balance *' : 'Opening Balance *';
+                    const balLabel = isOD ? 'Current Outstanding *' : isLoan ? 'Outstanding Balance *' : 'Opening Balance *';
                     const balStyle = {
                       ...inputStyle, fontFamily: 'var(--font-mono)',
                       ...(loanAutoCalc ? { borderColor: 'var(--success)', background: 'rgba(58,92,74,0.04)' } : {}),
@@ -865,6 +1088,50 @@ export default function Accounts() {
                     </p>
                   </div>
                 )}
+                {form.sub_type === 'overdraft' && (
+                  <div data-testid="od-details-section" style={{
+                    marginBottom: 16, padding: '16px 18px', background: 'var(--bg-secondary)', borderRadius: 2,
+                    border: '1px solid var(--border-subtle)',
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                      <CurrencyCircleDollar size={16} weight="duotone" style={{ color: 'var(--accent-1)' }} />
+                      <span style={{ fontSize: 13, fontWeight: 600 }}>Overdraft Details</span>
+                    </div>
+                    <p style={{ fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 14, lineHeight: 1.6 }}>
+                      An overdraft gives you a credit limit — you withdraw as needed and repay anytime.
+                      Interest is charged only on what you've used, calculated daily.
+                      Record withdrawals as transfers <strong>from</strong> this OD account to your bank, and repayments
+                      as transfers <strong>to</strong> this OD account.
+                    </p>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                      <div>
+                        <label style={labelStyle}>Sanctioned Limit *</label>
+                        <input data-testid="od-sanctioned-input" type="number" step="0.01"
+                          value={form.loan_sanctioned_amount}
+                          onChange={e => setForm(f => ({ ...f, loan_sanctioned_amount: e.target.value }))}
+                          style={{ ...inputStyle, fontFamily: 'var(--font-mono)' }} placeholder="e.g., 1000000" />
+                        <span style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4, display: 'block' }}>
+                          The maximum credit your bank has approved
+                        </span>
+                      </div>
+                      <div>
+                        <label style={labelStyle}>Interest Rate (% p.a.)</label>
+                        <input data-testid="od-rate-input" type="number" step="0.01"
+                          value={form.loan_interest_rate}
+                          onChange={e => setForm(f => ({ ...f, loan_interest_rate: e.target.value }))}
+                          style={{ ...inputStyle, fontFamily: 'var(--font-mono)' }} placeholder="e.g., 10.5 (optional)" />
+                        <span style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4, display: 'block' }}>
+                          {form.loan_interest_rate ? 'Auto-interest calculation enabled — you can calculate monthly interest from the account card' : 'Leave blank for manual mode — you\'ll add interest entries yourself'}
+                        </span>
+                      </div>
+                    </div>
+                    {parseFloat(form.loan_sanctioned_amount) > 0 && parseFloat(form.opening_balance) > 0 && (
+                      <div className="mono" style={{ fontSize: 11, color: 'var(--info)', marginTop: 12, padding: '8px 12px', background: 'rgba(74,110,125,0.06)', borderRadius: 2 }}>
+                        Available credit: {formatCurrency(parseFloat(form.loan_sanctioned_amount) - parseFloat(form.opening_balance))}
+                      </div>
+                    )}
+                  </div>
+                )}
                 {error && <p data-testid="account-error" style={{ color: 'var(--error)', fontSize: 13, marginBottom: 12 }}>{error}</p>}
                 <div style={{ display: 'flex', gap: 12 }}>
                   <button data-testid="save-account-btn" type="submit" disabled={saving} style={{
@@ -913,6 +1180,15 @@ export default function Accounts() {
           expandedSubTypes={expandedSubTypes}
           toggleSubType={toggleSubType}
           onViewSchedule={(acc) => setAmortAcc(acc)}
+          onCalcInterest={(acc) => setInterestAcc(acc)}
+        />
+      )}
+
+      {/* OD Interest Calculator Modal */}
+      {interestAcc && (
+        <ODInterestModal
+          account={interestAcc}
+          onClose={() => { setInterestAcc(null); loadAccounts(); }}
         />
       )}
 

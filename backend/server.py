@@ -1261,13 +1261,14 @@ async def recalculate_account_balance(user_id: str, account_id: str):
     )
     if not account:
         return
-    
+
     opening = account.get("opening_balance", 0)
     as_of_date = account.get("balance_as_of_date")
-    
+    is_od = (account.get("sub_type") or "").lower() == "overdraft"
+
     # Start from opening balance
     balance = opening
-    
+
     if as_of_date:
         # Get all approved transactions for this account after the balance_as_of_date
         # "Opening balance for the day" means transactions ON that date are NOT yet included
@@ -1278,28 +1279,38 @@ async def recalculate_account_balance(user_id: str, account_id: str):
             "date": {"$gte": as_of_date},
             "source": {"$ne": "loan_emi"},  # Exclude recurring EMI templates
         }
-        
+
         # Transactions where this account is the primary account
         primary_txns = await db.transactions.find(
             {**txn_query, "account_id": account_id}, {"_id": 0}
         ).to_list(10000)
-        
+
         for txn in primary_txns:
             if txn["transaction_type"] == "income":
                 balance += txn["amount"]
             elif txn["transaction_type"] == "expense":
                 balance -= txn["amount"]
             elif txn["transaction_type"] == "transfer":
-                balance -= txn["amount"]  # Money leaving this account
-        
+                if is_od:
+                    # Overdraft: transferring OUT means using the credit line,
+                    # which INCREASES the outstanding balance.
+                    balance += txn["amount"]
+                else:
+                    balance -= txn["amount"]  # Money leaving this account
+
         # Transfers INTO this account
         transfer_in_txns = await db.transactions.find(
             {**txn_query, "to_account_id": account_id, "transaction_type": "transfer"}, {"_id": 0}
         ).to_list(10000)
-        
+
         for txn in transfer_in_txns:
-            balance += txn["amount"]
-    
+            if is_od:
+                # Overdraft: transferring IN means repaying, which DECREASES
+                # the outstanding balance.
+                balance -= txn["amount"]
+            else:
+                balance += txn["amount"]
+
     await db.accounts.update_one(
         {"account_id": account_id, "user_id": user_id},
         {"$set": {"balance": balance}}
@@ -1310,7 +1321,7 @@ async def apply_transaction_to_balances(user_id: str, txn: dict):
     # Skip loan_emi recurring templates — they're for cash flow projection only
     if txn.get("source") == "loan_emi":
         return
-    
+
     t_type = txn["transaction_type"]
     amount = txn["amount"]
     txn_date = txn.get("date", "")
@@ -1327,6 +1338,13 @@ async def apply_transaction_to_balances(user_id: str, txn: dict):
             return True  # No date set, apply all transactions
         return txn_date >= as_of
 
+    async def is_od(account_id):
+        acc = await db.accounts.find_one(
+            {"account_id": account_id, "user_id": user_id},
+            {"_id": 0, "sub_type": 1}
+        )
+        return (acc.get("sub_type") or "").lower() == "overdraft" if acc else False
+
     if t_type == "income":
         if await should_apply(txn["account_id"]):
             await db.accounts.update_one(
@@ -1341,22 +1359,26 @@ async def apply_transaction_to_balances(user_id: str, txn: dict):
             )
     elif t_type == "transfer":
         if await should_apply(txn["account_id"]):
+            # Overdraft source: withdrawal INCREASES outstanding
+            od_src = await is_od(txn["account_id"])
             await db.accounts.update_one(
                 {"account_id": txn["account_id"], "user_id": user_id},
-                {"$inc": {"balance": -amount}}
+                {"$inc": {"balance": amount if od_src else -amount}}
             )
         if txn.get("to_account_id"):
             if await should_apply(txn["to_account_id"]):
+                # Overdraft destination: repayment DECREASES outstanding
+                od_dst = await is_od(txn["to_account_id"])
                 await db.accounts.update_one(
                     {"account_id": txn["to_account_id"], "user_id": user_id},
-                    {"$inc": {"balance": amount}}
+                    {"$inc": {"balance": -amount if od_dst else amount}}
                 )
 
 
 async def reverse_transaction_balances(user_id: str, txn: dict):
     if txn.get("source") == "loan_emi":
         return
-    
+
     t_type = txn["transaction_type"]
     amount = txn["amount"]
     txn_date = txn.get("date", "")
@@ -1371,6 +1393,13 @@ async def reverse_transaction_balances(user_id: str, txn: dict):
             return True
         return txn_date >= as_of
 
+    async def is_od(account_id):
+        acc = await db.accounts.find_one(
+            {"account_id": account_id, "user_id": user_id},
+            {"_id": 0, "sub_type": 1}
+        )
+        return (acc.get("sub_type") or "").lower() == "overdraft" if acc else False
+
     if t_type == "income":
         if await should_apply(txn["account_id"]):
             await db.accounts.update_one(
@@ -1385,15 +1414,19 @@ async def reverse_transaction_balances(user_id: str, txn: dict):
             )
     elif t_type == "transfer":
         if await should_apply(txn["account_id"]):
+            # Reverse of apply: OD source withdrawal was +amount, so reverse is -amount
+            od_src = await is_od(txn["account_id"])
             await db.accounts.update_one(
                 {"account_id": txn["account_id"], "user_id": user_id},
-                {"$inc": {"balance": amount}}
+                {"$inc": {"balance": -amount if od_src else amount}}
             )
         if txn.get("to_account_id"):
             if await should_apply(txn["to_account_id"]):
+                # Reverse of apply: OD destination repayment was -amount, so reverse is +amount
+                od_dst = await is_od(txn["to_account_id"])
                 await db.accounts.update_one(
                     {"account_id": txn["to_account_id"], "user_id": user_id},
-                    {"$inc": {"balance": -amount}}
+                    {"$inc": {"balance": amount if od_dst else -amount}}
                 )
 
 
@@ -6588,6 +6621,187 @@ async def create_support_ticket(request: Request, user: dict = Depends(get_curre
     )
     
     return {"success": True, "ticket_id": ticket_id, "email_sent": ticket.get("email_sent", False)}
+
+
+# ─── Overdraft Interest Calculation ──────────────────────────────────
+
+@app.get("/api/accounts/{account_id}/od-interest")
+async def calculate_od_interest(account_id: str, month: str, user: dict = Depends(get_current_user)):
+    """
+    Compute daily interest for an overdraft account for a given month.
+    Query param `month` should be YYYY-MM (e.g., 2026-04).
+    Returns a day-by-day breakdown and the total.
+    """
+    account = await db.accounts.find_one(
+        {"account_id": account_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+    if (account.get("sub_type") or "").lower() != "overdraft":
+        raise HTTPException(status_code=400, detail="This endpoint is only for overdraft accounts")
+    rate = account.get("loan_interest_rate")
+    if not rate or rate <= 0:
+        raise HTTPException(status_code=400, detail="No interest rate set on this account")
+
+    # Parse month string into start/end dates
+    try:
+        year, mon = int(month[:4]), int(month[5:7])
+        month_start = date_cls(year, mon, 1)
+        if mon == 12:
+            month_end = date_cls(year + 1, 1, 1)
+        else:
+            month_end = date_cls(year, mon + 1, 1)
+    except (ValueError, IndexError):
+        raise HTTPException(status_code=400, detail="Invalid month format. Use YYYY-MM")
+
+    num_days = (month_end - month_start).days
+    daily_rate = rate / 100.0 / 365.0
+
+    # ── Build the outstanding balance timeline for the month ──
+    # Start with the opening balance, then replay all approved transfers
+    # from balance_as_of_date up to month_end to get balances at each date.
+
+    opening = account.get("opening_balance", 0)
+    as_of_date = account.get("balance_as_of_date") or month_start.isoformat()
+    as_of_str = as_of_date if isinstance(as_of_date, str) else as_of_date.isoformat()
+    month_end_str = month_end.isoformat()
+
+    # All approved transfers involving this OD account up to month_end
+    txn_query = {
+        "user_id": user["user_id"],
+        "status": "approved",
+        "transaction_type": "transfer",
+        "date": {"$gte": as_of_str, "$lt": month_end_str},
+        "source": {"$ne": "loan_emi"},
+    }
+
+    # Withdrawals (OD is source → outstanding increases)
+    withdrawals = await db.transactions.find(
+        {**txn_query, "account_id": account_id},
+        {"_id": 0, "date": 1, "amount": 1, "description": 1}
+    ).sort("date", 1).to_list(10000)
+
+    # Repayments (OD is destination → outstanding decreases)
+    repayments = await db.transactions.find(
+        {**txn_query, "to_account_id": account_id},
+        {"_id": 0, "date": 1, "amount": 1, "description": 1}
+    ).sort("date", 1).to_list(10000)
+
+    # Also include expense transactions on the OD account (e.g., previous
+    # interest debits recorded as expenses) since they reduce balance.
+    expense_query = {
+        "user_id": user["user_id"],
+        "status": "approved",
+        "account_id": account_id,
+        "transaction_type": "expense",
+        "date": {"$gte": as_of_str, "$lt": month_end_str},
+        "source": {"$ne": "loan_emi"},
+    }
+    expenses = await db.transactions.find(
+        expense_query,
+        {"_id": 0, "date": 1, "amount": 1, "description": 1}
+    ).sort("date", 1).to_list(10000)
+
+    # Build ordered list of balance-change events
+    events = []
+    for w in withdrawals:
+        events.append({"date": w["date"], "delta": w["amount"], "desc": w.get("description", "Withdrawal")})
+    for r in repayments:
+        events.append({"date": r["date"], "delta": -r["amount"], "desc": r.get("description", "Repayment")})
+    for e in expenses:
+        events.append({"date": e["date"], "delta": -e["amount"], "desc": e.get("description", "Expense")})
+    events.sort(key=lambda x: x["date"])
+
+    # Walk from as_of_date to month_end, applying events to get daily outstanding
+    balance = opening
+    # Apply events BEFORE the month starts so we know the opening balance
+    pre_month_events = [e for e in events if e["date"] < month_start.isoformat()]
+    for e in pre_month_events:
+        balance += e["delta"]
+
+    month_events = [e for e in events if month_start.isoformat() <= e["date"] < month_end_str]
+
+    # Build day-by-day breakdown
+    daily_breakdown = []
+    total_interest = 0.0
+    event_idx = 0
+
+    for day_offset in range(num_days):
+        current_date = month_start + timedelta(days=day_offset)
+        current_str = current_date.isoformat()
+        # Apply any events on this date
+        while event_idx < len(month_events) and month_events[event_idx]["date"] <= current_str:
+            balance += month_events[event_idx]["delta"]
+            event_idx += 1
+        interest = max(0, balance) * daily_rate
+        total_interest += interest
+        daily_breakdown.append({
+            "date": current_str,
+            "outstanding": round(balance, 2),
+            "interest": round(interest, 2),
+        })
+
+    return {
+        "account_id": account_id,
+        "month": month,
+        "interest_rate": rate,
+        "daily_rate": round(daily_rate * 100, 6),
+        "total_interest": round(total_interest, 2),
+        "daily_breakdown": daily_breakdown,
+        "closing_outstanding": round(balance, 2),
+    }
+
+
+@app.post("/api/accounts/{account_id}/od-interest")
+async def save_od_interest(account_id: str, body: dict = Body(...), user: dict = Depends(get_current_user)):
+    """
+    Save the OD interest as an expense transaction on the OD account.
+    Body: { amount: float, date: str (ISO), month: str (YYYY-MM), description?: str }
+    The transaction increases the outstanding balance.
+    """
+    account = await db.accounts.find_one(
+        {"account_id": account_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+    if (account.get("sub_type") or "").lower() != "overdraft":
+        raise HTTPException(status_code=400, detail="This endpoint is only for overdraft accounts")
+
+    amount = body.get("amount")
+    txn_date = body.get("date")
+    month_label = body.get("month", "")
+    description = body.get("description") or f"OD Interest — {month_label}"
+
+    if not amount or amount <= 0:
+        raise HTTPException(status_code=400, detail="Amount must be positive")
+    if not txn_date:
+        raise HTTPException(status_code=400, detail="Date is required")
+
+    txn = {
+        "transaction_id": f"txn_{uuid.uuid4().hex[:12]}",
+        "user_id": user["user_id"],
+        "transaction_type": "expense",
+        "amount": round(amount, 2),
+        "date": txn_date,
+        "account_id": account_id,
+        "to_account_id": None,
+        "category_id": None,
+        "subcategory_id": None,
+        "description": description,
+        "payment_method": "other",
+        "is_recurring": False,
+        "recurring_frequency": None,
+        "source": "od_interest",
+        "status": "approved",
+        "created_at": datetime.now(timezone.utc),
+    }
+    await db.transactions.insert_one(txn)
+    del txn["_id"]
+
+    # Recalculate the OD account balance
+    await recalculate_account_balance(user["user_id"], account_id)
+
+    return {"transaction": txn, "message": "Interest entry added to your overdraft account"}
 
 
 # ─── Health Check ────────────────────────────────────────────────────
