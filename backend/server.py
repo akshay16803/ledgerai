@@ -124,6 +124,7 @@ class AccountCreate(BaseModel):
     loan_tenure_months: Optional[int] = None  # remaining tenure in months
     loan_emi_amount: Optional[float] = None  # monthly EMI amount
     loan_emi_day: Optional[int] = None  # day of month EMI is due (1-31)
+    loan_sanctioned_amount: Optional[float] = None  # original sanctioned loan amount
 
 class AccountUpdate(BaseModel):
     name: Optional[str] = None
@@ -139,6 +140,7 @@ class AccountUpdate(BaseModel):
     loan_tenure_months: Optional[int] = None
     loan_emi_amount: Optional[float] = None
     loan_emi_day: Optional[int] = None
+    loan_sanctioned_amount: Optional[float] = None
 
 class AccountSubTypeCreate(BaseModel):
     name: str
@@ -725,6 +727,8 @@ async def create_account(data: AccountCreate, user: dict = Depends(get_current_u
         account["loan_emi_amount"] = data.loan_emi_amount
     if data.loan_emi_day is not None:
         account["loan_emi_day"] = data.loan_emi_day
+    if data.loan_sanctioned_amount is not None:
+        account["loan_sanctioned_amount"] = data.loan_sanctioned_amount
 
     await db.accounts.insert_one(account)
     del account["_id"]

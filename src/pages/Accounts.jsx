@@ -501,7 +501,7 @@ export default function Accounts() {
   const [showForm, setShowForm] = useState(false);
   const [showSubTypeManager, setShowSubTypeManager] = useState(false);
   const [editingAcc, setEditingAcc] = useState(null);
-  const [form, setForm] = useState({ name: '', account_type: 'asset', sub_type: '', account_number: '', opening_balance: '', balance_as_of_date: new Date().toISOString().split('T')[0], currency: 'INR', description: '', loan_interest_rate: '', loan_tenure_months: '', loan_emi_amount: '', loan_emi_day: '' });
+  const [form, setForm] = useState({ name: '', account_type: 'asset', sub_type: '', account_number: '', opening_balance: '', balance_as_of_date: new Date().toISOString().split('T')[0], currency: 'INR', description: '', loan_interest_rate: '', loan_tenure_months: '', loan_emi_amount: '', loan_emi_day: '', loan_sanctioned_amount: '' });
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [subTypesMap, setSubTypesMap] = useState(() => getCached('account_sub_types') || { asset: [], liability: [], equity: [] });
@@ -524,7 +524,7 @@ export default function Accounts() {
   const openCreate = () => {
     setEditingAcc(null);
     const firstSubType = getSubTypeOptions('asset')[0]?.value || '';
-    setForm({ name: '', account_type: 'asset', sub_type: firstSubType, account_number: '', opening_balance: '', balance_as_of_date: new Date().toISOString().split('T')[0], currency: 'INR', description: '', loan_interest_rate: '', loan_tenure_months: '', loan_emi_amount: '', loan_emi_day: '' });
+    setForm({ name: '', account_type: 'asset', sub_type: firstSubType, account_number: '', opening_balance: '', balance_as_of_date: new Date().toISOString().split('T')[0], currency: 'INR', description: '', loan_interest_rate: '', loan_tenure_months: '', loan_emi_amount: '', loan_emi_day: '', loan_sanctioned_amount: '' });
     setShowForm(true);
     setError('');
     // Defensive: if a prior submit left `saving` stuck, a fresh open
@@ -549,10 +549,27 @@ export default function Accounts() {
       loan_tenure_months: acc.loan_tenure_months || '',
       loan_emi_amount: acc.loan_emi_amount || '',
       loan_emi_day: acc.loan_emi_day || '',
+      loan_sanctioned_amount: acc.loan_sanctioned_amount || '',
     });
     setShowForm(true);
     setError('');
     setSaving(false);
+  };
+
+  // Auto-calculate outstanding balance from EMI, rate, and remaining
+  // tenure when sanctioned amount is filled. Formula is present value
+  // of remaining EMIs: PV = EMI × [(1 − (1+r)^(−n)) / r].
+  // Called from onChange of rate/tenure/EMI/sanctioned fields.
+  const autoCalcBalance = (formState) => {
+    const emi = parseFloat(formState.loan_emi_amount);
+    const rate = parseFloat(formState.loan_interest_rate);
+    const months = parseInt(formState.loan_tenure_months);
+    const sanctioned = parseFloat(formState.loan_sanctioned_amount);
+    if (sanctioned > 0 && emi > 0 && rate > 0 && months > 0) {
+      const r = rate / 12 / 100;
+      formState.opening_balance = Math.round(emi * ((1 - Math.pow(1 + r, -months)) / r) * 100) / 100;
+    }
+    return formState;
   };
 
   const handleTypeChange = (newType) => {
@@ -577,6 +594,7 @@ export default function Accounts() {
         if (form.loan_tenure_months) loanFields.loan_tenure_months = parseInt(form.loan_tenure_months);
         if (form.loan_emi_amount) loanFields.loan_emi_amount = parseFloat(form.loan_emi_amount);
         if (form.loan_emi_day) loanFields.loan_emi_day = parseInt(form.loan_emi_day);
+        if (form.loan_sanctioned_amount) loanFields.loan_sanctioned_amount = parseFloat(form.loan_sanctioned_amount);
       }
 
       if (editingAcc) {
@@ -727,43 +745,58 @@ export default function Accounts() {
                       ))}
                     </select>
                   </div>
-                  {editingAcc ? (
-                    <>
-                      <div>
-                        <label style={labelStyle}>{(form.sub_type === 'loan' || form.sub_type === 'mortgage') ? 'Outstanding Balance *' : 'Opening Balance *'}</label>
-                        <input data-testid="account-balance-input" type="number" step="0.01"
-                          value={form.opening_balance} onChange={e => setForm(f => ({ ...f, opening_balance: e.target.value }))}
-                          style={{ ...inputStyle, fontFamily: 'var(--font-mono)' }} placeholder="0" />
-                      </div>
-                      <div>
-                        <label style={labelStyle}>Balance as of (opening of day)</label>
-                        <input data-testid="account-balance-date" type="date"
-                          value={form.balance_as_of_date} onChange={e => setForm(f => ({ ...f, balance_as_of_date: e.target.value }))}
-                          style={inputStyle} />
-                        <span style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4, display: 'block' }}>
-                          Transactions from this date onward adjust the balance
-                        </span>
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <div>
-                        <label style={labelStyle}>{(form.sub_type === 'loan' || form.sub_type === 'mortgage') ? 'Outstanding Balance *' : 'Opening Balance *'}</label>
-                        <input data-testid="account-balance-input" type="number" step="0.01"
-                          value={form.opening_balance} onChange={e => setForm(f => ({ ...f, opening_balance: e.target.value }))}
-                          style={{ ...inputStyle, fontFamily: 'var(--font-mono)' }} placeholder="0.00" />
-                      </div>
-                      <div>
-                        <label style={labelStyle}>Balance as of (opening of day)</label>
-                        <input data-testid="account-balance-date" type="date"
-                          value={form.balance_as_of_date} onChange={e => setForm(f => ({ ...f, balance_as_of_date: e.target.value }))}
-                          style={inputStyle} />
-                        <span style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4, display: 'block' }}>
-                          Opening balance at the start of this day
-                        </span>
-                      </div>
-                    </>
-                  )}
+                  {(() => {
+                    const isLoan = form.sub_type === 'loan' || form.sub_type === 'mortgage';
+                    const loanAutoCalc = isLoan
+                      && parseFloat(form.loan_sanctioned_amount) > 0
+                      && parseFloat(form.loan_emi_amount) > 0
+                      && parseFloat(form.loan_interest_rate) > 0
+                      && parseInt(form.loan_tenure_months) > 0;
+                    const balLabel = isLoan ? 'Outstanding Balance *' : 'Opening Balance *';
+                    const balStyle = {
+                      ...inputStyle, fontFamily: 'var(--font-mono)',
+                      ...(loanAutoCalc ? { borderColor: 'var(--success)', background: 'rgba(58,92,74,0.04)' } : {}),
+                    };
+                    return editingAcc ? (
+                      <>
+                        <div>
+                          <label style={labelStyle}>{balLabel}</label>
+                          <input data-testid="account-balance-input" type="number" step="0.01"
+                            value={form.opening_balance} onChange={e => setForm(f => ({ ...f, opening_balance: e.target.value }))}
+                            style={balStyle} placeholder="0" />
+                          {loanAutoCalc && <span className="mono" style={{ fontSize: 10, color: 'var(--success)', marginTop: 4, display: 'block' }}>Auto-calculated from loan details</span>}
+                        </div>
+                        <div>
+                          <label style={labelStyle}>Balance as of (opening of day)</label>
+                          <input data-testid="account-balance-date" type="date"
+                            value={form.balance_as_of_date} onChange={e => setForm(f => ({ ...f, balance_as_of_date: e.target.value }))}
+                            style={inputStyle} />
+                          <span style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4, display: 'block' }}>
+                            Transactions from this date onward adjust the balance
+                          </span>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div>
+                          <label style={labelStyle}>{balLabel}</label>
+                          <input data-testid="account-balance-input" type="number" step="0.01"
+                            value={form.opening_balance} onChange={e => setForm(f => ({ ...f, opening_balance: e.target.value }))}
+                            style={balStyle} placeholder="0.00" />
+                          {loanAutoCalc && <span className="mono" style={{ fontSize: 10, color: 'var(--success)', marginTop: 4, display: 'block' }}>Auto-calculated from loan details</span>}
+                        </div>
+                        <div>
+                          <label style={labelStyle}>Balance as of (opening of day)</label>
+                          <input data-testid="account-balance-date" type="date"
+                            value={form.balance_as_of_date} onChange={e => setForm(f => ({ ...f, balance_as_of_date: e.target.value }))}
+                            style={inputStyle} />
+                          <span style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4, display: 'block' }}>
+                            Opening balance at the start of this day
+                          </span>
+                        </div>
+                      </>
+                    );
+                  })()}
                 </div>
                 <div style={{ marginBottom: 16 }}>
                   <label style={labelStyle}>Description</label>
@@ -786,19 +819,19 @@ export default function Accounts() {
                       <div>
                         <label style={labelStyle}>Interest Rate (% p.a.)</label>
                         <input data-testid="loan-rate-input" type="number" step="0.01"
-                          value={form.loan_interest_rate} onChange={e => setForm(f => ({ ...f, loan_interest_rate: e.target.value }))}
+                          value={form.loan_interest_rate} onChange={e => setForm(f => autoCalcBalance({ ...f, loan_interest_rate: e.target.value }))}
                           style={{ ...inputStyle, fontFamily: 'var(--font-mono)' }} placeholder="e.g., 8.5" />
                       </div>
                       <div>
                         <label style={labelStyle}>Remaining Tenure (months)</label>
                         <input data-testid="loan-tenure-input" type="number"
-                          value={form.loan_tenure_months} onChange={e => setForm(f => ({ ...f, loan_tenure_months: e.target.value }))}
+                          value={form.loan_tenure_months} onChange={e => setForm(f => autoCalcBalance({ ...f, loan_tenure_months: e.target.value }))}
                           style={{ ...inputStyle, fontFamily: 'var(--font-mono)' }} placeholder="e.g., 240" />
                       </div>
                       <div>
                         <label style={labelStyle}>EMI Amount</label>
                         <input data-testid="loan-emi-input" type="number" step="0.01"
-                          value={form.loan_emi_amount} onChange={e => setForm(f => ({ ...f, loan_emi_amount: e.target.value }))}
+                          value={form.loan_emi_amount} onChange={e => setForm(f => autoCalcBalance({ ...f, loan_emi_amount: e.target.value }))}
                           style={{ ...inputStyle, fontFamily: 'var(--font-mono)' }} placeholder="e.g., 43391" />
                       </div>
                       <div>
@@ -806,6 +839,25 @@ export default function Accounts() {
                         <input data-testid="loan-emi-day-input" type="number" min="1" max="31"
                           value={form.loan_emi_day} onChange={e => setForm(f => ({ ...f, loan_emi_day: e.target.value }))}
                           style={{ ...inputStyle, fontFamily: 'var(--font-mono)' }} placeholder="e.g., 5" />
+                      </div>
+                      <div style={{ gridColumn: '1 / -1', marginTop: 4, paddingTop: 10, borderTop: '1px dashed var(--border-subtle)' }}>
+                        <label style={labelStyle}>Sanctioned Amount</label>
+                        <input data-testid="loan-sanctioned-input" type="number" step="0.01"
+                          value={form.loan_sanctioned_amount}
+                          onChange={e => setForm(f => autoCalcBalance({ ...f, loan_sanctioned_amount: e.target.value }))}
+                          style={{ ...inputStyle, fontFamily: 'var(--font-mono)' }} placeholder="e.g., 2000000 (optional)" />
+                        <p className="mono" style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 6 }}>
+                          {(() => {
+                            const emi = parseFloat(form.loan_emi_amount);
+                            const rate = parseFloat(form.loan_interest_rate);
+                            const months = parseInt(form.loan_tenure_months);
+                            const sanctioned = parseFloat(form.loan_sanctioned_amount);
+                            if (sanctioned > 0 && emi > 0 && rate > 0 && months > 0) {
+                              return 'Outstanding balance auto-calculated from EMI, rate & tenure.';
+                            }
+                            return 'Fill this along with EMI, rate & tenure to auto-calculate outstanding balance.';
+                          })()}
+                        </p>
                       </div>
                     </div>
                     <p className="mono" style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 10 }}>
