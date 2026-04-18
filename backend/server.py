@@ -464,6 +464,117 @@ async def logout(request: Request, response: Response):
     return {"message": "Logged out"}
 
 
+
+@app.post("/api/auth/google/mobile")
+async def google_mobile_login(request: Request, response: Response):
+    """Handle Google Sign-In from mobile app using ID token."""
+    body = await request.json()
+    id_token = body.get("id_token") or body.get("credential")
+    if not id_token:
+        raise HTTPException(status_code=400, detail="id_token is required")
+
+    # Verify the ID token with Google
+    try:
+        async with httpx.AsyncClient() as http_client:
+            token_info_resp = await http_client.get(
+                f"https://oauth2.googleapis.com/tokeninfo?id_token={id_token}"
+            )
+        if token_info_resp.status_code != 200:
+            raise HTTPException(status_code=401, detail="Invalid ID token")
+
+        token_info = token_info_resp.json()
+        email = token_info.get("email", "")
+        name = token_info.get("name", "")
+        picture = token_info.get("picture", "")
+
+        if not email:
+            raise HTTPException(status_code=400, detail="No email in token")
+
+        # Verify audience matches our client ID
+        if GOOGLE_CLIENT_ID and token_info.get("aud") != GOOGLE_CLIENT_ID:
+            raise HTTPException(status_code=401, detail="Token audience mismatch")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Google mobile token verification error: {e}")
+        raise HTTPException(status_code=401, detail="Failed to verify token")
+
+    # Create or update user
+    existing_user = await db.users.find_one({"email": email}, {"_id": 0})
+    if existing_user:
+        user_id = existing_user["user_id"]
+        await db.users.update_one(
+            {"email": email},
+            {"$set": {"name": name or existing_user.get("name", ""), "picture": picture, "updated_at": datetime.now(timezone.utc)}}
+        )
+    else:
+        user_id = f"user_{uuid.uuid4().hex[:12]}"
+        await db.users.insert_one({
+            "user_id": user_id,
+            "email": email,
+            "name": name,
+            "picture": picture,
+            "email_verified": True,  # Google-verified
+            "created_at": datetime.now(timezone.utc),
+        })
+        await seed_default_data(user_id)
+
+    # Create session
+    session_token = secrets.token_urlsafe(48)
+    await db.user_sessions.insert_one({
+        "user_id": user_id,
+        "session_token": session_token,
+        "expires_at": datetime.now(timezone.utc) + timedelta(days=30),
+        "created_at": datetime.now(timezone.utc),
+    })
+
+    user_doc = existing_user or await db.users.find_one({"user_id": user_id}, {"_id": 0})
+    return {
+        "session_token": session_token,
+        "user": {
+            "user_id": user_id,
+            "email": email,
+            "name": name or (user_doc or {}).get("name", ""),
+            "picture": picture,
+            "subscription_plan": (user_doc or {}).get("subscription_plan"),
+            "subscription_status": (user_doc or {}).get("subscription_status"),
+        },
+    }
+
+
+@app.delete("/api/auth/delete-account")
+async def delete_account(request: Request, user: dict = Depends(get_current_user)):
+    """Permanently delete user account and all associated data."""
+    user_id = user["user_id"]
+
+    # Delete all user data from every collection
+    await db.transactions.delete_many({"user_id": user_id})
+    await db.accounts.delete_many({"user_id": user_id})
+    await db.categories.delete_many({"user_id": user_id})
+    await db.invoices.delete_many({"user_id": user_id})
+    await db.bills.delete_many({"user_id": user_id})
+    await db.customers.delete_many({"user_id": user_id})
+    await db.vendors.delete_many({"user_id": user_id})
+    await db.mandates.delete_many({"user_id": user_id})
+    await db.statements.delete_many({"user_id": user_id})
+    await db.synced_sms.delete_many({"user_id": user_id})
+    await db.receipts.delete_many({"user_id": user_id})
+    await db.email_archives.delete_many({"user_id": user_id})
+    await db.feature_requests.delete_many({"user_id": user_id})
+    await db.tax_summaries.delete_many({"user_id": user_id})
+    await db.tax_summary_transactions.delete_many({"user_id": user_id})
+    await db.payment_orders.delete_many({"user_id": user_id})
+    await db.user_settings.delete_many({"user_id": user_id})
+    await db.user_sessions.delete_many({"user_id": user_id})
+    await db.ai_chat_history.delete_many({"user_id": user_id})
+    await db.gmail_tokens.delete_many({"user_id": user_id})
+    await db.outlook_tokens.delete_many({"user_id": user_id})
+    await db.users.delete_one({"user_id": user_id})
+
+    return {"message": "Account and all data permanently deleted"}
+
+
 # ─── Default Data Seeding ───────────────────────────────────────────
 
 async def seed_default_data(user_id: str):
@@ -1016,6 +1127,63 @@ async def get_amortization(account_id: str, user: dict = Depends(get_current_use
     }
 
 
+
+@app.get("/api/accounts/{account_id}/balance")
+async def get_account_balance(account_id: str, user: dict = Depends(get_current_user)):
+    """Get the current balance and recent activity for an account."""
+    account = await db.accounts.find_one(
+        {"account_id": account_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+
+    return {
+        "account_id": account_id,
+        "name": account.get("name"),
+        "balance": account.get("balance", 0),
+        "opening_balance": account.get("opening_balance", 0),
+        "currency": account.get("currency", "INR"),
+        "account_type": account.get("account_type"),
+        "sub_type": account.get("sub_type"),
+    }
+
+
+# --- Endpoint 6.5: GET /api/accounts/{account_id}/transactions ---
+
+@app.get("/api/accounts/{account_id}/transactions")
+async def get_account_transactions(
+    account_id: str,
+    user: dict = Depends(get_current_user),
+    limit: int = 50,
+    skip: int = 0,
+    from_date: str = None,
+    to_date: str = None,
+):
+    """Get transactions for a specific account."""
+    account = await db.accounts.find_one(
+        {"account_id": account_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+
+    query = {
+        "user_id": user["user_id"],
+        "$or": [{"account_id": account_id}, {"to_account_id": account_id}],
+    }
+    if from_date:
+        query.setdefault("date", {})["$gte"] = from_date
+    if to_date:
+        query.setdefault("date", {})["$lte"] = to_date
+
+    txns = await db.transactions.find(query, {"_id": 0}).sort("date", -1).skip(skip).limit(limit).to_list(limit)
+    total = await db.transactions.count_documents(query)
+
+    return {"items": txns, "total": total, "account_name": account.get("name")}
+
+
+# =====================================================================
+
+
 # ─── Account Sub Types Routes ────────────────────────────────────────
 
 # Default sub types (used when user has no custom sub types)
@@ -1212,6 +1380,82 @@ async def delete_category(category_id: str, user: dict = Depends(get_current_use
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Category not found")
     return {"message": "Category deleted"}
+
+
+
+@app.get("/api/categories/defaults")
+async def get_default_categories(user: dict = Depends(get_current_user)):
+    """Get the default category template (useful for resetting or reference)."""
+    income_categories = [
+        {"name": "Salary", "subcategories": ["Full-time", "Part-time", "Freelance"]},
+        {"name": "Business Income", "subcategories": ["Sales", "Services", "Consulting"]},
+        {"name": "Investment Income", "subcategories": ["Dividends", "Interest", "Capital Gains"]},
+        {"name": "Rental Income", "subcategories": []},
+        {"name": "Other Income", "subcategories": []},
+    ]
+    expense_categories = [
+        {"name": "Food & Dining", "subcategories": ["Groceries", "Restaurants", "Coffee & Tea"]},
+        {"name": "Transportation", "subcategories": ["Fuel", "Public Transit", "Cab/Taxi", "Maintenance"]},
+        {"name": "Housing", "subcategories": ["Rent", "Mortgage", "Utilities", "Repairs"]},
+        {"name": "Shopping", "subcategories": ["Clothing", "Electronics", "Home & Garden"]},
+        {"name": "Healthcare", "subcategories": ["Doctor", "Pharmacy", "Insurance"]},
+        {"name": "Entertainment", "subcategories": ["Movies", "Subscriptions", "Sports"]},
+        {"name": "Education", "subcategories": ["Tuition", "Books", "Courses"]},
+        {"name": "Bills & Utilities", "subcategories": ["Electricity", "Water", "Internet", "Phone"]},
+        {"name": "Personal Care", "subcategories": ["Grooming", "Fitness"]},
+        {"name": "Other Expenses", "subcategories": []},
+    ]
+    return {"income": income_categories, "expense": expense_categories}
+
+
+@app.post("/api/categories/merge")
+async def merge_categories(request: Request, user: dict = Depends(get_current_user)):
+    """Merge one category into another (reassign all transactions)."""
+    body = await request.json()
+    source_id = body.get("source_category_id")
+    target_id = body.get("target_category_id")
+    if not source_id or not target_id:
+        raise HTTPException(status_code=400, detail="source_category_id and target_category_id are required")
+    if source_id == target_id:
+        raise HTTPException(status_code=400, detail="Cannot merge a category into itself")
+
+    # Verify both categories exist and belong to user
+    source = await db.categories.find_one(
+        {"category_id": source_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    target = await db.categories.find_one(
+        {"category_id": target_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    if not source:
+        raise HTTPException(status_code=404, detail="Source category not found")
+    if not target:
+        raise HTTPException(status_code=404, detail="Target category not found")
+
+    # Reassign transactions from source to target
+    result = await db.transactions.update_many(
+        {"category_id": source_id, "user_id": user["user_id"]},
+        {"$set": {"category_id": target_id}}
+    )
+
+    # Also reassign subcategory references
+    await db.transactions.update_many(
+        {"subcategory_id": source_id, "user_id": user["user_id"]},
+        {"$set": {"subcategory_id": target_id}}
+    )
+
+    # Move subcategories of source under target
+    await db.categories.update_many(
+        {"parent_id": source_id, "user_id": user["user_id"]},
+        {"$set": {"parent_id": target_id}}
+    )
+
+    # Delete the source category
+    await db.categories.delete_one({"category_id": source_id, "user_id": user["user_id"]})
+
+    return {
+        "message": f"Merged '{source['name']}' into '{target['name']}'",
+        "transactions_reassigned": result.modified_count,
+    }
 
 
 # ─── Transactions Routes ────────────────────────────────────────────
@@ -1564,6 +1808,172 @@ async def reject_transaction(transaction_id: str, user: dict = Depends(get_curre
     return {"message": "Transaction rejected"}
 
 
+
+@app.post("/api/transactions/bulk-approve")
+async def bulk_approve_transactions(request: Request, user: dict = Depends(get_current_user)):
+    """Approve multiple transactions at once."""
+    body = await request.json()
+    transaction_ids = body.get("transaction_ids", [])
+    if not transaction_ids:
+        raise HTTPException(status_code=400, detail="transaction_ids is required")
+
+    approved = 0
+    errors = []
+    for tid in transaction_ids:
+        txn = await db.transactions.find_one(
+            {"transaction_id": tid, "user_id": user["user_id"]}, {"_id": 0}
+        )
+        if not txn:
+            errors.append({"transaction_id": tid, "error": "Not found"})
+            continue
+        if txn["status"] == "approved":
+            errors.append({"transaction_id": tid, "error": "Already approved"})
+            continue
+
+        await db.transactions.update_one(
+            {"transaction_id": tid},
+            {"$set": {"status": "approved", "approved_at": datetime.now(timezone.utc)}}
+        )
+        await apply_transaction_to_balances(user["user_id"], txn)
+
+        if txn.get("source") == "email" and txn.get("source_email_id"):
+            asyncio.create_task(archive_email_for_transaction(user["user_id"], txn))
+
+        approved += 1
+
+    return {"approved": approved, "errors": errors, "total": len(transaction_ids)}
+
+
+@app.post("/api/transactions/bulk-reject")
+async def bulk_reject_transactions(request: Request, user: dict = Depends(get_current_user)):
+    """Reject multiple transactions at once."""
+    body = await request.json()
+    transaction_ids = body.get("transaction_ids", [])
+    if not transaction_ids:
+        raise HTTPException(status_code=400, detail="transaction_ids is required")
+
+    rejected = 0
+    errors = []
+    for tid in transaction_ids:
+        txn = await db.transactions.find_one(
+            {"transaction_id": tid, "user_id": user["user_id"]}, {"_id": 0}
+        )
+        if not txn:
+            errors.append({"transaction_id": tid, "error": "Not found"})
+            continue
+
+        if txn["status"] == "approved":
+            await reverse_transaction_balances(user["user_id"], txn)
+
+        await db.transactions.update_one(
+            {"transaction_id": tid},
+            {"$set": {"status": "rejected", "rejected_at": datetime.now(timezone.utc)}}
+        )
+
+        if txn.get("source_email_id"):
+            await db.email_archives.delete_one({
+                "user_id": user["user_id"],
+                "source_email_id": txn["source_email_id"]
+            })
+
+        rejected += 1
+
+    return {"rejected": rejected, "errors": errors, "total": len(transaction_ids)}
+
+
+@app.post("/api/transactions/bulk-delete")
+async def bulk_delete_transactions(request: Request, user: dict = Depends(get_current_user)):
+    """Delete multiple transactions at once."""
+    body = await request.json()
+    transaction_ids = body.get("transaction_ids", [])
+    if not transaction_ids:
+        raise HTTPException(status_code=400, detail="transaction_ids is required")
+
+    deleted = 0
+    errors = []
+    for tid in transaction_ids:
+        txn = await db.transactions.find_one(
+            {"transaction_id": tid, "user_id": user["user_id"]}, {"_id": 0}
+        )
+        if not txn:
+            errors.append({"transaction_id": tid, "error": "Not found"})
+            continue
+
+        if txn["status"] == "approved":
+            await reverse_transaction_balances(user["user_id"], txn)
+
+        await db.transactions.delete_one(
+            {"transaction_id": tid, "user_id": user["user_id"]}
+        )
+        deleted += 1
+
+    return {"deleted": deleted, "errors": errors, "total": len(transaction_ids)}
+
+
+@app.post("/api/transactions/bulk-update")
+async def bulk_update_transactions(request: Request, user: dict = Depends(get_current_user)):
+    """Update fields on multiple transactions at once (e.g., category, description)."""
+    body = await request.json()
+    transaction_ids = body.get("transaction_ids", [])
+    update_fields = body.get("fields", {})
+    if not transaction_ids:
+        raise HTTPException(status_code=400, detail="transaction_ids is required")
+    if not update_fields:
+        raise HTTPException(status_code=400, detail="fields is required")
+
+    allowed_fields = {"category_id", "subcategory_id", "description", "payment_method"}
+    set_fields = {k: v for k, v in update_fields.items() if k in allowed_fields}
+    if not set_fields:
+        raise HTTPException(status_code=400, detail="No valid fields to update")
+
+    result = await db.transactions.update_many(
+        {"transaction_id": {"$in": transaction_ids}, "user_id": user["user_id"]},
+        {"$set": set_fields}
+    )
+
+    return {"updated": result.modified_count, "total": len(transaction_ids)}
+
+
+@app.get("/api/transactions/pending")
+async def list_pending_transactions(
+    user: dict = Depends(get_current_user),
+    limit: int = 50,
+    skip: int = 0,
+):
+    """List all pending review transactions."""
+    query = {"user_id": user["user_id"], "status": "pending_review"}
+    txns = await db.transactions.find(query, {"_id": 0}).sort("date", -1).skip(skip).limit(limit).to_list(limit)
+    total = await db.transactions.count_documents(query)
+    return {"items": txns, "total": total}
+
+
+@app.get("/api/transactions/search")
+async def search_transactions(
+    q: str = "",
+    user: dict = Depends(get_current_user),
+    limit: int = 50,
+    skip: int = 0,
+):
+    """Search transactions by description, amount, or date."""
+    user_id = user["user_id"]
+    query: dict = {"user_id": user_id}
+
+    if q:
+        # Try parsing as a number for amount search
+        try:
+            amount_val = float(q)
+            query["$or"] = [
+                {"description": {"$regex": q, "$options": "i"}},
+                {"amount": amount_val},
+            ]
+        except ValueError:
+            query["description"] = {"$regex": q, "$options": "i"}
+
+    txns = await db.transactions.find(query, {"_id": 0}).sort("date", -1).skip(skip).limit(limit).to_list(limit)
+    total = await db.transactions.count_documents(query)
+    return {"items": txns, "total": total}
+
+
 # ─── Recurring & Cash Flow Routes ────────────────────────────────────
 
 @app.get("/api/recurring/list")
@@ -1779,6 +2189,111 @@ async def delete_mandate(mandate_id: str, user: dict = Depends(get_current_user)
     return {"message": "Mandate deleted"}
 
 
+
+@app.post("/api/mandates/detect")
+async def detect_mandates(user: dict = Depends(get_current_user)):
+    """Auto-detect recurring mandates from transaction history."""
+    user_id = user["user_id"]
+
+    # Get recent approved transactions
+    txns = await db.transactions.find(
+        {"user_id": user_id, "status": "approved", "transaction_type": "expense"},
+        {"_id": 0}
+    ).sort("date", -1).to_list(2000)
+
+    # Group by description (normalized) to find recurring patterns
+    from collections import defaultdict
+    desc_groups = defaultdict(list)
+    for t in txns:
+        desc = (t.get("description") or "").strip().lower()
+        if desc and len(desc) > 3:
+            desc_groups[desc].append(t)
+
+    detected = []
+    now = datetime.now(timezone.utc)
+    for desc, group in desc_groups.items():
+        if len(group) < 2:
+            continue
+
+        # Check if amounts are similar (within 10%)
+        amounts = [t["amount"] for t in group]
+        avg_amount = sum(amounts) / len(amounts)
+        if any(abs(a - avg_amount) / avg_amount > 0.1 for a in amounts):
+            continue
+
+        # Check for monthly-ish frequency
+        dates = sorted([t["date"] for t in group])
+        if len(dates) >= 2:
+            # Check if already exists as mandate
+            existing = await db.mandates.find_one({
+                "user_id": user_id,
+                "merchant": {"$regex": desc[:20], "$options": "i"},
+            })
+            if existing:
+                continue
+
+            detected.append({
+                "merchant": group[0].get("description", desc),
+                "amount": round(avg_amount, 2),
+                "frequency": "monthly",
+                "occurrences": len(group),
+                "last_date": dates[-1],
+                "account_id": group[0].get("account_id"),
+            })
+
+    return {"detected": detected[:20], "total": len(detected)}
+
+
+@app.get("/api/mandates/upcoming")
+async def upcoming_mandates(
+    days: int = 30,
+    user: dict = Depends(get_current_user),
+):
+    """List mandates with upcoming charges in the next N days."""
+    user_id = user["user_id"]
+    mandates = await db.mandates.find(
+        {"user_id": user_id, "status": "active"}, {"_id": 0}
+    ).to_list(500)
+
+    now = datetime.now(timezone.utc)
+    today = now.day
+    upcoming = []
+
+    for m in mandates:
+        debit_day = m.get("debit_day")
+        if debit_day is None:
+            continue
+        try:
+            debit_day = int(debit_day)
+        except (ValueError, TypeError):
+            continue
+
+        # Calculate next debit date
+        year, month = now.year, now.month
+        if debit_day <= today:
+            # Already passed this month, next occurrence is next month
+            month += 1
+            if month > 12:
+                month = 1
+                year += 1
+
+        try:
+            next_date = date_cls(year, month, min(debit_day, 28))
+        except ValueError:
+            next_date = date_cls(year, month, 28)
+
+        days_until = (next_date - now.date()).days
+        if 0 <= days_until <= days:
+            upcoming.append({
+                **m,
+                "next_debit_date": next_date.isoformat(),
+                "days_until": days_until,
+            })
+
+    upcoming.sort(key=lambda x: x["days_until"])
+    return {"upcoming": upcoming, "total": len(upcoming)}
+
+
 async def _compute_od_monthly_interest(user_id: str, account: dict) -> float:
     """
     Compute the current month's daily interest for an OD account.
@@ -1968,6 +2483,53 @@ async def cashflow_projection(user: dict = Depends(get_current_user)):
     }
 
 
+
+@app.get("/api/cashflow/history")
+async def cashflow_history(
+    months: int = 12,
+    user: dict = Depends(get_current_user),
+):
+    """Get historical monthly cash flow (income - expense) for the last N months."""
+    user_id = user["user_id"]
+    now = datetime.now(timezone.utc)
+
+    history = []
+    for i in range(months - 1, -1, -1):
+        year = now.year
+        month = now.month - i
+        while month <= 0:
+            month += 12
+            year -= 1
+        month_start = f"{year:04d}-{month:02d}-01"
+        if month == 12:
+            month_end = f"{year + 1:04d}-01-01"
+        else:
+            month_end = f"{year:04d}-{month + 1:02d}-01"
+
+        txns = await db.transactions.find(
+            {"user_id": user_id, "status": "approved", "date": {"$gte": month_start, "$lt": month_end}},
+            {"_id": 0, "transaction_type": 1, "amount": 1}
+        ).to_list(5000)
+
+        income = sum(t["amount"] for t in txns if t["transaction_type"] == "income")
+        expense = sum(t["amount"] for t in txns if t["transaction_type"] == "expense")
+
+        history.append({
+            "month": month_start[:7],
+            "income": round(income, 2),
+            "expense": round(expense, 2),
+            "net_cashflow": round(income - expense, 2),
+        })
+
+    # Compute running balance
+    running = 0
+    for h in history:
+        running += h["net_cashflow"]
+        h["cumulative"] = round(running, 2)
+
+    return {"history": history}
+
+
 # ─── Dashboard Routes ───────────────────────────────────────────────
 
 @app.get("/api/dashboard/summary")
@@ -2015,6 +2577,94 @@ async def dashboard_summary(user: dict = Depends(get_current_user)):
         "accounts": accounts,
         "recent_transactions": recent_txns,
     }
+
+
+
+@app.get("/api/dashboard/trends")
+async def dashboard_trends(
+    months: int = 6,
+    user: dict = Depends(get_current_user),
+):
+    """Get income/expense trends for the last N months."""
+    user_id = user["user_id"]
+    now = datetime.now(timezone.utc)
+
+    trends = []
+    for i in range(months - 1, -1, -1):
+        # Calculate month start/end
+        year = now.year
+        month = now.month - i
+        while month <= 0:
+            month += 12
+            year -= 1
+        month_start = f"{year:04d}-{month:02d}-01"
+        if month == 12:
+            month_end = f"{year + 1:04d}-01-01"
+        else:
+            month_end = f"{year:04d}-{month + 1:02d}-01"
+
+        txns = await db.transactions.find(
+            {"user_id": user_id, "status": "approved", "date": {"$gte": month_start, "$lt": month_end}},
+            {"_id": 0, "transaction_type": 1, "amount": 1}
+        ).to_list(5000)
+
+        income = sum(t["amount"] for t in txns if t["transaction_type"] == "income")
+        expense = sum(t["amount"] for t in txns if t["transaction_type"] == "expense")
+
+        trends.append({
+            "month": month_start[:7],
+            "income": round(income, 2),
+            "expense": round(expense, 2),
+            "net": round(income - expense, 2),
+        })
+
+    return {"trends": trends}
+
+
+@app.get("/api/dashboard/monthly-comparison")
+async def dashboard_monthly_comparison(user: dict = Depends(get_current_user)):
+    """Compare current month with previous month."""
+    user_id = user["user_id"]
+    now = datetime.now(timezone.utc)
+
+    # Current month
+    curr_start = now.replace(day=1).strftime("%Y-%m-%d")
+    curr_end = now.strftime("%Y-%m-%d")
+
+    # Previous month
+    if now.month == 1:
+        prev_year, prev_month = now.year - 1, 12
+    else:
+        prev_year, prev_month = now.year, now.month - 1
+    prev_start = f"{prev_year:04d}-{prev_month:02d}-01"
+    prev_end = f"{prev_year:04d}-{prev_month:02d}-{28}"  # approximate
+
+    async def get_month_totals(start, end):
+        txns = await db.transactions.find(
+            {"user_id": user_id, "status": "approved", "date": {"$gte": start, "$lte": end}},
+            {"_id": 0, "transaction_type": 1, "amount": 1}
+        ).to_list(5000)
+        income = sum(t["amount"] for t in txns if t["transaction_type"] == "income")
+        expense = sum(t["amount"] for t in txns if t["transaction_type"] == "expense")
+        return {"income": round(income, 2), "expense": round(expense, 2), "net": round(income - expense, 2)}
+
+    current = await get_month_totals(curr_start, curr_end)
+    previous = await get_month_totals(prev_start, prev_end)
+
+    def pct_change(curr, prev):
+        if prev == 0:
+            return 100.0 if curr > 0 else 0.0
+        return round(((curr - prev) / prev) * 100, 1)
+
+    return {
+        "current_month": {**current, "period": curr_start[:7]},
+        "previous_month": {**previous, "period": prev_start[:7]},
+        "income_change_pct": pct_change(current["income"], previous["income"]),
+        "expense_change_pct": pct_change(current["expense"], previous["expense"]),
+    }
+
+
+# =====================================================================
 
 
 # ─── Reports Routes ─────────────────────────────────────────────────
@@ -2158,6 +2808,190 @@ async def reports_by_category(
     return {"categories": _aggregate_by_category(txns, cat_map)}
 
 
+
+@app.get("/api/reports/account")
+async def reports_by_account(
+    start_date: str = None, end_date: str = None,
+    account_id: str = None,
+    user: dict = Depends(get_current_user),
+):
+    """Get transaction summary grouped by account."""
+    user_id = user["user_id"]
+    query = {"user_id": user_id, "status": "approved"}
+    if start_date:
+        query.setdefault("date", {})["$gte"] = start_date
+    if end_date:
+        query.setdefault("date", {})["$lte"] = end_date
+    if account_id:
+        query["$or"] = [{"account_id": account_id}, {"to_account_id": account_id}]
+
+    txns = await db.transactions.find(query, {"_id": 0}).to_list(5000)
+    accounts = await db.accounts.find({"user_id": user_id}, {"_id": 0}).to_list(100)
+    acc_map = {a["account_id"]: a["name"] for a in accounts}
+
+    by_account = {}
+    for t in txns:
+        aid = t.get("account_id", "unknown")
+        if aid not in by_account:
+            by_account[aid] = {
+                "account_id": aid,
+                "account_name": acc_map.get(aid, "Unknown"),
+                "income": 0, "expense": 0, "transfers_out": 0, "transfers_in": 0, "count": 0,
+            }
+        by_account[aid]["count"] += 1
+        if t["transaction_type"] == "income":
+            by_account[aid]["income"] += t["amount"]
+        elif t["transaction_type"] == "expense":
+            by_account[aid]["expense"] += t["amount"]
+        elif t["transaction_type"] == "transfer":
+            by_account[aid]["transfers_out"] += t["amount"]
+            to_aid = t.get("to_account_id")
+            if to_aid:
+                if to_aid not in by_account:
+                    by_account[to_aid] = {
+                        "account_id": to_aid,
+                        "account_name": acc_map.get(to_aid, "Unknown"),
+                        "income": 0, "expense": 0, "transfers_out": 0, "transfers_in": 0, "count": 0,
+                    }
+                by_account[to_aid]["transfers_in"] += t["amount"]
+
+    result = sorted(by_account.values(), key=lambda x: x["income"] + x["expense"], reverse=True)
+    for r in result:
+        r["income"] = round(r["income"], 2)
+        r["expense"] = round(r["expense"], 2)
+        r["transfers_out"] = round(r["transfers_out"], 2)
+        r["transfers_in"] = round(r["transfers_in"], 2)
+
+    return {"accounts": result}
+
+
+@app.get("/api/reports/income-expense")
+async def reports_income_expense(
+    start_date: str = None, end_date: str = None,
+    user: dict = Depends(get_current_user),
+):
+    """Detailed income vs expense breakdown with category drill-down."""
+    user_id = user["user_id"]
+    query = {"user_id": user_id, "status": "approved"}
+    if start_date:
+        query.setdefault("date", {})["$gte"] = start_date
+    if end_date:
+        query.setdefault("date", {})["$lte"] = end_date
+
+    txns = await db.transactions.find(query, {"_id": 0}).to_list(5000)
+    categories = await db.categories.find({"user_id": user_id}, {"_id": 0}).to_list(200)
+    cat_map = {c["category_id"]: c for c in categories}
+
+    income_txns = [t for t in txns if t["transaction_type"] == "income"]
+    expense_txns = [t for t in txns if t["transaction_type"] == "expense"]
+
+    return {
+        "total_income": round(sum(t["amount"] for t in income_txns), 2),
+        "total_expense": round(sum(t["amount"] for t in expense_txns), 2),
+        "net": round(sum(t["amount"] for t in income_txns) - sum(t["amount"] for t in expense_txns), 2),
+        "income_by_category": _aggregate_by_category(income_txns, cat_map),
+        "expense_by_category": _aggregate_by_category(expense_txns, cat_map),
+        "start_date": start_date,
+        "end_date": end_date,
+    }
+
+
+@app.get("/api/reports/export/csv")
+async def export_report_csv(
+    start_date: str = None, end_date: str = None,
+    transaction_type: str = None,
+    user: dict = Depends(get_current_user),
+):
+    """Export transactions as CSV."""
+    user_id = user["user_id"]
+    query = {"user_id": user_id, "status": "approved"}
+    if start_date:
+        query.setdefault("date", {})["$gte"] = start_date
+    if end_date:
+        query.setdefault("date", {})["$lte"] = end_date
+    if transaction_type:
+        query["transaction_type"] = transaction_type
+
+    txns = await db.transactions.find(query, {"_id": 0}).sort("date", -1).to_list(10000)
+    accounts = await db.accounts.find({"user_id": user_id}, {"_id": 0}).to_list(100)
+    categories = await db.categories.find({"user_id": user_id}, {"_id": 0}).to_list(500)
+    acc_map = {a["account_id"]: a["name"] for a in accounts}
+    cat_map = {c["category_id"]: c["name"] for c in categories}
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Date", "Type", "Amount", "Account", "To Account", "Category", "Description", "Payment Method", "Source"])
+    for t in txns:
+        writer.writerow([
+            t.get("date", ""),
+            t.get("transaction_type", ""),
+            t.get("amount", 0),
+            acc_map.get(t.get("account_id"), ""),
+            acc_map.get(t.get("to_account_id"), "") if t.get("to_account_id") else "",
+            cat_map.get(t.get("category_id"), ""),
+            t.get("description", ""),
+            t.get("payment_method", ""),
+            t.get("source", "manual"),
+        ])
+
+    csv_bytes = output.getvalue().encode("utf-8-sig")
+    return Response(
+        content=csv_bytes,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="transactions_{start_date or "all"}_{end_date or "all"}.csv"'},
+    )
+
+
+@app.get("/api/reports/export/pdf")
+async def export_report_pdf(
+    start_date: str = None, end_date: str = None,
+    user: dict = Depends(get_current_user),
+):
+    """Return report data for client-side PDF generation."""
+    user_id = user["user_id"]
+    query = {"user_id": user_id, "status": "approved"}
+    if start_date:
+        query.setdefault("date", {})["$gte"] = start_date
+    if end_date:
+        query.setdefault("date", {})["$lte"] = end_date
+
+    txns = await db.transactions.find(query, {"_id": 0}).sort("date", -1).to_list(10000)
+    accounts = await db.accounts.find({"user_id": user_id}, {"_id": 0}).to_list(100)
+    categories = await db.categories.find({"user_id": user_id}, {"_id": 0}).to_list(500)
+    settings = await db.user_settings.find_one({"user_id": user_id}, {"_id": 0}) or {}
+
+    acc_map = {a["account_id"]: a["name"] for a in accounts}
+    cat_map = {c["category_id"]: c for c in categories}
+
+    total_income = sum(t["amount"] for t in txns if t["transaction_type"] == "income")
+    total_expense = sum(t["amount"] for t in txns if t["transaction_type"] == "expense")
+
+    return {
+        "report": {
+            "start_date": start_date,
+            "end_date": end_date,
+            "total_income": round(total_income, 2),
+            "total_expense": round(total_expense, 2),
+            "net": round(total_income - total_expense, 2),
+            "transaction_count": len(txns),
+            "transactions": txns[:500],  # Limit for PDF
+            "income_by_category": _aggregate_by_category(
+                [t for t in txns if t["transaction_type"] == "income"], cat_map
+            ),
+            "expense_by_category": _aggregate_by_category(
+                [t for t in txns if t["transaction_type"] == "expense"], cat_map
+            ),
+        },
+        "settings": {
+            "firm_name": settings.get("firm_name", ""),
+            "base_currency": settings.get("base_currency", "INR"),
+        },
+    }
+
+
+# =====================================================================
+
+
 # ─── Feature Requests Routes ────────────────────────────────────────
 
 @app.get("/api/feature-requests")
@@ -2182,6 +3016,50 @@ async def create_feature_request(data: FeatureRequestCreate, user: dict = Depend
     await db.feature_requests.insert_one(req)
     del req["_id"]
     return req
+
+
+
+@app.get("/api/feature-requests/{request_id}")
+async def get_feature_request(request_id: str, user: dict = Depends(get_current_user)):
+    """Get a single feature request."""
+    req = await db.feature_requests.find_one(
+        {"request_id": request_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    if not req:
+        raise HTTPException(status_code=404, detail="Feature request not found")
+    if isinstance(req.get("created_at"), datetime):
+        req["created_at"] = req["created_at"].isoformat()
+    return req
+
+
+# --- Endpoint 6.15: POST /api/feature-requests/{request_id}/vote ---
+
+@app.post("/api/feature-requests/{request_id}/vote")
+async def vote_feature_request(request_id: str, user: dict = Depends(get_current_user)):
+    """Upvote a feature request."""
+    req = await db.feature_requests.find_one(
+        {"request_id": request_id}, {"_id": 0}
+    )
+    if not req:
+        raise HTTPException(status_code=404, detail="Feature request not found")
+
+    # Check if user already voted
+    voters = req.get("voters", [])
+    if user["user_id"] in voters:
+        raise HTTPException(status_code=400, detail="Already voted")
+
+    await db.feature_requests.update_one(
+        {"request_id": request_id},
+        {
+            "$inc": {"votes": 1},
+            "$push": {"voters": user["user_id"]},
+        },
+    )
+
+    return {"message": "Vote recorded", "votes": req.get("votes", 0) + 1}
+
+
+# =====================================================================
 
 
 # ─── Statement Upload & Reconciliation Routes ───────────────────────
@@ -2479,6 +3357,118 @@ async def reaudit_statement(statement_id: str, user: dict = Depends(get_current_
 
     asyncio.create_task(parse_statement_background(statement_id, user["user_id"]))
     return {"statement_id": statement_id, "status": "parsing", "message": "Re-audit started"}
+
+
+
+@app.post("/api/statements/{statement_id}/approve")
+async def approve_statement(statement_id: str, user: dict = Depends(get_current_user)):
+    """Approve all entries in a parsed statement and create transactions."""
+    stmt = await db.statements.find_one(
+        {"statement_id": statement_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    if not stmt:
+        raise HTTPException(status_code=404, detail="Statement not found")
+
+    entries = stmt.get("entries", [])
+    if not entries:
+        raise HTTPException(status_code=400, detail="No entries to approve")
+
+    created = 0
+    for entry in entries:
+        if entry.get("status") == "approved":
+            continue
+
+        txn = {
+            "transaction_id": f"txn_{uuid.uuid4().hex[:12]}",
+            "user_id": user["user_id"],
+            "transaction_type": entry.get("transaction_type", "expense"),
+            "amount": abs(float(entry.get("amount", 0))),
+            "date": entry.get("date", datetime.now(timezone.utc).strftime("%Y-%m-%d")),
+            "account_id": stmt.get("account_id", ""),
+            "category_id": entry.get("category_id"),
+            "subcategory_id": entry.get("subcategory_id"),
+            "description": entry.get("description", ""),
+            "payment_method": entry.get("payment_method"),
+            "source": "statement",
+            "status": "approved",
+            "created_at": datetime.now(timezone.utc),
+        }
+        await db.transactions.insert_one(txn)
+        await apply_transaction_to_balances(user["user_id"], txn)
+        created += 1
+
+    # Mark statement as approved
+    await db.statements.update_one(
+        {"statement_id": statement_id, "user_id": user["user_id"]},
+        {"$set": {"status": "approved", "approved_at": datetime.now(timezone.utc)}},
+    )
+
+    return {"message": f"Statement approved, {created} transactions created", "transactions_created": created}
+
+
+@app.post("/api/statements/{statement_id}/reject")
+async def reject_statement(statement_id: str, user: dict = Depends(get_current_user)):
+    """Reject/dismiss a parsed statement."""
+    stmt = await db.statements.find_one(
+        {"statement_id": statement_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    if not stmt:
+        raise HTTPException(status_code=404, detail="Statement not found")
+
+    await db.statements.update_one(
+        {"statement_id": statement_id, "user_id": user["user_id"]},
+        {"$set": {"status": "rejected", "rejected_at": datetime.now(timezone.utc)}},
+    )
+
+    return {"message": "Statement rejected"}
+
+
+@app.get("/api/statements/{statement_id}/entries")
+async def get_statement_entries(statement_id: str, user: dict = Depends(get_current_user)):
+    """Get all entries for a parsed statement."""
+    stmt = await db.statements.find_one(
+        {"statement_id": statement_id, "user_id": user["user_id"]}, {"_id": 0, "file_path": 0}
+    )
+    if not stmt:
+        raise HTTPException(status_code=404, detail="Statement not found")
+
+    entries = stmt.get("entries", [])
+    return {"entries": entries, "total": len(entries), "statement_id": statement_id}
+
+
+@app.post("/api/statements/{statement_id}/bulk-categorize")
+async def bulk_categorize_statement(statement_id: str, request: Request, user: dict = Depends(get_current_user)):
+    """Bulk update categories on statement entries."""
+    body = await request.json()
+    updates = body.get("updates", [])  # [{entry_index: int, category_id: str, subcategory_id?: str}]
+    if not updates:
+        raise HTTPException(status_code=400, detail="updates array is required")
+
+    stmt = await db.statements.find_one(
+        {"statement_id": statement_id, "user_id": user["user_id"]}
+    )
+    if not stmt:
+        raise HTTPException(status_code=404, detail="Statement not found")
+
+    entries = stmt.get("entries", [])
+    updated_count = 0
+
+    for upd in updates:
+        idx = upd.get("entry_index")
+        if idx is None or idx < 0 or idx >= len(entries):
+            continue
+        if upd.get("category_id"):
+            entries[idx]["category_id"] = upd["category_id"]
+        if upd.get("subcategory_id"):
+            entries[idx]["subcategory_id"] = upd["subcategory_id"]
+        updated_count += 1
+
+    await db.statements.update_one(
+        {"statement_id": statement_id, "user_id": user["user_id"]},
+        {"$set": {"entries": entries}},
+    )
+
+    return {"updated": updated_count, "total": len(updates)}
 
 
 @app.patch("/api/statements/{statement_id}/entries/{entry_index}")
@@ -5546,6 +6536,87 @@ async def retry_pending_sms(user: dict = Depends(get_current_user)):
     return {"message": f"Processing {pending_count} pending SMS messages", "count": pending_count}
 
 
+
+@app.post("/api/sms/parse")
+async def parse_single_sms(body: dict = Body(...), user: dict = Depends(get_current_user)):
+    """Parse a single SMS message and return extracted transaction data (without saving)."""
+    message = body.get("message", "").strip()
+    sender = body.get("sender", "").strip()
+    if not message:
+        raise HTTPException(status_code=400, detail="message is required")
+
+    if not async_openai_client:
+        raise HTTPException(status_code=503, detail="AI service not configured")
+
+    accounts = await db.accounts.find({"user_id": user["user_id"]}, {"_id": 0, "name": 1, "account_id": 1}).to_list(50)
+    account_names = [f"{a['name']} (ID: {a['account_id']})" for a in accounts]
+    categories = await db.categories.find({"user_id": user["user_id"]}, {"_id": 0, "name": 1, "category_id": 1, "category_type": 1}).to_list(200)
+    category_info = [f"{c['name']} ({c['category_type']}, ID: {c['category_id']})" for c in categories]
+
+    sms_doc = {"sender": sender, "body": message, "timestamp": datetime.now(timezone.utc).isoformat()}
+    result = await analyze_sms_with_ai(sms_doc, account_names, category_info)
+
+    return {"parsed": result}
+
+
+@app.post("/api/sms/bulk-parse")
+async def bulk_parse_sms(body: dict = Body(...), user: dict = Depends(get_current_user)):
+    """Trigger AI processing on all pending SMS messages."""
+    pending_count = await db.synced_sms.count_documents(
+        {"user_id": user["user_id"], "ai_status": {"$in": ["pending", "failed"]}}
+    )
+    if pending_count == 0:
+        return {"message": "No pending SMS to process", "count": 0}
+
+    asyncio.create_task(process_pending_sms(user["user_id"]))
+    return {"message": f"Processing {pending_count} SMS messages", "count": pending_count}
+
+
+@app.post("/api/sms/detect-mandates")
+async def sms_detect_mandates(user: dict = Depends(get_current_user)):
+    """Detect recurring mandates from processed SMS transactions."""
+    user_id = user["user_id"]
+
+    # Get SMS-sourced transactions
+    sms_txns = await db.transactions.find(
+        {"user_id": user_id, "source": "sms", "status": "approved", "transaction_type": "expense"},
+        {"_id": 0}
+    ).sort("date", -1).to_list(1000)
+
+    from collections import defaultdict
+    desc_groups = defaultdict(list)
+    for t in sms_txns:
+        desc = (t.get("description") or "").strip().lower()
+        if desc and len(desc) > 3:
+            desc_groups[desc].append(t)
+
+    detected = []
+    for desc, group in desc_groups.items():
+        if len(group) < 2:
+            continue
+        amounts = [t["amount"] for t in group]
+        avg_amount = sum(amounts) / len(amounts)
+        if any(abs(a - avg_amount) / avg_amount > 0.15 for a in amounts if avg_amount > 0):
+            continue
+
+        existing = await db.mandates.find_one({
+            "user_id": user_id,
+            "merchant": {"$regex": desc[:20], "$options": "i"},
+        })
+        if existing:
+            continue
+
+        detected.append({
+            "merchant": group[0].get("description", desc),
+            "amount": round(avg_amount, 2),
+            "frequency": "monthly",
+            "occurrences": len(group),
+            "source": "sms",
+        })
+
+    return {"detected": detected[:20], "total": len(detected)}
+
+
 # ─── SMS Processing Helpers ──────────────────────────────────────────
 
 async def analyze_sms_with_ai(sms_doc: dict, account_names: list, category_info: list):
@@ -6146,6 +7217,39 @@ async def get_records(
     return {"records": records, "total": total}
 
 
+
+
+@app.get("/api/records/search")
+async def search_records(
+    q: str = "",
+    user: dict = Depends(get_current_user),
+    limit: int = 50,
+    skip: int = 0,
+):
+    """Search email records by subject, sender, or description."""
+    query = {"user_id": user["user_id"]}
+    if q:
+        search_regex = {"$regex": q, "$options": "i"}
+        query["$or"] = [
+            {"subject": search_regex},
+            {"from_email": search_regex},
+            {"transaction_description": search_regex},
+        ]
+
+    records = await db.email_archives.find(
+        query, {"_id": 0, "raw_eml": 0, "attachments.data": 0}
+    ).sort("archived_at", -1).skip(skip).limit(limit).to_list(limit)
+
+    total = await db.email_archives.count_documents(query)
+    for r in records:
+        if isinstance(r.get("archived_at"), datetime):
+            r["archived_at"] = r["archived_at"].isoformat()
+
+    return {"items": records, "total": total}
+
+
+# =====================================================================
+
 @app.get("/api/records/{archive_id}/download-eml")
 async def download_eml(archive_id: str, user: dict = Depends(get_current_user)):
     record = await db.email_archives.find_one(
@@ -6200,6 +7304,37 @@ async def preview_record(archive_id: str, user: dict = Depends(get_current_user)
     if isinstance(record.get("archived_at"), datetime):
         record["archived_at"] = record["archived_at"].isoformat()
     return record
+
+
+
+@app.get("/api/records/{archive_id}")
+async def get_record(archive_id: str, user: dict = Depends(get_current_user)):
+    """Get a single email record by ID."""
+    record = await db.email_archives.find_one(
+        {"archive_id": archive_id, "user_id": user["user_id"]},
+        {"_id": 0, "raw_eml": 0, "attachments.data": 0}
+    )
+    if not record:
+        raise HTTPException(status_code=404, detail="Record not found")
+    if isinstance(record.get("archived_at"), datetime):
+        record["archived_at"] = record["archived_at"].isoformat()
+    return record
+
+
+# --- Endpoint 6.8: DELETE /api/records/{archive_id} ---
+
+@app.delete("/api/records/{archive_id}")
+async def delete_record(archive_id: str, user: dict = Depends(get_current_user)):
+    """Delete an email record."""
+    result = await db.email_archives.delete_one(
+        {"archive_id": archive_id, "user_id": user["user_id"]}
+    )
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Record not found")
+    return {"message": "Record deleted"}
+
+
+# =====================================================================
 
 
 @app.post("/api/records/download-zip")
@@ -6448,6 +7583,95 @@ async def get_available_emails_for_tax(user: dict = Depends(get_current_user)):
     return {"emails": emails}
 
 
+
+@app.get("/api/tax-summary/generate")
+async def generate_tax_summary_from_transactions(
+    date_from: str = None,
+    date_to: str = None,
+    user: dict = Depends(get_current_user),
+):
+    """Generate a tax summary from existing transactions (without email scanning)."""
+    user_id = user["user_id"]
+    if not date_from or not date_to:
+        raise HTTPException(status_code=400, detail="date_from and date_to are required")
+
+    txns = await db.transactions.find(
+        {"user_id": user_id, "status": "approved", "date": {"$gte": date_from, "$lte": date_to}},
+        {"_id": 0}
+    ).to_list(10000)
+
+    total_income = sum(t["amount"] for t in txns if t["transaction_type"] == "income")
+    total_expenses = sum(t["amount"] for t in txns if t["transaction_type"] == "expense")
+
+    # Group by category
+    categories = await db.categories.find({"user_id": user_id}, {"_id": 0}).to_list(200)
+    cat_map = {c["category_id"]: c["name"] for c in categories}
+
+    income_by_cat = {}
+    expense_by_cat = {}
+    for t in txns:
+        cat_name = cat_map.get(t.get("category_id"), "Uncategorized")
+        if t["transaction_type"] == "income":
+            income_by_cat[cat_name] = income_by_cat.get(cat_name, 0) + t["amount"]
+        elif t["transaction_type"] == "expense":
+            expense_by_cat[cat_name] = expense_by_cat.get(cat_name, 0) + t["amount"]
+
+    return {
+        "date_from": date_from,
+        "date_to": date_to,
+        "total_income": round(total_income, 2),
+        "total_expenses": round(total_expenses, 2),
+        "net": round(total_income - total_expenses, 2),
+        "transaction_count": len(txns),
+        "income_by_category": {k: round(v, 2) for k, v in sorted(income_by_cat.items(), key=lambda x: -x[1])},
+        "expense_by_category": {k: round(v, 2) for k, v in sorted(expense_by_cat.items(), key=lambda x: -x[1])},
+    }
+
+
+# --- Endpoint 6.18: GET /api/tax-summary/{summary_id}/download ---
+
+@app.get("/api/tax-summary/{summary_id}/download")
+async def download_tax_summary(summary_id: str, user: dict = Depends(get_current_user)):
+    """Download a tax summary as CSV (alias for export endpoint)."""
+    summary = await db.tax_summaries.find_one(
+        {"summary_id": summary_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    if not summary:
+        raise HTTPException(status_code=404, detail="Summary not found")
+
+    txns = await db.tax_summary_transactions.find(
+        {"summary_id": summary_id}, {"_id": 0}
+    ).sort("date", 1).to_list(5000)
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Date", "Type", "Description", "Category", "Amount (INR)", "Source Email"])
+    for t in txns:
+        writer.writerow([
+            t.get("date", ""), t.get("transaction_type", ""),
+            t.get("description", ""), t.get("category", ""),
+            t.get("amount", 0), t.get("from_email", ""),
+        ])
+    writer.writerow([])
+    writer.writerow(["Summary", summary.get("name", "")])
+    writer.writerow(["Period", f"{summary.get('date_from', '')} to {summary.get('date_to', '')}"])
+    writer.writerow(["Total Income", summary.get("total_income", 0)])
+    writer.writerow(["Total Expenses", summary.get("total_expenses", 0)])
+    writer.writerow(["Net", summary.get("total_income", 0) - summary.get("total_expenses", 0)])
+
+    csv_bytes = output.getvalue().encode("utf-8-sig")
+    filename = re.sub(r'[^\w\s-]', '', summary.get("name", "tax_summary"))[:40].strip()
+
+    return Response(
+        content=csv_bytes,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}.csv"'},
+    )
+
+
+# =====================================================================
+
+
 async def _recalculate_tax_summary(summary_id: str):
     """Recalculate totals for a tax summary."""
     txns = await db.tax_summary_transactions.find(
@@ -6669,6 +7893,157 @@ async def update_settings(request: Request, user: dict = Depends(get_current_use
     return settings
 
 
+
+@app.get("/api/settings/currencies")
+async def get_currencies(user: dict = Depends(get_current_user)):
+    """Return list of supported currencies."""
+    currencies = [
+        {"code": "INR", "name": "Indian Rupee", "symbol": "\u20b9"},
+        {"code": "USD", "name": "US Dollar", "symbol": "$"},
+        {"code": "EUR", "name": "Euro", "symbol": "\u20ac"},
+        {"code": "GBP", "name": "British Pound", "symbol": "\u00a3"},
+        {"code": "AED", "name": "UAE Dirham", "symbol": "\u062f.\u0625"},
+        {"code": "SGD", "name": "Singapore Dollar", "symbol": "S$"},
+        {"code": "AUD", "name": "Australian Dollar", "symbol": "A$"},
+        {"code": "CAD", "name": "Canadian Dollar", "symbol": "C$"},
+        {"code": "JPY", "name": "Japanese Yen", "symbol": "\u00a5"},
+        {"code": "CNY", "name": "Chinese Yuan", "symbol": "\u00a5"},
+    ]
+    return {"currencies": currencies}
+
+
+@app.get("/api/settings/date-formats")
+async def get_date_formats(user: dict = Depends(get_current_user)):
+    """Return list of supported date formats."""
+    formats = [
+        {"value": "DD/MM/YYYY", "label": "DD/MM/YYYY", "example": "18/04/2026"},
+        {"value": "MM/DD/YYYY", "label": "MM/DD/YYYY", "example": "04/18/2026"},
+        {"value": "YYYY-MM-DD", "label": "YYYY-MM-DD", "example": "2026-04-18"},
+        {"value": "DD-MM-YYYY", "label": "DD-MM-YYYY", "example": "18-04-2026"},
+        {"value": "DD MMM YYYY", "label": "DD MMM YYYY", "example": "18 Apr 2026"},
+    ]
+    return {"formats": formats}
+
+
+@app.post("/api/settings/logo")
+async def upload_logo(
+    file: UploadFile = File(...),
+    user: dict = Depends(get_current_user),
+):
+    """Upload a company logo for invoices."""
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No file provided")
+
+    ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else ""
+    allowed = ("jpg", "jpeg", "png", "webp", "svg")
+    if ext not in allowed:
+        raise HTTPException(status_code=400, detail=f"Unsupported file type. Allowed: {', '.join(allowed)}")
+
+    content = await file.read()
+    if len(content) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="File too large (max 5 MB)")
+
+    logo_id = f"logo_{user['user_id']}"
+    # Store in GridFS
+    try:
+        # Delete old logo if exists
+        try:
+            await receipt_fs.delete(logo_id)
+        except Exception:
+            pass
+        await receipt_fs.upload_from_stream_with_id(
+            logo_id, f"logo.{ext}", content,
+            metadata={"user_id": user["user_id"], "file_ext": ext, "type": "logo"},
+        )
+    except Exception as e:
+        logger.error(f"Failed to store logo: {e}")
+
+    # Store base64 URL in settings
+    mime_map = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "webp": "image/webp", "svg": "image/svg+xml"}
+    mime = mime_map.get(ext, "application/octet-stream")
+    logo_url = f"data:{mime};base64,{base64.b64encode(content).decode()}"
+
+    await db.user_settings.update_one(
+        {"user_id": user["user_id"]},
+        {"$set": {"logo_url": logo_url, "logo_filename": file.filename}},
+        upsert=True,
+    )
+
+    return {"message": "Logo uploaded", "logo_url": logo_url}
+
+
+@app.delete("/api/settings/logo")
+async def delete_logo(user: dict = Depends(get_current_user)):
+    """Delete the company logo."""
+    await db.user_settings.update_one(
+        {"user_id": user["user_id"]},
+        {"$unset": {"logo_url": "", "logo_filename": ""}},
+    )
+    try:
+        await receipt_fs.delete(f"logo_{user['user_id']}")
+    except Exception:
+        pass
+    return {"message": "Logo deleted"}
+
+
+@app.post("/api/settings/signature")
+async def upload_signature(
+    file: UploadFile = File(...),
+    user: dict = Depends(get_current_user),
+):
+    """Upload a signature image for invoices."""
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No file provided")
+
+    ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else ""
+    allowed = ("jpg", "jpeg", "png", "webp")
+    if ext not in allowed:
+        raise HTTPException(status_code=400, detail=f"Unsupported file type. Allowed: {', '.join(allowed)}")
+
+    content = await file.read()
+    if len(content) > 2 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="File too large (max 2 MB)")
+
+    sig_id = f"sig_{user['user_id']}"
+    try:
+        try:
+            await receipt_fs.delete(sig_id)
+        except Exception:
+            pass
+        await receipt_fs.upload_from_stream_with_id(
+            sig_id, f"signature.{ext}", content,
+            metadata={"user_id": user["user_id"], "file_ext": ext, "type": "signature"},
+        )
+    except Exception as e:
+        logger.error(f"Failed to store signature: {e}")
+
+    mime_map = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "webp": "image/webp"}
+    mime = mime_map.get(ext, "application/octet-stream")
+    signature_url = f"data:{mime};base64,{base64.b64encode(content).decode()}"
+
+    await db.user_settings.update_one(
+        {"user_id": user["user_id"]},
+        {"$set": {"signature_url": signature_url, "signature_filename": file.filename}},
+        upsert=True,
+    )
+
+    return {"message": "Signature uploaded", "signature_url": signature_url}
+
+
+@app.delete("/api/settings/signature")
+async def delete_signature(user: dict = Depends(get_current_user)):
+    """Delete the signature image."""
+    await db.user_settings.update_one(
+        {"user_id": user["user_id"]},
+        {"$unset": {"signature_url": "", "signature_filename": ""}},
+    )
+    try:
+        await receipt_fs.delete(f"sig_{user['user_id']}")
+    except Exception:
+        pass
+    return {"message": "Signature deleted"}
+
+
 async def get_user_base_currency(user_id: str) -> str:
     settings = await db.user_settings.find_one({"user_id": user_id}, {"_id": 0, "base_currency": 1})
     return (settings or {}).get("base_currency", "INR")
@@ -6785,6 +8160,50 @@ async def create_support_ticket(request: Request, user: dict = Depends(get_curre
     )
     
     return {"success": True, "ticket_id": ticket_id, "email_sent": ticket.get("email_sent", False)}
+
+
+
+@app.get("/api/support/faq")
+async def get_faq(user: dict = Depends(get_current_user)):
+    """Return frequently asked questions."""
+    faqs = [
+        {
+            "question": "How do I connect my email for automatic transaction tracking?",
+            "answer": "Go to Settings > Email Connections and click 'Connect Gmail' or 'Connect Outlook'. We'll only read transaction-related emails.",
+        },
+        {
+            "question": "How do I upload bank statements?",
+            "answer": "Navigate to Statements > Upload, select your bank account, and upload a PDF or CSV statement. Our AI will parse and categorize the entries.",
+        },
+        {
+            "question": "How do I create a GST invoice?",
+            "answer": "Go to Invoices > Create Invoice, select 'GST' as the invoice type, add your customer details and line items with HSN/SAC codes and GST rates.",
+        },
+        {
+            "question": "Can I track SMS banking alerts?",
+            "answer": "Yes! Use the mobile app to sync your SMS messages. Our AI will automatically extract transactions from banking alerts.",
+        },
+        {
+            "question": "How do I manage recurring expenses?",
+            "answer": "SpentyAI auto-detects mandates from your transactions. You can also manually add them from the Mandates section.",
+        },
+        {
+            "question": "How do I export my data?",
+            "answer": "Go to Reports and use the Export button to download your transactions as CSV. Tax summaries can also be exported.",
+        },
+        {
+            "question": "What payment methods are supported?",
+            "answer": "We accept payments via Razorpay (credit/debit cards, UPI, net banking) and Apple In-App Purchase for iOS users.",
+        },
+        {
+            "question": "How do I cancel my subscription?",
+            "answer": "Go to Settings > Billing and click 'Cancel Subscription'. You'll retain access until the end of your billing period.",
+        },
+    ]
+    return {"faqs": faqs}
+
+
+# =====================================================================
 
 
 # ─── Overdraft Interest Calculation ──────────────────────────────────
@@ -7584,6 +9003,67 @@ You can help the user record purchase bills (expenses from vendors/suppliers). S
     }
 
 
+
+@app.get("/api/ai/chat/history")
+async def get_chat_history(
+    limit: int = 50,
+    skip: int = 0,
+    user: dict = Depends(get_current_user),
+):
+    """Get AI chat conversation history."""
+    messages = await db.ai_chat_history.find(
+        {"user_id": user["user_id"]}, {"_id": 0}
+    ).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
+
+    for m in messages:
+        if isinstance(m.get("created_at"), datetime):
+            m["created_at"] = m["created_at"].isoformat()
+
+    return {"messages": list(reversed(messages)), "total": await db.ai_chat_history.count_documents({"user_id": user["user_id"]})}
+
+
+# --- Endpoint 6.2: DELETE /api/ai/chat/history/clear ---
+
+@app.delete("/api/ai/chat/history/clear")
+async def clear_chat_history(user: dict = Depends(get_current_user)):
+    """Clear all AI chat history for the user."""
+    result = await db.ai_chat_history.delete_many({"user_id": user["user_id"]})
+    return {"message": "Chat history cleared", "deleted": result.deleted_count}
+
+
+# --- Endpoint 6.3: GET /api/ai/chat/suggestions ---
+
+@app.get("/api/ai/chat/suggestions")
+async def get_chat_suggestions(user: dict = Depends(get_current_user)):
+    """Get contextual chat suggestions based on user's data."""
+    user_id = user["user_id"]
+    pending = await db.transactions.count_documents({"user_id": user_id, "status": "pending_review"})
+    txn_count = await db.transactions.count_documents({"user_id": user_id})
+
+    suggestions = [
+        "What's my net worth?",
+        "Show me my spending this month",
+        "How much did I earn last month?",
+    ]
+
+    if pending > 0:
+        suggestions.insert(0, f"I have {pending} transactions pending review. Can you summarize them?")
+    if txn_count > 10:
+        suggestions.append("What are my top expense categories?")
+        suggestions.append("Am I spending more than last month?")
+    if txn_count == 0:
+        suggestions = [
+            "How do I get started with SpentyAI?",
+            "What can you help me with?",
+            "How do I connect my email for auto-tracking?",
+        ]
+
+    return {"suggestions": suggestions}
+
+
+# =====================================================================
+
+
 # ─── Razorpay Payments ───────────────────────────────────────────────
 
 PLAN_PRICES = {
@@ -7724,6 +9204,176 @@ async def payment_history(user: dict = Depends(get_current_user)):
             if key in o and isinstance(o[key], datetime):
                 o[key] = o[key].isoformat()
     return {"orders": orders}
+
+
+
+@app.get("/api/payments/plans")
+async def get_payment_plans(user: dict = Depends(get_current_user)):
+    """Return available subscription plans."""
+    plans = []
+    for key, plan in PLAN_PRICES.items():
+        plans.append({
+            "plan_id": key,
+            "name": plan["description"],
+            "amount": plan["amount"],
+            "amount_display": f"₹{plan['amount'] / 100:,.0f}",
+            "currency": plan["currency"],
+            "duration_days": plan["duration_days"],
+        })
+    return {"plans": plans}
+
+
+@app.post("/api/payments/apple/verify")
+async def verify_apple_payment(body: dict = Body(...), user: dict = Depends(get_current_user)):
+    """Verify an Apple In-App Purchase receipt and activate subscription."""
+    receipt_data = body.get("receipt_data")
+    product_id = body.get("product_id", "")
+    if not receipt_data:
+        raise HTTPException(status_code=400, detail="receipt_data is required")
+
+    # Map Apple product IDs to plan keys
+    apple_plan_map = {
+        "com.spentyai.monthly": "monthly",
+        "com.spentyai.quarterly": "quarterly",
+        "com.spentyai.yearly": "yearly",
+        "com.spentyai.lifetime": "lifetime",
+    }
+    plan_key = apple_plan_map.get(product_id, "monthly")
+
+    # Verify receipt with Apple (production first, then sandbox)
+    verify_url = "https://buy.itunes.apple.com/verifyReceipt"
+    payload = {"receipt-data": receipt_data, "password": os.environ.get("APPLE_SHARED_SECRET", "")}
+
+    try:
+        async with httpx.AsyncClient() as http_client:
+            resp = await http_client.post(verify_url, json=payload)
+            result = resp.json()
+            # If status 21007, it's a sandbox receipt — retry with sandbox URL
+            if result.get("status") == 21007:
+                sandbox_url = "https://sandbox.itunes.apple.com/verifyReceipt"
+                resp = await http_client.post(sandbox_url, json=payload)
+                result = resp.json()
+
+        if result.get("status") != 0:
+            raise HTTPException(status_code=400, detail=f"Apple receipt verification failed (status: {result.get('status')})")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Apple receipt verification error: {e}")
+        raise HTTPException(status_code=502, detail="Apple verification service unavailable")
+
+    plan = PLAN_PRICES.get(plan_key, PLAN_PRICES["monthly"])
+    now = datetime.now(timezone.utc)
+    expiry = now + timedelta(days=plan["duration_days"])
+
+    # Store payment record
+    order_id = f"apple_{uuid.uuid4().hex[:12]}"
+    await db.payment_orders.insert_one({
+        "order_id": order_id,
+        "user_id": user["user_id"],
+        "plan": plan_key,
+        "amount": plan["amount"],
+        "currency": plan["currency"],
+        "payment_provider": "apple",
+        "product_id": product_id,
+        "status": "paid",
+        "paid_at": now,
+        "created_at": now,
+    })
+
+    # Activate subscription
+    await db.users.update_one(
+        {"user_id": user["user_id"]},
+        {"$set": {
+            "subscription_plan": plan_key,
+            "subscription_status": "active",
+            "subscription_expiry": expiry.isoformat(),
+            "subscription_provider": "apple",
+            "updated_at": now,
+        }},
+    )
+
+    return {
+        "message": "Subscription activated",
+        "plan": plan_key,
+        "expiry": expiry.isoformat(),
+    }
+
+
+@app.post("/api/payments/apple/webhook")
+async def apple_webhook(request: Request):
+    """Handle Apple App Store server notifications (subscription events)."""
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+
+    notification_type = body.get("notification_type", "")
+    unified_receipt = body.get("unified_receipt", {})
+    latest_receipt_info = (unified_receipt.get("latest_receipt_info") or [{}])
+    if latest_receipt_info:
+        latest = latest_receipt_info[-1] if isinstance(latest_receipt_info, list) else {}
+    else:
+        latest = {}
+
+    original_transaction_id = latest.get("original_transaction_id", "")
+    logger.info(f"Apple webhook: {notification_type} for txn {original_transaction_id}")
+
+    # Handle cancellation/expiry
+    if notification_type in ("CANCEL", "DID_FAIL_TO_RENEW", "REFUND"):
+        # Find user by apple transaction — search payment_orders
+        order = await db.payment_orders.find_one({
+            "payment_provider": "apple",
+            "status": "paid",
+        })
+        if order:
+            await db.users.update_one(
+                {"user_id": order["user_id"]},
+                {"$set": {"subscription_status": "cancelled", "updated_at": datetime.now(timezone.utc)}},
+            )
+
+    return {"status": "ok"}
+
+
+@app.get("/api/payments/status")
+async def payment_status(user: dict = Depends(get_current_user)):
+    """Get current subscription status for the user."""
+    user_doc = await db.users.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    if not user_doc:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    return {
+        "subscription_plan": user_doc.get("subscription_plan"),
+        "subscription_status": user_doc.get("subscription_status"),
+        "subscription_expiry": user_doc.get("subscription_expiry"),
+        "subscription_provider": user_doc.get("subscription_provider"),
+        "is_active": user_doc.get("subscription_status") == "active",
+    }
+
+
+@app.post("/api/payments/cancel")
+async def cancel_subscription(user: dict = Depends(get_current_user)):
+    """Cancel the user's subscription (keeps access until expiry)."""
+    user_doc = await db.users.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    if not user_doc:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if user_doc.get("subscription_status") != "active":
+        raise HTTPException(status_code=400, detail="No active subscription to cancel")
+
+    await db.users.update_one(
+        {"user_id": user["user_id"]},
+        {"$set": {
+            "subscription_status": "cancelled",
+            "updated_at": datetime.now(timezone.utc),
+        }},
+    )
+
+    return {
+        "message": "Subscription cancelled. Access continues until expiry.",
+        "expiry": user_doc.get("subscription_expiry"),
+    }
 
 
 # ─── Promo Codes ─────────────────────────────────────────────────────
@@ -8589,6 +10239,91 @@ async def list_receipts(
     return {"receipts": receipts, "total": total}
 
 
+
+@app.get("/api/receipts/{receipt_id}")
+async def get_receipt(receipt_id: str, user: dict = Depends(get_current_user)):
+    """Get a single receipt by ID."""
+    receipt = await db.receipts.find_one(
+        {"receipt_id": receipt_id, "user_id": user["user_id"]},
+        {"_id": 0, "file_path": 0}
+    )
+    if not receipt:
+        raise HTTPException(status_code=404, detail="Receipt not found")
+    if isinstance(receipt.get("uploaded_at"), datetime):
+        receipt["uploaded_at"] = receipt["uploaded_at"].isoformat()
+    if isinstance(receipt.get("parsed_at"), datetime):
+        receipt["parsed_at"] = receipt["parsed_at"].isoformat()
+    if isinstance(receipt.get("linked_at"), datetime):
+        receipt["linked_at"] = receipt["linked_at"].isoformat()
+    return receipt
+
+
+# --- Endpoint 6.10: DELETE /api/receipts/{receipt_id} ---
+
+@app.delete("/api/receipts/{receipt_id}")
+async def delete_receipt(receipt_id: str, user: dict = Depends(get_current_user)):
+    """Delete a receipt."""
+    receipt = await db.receipts.find_one(
+        {"receipt_id": receipt_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    if not receipt:
+        raise HTTPException(status_code=404, detail="Receipt not found")
+
+    # Delete from GridFS
+    try:
+        await receipt_fs.delete(receipt_id)
+    except Exception:
+        pass
+
+    # Delete local file
+    file_path = receipt.get("file_path", "")
+    if file_path and os.path.isfile(file_path):
+        try:
+            os.remove(file_path)
+        except Exception:
+            pass
+
+    await db.receipts.delete_one({"receipt_id": receipt_id, "user_id": user["user_id"]})
+    return {"message": "Receipt deleted"}
+
+
+# --- Endpoint 6.11: POST /api/receipts/{receipt_id}/link ---
+
+@app.post("/api/receipts/{receipt_id}/link")
+async def link_receipt_to_transaction(receipt_id: str, body: dict = Body(...), user: dict = Depends(get_current_user)):
+    """Link a receipt to a transaction."""
+    receipt = await db.receipts.find_one(
+        {"receipt_id": receipt_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    if not receipt:
+        raise HTTPException(status_code=404, detail="Receipt not found")
+
+    transaction_id = body.get("transaction_id")
+    if not transaction_id:
+        raise HTTPException(status_code=400, detail="transaction_id is required")
+
+    txn = await db.transactions.find_one(
+        {"transaction_id": transaction_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    if not txn:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+
+    now = datetime.now(timezone.utc)
+    await db.receipts.update_one(
+        {"receipt_id": receipt_id, "user_id": user["user_id"]},
+        {"$set": {"transaction_id": transaction_id, "linked_at": now}},
+    )
+    await db.transactions.update_one(
+        {"transaction_id": transaction_id, "user_id": user["user_id"]},
+        {"$set": {"receipt_id": receipt_id}},
+    )
+
+    return {"message": "Receipt linked to transaction", "receipt_id": receipt_id, "transaction_id": transaction_id}
+
+
+# =====================================================================
+
+
 # ─── Amount to Words (INR) Helper ────────────────────────────────────
 
 def amount_to_words_inr(amount: float) -> str:
@@ -8742,6 +10477,35 @@ async def delete_customer(customer_id: str, user: dict = Depends(get_current_use
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Customer not found")
     return {"detail": "Customer deleted"}
+
+
+
+@app.get("/api/customers/{customer_id}/invoices")
+async def get_customer_invoices(
+    customer_id: str,
+    user: dict = Depends(get_current_user),
+    limit: int = 50,
+    skip: int = 0,
+):
+    """Get all invoices for a specific customer."""
+    customer = await db.customers.find_one(
+        {"customer_id": customer_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+
+    invoices = await db.invoices.find(
+        {"customer_id": customer_id, "user_id": user["user_id"]}, {"_id": 0}
+    ).sort("invoice_date", -1).skip(skip).limit(limit).to_list(limit)
+
+    total = await db.invoices.count_documents(
+        {"customer_id": customer_id, "user_id": user["user_id"]}
+    )
+
+    return {"items": invoices, "total": total, "customer_name": customer.get("name")}
+
+
+# =====================================================================
 
 
 # ─── Invoices ─────────────────────────────────────────────────────────
@@ -9215,6 +10979,149 @@ async def record_payment(invoice_id: str, request: Request, user: dict = Depends
     return updated
 
 
+
+@app.get("/api/invoices/next-number")
+async def get_next_invoice_number(user: dict = Depends(get_current_user)):
+    """Preview the next invoice number without consuming it."""
+    settings = await db.user_settings.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    prefix = (settings or {}).get("invoice_prefix", "INV")
+    next_num = (settings or {}).get("invoice_next_number", 1)
+    return {"next_number": f"{prefix}-{next_num:04d}"}
+
+
+@app.get("/api/invoices/stats")
+async def invoice_stats(user: dict = Depends(get_current_user)):
+    """Get invoice statistics for the user."""
+    user_id = user["user_id"]
+    total = await db.invoices.count_documents({"user_id": user_id})
+    paid = await db.invoices.count_documents({"user_id": user_id, "payment_status": "paid"})
+    unpaid = await db.invoices.count_documents({"user_id": user_id, "payment_status": "unpaid"})
+    partial = await db.invoices.count_documents({"user_id": user_id, "payment_status": "partial"})
+
+    invoices = await db.invoices.find(
+        {"user_id": user_id}, {"_id": 0, "grand_total": 1, "amount_paid": 1, "payment_status": 1}
+    ).to_list(10000)
+
+    total_invoiced = sum(i.get("grand_total", 0) for i in invoices)
+    total_received = sum(i.get("amount_paid", 0) for i in invoices)
+    total_outstanding = total_invoiced - total_received
+
+    return {
+        "total": total,
+        "paid": paid,
+        "unpaid": unpaid,
+        "partial": partial,
+        "total_invoiced": round(total_invoiced, 2),
+        "total_received": round(total_received, 2),
+        "total_outstanding": round(total_outstanding, 2),
+    }
+
+
+@app.get("/api/invoices/{invoice_id}/pdf")
+async def get_invoice_pdf(invoice_id: str, user: dict = Depends(get_current_user)):
+    """Generate a PDF for the invoice (returns HTML for now, clients render)."""
+    invoice = await db.invoices.find_one(
+        {"invoice_id": invoice_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+
+    settings = await db.user_settings.find_one({"user_id": user["user_id"]}, {"_id": 0}) or {}
+
+    # Return invoice data with settings for client-side PDF generation
+    return {
+        "invoice": invoice,
+        "settings": {
+            "firm_name": settings.get("firm_name", ""),
+            "firm_address": settings.get("firm_address", ""),
+            "firm_city": settings.get("firm_city", ""),
+            "firm_state": settings.get("firm_state", ""),
+            "firm_pincode": settings.get("firm_pincode", ""),
+            "firm_gstin": settings.get("firm_gstin", ""),
+            "firm_pan": settings.get("firm_pan", ""),
+            "firm_phone": settings.get("firm_phone", ""),
+            "firm_email": settings.get("firm_email", ""),
+            "invoice_bank_name": settings.get("invoice_bank_name", ""),
+            "invoice_bank_account_no": settings.get("invoice_bank_account_no", ""),
+            "invoice_bank_ifsc": settings.get("invoice_bank_ifsc", ""),
+            "invoice_bank_branch": settings.get("invoice_bank_branch", ""),
+            "logo_url": settings.get("logo_url"),
+            "signature_url": settings.get("signature_url"),
+        },
+    }
+
+
+@app.post("/api/invoices/{invoice_id}/mark-paid")
+async def mark_invoice_paid(invoice_id: str, request: Request, user: dict = Depends(get_current_user)):
+    """Mark an invoice as fully paid."""
+    invoice = await db.invoices.find_one(
+        {"invoice_id": invoice_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    if invoice.get("payment_status") == "paid":
+        raise HTTPException(status_code=400, detail="Invoice already paid")
+
+    body = await request.json() if request.headers.get("content-length", "0") != "0" else {}
+    now = datetime.now(timezone.utc)
+    grand_total = invoice.get("grand_total", 0)
+
+    payment_info = {
+        "payment_status": "paid",
+        "amount_paid": grand_total,
+        "payment_account_id": body.get("account_id", invoice.get("payment_account_id")),
+        "payment_method": body.get("payment_method", invoice.get("payment_method")),
+        "payment_date": body.get("date", now.strftime("%Y-%m-%d")),
+        "updated_at": now,
+    }
+
+    # Create transaction if not exists
+    if not invoice.get("transaction_id") and payment_info["payment_account_id"]:
+        inv_for_txn = {**invoice, **payment_info}
+        txn_id = await _auto_post_invoice_transaction(user["user_id"], inv_for_txn, grand_total)
+        payment_info["transaction_id"] = txn_id
+
+    await db.invoices.update_one(
+        {"invoice_id": invoice_id, "user_id": user["user_id"]},
+        {"$set": payment_info},
+    )
+
+    updated = await db.invoices.find_one(
+        {"invoice_id": invoice_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    return updated
+
+
+@app.post("/api/invoices/{invoice_id}/duplicate")
+async def duplicate_invoice(invoice_id: str, user: dict = Depends(get_current_user)):
+    """Create a duplicate of an existing invoice with a new number."""
+    invoice = await db.invoices.find_one(
+        {"invoice_id": invoice_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+
+    now = datetime.now(timezone.utc)
+    new_number = await _get_next_invoice_number(user["user_id"])
+
+    new_invoice = {**invoice}
+    new_invoice["invoice_id"] = uuid.uuid4().hex[:16]
+    new_invoice["invoice_number"] = new_number
+    new_invoice["invoice_date"] = now.strftime("%Y-%m-%d")
+    new_invoice["payment_status"] = "unpaid"
+    new_invoice["amount_paid"] = 0
+    new_invoice["transaction_id"] = None
+    new_invoice["created_at"] = now
+    new_invoice["updated_at"] = now
+
+    await db.invoices.insert_one(new_invoice)
+    del new_invoice["_id"]
+    return new_invoice
+
+
+# =============================================================================
+
+
 # ─── Vendors CRUD ──────────────────────────────────────────────────
 
 @app.post("/api/vendors")
@@ -9309,6 +11216,32 @@ async def delete_vendor(vendor_id: str, user: dict = Depends(get_current_user)):
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Vendor not found")
     return {"detail": "Vendor deleted"}
+
+
+
+@app.get("/api/vendors/{vendor_id}/bills")
+async def get_vendor_bills(
+    vendor_id: str,
+    user: dict = Depends(get_current_user),
+    limit: int = 50,
+    skip: int = 0,
+):
+    """Get all bills for a specific vendor."""
+    vendor = await db.vendors.find_one(
+        {"vendor_id": vendor_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    if not vendor:
+        raise HTTPException(status_code=404, detail="Vendor not found")
+
+    bills = await db.bills.find(
+        {"vendor_id": vendor_id, "user_id": user["user_id"]}, {"_id": 0}
+    ).sort("bill_date", -1).skip(skip).limit(limit).to_list(limit)
+
+    total = await db.bills.count_documents(
+        {"vendor_id": vendor_id, "user_id": user["user_id"]}
+    )
+
+    return {"items": bills, "total": total, "vendor_name": vendor.get("name")}
 
 
 # ─── Purchase Bills ─────────────────────────────────────────────────
@@ -9714,6 +11647,138 @@ async def record_bill_payment(bill_id: str, request: Request, user: dict = Depen
         {"bill_id": bill_id, "user_id": user["user_id"]}, {"_id": 0}
     )
     return updated
+
+
+
+@app.get("/api/bills/next-number")
+async def get_next_bill_number(user: dict = Depends(get_current_user)):
+    """Preview the next bill number without consuming it."""
+    settings = await db.user_settings.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    prefix = (settings or {}).get("bill_prefix", "BILL")
+    next_num = (settings or {}).get("bill_next_number", 1)
+    return {"next_number": f"{prefix}-{next_num:04d}"}
+
+
+@app.get("/api/bills/stats")
+async def bill_stats(user: dict = Depends(get_current_user)):
+    """Get bill statistics for the user."""
+    user_id = user["user_id"]
+    total = await db.bills.count_documents({"user_id": user_id})
+    paid = await db.bills.count_documents({"user_id": user_id, "payment_status": "paid"})
+    unpaid = await db.bills.count_documents({"user_id": user_id, "payment_status": "unpaid"})
+    partial = await db.bills.count_documents({"user_id": user_id, "payment_status": "partial"})
+
+    bills = await db.bills.find(
+        {"user_id": user_id}, {"_id": 0, "grand_total": 1, "amount_paid": 1, "payment_status": 1}
+    ).to_list(10000)
+
+    total_billed = sum(b.get("grand_total", 0) for b in bills)
+    total_paid = sum(b.get("amount_paid", 0) for b in bills)
+    total_outstanding = total_billed - total_paid
+
+    return {
+        "total": total,
+        "paid": paid,
+        "unpaid": unpaid,
+        "partial": partial,
+        "total_billed": round(total_billed, 2),
+        "total_paid": round(total_paid, 2),
+        "total_outstanding": round(total_outstanding, 2),
+    }
+
+
+@app.get("/api/bills/{bill_id}/pdf")
+async def get_bill_pdf(bill_id: str, user: dict = Depends(get_current_user)):
+    """Return bill data with settings for client-side PDF generation."""
+    bill = await db.bills.find_one(
+        {"bill_id": bill_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    if not bill:
+        raise HTTPException(status_code=404, detail="Bill not found")
+
+    settings = await db.user_settings.find_one({"user_id": user["user_id"]}, {"_id": 0}) or {}
+
+    return {
+        "bill": bill,
+        "settings": {
+            "firm_name": settings.get("firm_name", ""),
+            "firm_address": settings.get("firm_address", ""),
+            "firm_city": settings.get("firm_city", ""),
+            "firm_state": settings.get("firm_state", ""),
+            "firm_pincode": settings.get("firm_pincode", ""),
+            "firm_gstin": settings.get("firm_gstin", ""),
+            "firm_pan": settings.get("firm_pan", ""),
+            "logo_url": settings.get("logo_url"),
+        },
+    }
+
+
+@app.post("/api/bills/{bill_id}/mark-paid")
+async def mark_bill_paid(bill_id: str, request: Request, user: dict = Depends(get_current_user)):
+    """Mark a bill as fully paid."""
+    bill = await db.bills.find_one(
+        {"bill_id": bill_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    if not bill:
+        raise HTTPException(status_code=404, detail="Bill not found")
+    if bill.get("payment_status") == "paid":
+        raise HTTPException(status_code=400, detail="Bill already paid")
+
+    body = await request.json() if request.headers.get("content-length", "0") != "0" else {}
+    now = datetime.now(timezone.utc)
+    grand_total = bill.get("grand_total", 0)
+
+    payment_info = {
+        "payment_status": "paid",
+        "amount_paid": grand_total,
+        "payment_account_id": body.get("account_id", bill.get("payment_account_id")),
+        "payment_method": body.get("payment_method", bill.get("payment_method")),
+        "payment_date": body.get("date", now.strftime("%Y-%m-%d")),
+        "updated_at": now,
+    }
+
+    # Create transaction if not exists
+    if not bill.get("transaction_id") and payment_info["payment_account_id"]:
+        bill_for_txn = {**bill, **payment_info}
+        txn_id = await _auto_post_bill_transaction(user["user_id"], bill_for_txn, grand_total)
+        payment_info["transaction_id"] = txn_id
+
+    await db.bills.update_one(
+        {"bill_id": bill_id, "user_id": user["user_id"]},
+        {"$set": payment_info},
+    )
+
+    updated = await db.bills.find_one(
+        {"bill_id": bill_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    return updated
+
+
+@app.post("/api/bills/{bill_id}/duplicate")
+async def duplicate_bill(bill_id: str, user: dict = Depends(get_current_user)):
+    """Create a duplicate of an existing bill with a new number."""
+    bill = await db.bills.find_one(
+        {"bill_id": bill_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    if not bill:
+        raise HTTPException(status_code=404, detail="Bill not found")
+
+    now = datetime.now(timezone.utc)
+    new_number = await _get_next_bill_number(user["user_id"])
+
+    new_bill = {**bill}
+    new_bill["bill_id"] = uuid.uuid4().hex[:16]
+    new_bill["bill_number"] = new_number
+    new_bill["bill_date"] = now.strftime("%Y-%m-%d")
+    new_bill["payment_status"] = "unpaid"
+    new_bill["amount_paid"] = 0
+    new_bill["transaction_id"] = None
+    new_bill["created_at"] = now
+    new_bill["updated_at"] = now
+
+    await db.bills.insert_one(new_bill)
+    del new_bill["_id"]
+    return new_bill
 
 
 # ─── Health Check ────────────────────────────────────────────────────
