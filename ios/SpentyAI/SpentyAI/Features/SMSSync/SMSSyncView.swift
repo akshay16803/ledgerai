@@ -210,7 +210,7 @@ struct SMSSyncView: View {
                     if viewModel.isLoadingStats {
                         ProgressView()
                             .controlSize(.small)
-                            .tint(.spentyPrimary)
+                            .tint(Color.spentyPrimary)
                     }
                 }
 
@@ -252,7 +252,7 @@ struct SMSSyncView: View {
                             if viewModel.isRetrying {
                                 ProgressView()
                                     .controlSize(.small)
-                                    .tint(.spentyPrimary)
+                                    .tint(Color.spentyPrimary)
                             } else {
                                 Image(systemName: "arrow.clockwise")
                             }
@@ -282,7 +282,7 @@ struct SMSSyncView: View {
                         if viewModel.isDetectingMandates {
                             ProgressView()
                                 .controlSize(.small)
-                                .tint(.spentyPrimary)
+                                .tint(Color.spentyPrimary)
                         } else {
                             Image(systemName: "repeat.circle")
                         }

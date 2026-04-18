@@ -67,7 +67,7 @@ struct PurchaseFormView: View {
                         Task { await save() }
                     }
                     .fontWeight(.semibold)
-                    .foregroundStyle(.spentyPrimary)
+                    .foregroundStyle(Color.spentyPrimary)
                     .disabled(isSaving)
                 }
             }
@@ -90,11 +90,11 @@ struct PurchaseFormView: View {
         Section {
             HStack {
                 Text("Bill Number")
-                    .foregroundStyle(.spentyTextSecondary)
+                    .foregroundStyle(Color.spentyTextSecondary)
                 Spacer()
                 TextField("Auto", text: $billNumber)
                     .multilineTextAlignment(.trailing)
-                    .foregroundStyle(.spentyTextPrimary)
+                    .foregroundStyle(Color.spentyTextPrimary)
             }
         } header: {
             Text("Bill Details")
@@ -107,7 +107,7 @@ struct PurchaseFormView: View {
         Section {
             if viewModel.vendors.isEmpty {
                 TextField("Vendor Name *", text: $vendorName)
-                    .foregroundStyle(.spentyTextPrimary)
+                    .foregroundStyle(Color.spentyTextPrimary)
             } else {
                 Picker("Vendor", selection: $selectedVendorId) {
                     Text("Select Vendor").tag(nil as String?)
@@ -123,13 +123,13 @@ struct PurchaseFormView: View {
 
                 TextField("Or enter name manually", text: $vendorName)
                     .font(SpentyFonts.subheadline)
-                    .foregroundStyle(.spentyTextSecondary)
+                    .foregroundStyle(Color.spentyTextSecondary)
             }
 
             if showValidation && vendorName.trimmingCharacters(in: .whitespaces).isEmpty {
                 Text("Vendor name is required.")
                     .font(SpentyFonts.caption1)
-                    .foregroundStyle(.spentyError)
+                    .foregroundStyle(Color.spentyError)
             }
         } header: {
             Text("Vendor")
@@ -141,10 +141,10 @@ struct PurchaseFormView: View {
     private var datesSection: some View {
         Section {
             DatePicker("Bill Date", selection: $date, displayedComponents: .date)
-                .foregroundStyle(.spentyTextPrimary)
+                .foregroundStyle(Color.spentyTextPrimary)
 
             DatePicker("Due Date", selection: $dueDate, displayedComponents: .date)
-                .foregroundStyle(.spentyTextPrimary)
+                .foregroundStyle(Color.spentyTextPrimary)
         } header: {
             Text("Dates")
         }
@@ -169,7 +169,7 @@ struct PurchaseFormView: View {
             } label: {
                 Label("Add Line Item", systemImage: "plus.circle.fill")
                     .font(SpentyFonts.subheadline)
-                    .foregroundStyle(.spentyPrimary)
+                    .foregroundStyle(Color.spentyPrimary)
             }
         } header: {
             Text("Line Items")
@@ -183,13 +183,13 @@ struct PurchaseFormView: View {
 
             TextField("HSN/SAC Code", text: item.hsnSac)
                 .font(SpentyFonts.caption1)
-                .foregroundStyle(.spentyTextSecondary)
+                .foregroundStyle(Color.spentyTextSecondary)
 
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Qty")
                         .font(SpentyFonts.caption2)
-                        .foregroundStyle(.spentyTextSecondary)
+                        .foregroundStyle(Color.spentyTextSecondary)
                     TextField("1", value: item.quantity, format: .number)
                         .keyboardType(.decimalPad)
                         .font(SpentyFonts.subheadline)
@@ -199,7 +199,7 @@ struct PurchaseFormView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Rate")
                         .font(SpentyFonts.caption2)
-                        .foregroundStyle(.spentyTextSecondary)
+                        .foregroundStyle(Color.spentyTextSecondary)
                     TextField("0", value: item.rate, format: .number)
                         .keyboardType(.decimalPad)
                         .font(SpentyFonts.subheadline)
@@ -209,7 +209,7 @@ struct PurchaseFormView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Tax %")
                         .font(SpentyFonts.caption2)
-                        .foregroundStyle(.spentyTextSecondary)
+                        .foregroundStyle(Color.spentyTextSecondary)
                     TextField("0", value: item.taxRate, format: .number)
                         .keyboardType(.decimalPad)
                         .font(SpentyFonts.subheadline)
@@ -221,11 +221,11 @@ struct PurchaseFormView: View {
                 VStack(alignment: .trailing, spacing: 2) {
                     Text("Amount")
                         .font(SpentyFonts.caption2)
-                        .foregroundStyle(.spentyTextSecondary)
+                        .foregroundStyle(Color.spentyTextSecondary)
                     Text(formatCurrency(item.wrappedValue.computedAmount))
                         .font(SpentyFonts.subheadline)
                         .fontWeight(.medium)
-                        .foregroundStyle(.spentyTextPrimary)
+                        .foregroundStyle(Color.spentyTextPrimary)
                 }
             }
 
@@ -240,30 +240,30 @@ struct PurchaseFormView: View {
         Section {
             HStack {
                 Text("Subtotal")
-                    .foregroundStyle(.spentyTextSecondary)
+                    .foregroundStyle(Color.spentyTextSecondary)
                 Spacer()
                 Text(formatCurrency(subtotal))
                     .font(SpentyFonts.subheadline)
-                    .foregroundStyle(.spentyTextPrimary)
+                    .foregroundStyle(Color.spentyTextPrimary)
             }
 
             HStack {
                 Text("Tax")
-                    .foregroundStyle(.spentyTextSecondary)
+                    .foregroundStyle(Color.spentyTextSecondary)
                 Spacer()
                 Text(formatCurrency(taxAmount))
                     .font(SpentyFonts.subheadline)
-                    .foregroundStyle(.spentyTextPrimary)
+                    .foregroundStyle(Color.spentyTextPrimary)
             }
 
             HStack {
                 Text("Grand Total")
                     .font(SpentyFonts.headline)
-                    .foregroundStyle(.spentyTextPrimary)
+                    .foregroundStyle(Color.spentyTextPrimary)
                 Spacer()
                 Text(formatCurrency(grandTotal))
                     .font(SpentyFonts.amountSmall)
-                    .foregroundStyle(.spentyPrimary)
+                    .foregroundStyle(Color.spentyPrimary)
             }
         } header: {
             Text("Totals")
@@ -276,7 +276,7 @@ struct PurchaseFormView: View {
         Section {
             TextField("Notes (optional)", text: $notes, axis: .vertical)
                 .lineLimit(2...5)
-                .foregroundStyle(.spentyTextPrimary)
+                .foregroundStyle(Color.spentyTextPrimary)
         } header: {
             Text("Notes")
         }

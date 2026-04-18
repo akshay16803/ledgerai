@@ -18,7 +18,7 @@ struct PurchaseListView: View {
                 Group {
                     if viewModel.isLoading && viewModel.bills.isEmpty {
                         ProgressView()
-                            .tint(.spentyPrimary)
+                            .tint(Color.spentyPrimary)
                     } else if viewModel.filteredBills.isEmpty {
                         emptyState
                     } else {
@@ -35,7 +35,7 @@ struct PurchaseListView: View {
                             viewModel.startUpload()
                         } label: {
                             Image(systemName: "doc.text.viewfinder")
-                                .foregroundStyle(.spentyPrimary)
+                                .foregroundStyle(Color.spentyPrimary)
                         }
 
                         Button {
@@ -43,7 +43,7 @@ struct PurchaseListView: View {
                         } label: {
                             Image(systemName: "plus")
                                 .fontWeight(.semibold)
-                                .foregroundStyle(.spentyPrimary)
+                                .foregroundStyle(Color.spentyPrimary)
                         }
                     }
                 }
@@ -126,25 +126,25 @@ struct PurchaseListView: View {
                     label: "Total Billed",
                     value: formatCurrency(viewModel.stats?.totalBilled ?? 0),
                     icon: "doc.text.fill",
-                    color: .spentyPrimary
+                    color: Color.spentyPrimary
                 )
                 StatCard(
                     label: "Paid",
                     value: formatCurrency(viewModel.stats?.totalPaid ?? 0),
                     icon: "checkmark.circle.fill",
-                    color: .spentySuccess
+                    color: Color.spentySuccess
                 )
                 StatCard(
                     label: "Outstanding",
                     value: formatCurrency(viewModel.stats?.totalOutstanding ?? 0),
                     icon: "clock.fill",
-                    color: .spentyWarning
+                    color: Color.spentyWarning
                 )
                 StatCard(
                     label: "Overdue",
                     value: formatCurrency(viewModel.stats?.totalOverdue ?? 0),
                     icon: "exclamationmark.triangle.fill",
-                    color: .spentyError
+                    color: Color.spentyError
                 )
             }
             .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
@@ -167,7 +167,7 @@ struct PurchaseListView: View {
                             Text(option.capitalized)
                                 .font(SpentyFonts.caption1)
                                 .fontWeight(.medium)
-                                .foregroundStyle(viewModel.statusFilter == option ? .white : .spentyTextPrimary)
+                                .foregroundStyle(viewModel.statusFilter == option ? .white : Color.spentyTextPrimary)
                                 .padding(.horizontal, 14)
                                 .padding(.vertical, 7)
                                 .background(
@@ -209,7 +209,7 @@ struct PurchaseListView: View {
                         } label: {
                             Label("Edit", systemImage: "pencil")
                         }
-                        .tint(.spentyInfo)
+                        .tint(Color.spentyInfo)
                     }
                     .swipeActions(edge: .leading, allowsFullSwipe: false) {
                         if bill.paymentStatus?.lowercased() != "paid" {
@@ -218,7 +218,7 @@ struct PurchaseListView: View {
                             } label: {
                                 Label("Mark Paid", systemImage: "checkmark.circle")
                             }
-                            .tint(.spentySuccess)
+                            .tint(Color.spentySuccess)
                         }
 
                         Button {
@@ -226,7 +226,7 @@ struct PurchaseListView: View {
                         } label: {
                             Label("Duplicate", systemImage: "doc.on.doc")
                         }
-                        .tint(.spentyWarning)
+                        .tint(Color.spentyWarning)
                     }
                     .listRowBackground(Color.spentyCardBg)
             }
@@ -244,11 +244,11 @@ struct PurchaseListView: View {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(bill.billNumber ?? "Draft")
                             .font(SpentyFonts.headline)
-                            .foregroundStyle(.spentyTextPrimary)
+                            .foregroundStyle(Color.spentyTextPrimary)
 
                         Text(bill.vendorName ?? "Unknown Vendor")
                             .font(SpentyFonts.subheadline)
-                            .foregroundStyle(.spentyTextSecondary)
+                            .foregroundStyle(Color.spentyTextSecondary)
                     }
 
                     Spacer()
@@ -256,7 +256,7 @@ struct PurchaseListView: View {
                     VStack(alignment: .trailing, spacing: 3) {
                         Text(formatCurrency(bill.grandTotal ?? 0))
                             .font(SpentyFonts.amountSmall)
-                            .foregroundStyle(.spentyTextPrimary)
+                            .foregroundStyle(Color.spentyTextPrimary)
 
                         StatusBadge(status: bill.paymentStatus ?? "unpaid")
                     }
@@ -265,7 +265,7 @@ struct PurchaseListView: View {
                 HStack(spacing: 16) {
                     Label(formatDate(bill.date), systemImage: "calendar")
                         .font(SpentyFonts.caption1)
-                        .foregroundStyle(.spentyTextSecondary)
+                        .foregroundStyle(Color.spentyTextSecondary)
 
                     if let dueDate = bill.dueDate {
                         Label("Due: \(formatDate(dueDate))", systemImage: "clock")
@@ -287,11 +287,11 @@ struct PurchaseListView: View {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(creditor.vendorName ?? "Unknown")
                             .font(SpentyFonts.subheadline)
-                            .foregroundStyle(.spentyTextPrimary)
+                            .foregroundStyle(Color.spentyTextPrimary)
 
                         Text("Owed: \(formatCurrency(creditor.outstanding ?? 0))")
                             .font(SpentyFonts.caption1)
-                            .foregroundStyle(.spentyError)
+                            .foregroundStyle(Color.spentyError)
                     }
 
                     Spacer()
@@ -299,11 +299,11 @@ struct PurchaseListView: View {
                     VStack(alignment: .trailing, spacing: 3) {
                         Text(formatCurrency(creditor.totalOwed ?? 0))
                             .font(SpentyFonts.footnote)
-                            .foregroundStyle(.spentyTextSecondary)
+                            .foregroundStyle(Color.spentyTextSecondary)
 
                         Text("Paid: \(formatCurrency(creditor.totalPaid ?? 0))")
                             .font(SpentyFonts.caption1)
-                            .foregroundStyle(.spentySuccess)
+                            .foregroundStyle(Color.spentySuccess)
                     }
                 }
                 .padding(.vertical, 2)
@@ -322,18 +322,18 @@ struct PurchaseListView: View {
                 HStack {
                     Text(bucket.bucket ?? "N/A")
                         .font(SpentyFonts.subheadline)
-                        .foregroundStyle(.spentyTextPrimary)
+                        .foregroundStyle(Color.spentyTextPrimary)
 
                     Spacer()
 
                     VStack(alignment: .trailing, spacing: 2) {
                         Text(formatCurrency(bucket.amount ?? 0))
                             .font(SpentyFonts.amountSmall)
-                            .foregroundStyle(.spentyTextPrimary)
+                            .foregroundStyle(Color.spentyTextPrimary)
 
                         Text("\(bucket.count ?? 0) bills")
                             .font(SpentyFonts.caption1)
-                            .foregroundStyle(.spentyTextSecondary)
+                            .foregroundStyle(Color.spentyTextSecondary)
                     }
                 }
                 .padding(.vertical, 2)
@@ -356,13 +356,13 @@ struct PurchaseListView: View {
 
             Text("No Bills Yet")
                 .font(SpentyFonts.title3)
-                .foregroundStyle(.spentyTextPrimary)
+                .foregroundStyle(Color.spentyTextPrimary)
 
             Text(viewModel.searchText.isEmpty
                  ? "Tap + to create your first purchase bill, or upload one to parse."
                  : "No bills match your search.")
                 .font(SpentyFonts.subheadline)
-                .foregroundStyle(.spentyTextSecondary)
+                .foregroundStyle(Color.spentyTextSecondary)
                 .multilineTextAlignment(.center)
 
             if viewModel.searchText.isEmpty {
@@ -383,7 +383,7 @@ struct PurchaseListView: View {
                     } label: {
                         Label("Upload", systemImage: "doc.text.viewfinder")
                             .font(SpentyFonts.headline)
-                            .foregroundStyle(.spentyPrimary)
+                            .foregroundStyle(Color.spentyPrimary)
                             .padding(.horizontal, 20)
                             .padding(.vertical, 12)
                             .background(Color.spentyPrimary.opacity(0.1), in: RoundedRectangle(cornerRadius: 12, style: .continuous))

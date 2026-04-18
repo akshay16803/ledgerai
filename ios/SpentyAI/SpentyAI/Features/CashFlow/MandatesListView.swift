@@ -92,7 +92,7 @@ struct MandatesListView: View {
                                 Label(isActive ? "Pause" : "Resume",
                                       systemImage: isActive ? "pause.circle" : "play.circle")
                             }
-                            .tint(.spentyWarning)
+                            .tint(Color.spentyWarning)
                         }
 
                     if mandate.id != viewModel.mandates.last?.id {

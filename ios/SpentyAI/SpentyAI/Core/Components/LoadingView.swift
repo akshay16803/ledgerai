@@ -7,7 +7,7 @@ struct LoadingView: View {
         VStack(spacing: 16) {
             ProgressView()
                 .controlSize(.large)
-                .tint(.spentyPrimary)
+                .tint(Color.spentyPrimary)
             if let message {
                 Text(message)
                     .font(SpentyFonts.subheadline)

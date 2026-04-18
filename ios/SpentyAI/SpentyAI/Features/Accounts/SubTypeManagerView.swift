@@ -189,7 +189,7 @@ struct SubTypeManagerView: View {
                     } label: {
                         Label("Edit", systemImage: "pencil")
                     }
-                    .tint(.spentyInfo)
+                    .tint(Color.spentyInfo)
                 }
             }
         }

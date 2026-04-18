@@ -319,7 +319,7 @@ struct AccountDetailView: View {
             if viewModel.amortizationSchedule.isEmpty {
                 VStack(spacing: 8) {
                     ProgressView()
-                        .tint(.spentyPrimary)
+                        .tint(Color.spentyPrimary)
                     Text("Loading schedule...")
                         .font(SpentyFonts.subheadline)
                         .foregroundColor(.spentyTextSecondary)

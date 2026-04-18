@@ -73,7 +73,7 @@ struct TransactionLedgerView: View {
                         HStack {
                             Spacer()
                             ProgressView()
-                                .tint(.spentyPrimary)
+                                .tint(Color.spentyPrimary)
                                 .padding()
                             Spacer()
                         }

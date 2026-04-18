@@ -135,7 +135,7 @@ struct StatementDetailView: View {
                     }
                     ProgressView(value: progress)
                         .progressViewStyle(.linear)
-                        .tint(.spentyPrimary)
+                        .tint(Color.spentyPrimary)
 
                     if let label = statement.processingStageLabel {
                         Text(label)

@@ -262,7 +262,7 @@ struct TransactionFormView: View {
                         .foregroundColor(.spentyTextPrimary)
                 }
             }
-            .tint(.spentyPrimary)
+            .tint(Color.spentyPrimary)
 
             if isRecurring {
                 Picker("Frequency", selection: $recurringFrequency) {

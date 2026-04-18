@@ -209,7 +209,7 @@ struct RecordsView: View {
                 if viewModel.isDownloadingZip {
                     ProgressView()
                         .controlSize(.mini)
-                        .tint(.spentyPrimary)
+                        .tint(Color.spentyPrimary)
                 } else {
                     Image(systemName: "arrow.down.doc.fill")
                         .font(.system(size: 12))
@@ -359,7 +359,7 @@ struct RecordsView: View {
                         HStack {
                             Spacer()
                             ProgressView()
-                                .tint(.spentyPrimary)
+                                .tint(Color.spentyPrimary)
                             Spacer()
                         }
                         .listRowBackground(Color.clear)
@@ -487,7 +487,7 @@ struct RecordsView: View {
                                 } label: {
                                     Label("Download", systemImage: "arrow.down.circle")
                                 }
-                                .tint(.spentyInfo)
+                                .tint(Color.spentyInfo)
                             }
                             .onAppear {
                                 if receipt.id == viewModel.receipts.last?.id {
@@ -500,7 +500,7 @@ struct RecordsView: View {
                         HStack {
                             Spacer()
                             ProgressView()
-                                .tint(.spentyPrimary)
+                                .tint(Color.spentyPrimary)
                             Spacer()
                         }
                         .listRowBackground(Color.clear)

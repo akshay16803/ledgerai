@@ -64,7 +64,7 @@ struct DematUploadView: View {
             VStack(spacing: 10) {
                 if viewModel.isUploadingDemat {
                     ProgressView()
-                        .tint(.spentyPrimary)
+                        .tint(Color.spentyPrimary)
                     Text("Uploading...")
                         .font(SpentyFonts.subheadline)
                         .foregroundColor(.spentyTextSecondary)
@@ -104,7 +104,7 @@ struct DematUploadView: View {
                 HStack {
                     Spacer()
                     ProgressView()
-                        .tint(.spentyPrimary)
+                        .tint(Color.spentyPrimary)
                     Spacer()
                 }
                 .padding(.vertical, 24)

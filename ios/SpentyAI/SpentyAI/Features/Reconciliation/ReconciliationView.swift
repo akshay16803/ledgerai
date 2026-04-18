@@ -150,7 +150,7 @@ struct ReconciliationView: View {
         VStack(alignment: .trailing, spacing: 2) {
             ProgressView(value: progress)
                 .progressViewStyle(.linear)
-                .tint(.spentyPrimary)
+                .tint(Color.spentyPrimary)
                 .frame(width: 80)
 
             if let label {

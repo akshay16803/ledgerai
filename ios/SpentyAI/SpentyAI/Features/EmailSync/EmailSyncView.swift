@@ -91,7 +91,7 @@ struct EmailSyncView: View {
                         HStack(spacing: 6) {
                             ProgressView()
                                 .controlSize(.small)
-                                .tint(.spentyPrimary)
+                                .tint(Color.spentyPrimary)
                             Text("Syncing...")
                                 .font(SpentyFonts.caption1)
                                 .foregroundColor(.spentyPrimary)
@@ -182,7 +182,7 @@ struct EmailSyncView: View {
                     if viewModel.isConnecting {
                         ProgressView()
                             .controlSize(.small)
-                            .tint(.spentyPrimary)
+                            .tint(Color.spentyPrimary)
                     } else {
                         Image(systemName: "plus.circle.fill")
                     }
@@ -235,7 +235,7 @@ struct EmailSyncView: View {
                     if viewModel.isConnecting {
                         ProgressView()
                             .controlSize(.small)
-                            .tint(.spentyPrimary)
+                            .tint(Color.spentyPrimary)
                     } else {
                         Image(systemName: "plus.circle.fill")
                     }
@@ -272,7 +272,7 @@ struct EmailSyncView: View {
                     HStack(spacing: 4) {
                         ProgressView()
                             .controlSize(.mini)
-                            .tint(.spentyPrimary)
+                            .tint(Color.spentyPrimary)
                         Text("Syncing")
                             .font(SpentyFonts.caption2)
                             .foregroundColor(.spentyPrimary)
@@ -446,7 +446,7 @@ struct EmailSyncView: View {
                             if viewModel.isRetrying {
                                 ProgressView()
                                     .controlSize(.small)
-                                    .tint(.spentyPrimary)
+                                    .tint(Color.spentyPrimary)
                             } else {
                                 Image(systemName: "arrow.clockwise")
                             }

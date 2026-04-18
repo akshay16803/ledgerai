@@ -63,7 +63,7 @@ struct MainTabView: View {
             }
             .tag(Tab.more)
         }
-        .tint(.spentyPrimary)
+        .tint(Color.spentyPrimary)
     }
 }
 

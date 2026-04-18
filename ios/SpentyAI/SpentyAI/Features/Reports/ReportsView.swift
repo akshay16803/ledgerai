@@ -36,7 +36,7 @@ struct ReportsView: View {
             .overlay {
                 if vm.isLoading && !vm.hasData {
                     ProgressView()
-                        .tint(.spentyPrimary)
+                        .tint(Color.spentyPrimary)
                 }
             }
             .alert("Error", isPresented: $vm.showError) {
@@ -105,7 +105,7 @@ struct ReportsView: View {
                     .foregroundColor(.spentyTextSecondary)
                 DatePicker("", selection: $vm.startDate, displayedComponents: .date)
                     .labelsHidden()
-                    .tint(.spentyPrimary)
+                    .tint(Color.spentyPrimary)
             }
 
             VStack(alignment: .leading, spacing: 4) {
@@ -114,7 +114,7 @@ struct ReportsView: View {
                     .foregroundColor(.spentyTextSecondary)
                 DatePicker("", selection: $vm.endDate, displayedComponents: .date)
                     .labelsHidden()
-                    .tint(.spentyPrimary)
+                    .tint(Color.spentyPrimary)
             }
 
             Spacer()
@@ -299,7 +299,7 @@ struct ReportsView: View {
                 HStack {
                     if vm.isExporting {
                         ProgressView()
-                            .tint(.spentyPrimary)
+                            .tint(Color.spentyPrimary)
                             .scaleEffect(0.8)
                     } else {
                         Image(systemName: "tablecells")

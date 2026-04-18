@@ -72,11 +72,11 @@ struct BillUploadParserView: View {
 
             Text("Upload a Bill")
                 .font(SpentyFonts.title3)
-                .foregroundStyle(.spentyTextPrimary)
+                .foregroundStyle(Color.spentyTextPrimary)
 
             Text("Upload a photo or PDF of a purchase bill. AI will extract the vendor, items, and amounts automatically.")
                 .font(SpentyFonts.subheadline)
-                .foregroundStyle(.spentyTextSecondary)
+                .foregroundStyle(Color.spentyTextSecondary)
                 .multilineTextAlignment(.center)
 
             VStack(spacing: 12) {
@@ -107,21 +107,21 @@ struct BillUploadParserView: View {
         VStack(spacing: 16) {
             ProgressView()
                 .scaleEffect(1.3)
-                .tint(.spentyPrimary)
+                .tint(Color.spentyPrimary)
 
             Text("Parsing bill...")
                 .font(SpentyFonts.headline)
-                .foregroundStyle(.spentyTextPrimary)
+                .foregroundStyle(Color.spentyTextPrimary)
 
             Text("AI is extracting data from your bill. This may take a moment.")
                 .font(SpentyFonts.subheadline)
-                .foregroundStyle(.spentyTextSecondary)
+                .foregroundStyle(Color.spentyTextSecondary)
                 .multilineTextAlignment(.center)
 
             if let name = uploadedFileName {
                 Text(name)
                     .font(SpentyFonts.caption1)
-                    .foregroundStyle(.spentyTextSecondary)
+                    .foregroundStyle(Color.spentyTextSecondary)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 4)
                     .background(Color.spentyBorder.opacity(0.5))
@@ -137,12 +137,12 @@ struct BillUploadParserView: View {
         VStack(spacing: 16) {
             HStack {
                 Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(.spentySuccess)
+                    .foregroundStyle(Color.spentySuccess)
                     .font(.title2)
 
                 Text("Bill Parsed Successfully")
                     .font(SpentyFonts.headline)
-                    .foregroundStyle(.spentyTextPrimary)
+                    .foregroundStyle(Color.spentyTextPrimary)
             }
 
             VStack(spacing: 0) {
@@ -171,24 +171,24 @@ struct BillUploadParserView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Line Items (\(items.count))")
                         .font(SpentyFonts.headline)
-                        .foregroundStyle(.spentyTextPrimary)
+                        .foregroundStyle(Color.spentyTextPrimary)
 
                     ForEach(Array(items.enumerated()), id: \.offset) { _, item in
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(item.description ?? "Item")
                                     .font(SpentyFonts.subheadline)
-                                    .foregroundStyle(.spentyTextPrimary)
+                                    .foregroundStyle(Color.spentyTextPrimary)
 
                                 if let hsnSac = item.hsnSac, !hsnSac.isEmpty {
                                     Text("HSN/SAC: \(hsnSac)")
                                         .font(SpentyFonts.caption1)
-                                        .foregroundStyle(.spentyTextSecondary)
+                                        .foregroundStyle(Color.spentyTextSecondary)
                                 }
 
                                 Text("\(formatNumber(item.quantity ?? 1)) x \(formatCurrency(item.rate ?? 0))")
                                     .font(SpentyFonts.caption1)
-                                    .foregroundStyle(.spentyTextSecondary)
+                                    .foregroundStyle(Color.spentyTextSecondary)
                             }
 
                             Spacer()
@@ -196,7 +196,7 @@ struct BillUploadParserView: View {
                             Text(formatCurrency(item.amount ?? 0))
                                 .font(SpentyFonts.subheadline)
                                 .fontWeight(.medium)
-                                .foregroundStyle(.spentyTextPrimary)
+                                .foregroundStyle(Color.spentyTextPrimary)
                         }
                         .padding(.vertical, 6)
 
@@ -238,14 +238,14 @@ struct BillUploadParserView: View {
         HStack {
             Text(label)
                 .font(highlight ? SpentyFonts.headline : SpentyFonts.subheadline)
-                .foregroundStyle(.spentyTextSecondary)
+                .foregroundStyle(Color.spentyTextSecondary)
 
             Spacer()
 
             Text(value ?? "--")
                 .font(highlight ? SpentyFonts.amountSmall : SpentyFonts.subheadline)
                 .fontWeight(highlight ? .semibold : .regular)
-                .foregroundStyle(highlight ? .spentyPrimary : .spentyTextPrimary)
+                .foregroundStyle(highlight ? Color.spentyPrimary : Color.spentyTextPrimary)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)

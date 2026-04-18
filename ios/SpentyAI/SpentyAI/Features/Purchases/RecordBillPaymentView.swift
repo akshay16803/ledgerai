@@ -56,7 +56,7 @@ struct RecordBillPaymentView: View {
                         Task { await save() }
                     }
                     .fontWeight(.semibold)
-                    .foregroundStyle(.spentyPrimary)
+                    .foregroundStyle(Color.spentyPrimary)
                     .disabled(isSaving)
                 }
             }
@@ -73,47 +73,47 @@ struct RecordBillPaymentView: View {
         Section {
             HStack {
                 Text("Bill")
-                    .foregroundStyle(.spentyTextSecondary)
+                    .foregroundStyle(Color.spentyTextSecondary)
                 Spacer()
                 Text(bill.billNumber ?? "Draft")
                     .font(SpentyFonts.headline)
-                    .foregroundStyle(.spentyTextPrimary)
+                    .foregroundStyle(Color.spentyTextPrimary)
             }
 
             HStack {
                 Text("Vendor")
-                    .foregroundStyle(.spentyTextSecondary)
+                    .foregroundStyle(Color.spentyTextSecondary)
                 Spacer()
                 Text(bill.vendorName ?? "--")
-                    .foregroundStyle(.spentyTextPrimary)
+                    .foregroundStyle(Color.spentyTextPrimary)
             }
 
             HStack {
                 Text("Bill Total")
-                    .foregroundStyle(.spentyTextSecondary)
+                    .foregroundStyle(Color.spentyTextSecondary)
                 Spacer()
                 Text(formatCurrency(bill.grandTotal ?? 0))
                     .font(SpentyFonts.amountSmall)
-                    .foregroundStyle(.spentyTextPrimary)
+                    .foregroundStyle(Color.spentyTextPrimary)
             }
 
             HStack {
                 Text("Amount Paid")
-                    .foregroundStyle(.spentyTextSecondary)
+                    .foregroundStyle(Color.spentyTextSecondary)
                 Spacer()
                 Text(formatCurrency(bill.amountPaid ?? 0))
                     .font(SpentyFonts.subheadline)
-                    .foregroundStyle(.spentySuccess)
+                    .foregroundStyle(Color.spentySuccess)
             }
 
             HStack {
                 Text("Balance Due")
                     .font(SpentyFonts.headline)
-                    .foregroundStyle(.spentyTextPrimary)
+                    .foregroundStyle(Color.spentyTextPrimary)
                 Spacer()
                 Text(formatCurrency(balanceDue))
                     .font(SpentyFonts.amountSmall)
-                    .foregroundStyle(.spentyError)
+                    .foregroundStyle(Color.spentyError)
             }
         } header: {
             Text("Bill Summary")
@@ -126,13 +126,13 @@ struct RecordBillPaymentView: View {
         Section {
             HStack {
                 Text("Amount")
-                    .foregroundStyle(.spentyTextSecondary)
+                    .foregroundStyle(Color.spentyTextSecondary)
                 Spacer()
                 TextField("0", value: $amount, format: .number)
                     .keyboardType(.decimalPad)
                     .multilineTextAlignment(.trailing)
                     .font(SpentyFonts.amountSmall)
-                    .foregroundStyle(.spentyTextPrimary)
+                    .foregroundStyle(Color.spentyTextPrimary)
                     .frame(width: 120)
             }
 
@@ -141,11 +141,11 @@ struct RecordBillPaymentView: View {
                      ? "Amount must be greater than zero."
                      : "Amount cannot exceed the balance due.")
                     .font(SpentyFonts.caption1)
-                    .foregroundStyle(.spentyError)
+                    .foregroundStyle(Color.spentyError)
             }
 
             DatePicker("Payment Date", selection: $date, displayedComponents: .date)
-                .foregroundStyle(.spentyTextPrimary)
+                .foregroundStyle(Color.spentyTextPrimary)
 
             Picker("Method", selection: $method) {
                 ForEach(Self.paymentMethods, id: \.self) { m in
@@ -165,7 +165,7 @@ struct RecordBillPaymentView: View {
             if viewModel.accounts.isEmpty {
                 Text("No accounts loaded")
                     .font(SpentyFonts.subheadline)
-                    .foregroundStyle(.spentyTextSecondary)
+                    .foregroundStyle(Color.spentyTextSecondary)
             } else {
                 Picker("Pay From Account", selection: $selectedAccountId) {
                     Text("Select Account").tag(nil as String?)
@@ -186,7 +186,7 @@ struct RecordBillPaymentView: View {
         Section {
             TextField("Payment notes (optional)", text: $notes, axis: .vertical)
                 .lineLimit(2...4)
-                .foregroundStyle(.spentyTextPrimary)
+                .foregroundStyle(Color.spentyTextPrimary)
         } header: {
             Text("Notes")
         }

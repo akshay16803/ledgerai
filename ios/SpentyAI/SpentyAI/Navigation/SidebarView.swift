@@ -117,7 +117,7 @@ struct SidebarView: View {
                 EmptyStateView(icon: "sidebar.left", title: "Select an item", subtitle: "Choose a section from the sidebar.")
             }
         }
-        .tint(.spentyPrimary)
+        .tint(Color.spentyPrimary)
         .sheet(isPresented: $showAIChat) {
             AIChatView()
         }

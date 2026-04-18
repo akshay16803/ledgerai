@@ -250,19 +250,19 @@ struct TransactionListView: View {
                     Label("Approve", systemImage: "checkmark.circle")
                         .font(SpentyFonts.footnote)
                 }
-                .tint(.spentySuccess)
+                .tint(Color.spentySuccess)
 
                 Button { Task { await viewModel.bulkReject() } } label: {
                     Label("Reject", systemImage: "xmark.circle")
                         .font(SpentyFonts.footnote)
                 }
-                .tint(.spentyWarning)
+                .tint(Color.spentyWarning)
 
                 Button { Task { await viewModel.bulkDelete() } } label: {
                     Label("Delete", systemImage: "trash")
                         .font(SpentyFonts.footnote)
                 }
-                .tint(.spentyError)
+                .tint(Color.spentyError)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
@@ -318,7 +318,7 @@ struct TransactionListView: View {
                         } label: {
                             Label("Edit", systemImage: "pencil")
                         }
-                        .tint(.spentyInfo)
+                        .tint(Color.spentyInfo)
                     }
                     .swipeActions(edge: .leading, allowsFullSwipe: true) {
                         if txn.status?.lowercased() == "pending" {
@@ -327,14 +327,14 @@ struct TransactionListView: View {
                             } label: {
                                 Label("Approve", systemImage: "checkmark.circle")
                             }
-                            .tint(.spentySuccess)
+                            .tint(Color.spentySuccess)
 
                             Button {
                                 Task { await viewModel.rejectTransaction(id: txn.id) }
                             } label: {
                                 Label("Reject", systemImage: "xmark.circle")
                             }
-                            .tint(.spentyError)
+                            .tint(Color.spentyError)
                         }
                     }
                     .onAppear {
@@ -359,7 +359,7 @@ struct TransactionListView: View {
                 HStack {
                     Spacer()
                     ProgressView()
-                        .tint(.spentyPrimary)
+                        .tint(Color.spentyPrimary)
                     Spacer()
                 }
                 .listRowBackground(Color.clear)

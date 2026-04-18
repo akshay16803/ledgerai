@@ -21,10 +21,10 @@ struct PurchasePreviewView: View {
                 if isLoadingPDF && viewModel.pdfData == nil {
                     VStack(spacing: 12) {
                         ProgressView()
-                            .tint(.spentyPrimary)
+                            .tint(Color.spentyPrimary)
                         Text("Loading bill PDF...")
                             .font(SpentyFonts.subheadline)
-                            .foregroundStyle(.spentyTextSecondary)
+                            .foregroundStyle(Color.spentyTextSecondary)
                     }
                 } else if let data = viewModel.pdfData, let document = PDFDocument(data: data) {
                     PurchasePDFKitView(document: document)
@@ -39,11 +39,11 @@ struct PurchasePreviewView: View {
 
                         Text("Unable to load PDF")
                             .font(SpentyFonts.headline)
-                            .foregroundStyle(.spentyTextPrimary)
+                            .foregroundStyle(Color.spentyTextPrimary)
 
                         Text("The bill preview could not be generated.")
                             .font(SpentyFonts.subheadline)
-                            .foregroundStyle(.spentyTextSecondary)
+                            .foregroundStyle(Color.spentyTextSecondary)
                             .multilineTextAlignment(.center)
 
                         Button {
@@ -73,7 +73,7 @@ struct PurchasePreviewView: View {
                                 preview: SharePreview("Bill PDF", icon: "doc.fill")
                             ) {
                                 Image(systemName: "square.and.arrow.up")
-                                    .foregroundStyle(.spentyPrimary)
+                                    .foregroundStyle(Color.spentyPrimary)
                             }
                         }
 
@@ -82,7 +82,7 @@ struct PurchasePreviewView: View {
                                 printPDF()
                             } label: {
                                 Image(systemName: "printer")
-                                    .foregroundStyle(.spentyPrimary)
+                                    .foregroundStyle(Color.spentyPrimary)
                             }
                         }
                     }

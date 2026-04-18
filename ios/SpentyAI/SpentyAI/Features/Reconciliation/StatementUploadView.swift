@@ -146,7 +146,7 @@ struct StatementUploadView: View {
                     displayedComponents: .date
                 )
                 .labelsHidden()
-                .tint(.spentyPrimary)
+                .tint(Color.spentyPrimary)
             }
 
             VStack(alignment: .leading, spacing: 8) {
@@ -160,7 +160,7 @@ struct StatementUploadView: View {
                     displayedComponents: .date
                 )
                 .labelsHidden()
-                .tint(.spentyPrimary)
+                .tint(Color.spentyPrimary)
             }
         }
     }
