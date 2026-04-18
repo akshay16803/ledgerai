@@ -338,7 +338,7 @@ struct DematView: View {
 
                     // Upload Button
                     PrimaryButton(
-                        title: "Upload",
+                        "Upload",
                         isLoading: viewModel.isUploading,
                         isDisabled: viewModel.selectedAccountId.isEmpty || selectedFileData == nil
                     ) {
