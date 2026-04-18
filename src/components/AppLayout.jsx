@@ -4,7 +4,7 @@ import { useAuth } from '../contexts/AuthContext.jsx';
 import { api } from '../lib/api.js';
 import {
   House, ArrowsLeftRight, Bank, Tag,
-  Lightbulb, SignOut, Gear, EnvelopeSimple, TrendUp, Scales, ChartBar, Archive, Receipt, List, X, Headset, Users
+  Lightbulb, SignOut, Gear, EnvelopeSimple, TrendUp, Scales, ChartBar, Archive, Receipt, List, X, Headset, Users, Package, Storefront
 } from '@phosphor-icons/react';
 
 const baseNavItems = [
@@ -28,6 +28,11 @@ const invoiceNavItems = [
   { to: '/customers', icon: Users, label: 'Customers' },
 ];
 
+const billNavItems = [
+  { to: '/purchases', icon: Package, label: 'Purchases' },
+  { to: '/vendors', icon: Storefront, label: 'Vendors' },
+];
+
 export default function AppLayout({ children }) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
@@ -37,18 +42,26 @@ export default function AppLayout({ children }) {
   const [userToggled, setUserToggled] = useState(null);
   const [isMobile, setIsMobile] = useState(true);
   const [hasInvoices, setHasInvoices] = useState(false);
+  const [hasBills, setHasBills] = useState(false);
 
-  // Check invoice count to conditionally show Invoices & Customers tabs
+  // Check invoice and bill counts to conditionally show nav tabs
   useEffect(() => {
     api.get('/api/invoices/count').then(res => {
       setHasInvoices((res?.count || 0) > 0);
     }).catch(() => {});
+    api.get('/api/bills/count').then(res => {
+      setHasBills((res?.count || 0) > 0);
+    }).catch(() => {});
   }, []);
 
-  // Build dynamic nav items — insert Invoices & Customers after Dashboard if invoices exist
-  const navItems = hasInvoices
-    ? [baseNavItems[0], ...invoiceNavItems, ...baseNavItems.slice(1)]
-    : baseNavItems;
+  // Build dynamic nav items — insert Invoices/Customers and Purchases/Vendors after Dashboard
+  const navItems = (() => {
+    let items = [baseNavItems[0]];
+    if (hasInvoices) items = [...items, ...invoiceNavItems];
+    if (hasBills) items = [...items, ...billNavItems];
+    items = [...items, ...baseNavItems.slice(1)];
+    return items;
+  })();
 
   // Detect mobile
   useEffect(() => {

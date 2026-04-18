@@ -73,6 +73,9 @@ function AIChatPanel() {
       if (res.invoice_created && res.invoice) {
         assistantMessage.invoice = res.invoice;
       }
+      if (res.bill_created && res.bill) {
+        assistantMessage.bill = res.bill;
+      }
       setMessages(prev => [...prev, assistantMessage]);
     } catch (err) {
       setMessages(prev => [...prev, { role: 'assistant', content: 'Sorry, something went wrong. Please try again.' }]);
@@ -201,6 +204,16 @@ function AIChatPanel() {
                           </div>
                           <div className="mono" style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
                             {msg.invoice.invoice_number} · {msg.invoice.customer_name} · ₹{(msg.invoice.grand_total || 0).toLocaleString('en-IN')} · {msg.invoice.payment_status}
+                          </div>
+                        </div>
+                      )}
+                      {msg.bill && (
+                        <div style={{ marginTop: 8, padding: '10px 14px', background: 'rgba(194,109,92,0.08)', borderRadius: 6, border: '1px solid rgba(194,109,92,0.15)' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 600, color: 'var(--brand-primary)', marginBottom: 4 }}>
+                            <CheckCircle size={14} weight="fill" /> Bill Recorded
+                          </div>
+                          <div className="mono" style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
+                            {msg.bill.bill_number} · {msg.bill.vendor_name} · ₹{(msg.bill.grand_total || 0).toLocaleString('en-IN')} · {msg.bill.payment_status}
                           </div>
                         </div>
                       )}

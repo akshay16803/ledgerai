@@ -6999,6 +6999,15 @@ async def ai_chat(body: dict = Body(...), user: dict = Depends(get_current_user)
     ).sort("invoice_date", -1).limit(100).to_list(100)
     user_settings = await db.user_settings.find_one({"user_id": user_id}, {"_id": 0}) or {}
 
+    # ── Fetch vendors and bills for purchase context ──
+    vendors = await db.vendors.find({"user_id": user_id}, {"_id": 0}).to_list(200)
+    recent_bills = await db.bills.find(
+        {"user_id": user_id},
+        {"_id": 0, "bill_id": 1, "bill_number": 1, "bill_type": 1,
+         "bill_date": 1, "due_date": 1, "vendor_id": 1, "vendor_name": 1,
+         "grand_total": 1, "amount_paid": 1, "payment_status": 1, "line_items": 1}
+    ).sort("bill_date", -1).limit(100).to_list(100)
+
     # Summary stats
     now = datetime.now(timezone.utc)
     month_start = now.replace(day=1).strftime("%Y-%m-%d")
@@ -7017,6 +7026,13 @@ async def ai_chat(body: dict = Body(...), user: dict = Depends(get_current_user)
     total_outstanding = total_invoiced - total_received
     invoices_this_month = [inv for inv in recent_invoices if inv.get("invoice_date", "") >= month_start]
     invoiced_this_month = sum(inv.get("grand_total", 0) for inv in invoices_this_month)
+
+    # Bill stats
+    total_billed = sum(b.get("grand_total", 0) for b in recent_bills)
+    total_paid_bills = sum(b.get("amount_paid", 0) for b in recent_bills)
+    total_payable = total_billed - total_paid_bills
+    bills_this_month = [b for b in recent_bills if b.get("bill_date", "") >= month_start]
+    billed_this_month = sum(b.get("grand_total", 0) for b in bills_this_month)
 
     # Build compact account list
     acc_lines = []
@@ -7055,6 +7071,31 @@ async def ai_chat(body: dict = Body(...), user: dict = Depends(get_current_user)
         inv_lines.append(
             f"  {inv.get('invoice_number','?')} | {inv.get('invoice_date','')} | {inv.get('customer_name','?')} "
             f"| ₹{inv.get('grand_total',0):,.2f} | {status} | outstanding: ₹{outstanding:,.2f} | items: {items_summary}"
+        )
+
+    # Build compact vendor list
+    vendor_lines = []
+    for v in vendors:
+        v_line = f"- {v['name']} (ID: {v.get('vendor_id', v.get('id', '?'))}"
+        v_extras = []
+        if v.get("city"): v_extras.append(v["city"])
+        if v.get("state"): v_extras.append(v["state"])
+        if v.get("gstin"): v_extras.append(f"GSTIN: {v['gstin']}")
+        if v.get("phone"): v_extras.append(f"Ph: {v['phone']}")
+        if v_extras:
+            v_line += f", {', '.join(v_extras)}"
+        v_line += ")"
+        vendor_lines.append(v_line)
+
+    # Build compact bill list
+    bill_lines = []
+    for b in recent_bills:
+        b_status = b.get("payment_status", "unpaid")
+        b_outstanding = b.get("grand_total", 0) - b.get("amount_paid", 0)
+        b_items_summary = ", ".join(li.get("description", "?") for li in (b.get("line_items") or [])[:3])
+        bill_lines.append(
+            f"  {b.get('bill_number','?')} | {b.get('bill_date','')} | {b.get('vendor_name','?')} "
+            f"| ₹{b.get('grand_total',0):,.2f} | {b_status} | payable: ₹{b_outstanding:,.2f} | items: {b_items_summary}"
         )
 
     # Build invoice settings summary
@@ -7114,6 +7155,14 @@ Firm Name: {firm_name or "(not set)"}
 Firm State: {firm_state or "(not set)"}
 Bank Details Configured: {"Yes" if has_bank else "No"}
 
+═══ VENDORS ═══
+{chr(10).join(vendor_lines) if vendor_lines else "No vendors yet."}
+
+═══ PURCHASE BILLS (newest first) ═══
+Total Billed: ₹{total_billed:,.2f} | Total Paid: ₹{total_paid_bills:,.2f} | Payable: ₹{total_payable:,.2f}
+Billed This Month: ₹{billed_this_month:,.2f}
+{chr(10).join(bill_lines) if bill_lines else "No purchase bills yet."}
+
 ═══ POSTING TRANSACTIONS ═══
 You can help the user post transactions. STRICT RULES:
 1. For income/expense you MUST have ALL of: transaction_type, amount, date (YYYY-MM-DD), account_id, category_id, description.
@@ -7142,7 +7191,23 @@ You can help the user create sales invoices. STRICT RULES:
 |||INVOICE|||
 7. The server will auto-calculate taxes, totals, round-off, and invoice number.
 8. NEVER create an invoice without explicit user confirmation of the details.
-9. You can answer questions about existing invoices, outstanding amounts, debtor status, and customer sales history using the data above."""
+9. You can answer questions about existing invoices, outstanding amounts, debtor status, and customer sales history using the data above.
+
+═══ CREATING PURCHASE BILLS ═══
+You can help the user record purchase bills (expenses from vendors/suppliers). STRICT RULES:
+1. You MUST have AT MINIMUM: vendor_id (pick from existing vendors or ask to create), at least one line item with description and rate, bill_type ("simple" or "gst"), and payment_status ("paid", "partial", or "unpaid").
+2. For GST bills you also need: place_of_supply (Indian state), and each line item should have gst_rate (0, 5, 12, 18, or 28).
+3. If the vendor exists in the VENDORS list above, use their vendor_id. If it's a new vendor, tell the user to create them first from the Purchases page.
+4. If payment is "paid" or "partial", you need: payment_account_id (from accounts list), payment_date, payment_method (upi/cash/neft/cheque/etc).
+5. Optionally include bill_reference (the vendor's original invoice/bill number).
+6. Before creating, show a clear summary: vendor, items with qty × rate, taxes (if GST), total, payment status.
+7. When ALL fields are confirmed, output the bill JSON wrapped EXACTLY like this:
+|||BILL|||
+{{"bill_type": "simple or gst", "vendor_id": "...", "vendor_name": "...", "vendor_state": "...", "bill_date": "YYYY-MM-DD", "due_date": "YYYY-MM-DD or null", "place_of_supply": "state or null", "bill_reference": "vendor invoice number or null", "line_items": [{{"description": "...", "quantity": 1, "rate": 1000, "discount_percent": 0, "gst_rate": 18, "hsn_sac": "..."}}], "payment_status": "unpaid", "amount_paid": 0, "payment_account_id": null, "payment_date": null, "payment_method": null, "notes": "..."}}
+|||BILL|||
+8. The server will auto-calculate taxes, totals, round-off, and bill number.
+9. NEVER create a bill without explicit user confirmation of the details.
+10. You can answer questions about existing bills, payable amounts, creditor status, and vendor purchase history using the data above."""
 
     # Build messages
     messages = [{"role": "system", "content": system_prompt}]
@@ -7379,12 +7444,138 @@ You can help the user create sales invoices. STRICT RULES:
                 clean_reply = clean_reply.replace(f"|||INVOICE|||{inv_parts[1]}|||INVOICE|||", "")
                 clean_reply += "\n\n⚠️ I tried to create an invoice but the format was invalid. Let me try again — please confirm the details."
 
+    # ── Check for bill creation ──
+    bill_created = False
+    created_bill = None
+
+    if "|||BILL|||" in clean_reply:
+        bill_parts = clean_reply.split("|||BILL|||")
+        if len(bill_parts) >= 3:
+            bill_json_str = bill_parts[1].strip()
+            try:
+                bill_data = json.loads(bill_json_str)
+                bill_errors = []
+
+                # Validate basics
+                bill_type = bill_data.get("bill_type", "simple")
+                raw_bill_items = bill_data.get("line_items", [])
+                if not raw_bill_items:
+                    bill_errors.append("At least one line item is required")
+                for idx, item in enumerate(raw_bill_items):
+                    if not item.get("description"):
+                        bill_errors.append(f"Line item {idx+1} needs a description")
+                    if not item.get("rate") or float(item.get("rate", 0)) <= 0:
+                        bill_errors.append(f"Line item {idx+1} needs a valid rate")
+
+                vendor_id = bill_data.get("vendor_id", "")
+                vendor_name = bill_data.get("vendor_name", "")
+                if not vendor_id and not vendor_name:
+                    bill_errors.append("Vendor is required")
+
+                # Validate payment account if paid/partial
+                bill_pay_status = bill_data.get("payment_status", "unpaid")
+                if bill_pay_status in ("paid", "partial"):
+                    bill_pay_acc_id = bill_data.get("payment_account_id")
+                    if not bill_pay_acc_id:
+                        bill_errors.append("Payment account is required for paid/partial bills")
+                    else:
+                        bill_pay_acc = await db.accounts.find_one({"account_id": bill_pay_acc_id, "user_id": user_id})
+                        if not bill_pay_acc:
+                            bill_errors.append(f"Payment account {bill_pay_acc_id} not found")
+
+                if bill_errors:
+                    clean_reply = clean_reply.replace(f"|||BILL|||{bill_parts[1]}|||BILL|||", "")
+                    clean_reply += f"\n\n⚠️ Could not create bill: {', '.join(bill_errors)}"
+                else:
+                    # Look up vendor details if vendor_id provided
+                    if vendor_id:
+                        vendor_doc = await db.vendors.find_one({"vendor_id": vendor_id, "user_id": user_id})
+                        if vendor_doc:
+                            vendor_name = vendor_doc.get("name", vendor_name)
+                            bill_data["vendor_state"] = bill_data.get("vendor_state") or vendor_doc.get("state", "")
+
+                    # Determine same-state for GST calc
+                    bill_firm_state = user_settings.get("firm_state", "")
+                    bill_vendor_state = bill_data.get("vendor_state") or bill_data.get("place_of_supply") or ""
+                    bill_is_same_state = (bill_firm_state.strip().lower() == bill_vendor_state.strip().lower()) if bill_firm_state and bill_vendor_state else True
+
+                    # Calculate line items and totals
+                    bill_calc_items = _calculate_line_items(raw_bill_items, bill_type, bill_is_same_state)
+                    bill_totals = _calculate_invoice_totals(bill_calc_items)
+
+                    bill_number = await _get_next_bill_number(user_id)
+                    bill_now = datetime.now(timezone.utc)
+
+                    bill_amount_paid = float(bill_data.get("amount_paid", 0))
+                    if bill_pay_status == "paid":
+                        bill_amount_paid = bill_totals["grand_total"]
+
+                    bill_doc = {
+                        "bill_id": uuid.uuid4().hex[:16],
+                        "user_id": user_id,
+                        "bill_number": bill_number,
+                        "bill_type": bill_type,
+                        "bill_date": bill_data.get("bill_date", today_str),
+                        "due_date": bill_data.get("due_date"),
+                        "vendor_id": vendor_id,
+                        "vendor_name": vendor_name,
+                        "vendor_gstin": bill_data.get("vendor_gstin"),
+                        "vendor_address": bill_data.get("vendor_address"),
+                        "vendor_state": bill_vendor_state,
+                        "place_of_supply": bill_data.get("place_of_supply"),
+                        "line_items": bill_calc_items,
+                        **bill_totals,
+                        "amount_in_words": amount_to_words_inr(bill_totals["grand_total"]),
+                        "payment_status": bill_pay_status,
+                        "amount_paid": bill_amount_paid,
+                        "payment_account_id": bill_data.get("payment_account_id"),
+                        "payment_method": bill_data.get("payment_method"),
+                        "payment_date": bill_data.get("payment_date"),
+                        "transaction_id": None,
+                        "bill_reference": bill_data.get("bill_reference"),
+                        "notes": bill_data.get("notes"),
+                        "terms_conditions": bill_data.get("terms_conditions", user_settings.get("bill_terms")),
+                        "created_at": bill_now,
+                        "updated_at": bill_now,
+                        "source": "ai_chat",
+                    }
+
+                    # Auto-post expense transaction if paid/partial
+                    if bill_pay_status == "paid":
+                        bill_txn_id = await _auto_post_bill_transaction(user_id, bill_doc, bill_totals["grand_total"])
+                        bill_doc["transaction_id"] = bill_txn_id
+                    elif bill_pay_status == "partial" and bill_amount_paid > 0:
+                        bill_txn_id = await _auto_post_bill_transaction(user_id, bill_doc, bill_amount_paid)
+                        bill_doc["transaction_id"] = bill_txn_id
+
+                    await db.bills.insert_one(bill_doc)
+                    del bill_doc["_id"]
+
+                    bill_created = True
+                    created_bill = {
+                        "bill_id": bill_doc["bill_id"],
+                        "bill_number": bill_number,
+                        "grand_total": bill_totals["grand_total"],
+                        "vendor_name": vendor_name,
+                        "payment_status": bill_pay_status,
+                    }
+
+                    clean_reply = clean_reply.replace(f"|||BILL|||{bill_parts[1]}|||BILL|||", "").strip()
+                    if not clean_reply:
+                        clean_reply = f"✅ Bill {bill_number} recorded successfully for {vendor_name} — ₹{bill_totals['grand_total']:,.2f}"
+
+            except json.JSONDecodeError:
+                clean_reply = clean_reply.replace(f"|||BILL|||{bill_parts[1]}|||BILL|||", "")
+                clean_reply += "\n\n⚠️ I tried to create a bill but the format was invalid. Let me try again — please confirm the details."
+
     return {
         "reply": clean_reply.strip(),
         "transaction_posted": transaction_posted,
         "transaction": posted_txn,
         "invoice_created": invoice_created,
         "invoice": created_invoice,
+        "bill_created": bill_created,
+        "bill": created_bill,
     }
 
 
@@ -8895,6 +9086,507 @@ async def record_payment(invoice_id: str, request: Request, user: dict = Depends
 
     updated = await db.invoices.find_one(
         {"invoice_id": invoice_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    return updated
+
+
+# ─── Vendors CRUD ──────────────────────────────────────────────────
+
+@app.post("/api/vendors")
+async def create_vendor(request: Request, user: dict = Depends(get_current_user)):
+    body = await request.json()
+    now = datetime.now(timezone.utc)
+    vendor = {
+        "vendor_id": uuid.uuid4().hex[:16],
+        "user_id": user["user_id"],
+        "name": body.get("name", ""),
+        "gstin": body.get("gstin"),
+        "pan": body.get("pan"),
+        "phone": body.get("phone"),
+        "email": body.get("email"),
+        "billing_address": body.get("billing_address"),
+        "city": body.get("city"),
+        "state": body.get("state"),
+        "pincode": body.get("pincode"),
+        "notes": body.get("notes"),
+        "created_at": now,
+        "updated_at": now,
+    }
+    if not vendor["name"]:
+        raise HTTPException(status_code=400, detail="Vendor name is required")
+    await db.vendors.insert_one(vendor)
+    del vendor["_id"]
+    return vendor
+
+
+@app.get("/api/vendors")
+async def list_vendors(
+    request: Request,
+    user: dict = Depends(get_current_user),
+    q: Optional[str] = None,
+    limit: int = 100,
+    skip: int = 0,
+):
+    query: dict = {"user_id": user["user_id"]}
+    if q:
+        regex = {"$regex": q, "$options": "i"}
+        query["$or"] = [
+            {"name": regex},
+            {"email": regex},
+            {"phone": regex},
+            {"gstin": regex},
+        ]
+    vendors = await db.vendors.find(query, {"_id": 0}).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
+    total = await db.vendors.count_documents(query)
+    return {"items": vendors, "total": total}
+
+
+@app.get("/api/vendors/{vendor_id}")
+async def get_vendor(vendor_id: str, user: dict = Depends(get_current_user)):
+    vendor = await db.vendors.find_one(
+        {"vendor_id": vendor_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    if not vendor:
+        raise HTTPException(status_code=404, detail="Vendor not found")
+    return vendor
+
+
+@app.put("/api/vendors/{vendor_id}")
+async def update_vendor(vendor_id: str, request: Request, user: dict = Depends(get_current_user)):
+    body = await request.json()
+    vendor = await db.vendors.find_one(
+        {"vendor_id": vendor_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    if not vendor:
+        raise HTTPException(status_code=404, detail="Vendor not found")
+
+    allowed = ["name", "gstin", "pan", "phone", "email", "billing_address", "city", "state", "pincode", "notes"]
+    update_fields = {k: body[k] for k in allowed if k in body}
+    if not update_fields:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    update_fields["updated_at"] = datetime.now(timezone.utc)
+
+    await db.vendors.update_one(
+        {"vendor_id": vendor_id, "user_id": user["user_id"]},
+        {"$set": update_fields},
+    )
+    updated = await db.vendors.find_one(
+        {"vendor_id": vendor_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    return updated
+
+
+@app.delete("/api/vendors/{vendor_id}")
+async def delete_vendor(vendor_id: str, user: dict = Depends(get_current_user)):
+    result = await db.vendors.delete_one(
+        {"vendor_id": vendor_id, "user_id": user["user_id"]}
+    )
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Vendor not found")
+    return {"detail": "Vendor deleted"}
+
+
+# ─── Purchase Bills ─────────────────────────────────────────────────
+
+async def _get_next_bill_number(user_id: str) -> str:
+    """Generate the next bill number from user settings (prefix + auto-increment)."""
+    settings = await db.user_settings.find_one({"user_id": user_id}, {"_id": 0})
+    prefix = (settings or {}).get("bill_prefix", "BILL")
+    next_num = (settings or {}).get("bill_next_number", 1)
+    bill_number = f"{prefix}-{next_num:04d}"
+    await db.user_settings.update_one(
+        {"user_id": user_id},
+        {"$set": {"bill_next_number": next_num + 1}},
+        upsert=True,
+    )
+    return bill_number
+
+
+async def _auto_post_bill_transaction(user_id: str, bill: dict, amount: float) -> str | None:
+    """Create an expense transaction for a bill payment. Returns the transaction_id."""
+    if amount <= 0:
+        return None
+
+    txn_id = f"txn_{uuid.uuid4().hex[:12]}"
+    txn = {
+        "transaction_id": txn_id,
+        "user_id": user_id,
+        "transaction_type": "expense",
+        "amount": amount,
+        "date": bill.get("payment_date") or bill["bill_date"],
+        "account_id": bill.get("payment_account_id", ""),
+        "to_account_id": None,
+        "category_id": None,
+        "subcategory_id": None,
+        "description": f"Bill {bill['bill_number']} - {bill.get('vendor_name', '')}",
+        "payment_method": bill.get("payment_method"),
+        "is_recurring": False,
+        "recurring_frequency": None,
+        "source": "bill",
+        "status": "approved",
+        "receipt_id": None,
+        "created_at": datetime.now(timezone.utc),
+    }
+    await db.transactions.insert_one(txn)
+    # Apply to balances
+    if txn["account_id"]:
+        await apply_transaction_to_balances(user_id, txn)
+    return txn_id
+
+
+@app.get("/api/bills/count")
+async def get_bill_count(user: dict = Depends(get_current_user)):
+    count = await db.bills.count_documents({"user_id": user["user_id"]})
+    return {"count": count}
+
+
+@app.get("/api/bills/creditors")
+async def get_creditors(user: dict = Depends(get_current_user)):
+    pipeline = [
+        {"$match": {"user_id": user["user_id"], "payment_status": {"$in": ["unpaid", "partial"]}}},
+        {"$group": {
+            "_id": "$vendor_id",
+            "vendor_name": {"$first": "$vendor_name"},
+            "total_outstanding": {"$sum": {"$subtract": ["$grand_total", "$amount_paid"]}},
+            "bill_count": {"$sum": 1},
+            "oldest_date": {"$min": "$bill_date"},
+        }},
+        {"$project": {
+            "_id": 0,
+            "vendor_id": "$_id",
+            "vendor_name": 1,
+            "total_outstanding": 1,
+            "bill_count": 1,
+            "oldest_date": 1,
+        }},
+        {"$sort": {"total_outstanding": -1}},
+    ]
+    results = await db.bills.aggregate(pipeline).to_list(1000)
+    return {"items": results, "total": len(results)}
+
+
+@app.get("/api/bills/aging")
+async def get_bill_aging(user: dict = Depends(get_current_user)):
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    bills = await db.bills.find(
+        {"user_id": user["user_id"], "payment_status": {"$in": ["unpaid", "partial"]}},
+        {"_id": 0},
+    ).to_list(10000)
+
+    buckets = {
+        "current": {"amount": 0, "count": 0, "bills": []},
+        "1_30": {"amount": 0, "count": 0, "bills": []},
+        "31_60": {"amount": 0, "count": 0, "bills": []},
+        "61_90": {"amount": 0, "count": 0, "bills": []},
+        "90_plus": {"amount": 0, "count": 0, "bills": []},
+    }
+
+    for bill in bills:
+        due = bill.get("due_date") or bill.get("bill_date", today)
+        try:
+            due_dt = datetime.strptime(due[:10], "%Y-%m-%d")
+            today_dt = datetime.strptime(today, "%Y-%m-%d")
+            days = (today_dt - due_dt).days
+        except Exception:
+            days = 0
+
+        outstanding = bill.get("grand_total", 0) - bill.get("amount_paid", 0)
+        summary = {
+            "bill_id": bill["bill_id"],
+            "bill_number": bill.get("bill_number"),
+            "vendor_name": bill.get("vendor_name"),
+            "outstanding": outstanding,
+            "due_date": due,
+            "days_overdue": max(days, 0),
+        }
+
+        if days <= 0:
+            bucket = "current"
+        elif days <= 30:
+            bucket = "1_30"
+        elif days <= 60:
+            bucket = "31_60"
+        elif days <= 90:
+            bucket = "61_90"
+        else:
+            bucket = "90_plus"
+
+        buckets[bucket]["amount"] += outstanding
+        buckets[bucket]["count"] += 1
+        buckets[bucket]["bills"].append(summary)
+
+    # Round amounts
+    for b in buckets.values():
+        b["amount"] = round(b["amount"], 2)
+
+    return buckets
+
+
+@app.get("/api/bills/purchases-by-vendor")
+async def get_purchases_by_vendor(user: dict = Depends(get_current_user)):
+    pipeline = [
+        {"$match": {"user_id": user["user_id"]}},
+        {"$group": {
+            "_id": "$vendor_id",
+            "vendor_name": {"$first": "$vendor_name"},
+            "total_purchases": {"$sum": "$grand_total"},
+            "bill_count": {"$sum": 1},
+            "last_bill_date": {"$max": "$bill_date"},
+        }},
+        {"$project": {
+            "_id": 0,
+            "vendor_id": "$_id",
+            "vendor_name": 1,
+            "total_purchases": 1,
+            "bill_count": 1,
+            "last_bill_date": 1,
+        }},
+        {"$sort": {"total_purchases": -1}},
+    ]
+    results = await db.bills.aggregate(pipeline).to_list(1000)
+    return {"items": results, "total": len(results)}
+
+
+@app.post("/api/bills")
+async def create_bill(request: Request, user: dict = Depends(get_current_user)):
+    body = await request.json()
+    now = datetime.now(timezone.utc)
+
+    # Determine same-state for GST
+    settings = await db.user_settings.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    firm_state = (settings or {}).get("firm_state", "")
+    vendor_state = body.get("vendor_state") or body.get("place_of_supply") or ""
+    is_same_state = firm_state.strip().lower() == vendor_state.strip().lower() if firm_state and vendor_state else True
+
+    bill_type = body.get("bill_type", "simple")
+    raw_items = body.get("line_items", [])
+    if not raw_items:
+        raise HTTPException(status_code=400, detail="At least one line item is required")
+
+    line_items = _calculate_line_items(raw_items, bill_type, is_same_state)
+    totals = _calculate_invoice_totals(line_items)
+
+    bill_number = await _get_next_bill_number(user["user_id"])
+
+    payment_status = body.get("payment_status", "unpaid")
+    amount_paid = float(body.get("amount_paid", 0))
+    if payment_status == "paid":
+        amount_paid = totals["grand_total"]
+
+    bill = {
+        "bill_id": uuid.uuid4().hex[:16],
+        "user_id": user["user_id"],
+        "bill_number": bill_number,
+        "bill_type": bill_type,
+        "bill_date": body.get("bill_date", now.strftime("%Y-%m-%d")),
+        "due_date": body.get("due_date"),
+        "payment_terms": body.get("payment_terms"),
+        "vendor_id": body.get("vendor_id", ""),
+        "vendor_name": body.get("vendor_name", ""),
+        "vendor_gstin": body.get("vendor_gstin"),
+        "vendor_address": body.get("vendor_address"),
+        "vendor_state": vendor_state,
+        "place_of_supply": body.get("place_of_supply"),
+        "line_items": line_items,
+        **totals,
+        "amount_in_words": amount_to_words_inr(totals["grand_total"]),
+        "payment_status": payment_status,
+        "amount_paid": amount_paid,
+        "payment_account_id": body.get("payment_account_id"),
+        "payment_method": body.get("payment_method"),
+        "payment_date": body.get("payment_date"),
+        "transaction_id": None,
+        "bill_reference": body.get("bill_reference"),
+        "po_number": body.get("po_number"),
+        "notes": body.get("notes"),
+        "terms_conditions": body.get("terms_conditions", (settings or {}).get("bill_terms")),
+        "created_at": now,
+        "updated_at": now,
+    }
+
+    # Auto-post transaction for paid / partial
+    if payment_status == "paid":
+        txn_id = await _auto_post_bill_transaction(user["user_id"], bill, totals["grand_total"])
+        bill["transaction_id"] = txn_id
+    elif payment_status == "partial" and amount_paid > 0:
+        txn_id = await _auto_post_bill_transaction(user["user_id"], bill, amount_paid)
+        bill["transaction_id"] = txn_id
+
+    await db.bills.insert_one(bill)
+    del bill["_id"]
+    return bill
+
+
+@app.get("/api/bills")
+async def list_bills(
+    user: dict = Depends(get_current_user),
+    status: Optional[str] = None,
+    vendor_id: Optional[str] = None,
+    from_date: Optional[str] = None,
+    to_date: Optional[str] = None,
+    limit: int = 50,
+    skip: int = 0,
+):
+    query: dict = {"user_id": user["user_id"]}
+    if status:
+        query["payment_status"] = status
+    if vendor_id:
+        query["vendor_id"] = vendor_id
+    if from_date:
+        query.setdefault("bill_date", {})["$gte"] = from_date
+    if to_date:
+        query.setdefault("bill_date", {})["$lte"] = to_date
+
+    bills = await db.bills.find(query, {"_id": 0}).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
+    total = await db.bills.count_documents(query)
+    return {"items": bills, "total": total}
+
+
+@app.get("/api/bills/{bill_id}")
+async def get_bill(bill_id: str, user: dict = Depends(get_current_user)):
+    bill = await db.bills.find_one(
+        {"bill_id": bill_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    if not bill:
+        raise HTTPException(status_code=404, detail="Bill not found")
+    return bill
+
+
+@app.put("/api/bills/{bill_id}")
+async def update_bill(bill_id: str, request: Request, user: dict = Depends(get_current_user)):
+    body = await request.json()
+    bill = await db.bills.find_one(
+        {"bill_id": bill_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    if not bill:
+        raise HTTPException(status_code=404, detail="Bill not found")
+
+    update_fields: dict = {}
+
+    # Recalculate line items if provided
+    if "line_items" in body:
+        settings = await db.user_settings.find_one({"user_id": user["user_id"]}, {"_id": 0})
+        firm_state = (settings or {}).get("firm_state", "")
+        vendor_state = body.get("vendor_state", bill.get("vendor_state", ""))
+        is_same_state = firm_state.strip().lower() == vendor_state.strip().lower() if firm_state and vendor_state else True
+        bill_type = body.get("bill_type", bill.get("bill_type", "simple"))
+
+        line_items = _calculate_line_items(body["line_items"], bill_type, is_same_state)
+        totals = _calculate_invoice_totals(line_items)
+        update_fields["line_items"] = line_items
+        update_fields.update(totals)
+        update_fields["amount_in_words"] = amount_to_words_inr(totals["grand_total"])
+
+    # Copy simple fields
+    simple_keys = [
+        "bill_type", "bill_date", "due_date", "payment_terms",
+        "vendor_id", "vendor_name", "vendor_gstin", "vendor_address",
+        "vendor_state", "place_of_supply", "payment_status", "amount_paid",
+        "payment_account_id", "payment_method", "payment_date",
+        "bill_reference", "po_number", "notes", "terms_conditions",
+    ]
+    for k in simple_keys:
+        if k in body:
+            update_fields[k] = body[k]
+
+    update_fields["updated_at"] = datetime.now(timezone.utc)
+
+    await db.bills.update_one(
+        {"bill_id": bill_id, "user_id": user["user_id"]},
+        {"$set": update_fields},
+    )
+    updated = await db.bills.find_one(
+        {"bill_id": bill_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    return updated
+
+
+@app.delete("/api/bills/{bill_id}")
+async def delete_bill(bill_id: str, user: dict = Depends(get_current_user)):
+    bill = await db.bills.find_one(
+        {"bill_id": bill_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    if not bill:
+        raise HTTPException(status_code=404, detail="Bill not found")
+
+    # Delete linked transaction if any
+    if bill.get("transaction_id"):
+        await db.transactions.delete_one(
+            {"transaction_id": bill["transaction_id"], "user_id": user["user_id"]}
+        )
+        # Recalculate balance for the account
+        if bill.get("payment_account_id"):
+            await recalculate_account_balance(user["user_id"], bill["payment_account_id"])
+
+    await db.bills.delete_one(
+        {"bill_id": bill_id, "user_id": user["user_id"]}
+    )
+    return {"detail": "Bill deleted"}
+
+
+@app.post("/api/bills/{bill_id}/record-payment")
+async def record_bill_payment(bill_id: str, request: Request, user: dict = Depends(get_current_user)):
+    body = await request.json()
+    bill = await db.bills.find_one(
+        {"bill_id": bill_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    if not bill:
+        raise HTTPException(status_code=404, detail="Bill not found")
+
+    pay_amount = float(body.get("amount", 0))
+    if pay_amount <= 0:
+        raise HTTPException(status_code=400, detail="Payment amount must be positive")
+
+    new_paid = bill.get("amount_paid", 0) + pay_amount
+    grand_total = bill.get("grand_total", 0)
+
+    if new_paid >= grand_total:
+        new_status = "paid"
+        new_paid = grand_total
+    else:
+        new_status = "partial"
+
+    payment_info = {
+        "payment_account_id": body.get("account_id", bill.get("payment_account_id")),
+        "payment_method": body.get("payment_method", bill.get("payment_method")),
+        "payment_date": body.get("date", datetime.now(timezone.utc).strftime("%Y-%m-%d")),
+    }
+
+    # Create or update transaction
+    existing_txn_id = bill.get("transaction_id")
+    if existing_txn_id:
+        # Update existing transaction amount
+        await db.transactions.update_one(
+            {"transaction_id": existing_txn_id, "user_id": user["user_id"]},
+            {"$set": {
+                "amount": new_paid,
+                "date": payment_info["payment_date"],
+                "account_id": payment_info["payment_account_id"] or "",
+                "payment_method": payment_info["payment_method"],
+            }},
+        )
+        # Recalculate balances
+        if payment_info["payment_account_id"]:
+            await recalculate_account_balance(user["user_id"], payment_info["payment_account_id"])
+        txn_id = existing_txn_id
+    else:
+        # Create new transaction
+        bill_for_txn = {**bill, **payment_info, "payment_account_id": payment_info["payment_account_id"]}
+        txn_id = await _auto_post_bill_transaction(user["user_id"], bill_for_txn, new_paid)
+
+    await db.bills.update_one(
+        {"bill_id": bill_id, "user_id": user["user_id"]},
+        {"$set": {
+            "payment_status": new_status,
+            "amount_paid": new_paid,
+            "transaction_id": txn_id,
+            **payment_info,
+            "updated_at": datetime.now(timezone.utc),
+        }},
+    )
+
+    updated = await db.bills.find_one(
+        {"bill_id": bill_id, "user_id": user["user_id"]}, {"_id": 0}
     )
     return updated
 

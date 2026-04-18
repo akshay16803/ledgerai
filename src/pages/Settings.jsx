@@ -77,7 +77,8 @@ export default function Settings() {
 
   // setup=invoice means user was redirected to fill simple invoice fields
   // setup=gst means user tried GST invoice and needs GSTIN + state
-  const setupMode = searchParams.get('setup'); // 'invoice' | 'gst' | null
+  // setup=bill means user was redirected to fill details for purchase bills
+  const setupMode = searchParams.get('setup'); // 'invoice' | 'gst' | 'bill' | null
 
   const [baseCurrency, setBaseCurrency] = useState('INR');
   const [dateFormat, setDateFormat] = useState('DD/MM/YYYY');
@@ -99,6 +100,9 @@ export default function Settings() {
   // Invoice settings
   const [invoicePrefix, setInvoicePrefix] = useState('INV-');
   const [invoiceTerms, setInvoiceTerms] = useState('');
+  // Bill settings
+  const [billPrefix, setBillPrefix] = useState('BILL-');
+  const [billTerms, setBillTerms] = useState('');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -122,6 +126,8 @@ export default function Settings() {
       setInvoiceBankBranch(s.invoice_bank_branch || '');
       setInvoicePrefix(s.invoice_prefix || 'INV-');
       setInvoiceTerms(s.invoice_terms || '');
+      setBillPrefix(s.bill_prefix || 'BILL-');
+      setBillTerms(s.bill_terms || '');
     }).catch(() => {}).finally(() => setLoading(false));
   }, []);
 
@@ -164,12 +170,14 @@ export default function Settings() {
         invoice_bank_name: invoiceBankName, invoice_bank_account_no: invoiceBankAccountNo,
         invoice_bank_ifsc: invoiceBankIfsc, invoice_bank_branch: invoiceBankBranch,
         invoice_prefix: invoicePrefix, invoice_terms: invoiceTerms,
+        bill_prefix: billPrefix, bill_terms: billTerms,
       });
       setSaved(true);
       checkAuth();
-      // If in setup mode, redirect back to invoices after a brief confirmation
+      // If in setup mode, redirect back to the appropriate page after a brief confirmation
       if (setupMode) {
-        setTimeout(() => navigate('/invoices'), 800);
+        const redirectTo = setupMode === 'bill' ? '/purchases' : '/invoices';
+        setTimeout(() => navigate(redirectTo), 800);
         return;
       }
       setTimeout(() => setSaved(false), 3000);
@@ -304,7 +312,7 @@ export default function Settings() {
         </div>
 
         {/* Setup mode banners */}
-        {setupMode === 'invoice' && (
+        {(setupMode === 'invoice' || setupMode === 'bill') && (
           <div style={{
             display: 'flex', alignItems: 'flex-start', gap: 12, padding: '14px 18px', marginBottom: 20,
             background: 'rgba(194,109,92,0.06)', border: '1px solid rgba(194,109,92,0.2)', borderRadius: 4,
@@ -312,10 +320,10 @@ export default function Settings() {
             <Receipt size={20} weight="duotone" style={{ color: 'var(--brand-primary)', flexShrink: 0, marginTop: 1 }} />
             <div>
               <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4 }}>
-                Set up your business details to create invoices
+                {setupMode === 'bill' ? 'Set up your business details to record purchase bills' : 'Set up your business details to create invoices'}
               </div>
               <div style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-                Fill in the fields marked with <span style={{ color: 'var(--brand-primary)', fontWeight: 700 }}>*</span> below. These details will appear on every invoice you create. You only need to do this once — you can always come back and edit them later.
+                Fill in the fields marked with <span style={{ color: 'var(--brand-primary)', fontWeight: 700 }}>*</span> below. These details will appear on every {setupMode === 'bill' ? 'purchase bill' : 'invoice'} you create. You only need to do this once — you can always come back and edit them later.
               </div>
             </div>
           </div>
@@ -447,6 +455,30 @@ export default function Settings() {
             </div>
           </div>
         </div>
+
+        <div style={{ borderTop: '1px solid var(--border-subtle)', marginBottom: 24 }} />
+
+        {/* Bill Numbering & Terms */}
+        <div>
+          <h3 style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 12, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            Bill Numbering & Terms
+          </h3>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, maxWidth: 700 }}>
+            <div>
+              <label style={labelStyle}>Bill Number Prefix <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>— e.g. BILL-, PB-, or your firm initials</span></label>
+              <input data-testid="bill-prefix" value={billPrefix} onChange={e => setBillPrefix(e.target.value)} placeholder="BILL-" style={fieldStyle} />
+              <div className="mono" style={{ marginTop: 4, fontSize: 11, color: 'var(--text-muted)' }}>
+                Preview: {billPrefix || 'BILL-'}0001
+              </div>
+            </div>
+            <div style={{ gridColumn: '1 / -1' }}>
+              <label style={labelStyle}>Default Terms for Bills <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>— printed at the bottom of every purchase bill</span></label>
+              <textarea data-testid="bill-terms" value={billTerms} onChange={e => setBillTerms(e.target.value)}
+                placeholder="e.g. Payment to be made within 30 days of bill date. Subject to terms agreed with the vendor."
+                rows={3} style={{ ...fieldStyle, resize: 'vertical', minHeight: 60 }} />
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Save Button */}
@@ -462,11 +494,11 @@ export default function Settings() {
             opacity: saving ? 0.6 : 1, display: 'flex', alignItems: 'center', gap: 6,
           }}
         >
-          {saving ? 'Saving...' : setupMode ? 'Save & Continue to Invoices' : 'Save Settings'}
+          {saving ? 'Saving...' : setupMode ? (setupMode === 'bill' ? 'Save & Continue to Purchases' : 'Save & Continue to Invoices') : 'Save Settings'}
         </button>
         {setupMode && !saving && (
           <button
-            onClick={() => navigate('/invoices')}
+            onClick={() => navigate(setupMode === 'bill' ? '/purchases' : '/invoices')}
             style={{
               background: 'none', color: 'var(--text-secondary)', border: '1px solid var(--border-strong)',
               padding: '12px 20px', borderRadius: 2, fontSize: 13, fontWeight: 500,
