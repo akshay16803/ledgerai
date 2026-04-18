@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext.jsx';
-import { api } from '../lib/api.js';
 import {
   House, ArrowsLeftRight, Bank, Tag,
   Lightbulb, SignOut, Gear, EnvelopeSimple, TrendUp, Scales, ChartBar, Archive, Receipt, List, X, Headset, Users, Package, Storefront
@@ -24,12 +23,12 @@ const baseNavItems = [
 ];
 
 const invoiceNavItems = [
-  { to: '/invoices', icon: Receipt, label: 'Invoices' },
+  { to: '/invoices', icon: Receipt, label: 'Sales Invoice' },
   { to: '/customers', icon: Users, label: 'Customers' },
 ];
 
 const billNavItems = [
-  { to: '/purchases', icon: Package, label: 'Purchases' },
+  { to: '/purchases', icon: Package, label: 'Purchase Invoice' },
   { to: '/vendors', icon: Storefront, label: 'Vendors' },
 ];
 
@@ -41,27 +40,8 @@ export default function AppLayout({ children }) {
   // null = use CSS default, true/false = user toggled
   const [userToggled, setUserToggled] = useState(null);
   const [isMobile, setIsMobile] = useState(true);
-  const [hasInvoices, setHasInvoices] = useState(false);
-  const [hasBills, setHasBills] = useState(false);
-
-  // Check invoice and bill counts to conditionally show nav tabs
-  useEffect(() => {
-    api.get('/api/invoices/count').then(res => {
-      setHasInvoices((res?.count || 0) > 0);
-    }).catch(() => {});
-    api.get('/api/bills/count').then(res => {
-      setHasBills((res?.count || 0) > 0);
-    }).catch(() => {});
-  }, []);
-
-  // Build dynamic nav items — insert Invoices/Customers and Purchases/Vendors after Dashboard
-  const navItems = (() => {
-    let items = [baseNavItems[0]];
-    if (hasInvoices) items = [...items, ...invoiceNavItems];
-    if (hasBills) items = [...items, ...billNavItems];
-    items = [...items, ...baseNavItems.slice(1)];
-    return items;
-  })();
+  // Build nav items — Sales Invoice/Customers and Purchase Invoice/Vendors always visible after Dashboard
+  const navItems = [baseNavItems[0], ...invoiceNavItems, ...billNavItems, ...baseNavItems.slice(1)];
 
   // Detect mobile
   useEffect(() => {

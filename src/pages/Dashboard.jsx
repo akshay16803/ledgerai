@@ -7,6 +7,8 @@ import {
   Robot, PaperPlaneTilt, X, SpinnerGap, CheckCircle
 } from '@phosphor-icons/react';
 import { EditTransactionModal } from '../components/EditTransactionModal';
+import { SalesInvoiceModal } from '../components/SalesInvoiceModal';
+import { PurchaseBillModal } from '../components/PurchaseBillModal';
 
 function StatCard({ testId, label, value, icon: Icon, color, accent }) {
   return (
@@ -274,6 +276,8 @@ export default function Dashboard() {
   const [showNewTxn, setShowNewTxn] = useState(false);
   const [modalAccounts, setModalAccounts] = useState([]);
   const [modalCategories, setModalCategories] = useState([]);
+  const [showSalesInvoice, setShowSalesInvoice] = useState(false);
+  const [showPurchaseInvoice, setShowPurchaseInvoice] = useState(false);
 
   const openNewTxnModal = async () => {
     setShowNewTxn(true);
@@ -285,6 +289,25 @@ export default function Dashboard() {
       setModalAccounts(accs);
       setModalCategories(cats);
     } catch { /* modal will show empty selects */ }
+  };
+
+  // Handle switch from transaction modal to invoice modals
+  const handleSwitchToInvoice = async (type) => {
+    setShowNewTxn(false);
+    // Check settings gate — firm name must be set
+    try {
+      const settings = await api.get('/api/settings');
+      if (!settings.firm_name?.trim()) {
+        navigate(type === 'sales_invoice' ? '/settings?setup=invoice' : '/settings?setup=bill');
+        return;
+      }
+    } catch { /* proceed anyway */ }
+    // Load accounts for invoice modals
+    if (modalAccounts.length === 0) {
+      try { const accs = await api.get('/api/accounts'); setModalAccounts(accs); } catch {}
+    }
+    if (type === 'sales_invoice') setShowSalesInvoice(true);
+    else setShowPurchaseInvoice(true);
   };
 
   const loadData = useCallback(async () => {
@@ -433,6 +456,27 @@ export default function Dashboard() {
           categories={modalCategories}
           onSave={() => { setShowNewTxn(false); loadData(); }}
           onClose={() => setShowNewTxn(false)}
+          onSwitchToInvoice={handleSwitchToInvoice}
+        />
+      )}
+
+      {/* Sales Invoice Modal */}
+      {showSalesInvoice && (
+        <SalesInvoiceModal
+          invoice={null}
+          accounts={modalAccounts}
+          onSave={() => { setShowSalesInvoice(false); loadData(); }}
+          onClose={() => setShowSalesInvoice(false)}
+        />
+      )}
+
+      {/* Purchase Invoice Modal */}
+      {showPurchaseInvoice && (
+        <PurchaseBillModal
+          bill={null}
+          accounts={modalAccounts}
+          onSave={() => { setShowPurchaseInvoice(false); loadData(); }}
+          onClose={() => setShowPurchaseInvoice(false)}
         />
       )}
     </div>

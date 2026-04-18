@@ -2,7 +2,10 @@ import { useState, useEffect, useCallback } from 'react';
 import { api } from '../lib/api';
 import { getCached, setCache } from '../lib/cache';
 import { Plus, Check, X, Funnel, PencilSimple, Robot, Receipt, BookOpen, ListBullets } from '@phosphor-icons/react';
+import { useNavigate } from 'react-router-dom';
 import { EditTransactionModal } from '../components/EditTransactionModal';
+import { SalesInvoiceModal } from '../components/SalesInvoiceModal';
+import { PurchaseBillModal } from '../components/PurchaseBillModal';
 
 function formatCurrency(amount) {
   return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2 }).format(amount);
@@ -24,6 +27,23 @@ export default function Transactions() {
   const [filterDateFrom, setFilterDateFrom] = useState('');
   const [filterDateTo, setFilterDateTo] = useState('');
   const [editingTxn, setEditingTxn] = useState(null);
+  const [showSalesInvoice, setShowSalesInvoice] = useState(false);
+  const [showPurchaseInvoice, setShowPurchaseInvoice] = useState(false);
+  const navigate = useNavigate();
+
+  // Handle switch from transaction modal to invoice modals
+  const handleSwitchToInvoice = async (type) => {
+    setShowNewTxn(false);
+    try {
+      const settings = await api.get('/api/settings');
+      if (!settings.firm_name?.trim()) {
+        navigate(type === 'sales_invoice' ? '/settings?setup=invoice' : '/settings?setup=bill');
+        return;
+      }
+    } catch { /* proceed anyway */ }
+    if (type === 'sales_invoice') setShowSalesInvoice(true);
+    else setShowPurchaseInvoice(true);
+  };
 
   const loadData = useCallback(async () => {
     try {
@@ -383,6 +403,27 @@ export default function Transactions() {
           categories={categories}
           onSave={() => { setShowNewTxn(false); loadData(); }}
           onClose={() => setShowNewTxn(false)}
+          onSwitchToInvoice={handleSwitchToInvoice}
+        />
+      )}
+
+      {/* Sales Invoice Modal */}
+      {showSalesInvoice && (
+        <SalesInvoiceModal
+          invoice={null}
+          accounts={accounts}
+          onSave={() => { setShowSalesInvoice(false); loadData(); }}
+          onClose={() => setShowSalesInvoice(false)}
+        />
+      )}
+
+      {/* Purchase Invoice Modal */}
+      {showPurchaseInvoice && (
+        <PurchaseBillModal
+          bill={null}
+          accounts={accounts}
+          onSave={() => { setShowPurchaseInvoice(false); loadData(); }}
+          onClose={() => setShowPurchaseInvoice(false)}
         />
       )}
 

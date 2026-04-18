@@ -570,7 +570,7 @@ export default function Purchases() {
           fontFamily: 'var(--font-heading)', margin: 0, display: 'flex', alignItems: 'center', gap: 10,
         }}>
           <Package size={26} weight="duotone" style={{ color: 'var(--brand-primary)' }} />
-          Purchases
+          Purchase Invoice
         </h1>
         <button onClick={handleNewBill} style={{
           display: 'flex', alignItems: 'center', gap: 6, padding: '10px 20px',

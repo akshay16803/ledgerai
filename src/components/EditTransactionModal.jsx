@@ -1,8 +1,8 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { api } from '../lib/api';
-import { X, ArrowDown, ArrowUp, ArrowsLeftRight, Plus, Check, CheckCircle, Receipt, UploadSimple, SpinnerGap, Trash, Robot } from '@phosphor-icons/react';
+import { X, ArrowDown, ArrowUp, ArrowsLeftRight, Plus, Check, CheckCircle, Receipt, UploadSimple, SpinnerGap, Trash, Robot, FileText, Package } from '@phosphor-icons/react';
 
-export function EditTransactionModal({ transaction, accounts, categories, onSave, onClose, isPendingReview = false }) {
+export function EditTransactionModal({ transaction, accounts, categories, onSave, onClose, isPendingReview = false, onSwitchToInvoice }) {
   const isEdit = !!transaction;
   const [txnType, setTxnType] = useState(transaction?.transaction_type || 'expense');
   const [form, setForm] = useState({
@@ -261,24 +261,34 @@ export function EditTransactionModal({ transaction, accounts, categories, onSave
 
         <div style={{ padding: '24px 28px' }}>
           {/* Type Tabs */}
-          <div style={{ display: 'flex', gap: 0, marginBottom: 24, borderBottom: '1px solid var(--border-subtle)' }}>
+          <div style={{ display: 'flex', gap: 0, marginBottom: 24, borderBottom: '1px solid var(--border-subtle)', flexWrap: 'wrap' }}>
             {[
               { key: 'income', label: 'Income', icon: ArrowDown, color: 'var(--success)' },
               { key: 'expense', label: 'Expense', icon: ArrowUp, color: 'var(--error)' },
               { key: 'transfer', label: 'Transfer', icon: ArrowsLeftRight, color: 'var(--info)' },
+              ...(isEdit ? [] : [
+                { key: 'sales_invoice', label: 'Sales Invoice', icon: FileText, color: 'var(--info)' },
+                { key: 'purchase_invoice', label: 'Purchase Invoice', icon: Package, color: 'var(--brand-primary)' },
+              ]),
             ].map(({ key, label, icon: Icon, color }) => (
               <button key={key} data-testid={`modal-txn-type-${key}`}
-                onClick={() => { setTxnType(key); setForm(f => ({ ...f, category_id: '', subcategory_id: '' })); }}
+                onClick={() => {
+                  if (key === 'sales_invoice' || key === 'purchase_invoice') {
+                    if (onSwitchToInvoice) onSwitchToInvoice(key);
+                    return;
+                  }
+                  setTxnType(key); setForm(f => ({ ...f, category_id: '', subcategory_id: '' }));
+                }}
                 style={{
-                  padding: '10px 20px', border: 'none',
+                  padding: '10px 16px', border: 'none',
                   borderBottom: txnType === key ? `2px solid ${color}` : '2px solid transparent',
-                  background: 'transparent', cursor: 'pointer', fontSize: 14,
+                  background: 'transparent', cursor: 'pointer', fontSize: 13,
                   fontWeight: txnType === key ? 600 : 400,
                   color: txnType === key ? color : 'var(--text-muted)',
-                  fontFamily: 'var(--font-body)', display: 'flex', alignItems: 'center', gap: 6,
+                  fontFamily: 'var(--font-body)', display: 'flex', alignItems: 'center', gap: 5,
                   transition: 'all 0.15s',
                 }}>
-                <Icon size={16} weight={txnType === key ? 'bold' : 'regular'} /> {label}
+                <Icon size={15} weight={txnType === key ? 'bold' : 'regular'} /> {label}
               </button>
             ))}
           </div>

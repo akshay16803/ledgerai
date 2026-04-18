@@ -565,7 +565,7 @@ export default function Invoices() {
           fontFamily: 'var(--font-heading)', margin: 0, display: 'flex', alignItems: 'center', gap: 10,
         }}>
           <Receipt size={26} weight="duotone" style={{ color: 'var(--brand-primary)' }} />
-          Invoices
+          Sales Invoice
         </h1>
         <button onClick={handleNewInvoice} style={{
           display: 'flex', alignItems: 'center', gap: 6, padding: '10px 20px',
