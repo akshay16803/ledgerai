@@ -3,8 +3,13 @@ import Foundation
 
 final class GoogleSignInHelper: NSObject, ASWebAuthenticationPresentationContextProviding {
 
-    private static let clientID = Bundle.main.object(forInfoDictionaryKey: "GOOGLE_CLIENT_ID") as? String ?? ""
-    private static let redirectURI = Bundle.main.object(forInfoDictionaryKey: "GOOGLE_REDIRECT_URI") as? String ?? "com.spentyai.app:/oauth2callback"
+    private static let clientID: String = {
+        guard let path = Bundle.main.path(forResource: "Config", ofType: "plist"),
+              let dict = NSDictionary(contentsOfFile: path),
+              let id = dict["GOOGLE_CLIENT_ID"] as? String else { return "" }
+        return id
+    }()
+    private static let redirectURI = "com.spentyai.app:/oauth2callback"
     private static let callbackScheme = "com.spentyai.app"
 
     static func signIn() async throws -> String {
