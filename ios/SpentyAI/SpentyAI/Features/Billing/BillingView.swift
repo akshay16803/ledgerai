@@ -288,9 +288,9 @@ struct BillingView: View {
     private func paymentRow(_ order: PaymentOrder) -> some View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
-                Text(order.plan)
+                Text(order.plan ?? "Unknown")
                     .font(.subheadline.weight(.medium))
-                Text(order.createdAt)
+                Text(order.createdAt ?? "")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -298,9 +298,9 @@ struct BillingView: View {
             Spacer()
 
             VStack(alignment: .trailing, spacing: 2) {
-                Text("\(order.currency) \(String(format: "%.0f", order.amount))")
+                Text("\(order.currency ?? "") \(String(format: "%.0f", order.amount ?? 0))")
                     .font(.subheadline.weight(.semibold))
-                Text(order.status.capitalized)
+                Text((order.status ?? "").capitalized)
                     .font(.caption2)
                     .foregroundStyle(order.status == "completed" ? brandPrimary : brandError)
             }

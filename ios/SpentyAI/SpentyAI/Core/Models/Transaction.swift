@@ -22,7 +22,7 @@ struct Transaction: Codable, Identifiable {
     var isEstimatedRate: Bool?
 
     enum CodingKeys: String, CodingKey {
-        case id = "_id"
+        case id = "transactionId"
         case transactionType
         case amount
         case date

@@ -4,17 +4,24 @@ import Foundation
 
 struct PlanDTO: Codable, Identifiable {
     let id: String
-    let name: String
-    let productId: String
-    let price: Double
-    let currency: String
-    let interval: String?          // "month", "quarter", "year", nil for lifetime
-    let features: [String]?
+    let name: String?
+    let amount: Int?
+    let amountDisplay: String?
+    let currency: String?
+    let durationDays: Int?
 
     enum CodingKeys: String, CodingKey {
-        case id, name, price, currency, interval, features
-        case productId
+        case id = "planId"
+        case name
+        case amount
+        case amountDisplay
+        case currency
+        case durationDays
     }
+}
+
+struct PlansResponse: Codable {
+    let plans: [PlanDTO]
 }
 
 struct PromoResponse: Codable {
@@ -61,7 +68,8 @@ final class BillingRepository {
     // MARK: - Plans
 
     func getPlans() async throws -> [PlanDTO] {
-        try await APIClient.shared.get(BillingEndpoints.plans)
+        let response: PlansResponse = try await APIClient.shared.get(BillingEndpoints.plans)
+        return response.plans
     }
 
     // MARK: - Subscription Status
@@ -73,7 +81,8 @@ final class BillingRepository {
     // MARK: - Payment History
 
     func getHistory() async throws -> [PaymentOrder] {
-        try await APIClient.shared.get(BillingEndpoints.history)
+        let response: PaymentHistoryResponse = try await APIClient.shared.get(BillingEndpoints.history)
+        return response.orders
     }
 
     // MARK: - Apple Receipt Verification

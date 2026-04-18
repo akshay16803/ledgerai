@@ -17,7 +17,7 @@ struct Bill: Codable, Identifiable {
     var notes: String?
 
     enum CodingKeys: String, CodingKey {
-        case id = "_id"
+        case id = "billId"
         case billNumber
         case vendorId
         case vendorName

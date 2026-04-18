@@ -12,11 +12,18 @@ struct VendorBill: Codable, Identifiable {
     let status: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, date, total, status
+        case id = "billId"
+        case date, total, status
         case billNumber
         case dueDate
         case amountPaid
     }
+}
+
+struct VendorBillsResponse: Codable {
+    let items: [VendorBill]
+    let total: Int?
+    let vendorName: String?
 }
 
 struct CreateVendorRequest: Codable {
@@ -59,6 +66,7 @@ final class VendorRepository {
     // MARK: - Bills
 
     func getVendorBills(vendorId: String) async throws -> [VendorBill] {
-        try await APIClient.shared.get(APIEndpoints.vendorBills(vendorId))
+        let response: VendorBillsResponse = try await APIClient.shared.get(APIEndpoints.vendorBills(vendorId))
+        return response.items
     }
 }

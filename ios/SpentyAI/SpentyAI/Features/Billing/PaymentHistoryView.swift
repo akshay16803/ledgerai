@@ -49,23 +49,23 @@ struct PaymentHistoryView: View {
             HStack(spacing: 12) {
                 // Icon
                 Circle()
-                    .fill(statusColor(order.status).opacity(0.12))
+                    .fill(statusColor(order.status ?? "").opacity(0.12))
                     .frame(width: 40, height: 40)
                     .overlay {
-                        Image(systemName: statusIcon(order.status))
+                        Image(systemName: statusIcon(order.status ?? ""))
                             .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(statusColor(order.status))
+                            .foregroundStyle(statusColor(order.status ?? ""))
                     }
 
                 // Details
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(order.plan)
+                    Text(order.plan ?? "Unknown")
                         .font(.subheadline.weight(.medium))
 
                     HStack(spacing: 6) {
-                        Text(order.createdAt)
+                        Text(order.createdAt ?? "")
                         Text("·")
-                        Text(order.provider.capitalized)
+                        Text((order.paymentProvider ?? "").capitalized)
                     }
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -75,12 +75,12 @@ struct PaymentHistoryView: View {
 
                 // Amount + Status
                 VStack(alignment: .trailing, spacing: 3) {
-                    Text("\(order.currency) \(String(format: "%.0f", order.amount))")
+                    Text("\(order.currency ?? "") \(String(format: "%.0f", order.amount ?? 0))")
                         .font(.subheadline.weight(.semibold))
 
-                    Text(order.status.capitalized)
+                    Text((order.status ?? "").capitalized)
                         .font(.caption2.weight(.medium))
-                        .foregroundStyle(statusColor(order.status))
+                        .foregroundStyle(statusColor(order.status ?? ""))
                 }
             }
             .padding(.vertical, 4)

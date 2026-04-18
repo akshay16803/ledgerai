@@ -19,7 +19,7 @@ struct Account: Codable, Identifiable {
     var brokerName: String?
 
     enum CodingKeys: String, CodingKey {
-        case id = "_id"
+        case id = "accountId"
         case name
         case accountType
         case subType
@@ -45,7 +45,7 @@ struct AccountSubType: Codable, Identifiable {
     var icon: String?
 
     enum CodingKeys: String, CodingKey {
-        case id = "_id"
+        case id = "subTypeId"
         case name
         case accountType
         case icon

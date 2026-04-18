@@ -11,7 +11,7 @@ struct User: Codable, Identifiable {
     var subscriptionProvider: String?
 
     enum CodingKeys: String, CodingKey {
-        case id = "_id"
+        case id = "userId"
         case email
         case name
         case picture

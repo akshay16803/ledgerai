@@ -94,7 +94,3 @@ final class AuthManager {
         isAuthenticated = false
     }
 }
-
-// MARK: - Empty Response
-
-struct EmptyResponse: Decodable {}

@@ -84,10 +84,6 @@ struct BillParseResponse: Codable {
     let notes: String?
 }
 
-struct BillDeleteResponse: Codable {
-    let detail: String?
-}
-
 struct BillMarkPaidResponse: Codable {
     let detail: String?
     let bill: Bill?
@@ -121,7 +117,7 @@ final class PurchaseRepository {
     }
 
     func deleteBill(id: String) async throws {
-        let _: BillDeleteResponse = try await api.delete(APIEndpoints.bill(id))
+        let _: MessageResponse = try await api.delete(APIEndpoints.bill(id))
     }
 
     // MARK: - Actions

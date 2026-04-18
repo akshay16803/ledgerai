@@ -20,10 +20,6 @@ struct SearchBody: Codable {
     let limit: Int?
 }
 
-struct MessageResponse: Codable {
-    let message: String?
-}
-
 final class TransactionRepository: Sendable {
 
     static let shared = TransactionRepository()

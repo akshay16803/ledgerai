@@ -13,7 +13,7 @@ struct Customer: Codable, Identifiable, Equatable {
     var outstanding: Double?
 
     enum CodingKeys: String, CodingKey {
-        case id = "_id"
+        case id = "customerId"
         case name
         case email
         case phone

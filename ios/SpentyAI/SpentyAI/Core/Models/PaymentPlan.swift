@@ -21,17 +21,23 @@ struct PaymentPlan: Codable, Identifiable {
 
 struct PaymentOrder: Codable, Identifiable {
     let id: String
-    let plan: String
-    let amount: Double
-    let currency: String
-    let status: String             // "completed", "refunded", "pending"
-    let provider: String
-    let createdAt: String
+    let plan: String?
+    let amount: Double?
+    let currency: String?
+    let status: String?
+    let paymentProvider: String?
+    let createdAt: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, plan, amount, currency, status, provider
+        case id = "orderId"
+        case plan, amount, currency, status
+        case paymentProvider
         case createdAt
     }
+}
+
+struct PaymentHistoryResponse: Codable {
+    let orders: [PaymentOrder]
 }
 
 struct SubscriptionStatus: Codable {

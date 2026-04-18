@@ -71,6 +71,3 @@ final class CategoryRepository {
         return try await APIClient.shared.post(APIEndpoints.categoriesMerge, body: body)
     }
 }
-
-// Placeholder for empty-body DELETE responses
-private struct EmptyResponse: Codable {}

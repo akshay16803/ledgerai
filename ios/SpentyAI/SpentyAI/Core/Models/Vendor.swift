@@ -12,7 +12,7 @@ struct Vendor: Codable, Identifiable {
     var outstanding: Double?
 
     enum CodingKeys: String, CodingKey {
-        case id = "_id"
+        case id = "vendorId"
         case name
         case email
         case phone

@@ -13,7 +13,27 @@ struct ChatMessageDTO: Codable {
 }
 
 struct ChatResponse: Codable {
-    let message: ChatMessage
+    let reply: String?
+    let transactionPosted: Bool?
+    let transaction: Transaction?
+    let invoiceCreated: Bool?
+    let invoice: Invoice?
+    let billCreated: Bool?
+    let bill: Bill?
+
+    /// Convert the flat API response into a ChatMessage for the UI.
+    var asChatMessage: ChatMessage {
+        ChatMessage(
+            role: "assistant",
+            content: reply,
+            transactionPosted: transactionPosted,
+            transaction: transaction,
+            invoiceCreated: invoiceCreated,
+            invoice: invoice,
+            billCreated: billCreated,
+            bill: bill
+        )
+    }
 }
 
 struct ChatHistoryResponse: Codable {
@@ -25,7 +45,8 @@ struct ChatSuggestionsResponse: Codable {
 }
 
 struct ChatClearResponse: Codable {
-    let success: Bool
+    let message: String?
+    let deleted: Int?
 }
 
 // MARK: - Repository
@@ -43,7 +64,7 @@ final class AIChatRepository {
         }
         let body = ChatRequest(message: text, conversation: dto)
         let response: ChatResponse = try await APIClient.shared.post(APIEndpoints.aiChat, body: body)
-        return response.message
+        return response.asChatMessage
     }
 
     // MARK: - History

@@ -12,7 +12,7 @@ struct Record: Codable, Identifiable {
     var attachmentCount: Int?
 
     enum CodingKeys: String, CodingKey {
-        case id = "_id"
+        case id = "emailId"
         case subject
         case sender
         case receivedDate
@@ -34,7 +34,7 @@ struct Receipt: Codable, Identifiable {
     var fileSize: Int?
 
     enum CodingKeys: String, CodingKey {
-        case id = "_id"
+        case id = "receiptId"
         case filename
         case mimeType
         case uploadedAt

@@ -152,7 +152,7 @@ struct PendingTransaction: Codable, Identifiable {
     var status: String?
 
     enum CodingKeys: String, CodingKey {
-        case id = "_id"
+        case id = "transactionId"
         case date
         case description
         case amount

@@ -10,6 +10,22 @@ struct CustomerInvoice: Codable, Identifiable {
     let total: Double?
     let amountPaid: Double?
     let status: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id = "invoiceId"
+        case invoiceNumber
+        case date
+        case dueDate
+        case total
+        case amountPaid
+        case status
+    }
+}
+
+struct CustomerInvoicesResponse: Codable {
+    let items: [CustomerInvoice]
+    let total: Int?
+    let customerName: String?
 }
 
 struct CustomerPayload: Codable {
@@ -19,11 +35,6 @@ struct CustomerPayload: Codable {
     let gstin: String?
     let billingAddress: String?
     let shippingAddress: String?
-}
-
-/// Empty-body response for DELETE calls that return `{ "detail": "..." }`.
-private struct CustomerDeleteResponse: Codable {
-    let detail: String?
 }
 
 // MARK: - Repository
@@ -47,12 +58,13 @@ struct CustomerRepository {
     }
 
     func delete(id: String) async throws {
-        let _: CustomerDeleteResponse = try await api.delete(APIEndpoints.customer(id))
+        let _: MessageResponse = try await api.delete(APIEndpoints.customer(id))
     }
 
     // MARK: - Invoices
 
     func fetchInvoices(customerId: String) async throws -> [CustomerInvoice] {
-        try await api.get(APIEndpoints.customerInvoices(customerId))
+        let response: CustomerInvoicesResponse = try await api.get(APIEndpoints.customerInvoices(customerId))
+        return response.items
     }
 }

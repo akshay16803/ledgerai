@@ -18,7 +18,7 @@ struct Invoice: Codable, Identifiable, Equatable {
     var terms: String?
 
     enum CodingKeys: String, CodingKey {
-        case id = "_id"
+        case id = "invoiceId"
         case invoiceNumber
         case customerId
         case customerName

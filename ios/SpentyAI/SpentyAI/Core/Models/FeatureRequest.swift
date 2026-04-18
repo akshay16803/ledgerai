@@ -24,7 +24,7 @@ struct FeatureRequest: Codable, Identifiable {
     var createdAt: Date?
 
     enum CodingKeys: String, CodingKey {
-        case id = "_id"
+        case id = "requestId"
         case title
         case description
         case category

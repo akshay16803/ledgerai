@@ -54,7 +54,7 @@ struct InvoiceRepository {
     }
 
     func delete(id: String) async throws {
-        let _: DeleteResponse = try await api.delete(APIEndpoints.invoice(id))
+        let _: MessageResponse = try await api.delete(APIEndpoints.invoice(id))
     }
 
     // MARK: - Actions

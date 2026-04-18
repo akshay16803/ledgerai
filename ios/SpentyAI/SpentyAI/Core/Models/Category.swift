@@ -13,7 +13,7 @@ struct Category: Codable, Identifiable, Hashable {
     var children: [Category]?
 
     enum CodingKeys: String, CodingKey {
-        case id = "_id"
+        case id = "categoryId"
         case name
         case categoryType
         case parentId

@@ -18,10 +18,6 @@ struct SubTypeResponse: Decodable {
     let subType: AccountSubType
 }
 
-struct DeleteResponse: Decodable {
-    let message: String?
-}
-
 struct AmortizationEntry: Codable, Identifiable {
     var id: Int { month }
     let month: Int
@@ -61,7 +57,7 @@ struct DematStatement: Codable, Identifiable {
     var transactionsCount: Int?
 
     enum CodingKeys: String, CodingKey {
-        case id = "_id"
+        case id = "statementId"
         case filename
         case uploadedAt
         case status
@@ -113,7 +109,7 @@ actor AccountRepository {
     }
 
     func deleteAccount(_ id: String) async throws {
-        let _: DeleteResponse = try await api.delete(APIEndpoints.account(id))
+        let _: MessageResponse = try await api.delete(APIEndpoints.account(id))
     }
 
     // MARK: - Amortization & OD
@@ -154,7 +150,7 @@ actor AccountRepository {
     }
 
     func deleteSubType(_ id: String) async throws {
-        let _: DeleteResponse = try await api.delete(APIEndpoints.accountSubType(id))
+        let _: MessageResponse = try await api.delete(APIEndpoints.accountSubType(id))
     }
 
     // MARK: - Demat

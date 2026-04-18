@@ -12,7 +12,7 @@ struct Mandate: Codable, Identifiable {
     var sourceEmailSubject: String?
 
     enum CodingKeys: String, CodingKey {
-        case id = "_id"
+        case id = "mandateId"
         case merchant
         case mandateType
         case amount

@@ -18,7 +18,7 @@ struct Statement: Codable, Identifiable {
     var processingStageLabel: String?
 
     enum CodingKeys: String, CodingKey {
-        case id = "_id"
+        case id = "statementId"
         case filename
         case accountId
         case accountName

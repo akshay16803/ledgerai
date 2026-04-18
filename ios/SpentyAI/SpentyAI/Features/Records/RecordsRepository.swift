@@ -24,7 +24,7 @@ struct RecordPreviewResponse: Codable {
     let transactionId: String?
 
     enum CodingKeys: String, CodingKey {
-        case id = "_id"
+        case id = "emailId"
         case subject, sender, receivedDate, source, body, bodyHtml
         case attachments, transactionId
     }
@@ -54,7 +54,7 @@ struct ReceiptUploadResponse: Codable {
     let message: String?
 
     enum CodingKeys: String, CodingKey {
-        case id = "_id"
+        case id = "receiptId"
         case filename, message
     }
 }

@@ -14,7 +14,7 @@ struct TaxSummary: Codable, Identifiable {
     var provider: String?
 
     enum CodingKeys: String, CodingKey {
-        case id = "_id"
+        case id = "summaryId"
         case name
         case dateFrom
         case dateTo
@@ -38,7 +38,7 @@ struct TaxSummaryTransaction: Codable, Identifiable {
     var accountName: String?
 
     enum CodingKeys: String, CodingKey {
-        case id = "_id"
+        case id = "txnId"
         case date
         case description
         case amount
