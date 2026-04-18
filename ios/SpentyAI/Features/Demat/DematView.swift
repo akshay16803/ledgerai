@@ -101,7 +101,7 @@ struct DematView: View {
     private var summarySection: some View {
         if let summary = viewModel.overallSummary {
             VStack(alignment: .leading, spacing: SpentySpacing.sm) {
-                SectionHeader(title: "Portfolio Summary", actionTitle: nil, action: nil)
+                SectionHeader( "Portfolio Summary", actionTitle: nil, action: nil)
 
                 LazyVGrid(columns: statsColumns, spacing: SpentySpacing.md) {
                     StatCard(

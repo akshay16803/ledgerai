@@ -153,7 +153,7 @@ struct ReportsView: View {
 
         SpentyCard {
             VStack(alignment: .leading, spacing: SpentySpacing.md) {
-                SectionHeader(title: "Income vs Expense")
+                SectionHeader( "Income vs Expense")
 
                 if periods.isEmpty {
                     EmptyState(
@@ -173,7 +173,7 @@ struct ReportsView: View {
     private var categoryBreakdown: some View {
         VStack(alignment: .leading, spacing: SpentySpacing.md) {
             HStack {
-                SectionHeader(title: "By Category")
+                SectionHeader( "By Category")
                 Spacer()
             }
 

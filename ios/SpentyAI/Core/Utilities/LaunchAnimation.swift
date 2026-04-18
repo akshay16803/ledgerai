@@ -18,10 +18,10 @@ struct LaunchAnimationView: View {
             SpentyColors.brandPrimary
                 .ignoresSafeArea()
 
-            VStack(spacing: SpentySpacing.medium) {
+            VStack(spacing: SpentySpacing.md) {
                 // App title
                 Text("SpentyAI")
-                    .font(SpentyFonts.largeTitle)
+                    .font(SpentyFonts.stat)
                     .fontWeight(.bold)
                     .foregroundStyle(.white)
                     .opacity(showTitle ? 1 : 0)

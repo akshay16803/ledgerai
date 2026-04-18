@@ -156,7 +156,7 @@ struct CashFlowView: View {
     private var projectionChartSection: some View {
         if let entries = viewModel.projection?.projection, !entries.isEmpty {
             VStack(alignment: .leading, spacing: SpentySpacing.sm) {
-                SectionHeader(title: "24-Month Projection", actionTitle: nil, action: nil)
+                SectionHeader( "24-Month Projection", actionTitle: nil, action: nil)
 
                 SpentyCard {
                     ScrollView(.horizontal, showsIndicators: false) {
@@ -221,7 +221,7 @@ struct CashFlowView: View {
     private var odInterestSection: some View {
         if let items = viewModel.projection?.odInterestItems, !items.isEmpty {
             VStack(alignment: .leading, spacing: SpentySpacing.sm) {
-                SectionHeader(title: "OD Interest", actionTitle: nil, action: nil)
+                SectionHeader( "OD Interest", actionTitle: nil, action: nil)
 
                 ForEach(Array(items.enumerated()), id: \.offset) { _, item in
                     SpentyCard {
@@ -248,7 +248,7 @@ struct CashFlowView: View {
     private var recurringItemsSection: some View {
         if let items = viewModel.projection?.recurringItems, !items.isEmpty {
             VStack(alignment: .leading, spacing: SpentySpacing.sm) {
-                SectionHeader(title: "Recurring Items", actionTitle: nil, action: nil)
+                SectionHeader( "Recurring Items", actionTitle: nil, action: nil)
 
                 ForEach(Array(items.enumerated()), id: \.offset) { _, item in
                     SpentyCard {
