@@ -8397,6 +8397,126 @@ Only return the JSON object, no extra text. Be conservative — only fill fields
         return {"receipt_id": receipt_id, "parsed_data": None, "error": "Failed to parse receipt. Please fill in details manually."}
 
 
+@app.post("/api/bills/parse-upload")
+async def parse_bill_upload(
+    file: UploadFile = File(...),
+    user: dict = Depends(get_current_user),
+):
+    """Upload a purchase invoice / bill image or PDF and extract structured data via AI."""
+    if not async_openai_client:
+        raise HTTPException(status_code=500, detail="AI service not configured")
+
+    content = await file.read()
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="File too large (max 10 MB)")
+
+    mime = file.content_type or "application/octet-stream"
+    ext = (file.filename or "").rsplit(".", 1)[-1].lower() if file.filename else ""
+
+    import base64 as b64mod
+    b64_content = b64mod.b64encode(content).decode("utf-8")
+
+    # Fetch user's vendors for better matching
+    user_vendors = await db.vendors.find(
+        {"user_id": user["user_id"]}, {"_id": 0, "vendor_id": 1, "name": 1, "gstin": 1}
+    ).to_list(500)
+    vendor_names = ", ".join([v["name"] for v in user_vendors]) if user_vendors else "No vendors set up yet"
+
+    system_prompt = f"""You are a purchase invoice / bill parser for an accounting app.
+Extract all details from this purchase bill / vendor invoice image or PDF.
+
+The user has these vendors: {vendor_names}
+
+Return a JSON object with these fields (use null for anything you can't determine):
+{{
+  "vendor_name": "<vendor/supplier company name or null>",
+  "vendor_gstin": "<vendor GSTIN if visible or null>",
+  "bill_date": "<YYYY-MM-DD or null>",
+  "due_date": "<YYYY-MM-DD or null>",
+  "bill_reference": "<invoice number / reference on the bill or null>",
+  "bill_type": "<'gst' if GST/tax details are present, otherwise 'simple'>",
+  "place_of_supply": "<state name if visible or null>",
+  "line_items": [
+    {{
+      "description": "<item name/description>",
+      "hsn_sac": "<HSN/SAC code if visible or null>",
+      "quantity": <number>,
+      "rate": <unit price number>,
+      "discount_percent": <discount percentage or 0>,
+      "tax_rate": <GST rate percentage or 0>
+    }}
+  ],
+  "subtotal": <number or null>,
+  "tax_total": <number or null>,
+  "grand_total": <total amount number or null>,
+  "notes": "<any additional notes visible or null>"
+}}
+
+Only return the JSON object, no extra text. Be thorough — extract every line item visible.
+If the document has GST details (CGST, SGST, IGST, GSTIN), set bill_type to 'gst'.
+For tax_rate, use the per-item GST rate (e.g. 5, 12, 18, 28), not the total tax amount."""
+
+    user_message = [
+        {"type": "text", "text": "Parse this purchase invoice / bill and extract all details:"},
+        {
+            "type": "image_url",
+            "image_url": {"url": f"data:{mime};base64,{b64_content}"}
+        }
+    ]
+
+    try:
+        response = await async_openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message},
+            ],
+            max_tokens=2000,
+            temperature=0.1,
+        )
+
+        raw_text = response.choices[0].message.content.strip()
+        if raw_text.startswith("```"):
+            raw_text = raw_text.split("\n", 1)[-1]
+            if raw_text.endswith("```"):
+                raw_text = raw_text[:-3].strip()
+
+        import json
+        parsed = json.loads(raw_text)
+
+        # Try to match vendor_name to an existing vendor
+        matched_vendor = None
+        vendor_name = parsed.get("vendor_name")
+        if vendor_name:
+            for v in user_vendors:
+                if v["name"].lower() == vendor_name.lower():
+                    matched_vendor = v
+                    break
+            if not matched_vendor:
+                for v in user_vendors:
+                    if vendor_name.lower() in v["name"].lower() or v["name"].lower() in vendor_name.lower():
+                        matched_vendor = v
+                        break
+            # Also try matching by GSTIN
+            if not matched_vendor and parsed.get("vendor_gstin"):
+                for v in user_vendors:
+                    if v.get("gstin") and v["gstin"].upper() == parsed["vendor_gstin"].upper():
+                        matched_vendor = v
+                        break
+
+        if matched_vendor:
+            parsed["matched_vendor_id"] = matched_vendor["vendor_id"]
+            parsed["matched_vendor_name"] = matched_vendor["name"]
+
+        return {"parsed_data": parsed}
+
+    except json.JSONDecodeError:
+        return {"parsed_data": None, "error": "AI could not parse the bill clearly. Please fill in details manually."}
+    except Exception as e:
+        logger.error(f"Bill parse-upload error: {e}")
+        return {"parsed_data": None, "error": "Failed to parse bill. Please fill in details manually."}
+
+
 @app.get("/api/receipts/{receipt_id}/download")
 async def download_receipt(receipt_id: str, user: dict = Depends(get_current_user)):
     """Download a receipt file."""

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
-import { X, Plus, Trash, Receipt, SpinnerGap, Check, MagnifyingGlass, CaretDown, Warning, Gear } from '@phosphor-icons/react';
+import { X, Plus, Trash, Receipt, SpinnerGap, Check, MagnifyingGlass, CaretDown, Warning, Gear, UploadSimple, Robot } from '@phosphor-icons/react';
 
 const INDIAN_STATES = [
   'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chhattisgarh', 'Goa', 'Gujarat',
@@ -94,6 +94,15 @@ export function PurchaseBillModal({ bill, accounts, onSave, onClose }) {
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
 
+  // Upload & AI parse state
+  const [uploadFile, setUploadFile] = useState(null);
+  const [uploadPreview, setUploadPreview] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const [parsing, setParsing] = useState(false);
+  const [parseSuccess, setParseSuccess] = useState(false);
+  const [uploadError, setUploadError] = useState('');
+  const uploadInputRef = useRef(null);
+
   // Load firm settings on mount
   useEffect(() => {
     api.get('/api/settings').then(settings => {
@@ -170,6 +179,86 @@ export function PurchaseBillModal({ bill, accounts, onSave, onClose }) {
     } finally {
       setSavingVendor(false);
     }
+  };
+
+  // Upload & AI parse handler
+  const handleBillUpload = async (file) => {
+    if (!file) return;
+    setUploadFile(file);
+    setUploadError('');
+    setParseSuccess(false);
+    if (file.type.startsWith('image/')) {
+      const reader = new FileReader();
+      reader.onload = (e) => setUploadPreview(e.target.result);
+      reader.readAsDataURL(file);
+    } else {
+      setUploadPreview(null);
+    }
+    setUploading(true);
+    setParsing(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await api.upload('/api/bills/parse-upload', fd);
+      if (res.parsed_data) {
+        const pd = res.parsed_data;
+        // Auto-fill bill type
+        if (pd.bill_type === 'gst') setBillType('gst');
+        // Auto-fill dates
+        if (pd.bill_date) setBillDate(pd.bill_date);
+        if (pd.due_date) setDueDate(pd.due_date);
+        if (pd.bill_reference) setBillReference(pd.bill_reference);
+        if (pd.notes) setNotes(pd.notes);
+        if (pd.place_of_supply) setPlaceOfSupply(pd.place_of_supply);
+        // Auto-fill vendor — try matched vendor first, otherwise search by name
+        if (pd.matched_vendor_id) {
+          try {
+            const results = await api.get(`/api/vendors?q=${encodeURIComponent(pd.matched_vendor_name || '')}`, { bypassCache: true });
+            const matched = (Array.isArray(results) ? results : []).find(v =>
+              (v.vendor_id || v.id) === pd.matched_vendor_id
+            );
+            if (matched) selectVendor(matched);
+          } catch { /* skip */ }
+        } else if (pd.vendor_name && !selectedVendor) {
+          // Pre-fill the search query so user can see AI-detected vendor name
+          setVendorQuery(pd.vendor_name);
+          // Also pre-fill quick create form in case vendor doesn't exist
+          setQuickVendor(prev => ({
+            ...prev,
+            name: pd.vendor_name,
+            gstin: pd.vendor_gstin || prev.gstin,
+          }));
+        }
+        // Auto-fill line items
+        if (pd.line_items && pd.line_items.length > 0) {
+          setLineItems(pd.line_items.map((li, i) => ({
+            id: Date.now() + i + Math.random(),
+            description: li.description || '',
+            hsn_sac: li.hsn_sac || '',
+            quantity: li.quantity || 1,
+            rate: li.rate != null ? String(li.rate) : '',
+            discount_percent: li.discount_percent != null ? String(li.discount_percent) : '',
+            tax_rate: li.tax_rate != null ? li.tax_rate : 18,
+          })));
+        }
+        setParseSuccess(true);
+      } else if (res.error) {
+        setUploadError(res.error);
+      }
+    } catch (err) {
+      setUploadError(err.message || 'Failed to parse bill');
+    } finally {
+      setUploading(false);
+      setParsing(false);
+    }
+  };
+
+  const handleRemoveUpload = () => {
+    setUploadFile(null);
+    setUploadPreview(null);
+    setUploadError('');
+    setParseSuccess(false);
+    if (uploadInputRef.current) uploadInputRef.current.value = '';
   };
 
   // Line item helpers
@@ -330,6 +419,73 @@ export function PurchaseBillModal({ bill, accounts, onSave, onClose }) {
         </div>
 
         <div style={{ padding: '24px 28px' }}>
+          {/* Upload Bill for AI Parsing */}
+          {!isEdit && (
+            <div style={{ marginBottom: 20 }}>
+              {!uploadFile ? (
+                <div
+                  onClick={() => uploadInputRef.current?.click()}
+                  onDragOver={e => { e.preventDefault(); e.currentTarget.style.borderColor = 'var(--brand-primary)'; }}
+                  onDragLeave={e => { e.currentTarget.style.borderColor = 'var(--border-strong)'; }}
+                  onDrop={e => { e.preventDefault(); e.currentTarget.style.borderColor = 'var(--border-strong)'; const f = e.dataTransfer.files?.[0]; if (f) handleBillUpload(f); }}
+                  style={{
+                    border: '2px dashed var(--border-strong)', borderRadius: 4, padding: '18px 20px',
+                    cursor: 'pointer', textAlign: 'center',
+                    background: 'var(--bg-secondary)', transition: 'border-color 0.2s, background 0.2s',
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--brand-primary)'; e.currentTarget.style.background = 'rgba(194,109,92,0.04)'; }}
+                  onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border-strong)'; e.currentTarget.style.background = 'var(--bg-secondary)'; }}
+                >
+                  <UploadSimple size={22} style={{ color: 'var(--brand-primary)', marginBottom: 4 }} />
+                  <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+                    Upload a purchase bill to <span style={{ color: 'var(--brand-primary)', fontWeight: 600 }}>auto-fill with AI</span>
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
+                    Drop image or PDF here, or click to browse
+                  </div>
+                  <input ref={uploadInputRef} type="file" accept="image/*,.pdf" style={{ display: 'none' }}
+                    onChange={e => { const f = e.target.files?.[0]; if (f) handleBillUpload(f); }} />
+                </div>
+              ) : (
+                <div style={{
+                  border: '1px solid var(--border-strong)', borderRadius: 4, padding: '12px 16px',
+                  background: 'var(--bg-secondary)', display: 'flex', alignItems: 'center', gap: 12,
+                }}>
+                  {uploadPreview ? (
+                    <img src={uploadPreview} alt="Bill" style={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 2, border: '1px solid var(--border-subtle)' }} />
+                  ) : (
+                    <div style={{ width: 40, height: 40, borderRadius: 2, background: 'rgba(194,109,92,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <Receipt size={18} style={{ color: 'var(--brand-primary)' }} />
+                    </div>
+                  )}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {uploadFile.name}
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                      {(uploadFile.size / 1024).toFixed(0)} KB
+                      {(uploading || parsing) && <span> — <Robot size={11} weight="fill" style={{ verticalAlign: 'middle' }} /> Parsing with AI...</span>}
+                      {parseSuccess && !parsing && <span style={{ color: 'var(--success)' }}> — Auto-filled from bill</span>}
+                    </div>
+                  </div>
+                  {(uploading || parsing) && (
+                    <SpinnerGap size={18} className="spin" style={{ color: 'var(--brand-primary)', flexShrink: 0 }} />
+                  )}
+                  {parseSuccess && !parsing && (
+                    <Check size={18} weight="bold" style={{ color: 'var(--success)', flexShrink: 0 }} />
+                  )}
+                  {!uploading && !parsing && (
+                    <button type="button" onClick={handleRemoveUpload} title="Remove"
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4 }}>
+                      <X size={16} />
+                    </button>
+                  )}
+                </div>
+              )}
+              {uploadError && <p style={{ color: 'var(--error)', fontSize: 11, marginTop: 4 }}>{uploadError}</p>}
+            </div>
+          )}
+
           {/* Bill Type Toggle */}
           <div style={{ display: 'flex', gap: 0, marginBottom: 24, borderBottom: '1px solid var(--border-subtle)' }}>
             {[
@@ -786,14 +942,14 @@ export function PurchaseBillModal({ bill, accounts, onSave, onClose }) {
 
             {/* ── Actions ── */}
             <div style={{ display: 'flex', gap: 12 }}>
-              <button type="submit" disabled={saving}
+              <button type="submit" disabled={saving || uploading || parsing}
                 style={{
                   background: 'var(--brand-primary)', color: '#fff', border: 'none',
                   padding: '10px 24px', borderRadius: 2, fontSize: 13, fontWeight: 600,
-                  cursor: saving ? 'not-allowed' : 'pointer', fontFamily: 'var(--font-body)',
-                  opacity: saving ? 0.6 : 1,
+                  cursor: (saving || uploading || parsing) ? 'not-allowed' : 'pointer', fontFamily: 'var(--font-body)',
+                  opacity: (saving || uploading || parsing) ? 0.6 : 1,
                 }}>
-                {saving ? 'Saving...' : isEdit ? 'Update Bill' : 'Save Bill'}
+                {saving ? 'Saving...' : uploading || parsing ? 'Parsing...' : isEdit ? 'Update Bill' : 'Save Bill'}
               </button>
               <button type="button" onClick={onClose}
                 style={{
