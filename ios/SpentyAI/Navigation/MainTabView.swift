@@ -34,13 +34,11 @@ struct MainTabView: View {
     var body: some View {
         TabView(selection: $selectedTab) {
             ForEach(Tab.allCases, id: \.self) { tab in
-                NavigationStack {
-                    tabContent(for: tab)
-                }
-                .tabItem {
-                    Label(tab.title, systemImage: tab.icon)
-                }
-                .tag(tab)
+                tabContent(for: tab)
+                    .tabItem {
+                        Label(tab.title, systemImage: tab.icon)
+                    }
+                    .tag(tab)
             }
         }
         .tint(SpentyColors.brandPrimary)
@@ -50,66 +48,16 @@ struct MainTabView: View {
     private func tabContent(for tab: Tab) -> some View {
         switch tab {
         case .dashboard:
-            DashboardPlaceholder()
+            DashboardView()
         case .transactions:
-            TransactionsPlaceholder()
+            TransactionsView()
         case .accounts:
-            AccountsPlaceholder()
+            AccountsView()
         case .reports:
-            ReportsPlaceholder()
+            ReportsView()
         case .more:
             MoreMenuView()
         }
-    }
-}
-
-// MARK: - Placeholder Views (replaced as feature screens are built)
-
-private struct DashboardPlaceholder: View {
-    var body: some View {
-        EmptyState(
-            icon: "house.fill",
-            title: "Dashboard",
-            message: "Your financial overview will appear here."
-        )
-        .background(SpentyColors.bgPrimary.ignoresSafeArea())
-        .navigationTitle("Dashboard")
-    }
-}
-
-private struct TransactionsPlaceholder: View {
-    var body: some View {
-        EmptyState(
-            icon: "arrow.left.arrow.right",
-            title: "Transactions",
-            message: "Your transactions will appear here."
-        )
-        .background(SpentyColors.bgPrimary.ignoresSafeArea())
-        .navigationTitle("Transactions")
-    }
-}
-
-private struct AccountsPlaceholder: View {
-    var body: some View {
-        EmptyState(
-            icon: "building.columns",
-            title: "Accounts",
-            message: "Your linked accounts will appear here."
-        )
-        .background(SpentyColors.bgPrimary.ignoresSafeArea())
-        .navigationTitle("Accounts")
-    }
-}
-
-private struct ReportsPlaceholder: View {
-    var body: some View {
-        EmptyState(
-            icon: "chart.bar.fill",
-            title: "Reports",
-            message: "Financial reports and analytics will appear here."
-        )
-        .background(SpentyColors.bgPrimary.ignoresSafeArea())
-        .navigationTitle("Reports")
     }
 }
 

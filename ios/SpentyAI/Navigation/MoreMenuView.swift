@@ -4,70 +4,107 @@ struct MoreMenuView: View {
     @Environment(AppState.self) private var appState
 
     var body: some View {
-        List {
-            // Financial tools — always visible
-            Section("Financial Tools") {
-                menuRow(icon: "folder.fill", title: "Categories", destination: FeaturePlaceholderView(title: "Categories"))
-                menuRow(icon: "chart.line.uptrend.xyaxis", title: "Cash Flow", destination: FeaturePlaceholderView(title: "Cash Flow"))
-                menuRow(icon: "checkmark.rectangle.stack.fill", title: "Reconciliation", destination: FeaturePlaceholderView(title: "Reconciliation"))
-            }
-
-            // Sales — conditional on invoices
-            if appState.hasInvoices {
-                Section("Sales") {
-                    menuRow(icon: "doc.text.fill", title: "Sales Invoices", destination: FeaturePlaceholderView(title: "Sales Invoices"))
-                    menuRow(icon: "person.2.fill", title: "Customers", destination: FeaturePlaceholderView(title: "Customers"))
+        NavigationStack {
+            List {
+                // Financial tools — always visible
+                Section("Financial Tools") {
+                    menuRow(icon: "folder.fill", title: "Categories") {
+                        CategoriesView()
+                    }
+                    menuRow(icon: "chart.line.uptrend.xyaxis", title: "Cash Flow") {
+                        CashFlowView()
+                    }
+                    menuRow(icon: "checkmark.rectangle.stack.fill", title: "Reconciliation") {
+                        ReconciliationView()
+                    }
                 }
-            }
 
-            // Purchases — conditional on bills
-            if appState.hasBills {
-                Section("Purchases") {
-                    menuRow(icon: "doc.plaintext.fill", title: "Purchase Bills", destination: FeaturePlaceholderView(title: "Purchase Bills"))
-                    menuRow(icon: "shippingbox.fill", title: "Vendors", destination: FeaturePlaceholderView(title: "Vendors"))
+                // Sales — conditional on invoices
+                if appState.hasInvoices {
+                    Section("Sales") {
+                        menuRow(icon: "doc.text.fill", title: "Sales Invoices") {
+                            InvoicesView()
+                        }
+                        menuRow(icon: "person.2.fill", title: "Customers") {
+                            CustomersView()
+                        }
+                    }
                 }
-            }
 
-            // Data sources
-            Section("Data Sources") {
-                menuRow(icon: "envelope.fill", title: "Email & SMS", destination: FeaturePlaceholderView(title: "Email & SMS"))
-                menuRow(icon: "archivebox.fill", title: "Records", destination: FeaturePlaceholderView(title: "Records"))
-            }
+                // Purchases — conditional on bills
+                if appState.hasBills {
+                    Section("Purchases") {
+                        menuRow(icon: "doc.plaintext.fill", title: "Purchase Bills") {
+                            PurchasesView()
+                        }
+                        menuRow(icon: "shippingbox.fill", title: "Vendors") {
+                            VendorsView()
+                        }
+                    }
+                }
 
-            // Insights & investments
-            Section("Insights") {
-                menuRow(icon: "clock.arrow.circlepath", title: "Past Insights", destination: FeaturePlaceholderView(title: "Past Insights"))
-                menuRow(icon: "chart.line.uptrend.xyaxis.circle.fill", title: "Demat / Trading", destination: FeaturePlaceholderView(title: "Demat / Trading"))
-            }
+                // Data sources
+                Section("Data Sources") {
+                    menuRow(icon: "envelope.fill", title: "Email & SMS") {
+                        EmailSyncView()
+                    }
+                    menuRow(icon: "archivebox.fill", title: "Records") {
+                        RecordsView()
+                    }
+                }
 
-            // Support
-            Section("Help & Feedback") {
-                menuRow(icon: "lightbulb.fill", title: "Feature Requests", destination: FeaturePlaceholderView(title: "Feature Requests"))
-                menuRow(icon: "questionmark.circle.fill", title: "Support", destination: FeaturePlaceholderView(title: "Support"))
-                menuRow(icon: "gearshape.fill", title: "Settings", destination: FeaturePlaceholderView(title: "Settings"))
-            }
+                // Insights & investments
+                Section("Insights") {
+                    menuRow(icon: "clock.arrow.circlepath", title: "Past Insights") {
+                        PastInsightsView()
+                    }
+                    menuRow(icon: "chart.line.uptrend.xyaxis.circle.fill", title: "Demat / Trading") {
+                        DematView()
+                    }
+                }
 
-            // Sign out
-            Section {
-                Button(role: .destructive) {
-                    Task { await appState.logout() }
-                } label: {
-                    HStack(spacing: SpentySpacing.md) {
-                        Image(systemName: "rectangle.portrait.and.arrow.right")
-                            .font(.system(size: 16))
-                            .foregroundStyle(SpentyColors.danger)
-                            .frame(width: 28)
+                // Help & Feedback
+                Section("Help & Feedback") {
+                    menuRow(icon: "lightbulb.fill", title: "Feature Requests") {
+                        FeatureRequestsView()
+                    }
+                    menuRow(icon: "questionmark.circle.fill", title: "Support") {
+                        SupportView()
+                    }
+                    menuRow(icon: "gearshape.fill", title: "Settings") {
+                        SettingsView()
+                    }
+                }
 
-                        Text("Sign Out")
-                            .font(SpentyFonts.body)
-                            .foregroundStyle(SpentyColors.danger)
+                // Subscription
+                Section("Account") {
+                    menuRow(icon: "creditcard.fill", title: "Subscription") {
+                        BillingView()
+                    }
+                }
+
+                // Sign out
+                Section {
+                    Button(role: .destructive) {
+                        Task { await appState.logout() }
+                    } label: {
+                        HStack(spacing: SpentySpacing.md) {
+                            Image(systemName: "rectangle.portrait.and.arrow.right")
+                                .font(.system(size: 16))
+                                .foregroundStyle(SpentyColors.danger)
+                                .frame(width: 28)
+
+                            Text("Sign Out")
+                                .font(SpentyFonts.body)
+                                .foregroundStyle(SpentyColors.danger)
+                        }
                     }
                 }
             }
+            .listStyle(.insetGrouped)
+            .navigationTitle("More")
+            .background(SpentyColors.bgPrimary.ignoresSafeArea())
         }
-        .listStyle(.insetGrouped)
-        .navigationTitle("More")
-        .background(SpentyColors.bgPrimary.ignoresSafeArea())
     }
 
     // MARK: - Row Builder
@@ -75,10 +112,10 @@ struct MoreMenuView: View {
     private func menuRow<Destination: View>(
         icon: String,
         title: String,
-        destination: Destination
+        @ViewBuilder destination: @escaping () -> Destination
     ) -> some View {
         NavigationLink {
-            destination
+            destination()
         } label: {
             HStack(spacing: SpentySpacing.md) {
                 Image(systemName: icon)
@@ -94,26 +131,7 @@ struct MoreMenuView: View {
     }
 }
 
-// MARK: - Generic Placeholder (replaced as each feature screen is built)
-
-struct FeaturePlaceholderView: View {
-    let title: String
-
-    var body: some View {
-        EmptyState(
-            icon: "hammer.fill",
-            title: title,
-            message: "This feature is coming soon."
-        )
-        .background(SpentyColors.bgPrimary.ignoresSafeArea())
-        .navigationTitle(title)
-        .navigationBarTitleDisplayMode(.inline)
-    }
-}
-
 #Preview {
-    NavigationStack {
-        MoreMenuView()
-    }
-    .environment(AppState())
+    MoreMenuView()
+        .environment(AppState())
 }
