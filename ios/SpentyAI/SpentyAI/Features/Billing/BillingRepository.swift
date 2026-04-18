@@ -13,39 +13,7 @@ struct PlanDTO: Codable, Identifiable {
 
     enum CodingKeys: String, CodingKey {
         case id, name, price, currency, interval, features
-        case productId = "product_id"
-    }
-}
-
-struct SubscriptionStatus: Codable {
-    let isActive: Bool
-    let plan: String?
-    let productId: String?
-    let expiresAt: String?
-    let provider: String?          // "apple", "web", "promo"
-    let autoRenew: Bool?
-
-    enum CodingKeys: String, CodingKey {
-        case plan, provider
-        case isActive    = "is_active"
-        case productId   = "product_id"
-        case expiresAt   = "expires_at"
-        case autoRenew   = "auto_renew"
-    }
-}
-
-struct PaymentOrder: Codable, Identifiable {
-    let id: String
-    let plan: String
-    let amount: Double
-    let currency: String
-    let status: String             // "completed", "refunded", "pending"
-    let provider: String
-    let createdAt: String
-
-    enum CodingKeys: String, CodingKey {
-        case id, plan, amount, currency, status, provider
-        case createdAt = "created_at"
+        case productId
     }
 }
 
@@ -61,8 +29,8 @@ struct VerifyReceiptRequest: Codable {
     let productId: String
 
     enum CodingKeys: String, CodingKey {
-        case receiptData = "receipt_data"
-        case productId   = "product_id"
+        case receiptData
+        case productId
     }
 }
 

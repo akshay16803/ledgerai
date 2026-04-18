@@ -30,7 +30,7 @@ struct CustomerDetailView: View {
                 .padding()
             }
         }
-        .navigationTitle(customer.name)
+        .navigationTitle(customer.name ?? "Customer")
         .navigationBarTitleDisplayMode(.large)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -55,7 +55,7 @@ struct CustomerDetailView: View {
         VStack(alignment: .leading, spacing: 12) {
             cardHeader("Customer Details", icon: "person.text.rectangle")
 
-            infoRow("Name", value: customer.name)
+            infoRow("Name", value: customer.name ?? "")
             if let email = customer.email, !email.isEmpty {
                 infoRow("Email", value: email)
             }

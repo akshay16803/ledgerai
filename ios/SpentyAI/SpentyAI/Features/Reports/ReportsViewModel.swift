@@ -12,7 +12,7 @@ enum PeriodPreset: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
-enum CategoryType: String, CaseIterable, Identifiable {
+enum ReportCategoryType: String, CaseIterable, Identifiable {
     case expense = "Expense"
     case income = "Income"
 
@@ -31,7 +31,7 @@ final class ReportsViewModel {
     var activePreset: PeriodPreset = .thisMonth
     var startDate: Date = Date()
     var endDate: Date = Date()
-    var catType: CategoryType = .expense
+    var catType: ReportCategoryType = .expense
 
     var isLoading = false
     var errorMessage = ""

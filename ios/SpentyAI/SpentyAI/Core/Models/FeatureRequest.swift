@@ -1,5 +1,19 @@
 import Foundation
 
+enum FeatureRequestCategory: String, Codable, CaseIterable {
+    case ui = "UI"
+    case performance = "Performance"
+    case feature = "Feature"
+    case integration = "Integration"
+    case other = "Other"
+}
+
+enum FeatureRequestStatus: String, Codable {
+    case pending
+    case inProgress = "in_progress"
+    case completed
+}
+
 struct FeatureRequest: Codable, Identifiable {
     let id: String
     var title: String?

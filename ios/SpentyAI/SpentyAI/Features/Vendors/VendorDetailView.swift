@@ -36,7 +36,7 @@ struct VendorDetailView: View {
                 .padding()
             }
         }
-        .navigationTitle(displayVendor.name)
+        .navigationTitle(displayVendor.name ?? "Vendor")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
@@ -68,13 +68,13 @@ struct VendorDetailView: View {
                         .fill(Brand.primary.opacity(0.12))
                         .frame(width: 48, height: 48)
 
-                    Text(String(displayVendor.name.prefix(1)).uppercased())
+                    Text(String((displayVendor.name ?? "V").prefix(1)).uppercased())
                         .font(.title2.weight(.bold))
                         .foregroundStyle(Brand.primary)
                 }
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(displayVendor.name)
+                    Text(displayVendor.name ?? "Unnamed")
                         .font(.headline)
                     if let gstin = displayVendor.gstin, !gstin.isEmpty {
                         Text("GSTIN: \(gstin)")

@@ -12,17 +12,13 @@ struct SettingsView: View {
 
     // MARK: - State
 
-    @State private var viewModel: SettingsViewModel
+    @Environment(AuthManager.self) private var authManager
+    @State private var viewModel = SettingsViewModel(authManager: AuthManager())
+    @State private var hasInitialized = false
 
     // Photo pickers
     @State private var logoPickerItem: PhotosPickerItem?
     @State private var signaturePickerItem: PhotosPickerItem?
-
-    // MARK: - Init
-
-    init(authManager: AuthManager) {
-        _viewModel = State(initialValue: SettingsViewModel(authManager: authManager))
-    }
 
     // MARK: - Body
 
@@ -40,7 +36,13 @@ struct SettingsView: View {
         }
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.large)
-        .task { await viewModel.loadSettings() }
+        .task {
+            if !hasInitialized {
+                viewModel = SettingsViewModel(authManager: authManager)
+                hasInitialized = true
+            }
+            await viewModel.loadSettings()
+        }
         .alert("Error", isPresented: $viewModel.showError) {
             Button("OK") { viewModel.dismissError() }
         } message: {
@@ -391,6 +393,7 @@ struct SettingsView: View {
 
 #Preview {
     NavigationStack {
-        SettingsView(authManager: AuthManager())
+        SettingsView()
     }
+    .environment(AuthManager())
 }

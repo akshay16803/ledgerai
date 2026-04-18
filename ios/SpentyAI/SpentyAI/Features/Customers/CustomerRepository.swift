@@ -2,19 +2,6 @@ import Foundation
 
 // MARK: - Models
 
-struct Customer: Codable, Identifiable, Equatable {
-    let id: String
-    var name: String
-    var email: String?
-    var phone: String?
-    var gstin: String?
-    var billingAddress: String?
-    var shippingAddress: String?
-    var totalInvoiced: Double?
-    var totalPaid: Double?
-    var outstanding: Double?
-}
-
 struct CustomerInvoice: Codable, Identifiable {
     let id: String
     let invoiceNumber: String?
@@ -35,7 +22,7 @@ struct CustomerPayload: Codable {
 }
 
 /// Empty-body response for DELETE calls that return `{ "detail": "..." }`.
-struct DeleteResponse: Codable {
+private struct CustomerDeleteResponse: Codable {
     let detail: String?
 }
 
@@ -60,7 +47,7 @@ struct CustomerRepository {
     }
 
     func delete(id: String) async throws {
-        let _: DeleteResponse = try await api.delete(APIEndpoints.customer(id))
+        let _: CustomerDeleteResponse = try await api.delete(APIEndpoints.customer(id))
     }
 
     // MARK: - Invoices

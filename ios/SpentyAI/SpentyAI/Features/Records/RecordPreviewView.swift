@@ -61,7 +61,7 @@ struct RecordPreviewView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { previewToolbar }
         .sheet(item: $viewModel.shareItem) { item in
-            ShareSheet(activityItems: [item.url])
+            ShareSheet(items: [item.url])
         }
         .confirmationDialog(
             "Delete Record",

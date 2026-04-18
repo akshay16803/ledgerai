@@ -21,7 +21,7 @@ final class CustomersViewModel {
         guard !searchText.isEmpty else { return customers }
         let query = searchText.lowercased()
         return customers.filter { customer in
-            customer.name.lowercased().contains(query)
+            (customer.name?.lowercased().contains(query) ?? false)
                 || (customer.email?.lowercased().contains(query) ?? false)
         }
     }

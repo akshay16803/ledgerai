@@ -43,7 +43,7 @@ struct CategoryFormView: View {
                                 .tag(String?.none)
 
                             ForEach(viewModel.topLevelCategories) { parent in
-                                Text(parent.name)
+                                Text(parent.name ?? "Unnamed")
                                     .tag(Optional(parent.id))
                             }
                         }
@@ -89,7 +89,7 @@ struct CategoryFormView: View {
 
     private func prefill() {
         if let editing = viewModel.editingCategory {
-            name = editing.name
+            name = editing.name ?? ""
             selectedParentId = editing.parentId
         } else {
             selectedParentId = viewModel.selectedParent?.id

@@ -27,7 +27,7 @@ struct PurchasePreviewView: View {
                             .foregroundStyle(.spentyTextSecondary)
                     }
                 } else if let data = viewModel.pdfData, let document = PDFDocument(data: data) {
-                    PDFKitView(document: document)
+                    PurchasePDFKitView(document: document)
                         .ignoresSafeArea(edges: .bottom)
                 } else {
                     VStack(spacing: 16) {
@@ -116,7 +116,7 @@ struct PurchasePreviewView: View {
 
 // MARK: - PDFKit UIViewRepresentable
 
-struct PDFKitView: UIViewRepresentable {
+private struct PurchasePDFKitView: UIViewRepresentable {
     let document: PDFDocument
 
     func makeUIView(context: Context) -> PDFView {

@@ -1,10 +1,10 @@
 import Foundation
 
 struct SupportTicket: Codable {
-    var subject: String?
-    var category: String?
-    var priority: String?
-    var message: String?
+    var subject: String
+    var category: String
+    var priority: String
+    var message: String
 }
 
 struct FAQItem: Codable, Identifiable {

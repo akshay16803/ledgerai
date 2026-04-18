@@ -130,7 +130,7 @@ struct CustomerFormView: View {
 
     private func populateFields() {
         guard let customer = viewModel.editingCustomer else { return }
-        name = customer.name
+        name = customer.name ?? ""
         email = customer.email ?? ""
         phone = customer.phone ?? ""
         gstin = customer.gstin ?? ""

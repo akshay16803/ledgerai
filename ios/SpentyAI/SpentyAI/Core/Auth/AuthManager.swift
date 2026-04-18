@@ -43,7 +43,7 @@ final class AuthManager {
             let user: User
 
             enum CodingKeys: String, CodingKey {
-                case sessionToken = "session_token"
+                case sessionToken
                 case user
             }
         }

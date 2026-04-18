@@ -12,7 +12,7 @@ struct PurchaseFormView: View {
     @State private var vendorName = ""
     @State private var date = Date()
     @State private var dueDate = Date().addingTimeInterval(30 * 24 * 3600)
-    @State private var lineItems: [FormLineItem] = [FormLineItem()]
+    @State private var lineItems: [PurchaseFormLineItem] = [PurchaseFormLineItem()]
     @State private var notes = ""
     @State private var showValidation = false
     @State private var isSaving = false
@@ -160,12 +160,12 @@ struct PurchaseFormView: View {
             .onDelete { offsets in
                 lineItems.remove(atOffsets: offsets)
                 if lineItems.isEmpty {
-                    lineItems.append(FormLineItem())
+                    lineItems.append(PurchaseFormLineItem())
                 }
             }
 
             Button {
-                lineItems.append(FormLineItem())
+                lineItems.append(PurchaseFormLineItem())
             } label: {
                 Label("Add Line Item", systemImage: "plus.circle.fill")
                     .font(SpentyFonts.subheadline)
@@ -176,7 +176,7 @@ struct PurchaseFormView: View {
         }
     }
 
-    private func lineItemRow(item: Binding<FormLineItem>) -> some View {
+    private func lineItemRow(item: Binding<PurchaseFormLineItem>) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             TextField("Description", text: item.description)
                 .font(SpentyFonts.subheadline)
@@ -336,7 +336,7 @@ struct PurchaseFormView: View {
 
         if let items = bill.lineItems, !items.isEmpty {
             lineItems = items.map { item in
-                FormLineItem(
+                PurchaseFormLineItem(
                     description: item.description ?? "",
                     hsnSac: "",
                     quantity: item.quantity ?? 1,
@@ -361,7 +361,7 @@ struct PurchaseFormView: View {
 
 // MARK: - Form Line Item Model
 
-struct FormLineItem: Identifiable {
+struct PurchaseFormLineItem: Identifiable {
     let id = UUID()
     var description: String = ""
     var hsnSac: String = ""

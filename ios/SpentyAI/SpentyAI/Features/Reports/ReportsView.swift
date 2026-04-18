@@ -173,7 +173,7 @@ struct ReportsView: View {
         VStack(alignment: .leading, spacing: 12) {
             // Toggle between Expense / Income
             HStack(spacing: 0) {
-                ForEach(CategoryType.allCases) { type in
+                ForEach(ReportCategoryType.allCases) { type in
                     Button {
                         vm.catType = type
                         Task { await vm.reloadCategories() }

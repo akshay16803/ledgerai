@@ -189,7 +189,7 @@ private struct CategoryTreeRow: View {
                 .foregroundStyle(Brand.primary)
                 .frame(width: 24)
 
-            Text(cat.name)
+            Text(cat.name ?? "Unnamed")
                 .font(.body.weight(.medium))
 
             Spacer()
@@ -212,7 +212,7 @@ private struct CategoryTreeRow: View {
                 .foregroundStyle(Brand.primary.opacity(0.6))
                 .frame(width: 24)
 
-            Text(cat.name)
+            Text(cat.name ?? "Unnamed")
                 .font(.subheadline)
         }
         .padding(.leading, 4)

@@ -54,7 +54,7 @@ struct PastInsightDetailView: View {
             transactionFormSheet
         }
         .sheet(item: $viewModel.shareItem) { item in
-            ShareSheet(items: [item.url])
+            InsightShareSheet(items: [item.url])
         }
         .task {
             await viewModel.loadDetail(for: summary)
@@ -410,7 +410,7 @@ struct PastInsightDetailView: View {
 
 // MARK: - Share Sheet
 
-struct ShareSheet: UIViewControllerRepresentable {
+private struct InsightShareSheet: UIViewControllerRepresentable {
     let items: [Any]
 
     func makeUIViewController(context: Context) -> UIActivityViewController {

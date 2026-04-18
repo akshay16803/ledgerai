@@ -2,35 +2,6 @@ import Foundation
 
 // MARK: - Models
 
-struct FeatureRequest: Codable, Identifiable {
-    let id: String
-    let title: String
-    let description: String?
-    let category: FeatureRequestCategory
-    let status: FeatureRequestStatus
-    let votes: Int
-    let createdAt: Date
-
-    enum CodingKeys: String, CodingKey {
-        case id, title, description, category, status, votes
-        case createdAt = "created_at"
-    }
-}
-
-enum FeatureRequestCategory: String, Codable, CaseIterable {
-    case ui = "UI"
-    case performance = "Performance"
-    case feature = "Feature"
-    case integration = "Integration"
-    case other = "Other"
-}
-
-enum FeatureRequestStatus: String, Codable {
-    case pending
-    case inProgress = "in_progress"
-    case completed
-}
-
 struct CreateFeatureRequestBody: Codable {
     let title: String
     let description: String

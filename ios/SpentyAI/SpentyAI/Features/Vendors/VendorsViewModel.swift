@@ -27,7 +27,7 @@ final class VendorsViewModel {
         guard !searchText.isEmpty else { return vendors }
         let query = searchText.lowercased()
         return vendors.filter { vendor in
-            vendor.name.lowercased().contains(query) ||
+            (vendor.name?.lowercased().contains(query) ?? false) ||
             (vendor.email?.lowercased().contains(query) ?? false) ||
             (vendor.phone?.contains(query) ?? false) ||
             (vendor.gstin?.lowercased().contains(query) ?? false)

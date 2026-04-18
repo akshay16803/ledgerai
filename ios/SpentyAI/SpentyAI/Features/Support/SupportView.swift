@@ -285,7 +285,7 @@ struct SupportView: View {
                 }
             } label: {
                 HStack {
-                    Text(item.question)
+                    Text(item.question ?? "")
                         .font(.subheadline.weight(.medium))
                         .foregroundStyle(Brand.primaryDark)
                         .multilineTextAlignment(.leading)
@@ -303,7 +303,7 @@ struct SupportView: View {
             .buttonStyle(.plain)
 
             if isExpanded {
-                Text(item.answer)
+                Text(item.answer ?? "")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 16)

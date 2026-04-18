@@ -49,7 +49,7 @@ struct ODInterestResponse: Decodable {
     let rate: Double?
 }
 
-struct TransactionListResponse: Decodable {
+struct AccountTransactionsResponse: Decodable {
     let transactions: [Transaction]
 }
 
@@ -130,7 +130,7 @@ actor AccountRepository {
     // MARK: - Account Transactions
 
     func fetchAccountTransactions(_ accountId: String) async throws -> [Transaction] {
-        let response: TransactionListResponse = try await api.get(APIEndpoints.accountTransactions(accountId))
+        let response: AccountTransactionsResponse = try await api.get(APIEndpoints.accountTransactions(accountId))
         return response.transactions
     }
 

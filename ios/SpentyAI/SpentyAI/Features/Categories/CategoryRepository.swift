@@ -2,29 +2,6 @@ import Foundation
 
 // MARK: - Models
 
-enum CategoryType: String, Codable, CaseIterable {
-    case income
-    case expense
-}
-
-struct Category: Codable, Identifiable, Hashable {
-    let id: String
-    var name: String
-    var categoryType: CategoryType
-    var parentId: String?
-    var children: [Category]?
-
-    enum CodingKeys: String, CodingKey {
-        case id, name, children
-        case categoryType = "category_type"
-        case parentId     = "parent_id"
-    }
-
-    // Hashable by id only (children are recursive)
-    func hash(into hasher: inout Hasher) { hasher.combine(id) }
-    static func == (lhs: Category, rhs: Category) -> Bool { lhs.id == rhs.id }
-}
-
 struct CreateCategoryRequest: Codable {
     let name: String
     let categoryType: CategoryType
@@ -32,8 +9,8 @@ struct CreateCategoryRequest: Codable {
 
     enum CodingKeys: String, CodingKey {
         case name
-        case categoryType = "category_type"
-        case parentId     = "parent_id"
+        case categoryType
+        case parentId
     }
 }
 
@@ -46,8 +23,8 @@ struct MergeCategoriesRequest: Codable {
     let targetId: String
 
     enum CodingKeys: String, CodingKey {
-        case sourceId = "source_id"
-        case targetId = "target_id"
+        case sourceId
+        case targetId
     }
 }
 

@@ -44,7 +44,7 @@ struct RecordsView: View {
             .navigationBarTitleDisplayMode(.large)
             .toolbar { toolbarContent }
             .sheet(item: $viewModel.shareItem) { item in
-                ShareSheet(activityItems: [item.url])
+                RecordsShareSheet(activityItems: [item.url])
             }
             .sheet(isPresented: $showUploadSheet) {
                 ReceiptUploadView(viewModel: viewModel, isPresented: $showUploadSheet)
@@ -600,7 +600,7 @@ struct RecordsView: View {
 
 // MARK: - Share Sheet
 
-struct ShareSheet: UIViewControllerRepresentable {
+private struct RecordsShareSheet: UIViewControllerRepresentable {
     let activityItems: [Any]
 
     func makeUIViewController(context: Context) -> UIActivityViewController {

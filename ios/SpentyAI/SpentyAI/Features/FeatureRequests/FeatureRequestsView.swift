@@ -103,7 +103,7 @@ struct FeatureRequestsView: View {
 
             // Content
             VStack(alignment: .leading, spacing: 6) {
-                Text(request.title)
+                Text(request.title ?? "Untitled")
                     .font(.body.weight(.semibold))
                     .foregroundStyle(.primary)
 
@@ -115,8 +115,12 @@ struct FeatureRequestsView: View {
                 }
 
                 HStack(spacing: 8) {
-                    categoryBadge(request.category)
-                    statusBadge(request.status)
+                    if let cat = FeatureRequestCategory(rawValue: request.category ?? "") {
+                        categoryBadge(cat)
+                    }
+                    if let status = FeatureRequestStatus(rawValue: request.status ?? "") {
+                        statusBadge(status)
+                    }
                 }
             }
         }
@@ -130,7 +134,7 @@ struct FeatureRequestsView: View {
             VStack(spacing: 2) {
                 Image(systemName: "arrow.up")
                     .font(.caption.weight(.bold))
-                Text("\(request.votes)")
+                Text("\(request.votes ?? 0)")
                     .font(.caption2.weight(.semibold))
                     .monospacedDigit()
             }

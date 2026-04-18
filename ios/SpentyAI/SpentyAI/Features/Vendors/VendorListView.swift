@@ -118,7 +118,7 @@ struct VendorListView: View {
 
     private func vendorRow(_ vendor: Vendor) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(vendor.name)
+            Text(vendor.name ?? "Unnamed")
                 .font(.body.weight(.semibold))
                 .foregroundStyle(.primary)
 

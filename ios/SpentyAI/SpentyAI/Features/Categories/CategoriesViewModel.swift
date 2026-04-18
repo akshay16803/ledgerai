@@ -23,7 +23,7 @@ final class CategoriesViewModel {
 
     /// Top-level categories for the active tab, each with its children attached.
     var categoryTree: [Category] {
-        let filtered = categories.filter { $0.categoryType == activeTab }
+        let filtered = categories.filter { $0.categoryType == activeTab.rawValue }
         let topLevel = filtered.filter { $0.parentId == nil }
 
         return topLevel.map { parent in
@@ -31,14 +31,14 @@ final class CategoriesViewModel {
             copy.children = filtered.filter { $0.parentId == parent.id }
             return copy
         }
-        .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        .sorted { ($0.name ?? "").localizedCaseInsensitiveCompare($1.name ?? "") == .orderedAscending }
     }
 
     /// Flat list of top-level categories (for parent picker in form).
     var topLevelCategories: [Category] {
         categories
-            .filter { $0.categoryType == activeTab && $0.parentId == nil }
-            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+            .filter { $0.categoryType == activeTab.rawValue && $0.parentId == nil }
+            .sorted { ($0.name ?? "").localizedCaseInsensitiveCompare($1.name ?? "") == .orderedAscending }
     }
 
     // MARK: - Actions

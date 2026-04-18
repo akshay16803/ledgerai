@@ -2,25 +2,6 @@ import Foundation
 
 // MARK: - Models
 
-struct Vendor: Codable, Identifiable {
-    let id: String
-    var name: String
-    var email: String?
-    var phone: String?
-    var gstin: String?
-    var address: String?
-    var totalBilled: Double?
-    var totalPaid: Double?
-    var outstanding: Double?
-
-    enum CodingKeys: String, CodingKey {
-        case id, name, email, phone, gstin, address
-        case totalBilled  = "total_billed"
-        case totalPaid    = "total_paid"
-        case outstanding
-    }
-}
-
 struct VendorBill: Codable, Identifiable {
     let id: String
     let billNumber: String?
@@ -32,9 +13,9 @@ struct VendorBill: Codable, Identifiable {
 
     enum CodingKeys: String, CodingKey {
         case id, date, total, status
-        case billNumber = "bill_number"
-        case dueDate    = "due_date"
-        case amountPaid = "amount_paid"
+        case billNumber
+        case dueDate
+        case amountPaid
     }
 }
 
@@ -72,7 +53,7 @@ final class VendorRepository {
     }
 
     func deleteVendor(id: String) async throws {
-        try await APIClient.shared.delete(APIEndpoints.vendor(id))
+        let _: EmptyResponse = try await APIClient.shared.delete(APIEndpoints.vendor(id))
     }
 
     // MARK: - Bills

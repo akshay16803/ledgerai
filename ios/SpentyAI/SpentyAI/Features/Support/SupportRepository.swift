@@ -2,13 +2,6 @@ import Foundation
 
 // MARK: - API Models
 
-struct SupportTicket: Codable {
-    let subject: String
-    let category: String
-    let priority: String
-    let message: String
-}
-
 struct SupportTicketResponse: Codable {
     let success: Bool
     let message: String?
@@ -16,14 +9,8 @@ struct SupportTicketResponse: Codable {
 
     enum CodingKeys: String, CodingKey {
         case success, message
-        case ticketId = "ticket_id"
+        case ticketId
     }
-}
-
-struct FAQItem: Codable, Identifiable {
-    var id: String { question }
-    let question: String
-    let answer: String
 }
 
 // MARK: - Endpoints

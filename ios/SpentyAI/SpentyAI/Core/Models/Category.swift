@@ -1,6 +1,11 @@
 import Foundation
 
-struct Category: Codable, Identifiable {
+enum CategoryType: String, Codable, CaseIterable {
+    case income
+    case expense
+}
+
+struct Category: Codable, Identifiable, Hashable {
     let id: String
     var name: String?
     var categoryType: String?
@@ -14,4 +19,8 @@ struct Category: Codable, Identifiable {
         case parentId
         case children
     }
+
+    // Hashable by id only (children are recursive)
+    func hash(into hasher: inout Hasher) { hasher.combine(id) }
+    static func == (lhs: Category, rhs: Category) -> Bool { lhs.id == rhs.id }
 }

@@ -7,7 +7,12 @@ final class GoogleSignInHelper: NSObject, ASWebAuthenticationPresentationContext
     private static let redirectURI = Bundle.main.object(forInfoDictionaryKey: "GOOGLE_REDIRECT_URI") as? String ?? "com.spentyai.app:/oauth2callback"
     private static let callbackScheme = "com.spentyai.app"
 
-    func signIn() async throws -> String {
+    static func signIn() async throws -> String {
+        let helper = GoogleSignInHelper()
+        return try await helper._signIn()
+    }
+
+    private func _signIn() async throws -> String {
         let nonce = UUID().uuidString
         var components = URLComponents(string: "https://accounts.google.com/o/oauth2/v2/auth")!
         components.queryItems = [

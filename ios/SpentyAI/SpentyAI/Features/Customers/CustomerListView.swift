@@ -85,7 +85,7 @@ struct CustomerListView: View {
 
     private func customerRow(_ customer: Customer) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(customer.name)
+            Text(customer.name ?? "Unnamed")
                 .font(.body.weight(.semibold))
                 .foregroundStyle(.primary)
 

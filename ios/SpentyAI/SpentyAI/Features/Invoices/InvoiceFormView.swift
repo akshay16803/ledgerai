@@ -161,12 +161,12 @@ struct InvoiceFormView: View {
             List(viewModel.customers) { customer in
                 Button {
                     selectedCustomerId = customer.id
-                    customerName = customer.name
+                    customerName = customer.name ?? ""
                     showCustomerPicker = false
                 } label: {
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(customer.name)
+                            Text(customer.name ?? "Unnamed")
                                 .font(.body)
                                 .foregroundStyle(.primary)
                             if let email = customer.email, !email.isEmpty {

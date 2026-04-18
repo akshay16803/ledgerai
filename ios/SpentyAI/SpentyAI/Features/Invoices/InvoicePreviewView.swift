@@ -71,7 +71,7 @@ struct InvoicePreviewView: View {
         }
         .sheet(isPresented: $showShareSheet) {
             if let pdfData {
-                ShareSheet(items: [pdfData])
+                InvoiceShareSheet(items: [pdfData])
             }
         }
         .task {
@@ -250,7 +250,7 @@ struct PDFKitView: UIViewRepresentable {
 
 // MARK: - Share Sheet
 
-struct ShareSheet: UIViewControllerRepresentable {
+private struct InvoiceShareSheet: UIViewControllerRepresentable {
     let items: [Any]
 
     func makeUIViewController(context: Context) -> UIActivityViewController {

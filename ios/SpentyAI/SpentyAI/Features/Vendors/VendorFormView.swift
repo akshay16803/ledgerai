@@ -90,7 +90,7 @@ struct VendorFormView: View {
 
     private func populateIfEditing() {
         guard let vendor = viewModel.editingVendor else { return }
-        name    = vendor.name
+        name    = vendor.name ?? ""
         email   = vendor.email ?? ""
         phone   = vendor.phone ?? ""
         gstin   = vendor.gstin ?? ""

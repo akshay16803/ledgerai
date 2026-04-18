@@ -1,6 +1,6 @@
 import Foundation
 
-struct Customer: Codable, Identifiable {
+struct Customer: Codable, Identifiable, Equatable {
     let id: String
     var name: String?
     var email: String?

@@ -21,29 +21,32 @@ struct PaymentPlan: Codable, Identifiable {
 
 struct PaymentOrder: Codable, Identifiable {
     let id: String
-    var planKey: String?
-    var amount: Double?
-    var currency: String?
-    var status: String?
-    var provider: String?
-    var createdAt: Date?
+    let plan: String
+    let amount: Double
+    let currency: String
+    let status: String             // "completed", "refunded", "pending"
+    let provider: String
+    let createdAt: String
 
     enum CodingKeys: String, CodingKey {
-        case id = "_id"
-        case planKey
-        case amount
-        case currency
-        case status
-        case provider
+        case id, plan, amount, currency, status, provider
         case createdAt
     }
 }
 
 struct SubscriptionStatus: Codable {
-    var plan: String?
-    var status: String?
-    var expiresAt: Date?
-    var provider: String?
-    var isTrial: Bool?
-    var trialEndsAt: Date?
+    let isActive: Bool
+    let plan: String?
+    let productId: String?
+    let expiresAt: String?
+    let provider: String?          // "apple", "web", "promo"
+    let autoRenew: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case plan, provider
+        case isActive
+        case productId
+        case expiresAt
+        case autoRenew
+    }
 }
