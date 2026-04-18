@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext.jsx';
+import { api } from '../lib/api';
 import {
   House, ArrowsLeftRight, Bank, Tag,
   Lightbulb, SignOut, Gear, EnvelopeSimple, TrendUp, Scales, ChartBar, Archive, Receipt, List, X, Headset, Users, Package, Storefront
@@ -40,8 +41,28 @@ export default function AppLayout({ children }) {
   // null = use CSS default, true/false = user toggled
   const [userToggled, setUserToggled] = useState(null);
   const [isMobile, setIsMobile] = useState(true);
-  // Build nav items — Sales Invoice/Customers and Purchase Invoice/Vendors always visible after Dashboard
-  const navItems = [baseNavItems[0], ...invoiceNavItems, ...billNavItems, ...baseNavItems.slice(1)];
+  const [hasInvoices, setHasInvoices] = useState(false);
+  const [hasBills, setHasBills] = useState(false);
+
+  // Check if user has any invoices or bills to decide sidebar visibility
+  useEffect(() => {
+    api.get('/api/invoices').then(data => {
+      const list = Array.isArray(data) ? data : data.invoices || [];
+      setHasInvoices(list.length > 0);
+    }).catch(() => {});
+    api.get('/api/bills').then(data => {
+      const list = Array.isArray(data) ? data : data.bills || [];
+      setHasBills(list.length > 0);
+    }).catch(() => {});
+  }, []);
+
+  // Build nav items — only show invoice/bill tabs after first creation
+  const navItems = [
+    baseNavItems[0],
+    ...(hasInvoices ? invoiceNavItems : []),
+    ...(hasBills ? billNavItems : []),
+    ...baseNavItems.slice(1),
+  ];
 
   // Detect mobile
   useEffect(() => {
