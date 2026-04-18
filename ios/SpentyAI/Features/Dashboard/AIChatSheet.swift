@@ -31,49 +31,6 @@ struct ActionCard: Equatable {
     }
 }
 
-// MARK: - Chat API Models
-
-private struct ChatRequest: Codable {
-    let message: String
-    let conversationHistory: [ChatHistoryEntry]
-
-    enum CodingKeys: String, CodingKey {
-        case message
-        case conversationHistory = "conversation_history"
-    }
-}
-
-private struct ChatHistoryEntry: Codable {
-    let role: String
-    let content: String
-}
-
-private struct ChatResponse: Codable {
-    let response: String
-    let action: ChatAction?
-}
-
-private struct ChatAction: Codable {
-    let type: String?
-    let title: String?
-    let detail: String?
-}
-
-// MARK: - AI Chat Repository
-
-enum AIChatRepository {
-    static func sendMessage(
-        _ message: String,
-        conversationHistory: [ChatMessage]
-    ) async throws -> ChatResponse {
-        let history = conversationHistory.map { msg in
-            ChatHistoryEntry(role: msg.role.rawValue, content: msg.content)
-        }
-        let request = ChatRequest(message: message, conversationHistory: history)
-        return try await APIClient.shared.post(APIEndpoints.AIChat.send, body: request)
-    }
-}
-
 // MARK: - AI Chat Sheet
 
 struct AIChatSheet: View {
@@ -363,17 +320,32 @@ struct AIChatSheet: View {
     @MainActor
     private func performSend(_ text: String) async {
         do {
-            let response = try await AIChatRepository.sendMessage(text, conversationHistory: messages)
+            let history = messages.map { msg in
+                ["role": msg.role.rawValue, "content": msg.content]
+            }
+            let repo = AIChatRepository()
+            let response = try await repo.sendMessage(message: text, conversation: history)
 
-            var assistantMessage = ChatMessage(role: .assistant, content: response.response)
+            let replyText = response.reply ?? "Done."
+            var assistantMessage = ChatMessage(role: .assistant, content: replyText)
 
-            if let action = response.action,
-               let typeString = action.type,
-               let actionType = ActionCard.ActionType(rawValue: typeString) {
+            if response.transactionPosted == true {
                 assistantMessage.actionCard = ActionCard(
-                    type: actionType,
-                    title: action.title ?? "Success",
-                    detail: action.detail ?? ""
+                    type: .transactionPosted,
+                    title: "Transaction Posted",
+                    detail: response.transaction?.description ?? ""
+                )
+            } else if response.invoiceCreated == true {
+                assistantMessage.actionCard = ActionCard(
+                    type: .invoiceCreated,
+                    title: "Invoice Created",
+                    detail: response.invoice?.invoiceNumber ?? ""
+                )
+            } else if response.billCreated == true {
+                assistantMessage.actionCard = ActionCard(
+                    type: .billCreated,
+                    title: "Bill Created",
+                    detail: ""
                 )
             }
 

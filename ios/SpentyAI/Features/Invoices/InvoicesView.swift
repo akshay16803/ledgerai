@@ -34,10 +34,10 @@ struct InvoicesView: View {
             } content: {
                 invoiceSheet(editing: nil)
             }
-            .sheet(item: $viewModel.showEditInvoice) { invoice in
-                invoiceSheet(editing: invoice)
-            } onDismiss: {
+            .sheet(item: $viewModel.showEditInvoice, onDismiss: {
                 Task { await viewModel.refresh() }
+            }) { invoice in
+                invoiceSheet(editing: invoice)
             }
             .sheet(item: $viewModel.showPreview) { invoice in
                 InvoicePreviewView(
