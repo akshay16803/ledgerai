@@ -17,7 +17,7 @@ source "$ENV_FILE"
 GH_OWNER="akshay16803"
 GH_REPO="ledgerai"
 GH_TARGET="akshay16803.github.io"
-GH_CNAME="accounts.niprasha.com"
+GH_CNAME="spentyai.com"
 
 for cmd in jq gh curl dig; do
   if ! command -v "$cmd" >/dev/null 2>&1; then

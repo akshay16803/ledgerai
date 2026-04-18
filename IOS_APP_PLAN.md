@@ -293,7 +293,7 @@ ios/
 actor APIClient {
     static let shared = APIClient()
     
-    private let baseURL = URL(string: "https://accounts.niprasha.com")! // Production
+    private let baseURL = URL(string: "https://spentyai.com")! // Production
     private let session: URLSession
     private let tokenManager: TokenManager
     

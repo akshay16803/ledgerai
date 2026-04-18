@@ -28,7 +28,7 @@ Important note:
 
 ## 3. Production URLs
 
-- Frontend production URL: `https://accounts.niprasha.com`
+- Frontend production URL: `https://spentyai.com`
 - AI worker production URL: `https://ledgerai-ai.akshaychouhan16803.workers.dev`
 
 ## 4. Deployment Workflow
@@ -54,7 +54,7 @@ What it does:
 Relevant config:
 
 - `origin` remote: `https://github.com/akshay16803/ledgerai.git`
-- `dist/CNAME` has been used for `accounts.niprasha.com`
+- `dist/CNAME` has been used for `spentyai.com`
 
 ### Worker deploy
 
@@ -219,7 +219,7 @@ CLOUDFLARE_API_TOKEN="$TOKEN" npx wrangler secret list --config wrangler.toml
 
 7. Open the app and confirm:
 
-- frontend URL is `https://accounts.niprasha.com`
+- frontend URL is `https://spentyai.com`
 - AI backend points to `https://ledgerai-ai.akshaychouhan16803.workers.dev`
 - shared key matches the worker secret
 

@@ -43,7 +43,7 @@ npm run deploy
 
 This publishes the Vite build to GitHub Pages for:
 
-- `https://accounts.niprasha.com`
+- `https://spentyai.com`
 
 Worker:
 

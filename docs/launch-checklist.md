@@ -19,7 +19,7 @@ Use this checklist before calling LedgerAI production-ready.
 - Configure Supabase Auth redirect URLs and password reset URLs for the real web/mobile targets.
 - Deploy the Cloudflare AI worker from `/Users/akshaychouhan/ledgerai/scripts/cloudflare-ai-worker.js`.
 - Set required worker secrets/config before exposing the worker publicly:
-  - `ALLOWED_ORIGIN=https://accounts.niprasha.com`
+  - `ALLOWED_ORIGIN=https://spentyai.com`
   - `SUPABASE_URL=<your supabase project url>`
   - optional fallback/admin-only `LEDGERAI_SHARED_KEY` (not required for normal signed-in users)
 - Set `VITE_AI_ENDPOINT_DEFAULT` for web (or keep repo default) so normal users do not configure AI endpoint manually.

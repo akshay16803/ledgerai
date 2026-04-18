@@ -19,7 +19,7 @@ In Supabase Dashboard:
 3. Enable email confirmations (recommended for production).
 4. Configure password reset redirect URLs:
    - local web example: `http://localhost:3000`
-   - prod web example: `https://accounts.niprasha.com`
+   - prod web example: `https://spentyai.com`
    - add the mobile auth targets you plan to use for Expo/native testing
 5. Customize the confirmation email in the dashboard using [Supabase Auth Confirmation Email Template](/Users/akshaychouhan/ledgerai/docs/supabase-auth-confirm-signup-template.md).
 
@@ -52,7 +52,7 @@ Server-only keys remain server-only. Do not expose `service_role` in web or mobi
 Before using the Cloudflare AI worker in any public environment, set:
 
 - `LEDGERAI_SHARED_KEY`
-- `ALLOWED_ORIGIN=https://accounts.niprasha.com`
+- `ALLOWED_ORIGIN=https://spentyai.com`
 
 The worker now fails closed if either of these is missing.
 

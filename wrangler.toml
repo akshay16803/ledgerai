@@ -6,7 +6,7 @@ account_id = "e6511c5ef79d9196449f976a22317eb7"
 workers_dev = true
 
 [vars]
-ALLOWED_ORIGIN = "https://accounts.niprasha.com,http://localhost:3000"
+ALLOWED_ORIGIN = "https://spentyai.com,http://localhost:3000"
 SUPABASE_URL = "https://hxfbnbvwkvexuqbrznwi.supabase.co"
 SUPABASE_JWT_AUDIENCE = "authenticated"
 
