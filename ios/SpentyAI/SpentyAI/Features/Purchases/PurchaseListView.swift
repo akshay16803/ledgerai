@@ -270,7 +270,7 @@ struct PurchaseListView: View {
                     if let dueDate = bill.dueDate {
                         Label("Due: \(formatDate(dueDate))", systemImage: "clock")
                             .font(SpentyFonts.caption1)
-                            .foregroundStyle(isDueSoon(dueDate) ? .spentyError : .spentyTextSecondary)
+                            .foregroundStyle(isDueSoon(dueDate) ? Color.spentyError : Color.spentyTextSecondary)
                     }
                 }
             }
