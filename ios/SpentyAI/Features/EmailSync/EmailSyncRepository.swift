@@ -59,51 +59,46 @@ struct PendingTransaction: Codable, Identifiable {
 // MARK: - Repository
 
 struct EmailSyncRepository {
-    private let api = APIClient.shared
 
     // MARK: - Gmail
 
     func getGmailAuthURL() async throws -> AuthURLResponse {
-        try await api.request(APIEndpoints.Gmail.authURL, method: .get)
+        try await APIClient.shared.get(APIEndpoints.Gmail.authURL)
     }
 
     func getGmailStatus() async throws -> EmailSyncStatus {
-        try await api.request(APIEndpoints.Gmail.status, method: .get)
+        try await APIClient.shared.get(APIEndpoints.Gmail.status)
     }
 
     func syncGmail() async throws -> SyncResult {
-        try await api.request(APIEndpoints.Gmail.sync, method: .post)
+        try await APIClient.shared.post(APIEndpoints.Gmail.sync)
     }
 
     func disconnectGmail() async throws {
-        let _: EmptyResponse = try await api.request(APIEndpoints.Gmail.disconnect, method: .post)
+        let _: EmptyResponse = try await APIClient.shared.post(APIEndpoints.Gmail.disconnect)
     }
 
     // MARK: - Outlook
 
     func getOutlookAuthURL() async throws -> AuthURLResponse {
-        try await api.request(APIEndpoints.Outlook.authURL, method: .get)
+        try await APIClient.shared.get(APIEndpoints.Outlook.authURL)
     }
 
     func getOutlookStatus() async throws -> EmailSyncStatus {
-        try await api.request(APIEndpoints.Outlook.status, method: .get)
+        try await APIClient.shared.get(APIEndpoints.Outlook.status)
     }
 
     func syncOutlook() async throws -> SyncResult {
-        try await api.request(APIEndpoints.Outlook.sync, method: .post)
+        try await APIClient.shared.post(APIEndpoints.Outlook.sync)
     }
 
     func disconnectOutlook() async throws {
-        let _: EmptyResponse = try await api.request(APIEndpoints.Outlook.disconnect, method: .post)
+        let _: EmptyResponse = try await APIClient.shared.post(APIEndpoints.Outlook.disconnect)
     }
 
     // MARK: - Pending Review
 
     func getPendingReview() async throws -> [PendingTransaction] {
-        try await api.request(APIEndpoints.Gmail.records, method: .get, queryItems: [
-            URLQueryItem(name: "status", value: "pending")
-        ])
+        try await APIClient.shared.get(APIEndpoints.Gmail.records, query: ["status": "pending"])
     }
 }
-
-private struct EmptyResponse: Codable {}
