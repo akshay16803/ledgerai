@@ -37,13 +37,19 @@ struct DashboardView: View {
             }
         }
         .sheet(isPresented: $viewModel.showNewTransaction) {
-            EditTransactionSheet()
+            EditTransactionSheet(transaction: nil, onSaved: {
+                Task { await viewModel.refresh() }
+            })
         }
         .sheet(isPresented: $viewModel.showSalesInvoice) {
-            SalesInvoiceSheet()
+            SalesInvoiceSheet(editingInvoice: nil, settings: appState.user?.settings, onSaved: { _ in
+                Task { await viewModel.refresh() }
+            })
         }
         .sheet(isPresented: $viewModel.showPurchaseBill) {
-            PurchaseBillSheet()
+            PurchaseBillSheet(settings: appState.user?.settings, onSaved: {
+                await viewModel.refresh()
+            })
         }
         .sheet(isPresented: $viewModel.showAIChat) {
             AIChatSheet()
@@ -373,68 +379,6 @@ struct DashboardView: View {
         case "loan": .pending
         case "investment", "demat": .processing
         default: .active
-        }
-    }
-}
-
-// MARK: - Placeholder Sheets
-
-/// Placeholder for the edit-transaction sheet (to be implemented in the Transactions feature).
-struct EditTransactionSheet: View {
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            Text("New Transaction")
-                .font(SpentyFonts.heading)
-                .foregroundStyle(SpentyColors.textPrimary)
-                .navigationTitle("New Transaction")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Cancel") { dismiss() }
-                    }
-                }
-        }
-    }
-}
-
-/// Placeholder for the sales invoice sheet (to be implemented in the Invoices feature).
-struct SalesInvoiceSheet: View {
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            Text("Sales Invoice")
-                .font(SpentyFonts.heading)
-                .foregroundStyle(SpentyColors.textPrimary)
-                .navigationTitle("Sales Invoice")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Cancel") { dismiss() }
-                    }
-                }
-        }
-    }
-}
-
-/// Placeholder for the purchase bill sheet (to be implemented in the Bills feature).
-struct PurchaseBillSheet: View {
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            Text("Purchase Bill")
-                .font(SpentyFonts.heading)
-                .foregroundStyle(SpentyColors.textPrimary)
-                .navigationTitle("Purchase Bill")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Cancel") { dismiss() }
-                    }
-                }
         }
     }
 }

@@ -160,13 +160,11 @@ struct ParsedEntriesView: View {
 
     private func resolveCategoryName(categoryId: String, subcategoryId: String?) -> String {
         // Try to find the subcategory first
-        if let subId = subcategoryId {
-            for category in categories {
-                if let subs = category.subcategories,
-                   let sub = subs.first(where: { $0.categoryId == subId }) {
-                    return "\(category.name) / \(sub.name)"
-                }
-            }
+        if let subId = subcategoryId,
+           let sub = categories.first(where: { $0.categoryId == subId }),
+           let parentId = sub.parentId,
+           let parent = categories.first(where: { $0.categoryId == parentId }) {
+            return "\(parent.name) / \(sub.name)"
         }
 
         // Fall back to parent category
