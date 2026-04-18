@@ -13,6 +13,9 @@ enum StoreKitProducts {
         yearlyBusiness
     ]
 
+    /// The subscription group identifier shared by all subscription products.
+    static let subscriptionGroupId = "20986454"
+
     /// Maps App Store product ID to the backend plan name
     static func backendPlanName(for productID: String) -> String? {
         switch productID {

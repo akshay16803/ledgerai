@@ -54,7 +54,7 @@ final class AppState {
             isAuthenticated = true
             logger.info("Loaded user: \(fetchedUser.email)")
             await checkFeatureVisibility()
-        } catch let error as APIError where error is APIError {
+        } catch let error as APIError {
             if case .unauthorized = error {
                 isAuthenticated = false
                 user = nil
@@ -129,7 +129,7 @@ final class AppState {
 
 // EmptyResponse is defined in Core/Repositories/EmptyResponse.swift
 
-struct CountResponse: Codable {
+struct CountResponse: Decodable {
     let count: Int
 
     enum CodingKeys: String, CodingKey {

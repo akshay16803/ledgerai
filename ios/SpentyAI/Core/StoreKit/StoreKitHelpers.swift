@@ -94,15 +94,15 @@ extension SubscriptionManager {
     /// Checks ``Transaction.currentEntitlement`` for family-shared purchases
     /// and unlocks features if a shared transaction is found.
     func handleFamilySharing() async {
-        for await result in Transaction.currentEntitlements {
+        for await result in StoreKit.Transaction.currentEntitlements {
             guard case .verified(let transaction) = result else {
                 continue
             }
 
-            if transaction.ownershipType == .familyShared {
+            if transaction.ownershipType == StoreKit.Transaction.OwnershipType.familyShared {
                 // Grant access for family-shared subscription
                 await MainActor.run {
-                    self.updateEntitlement(for: transaction.productID, isActive: true)
+                    self.purchasedProductIDs.insert(transaction.productID)
                 }
             }
         }
@@ -144,7 +144,7 @@ extension SubscriptionManager {
     ///   - to: The product the user wants to switch to.
     /// - Returns: The resulting ``Transaction`` if successful.
     @discardableResult
-    func handleUpgradeDowngrade(from currentProduct: Product, to newProduct: Product) async throws -> Transaction? {
+    func handleUpgradeDowngrade(from currentProduct: Product, to newProduct: Product) async throws -> StoreKit.Transaction? {
         // Attempt the purchase with the upgrade policy.
         let result = try await newProduct.purchase()
 
@@ -155,8 +155,8 @@ extension SubscriptionManager {
             }
             await transaction.finish()
             await MainActor.run {
-                self.updateEntitlement(for: newProduct.id, isActive: true)
-                self.updateEntitlement(for: currentProduct.id, isActive: false)
+                self.purchasedProductIDs.insert(newProduct.id)
+                self.purchasedProductIDs.remove(currentProduct.id)
             }
             return transaction
 

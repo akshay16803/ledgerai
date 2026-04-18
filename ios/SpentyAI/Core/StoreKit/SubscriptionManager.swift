@@ -76,7 +76,7 @@ final class SubscriptionManager {
 
         var restored: Set<String> = []
 
-        for await result in Transaction.currentEntitlements {
+        for await result in StoreKit.Transaction.currentEntitlements {
             if let transaction = try? checkVerified(result) {
                 restored.insert(transaction.productID)
                 await verifyWithBackend(transaction: transaction)

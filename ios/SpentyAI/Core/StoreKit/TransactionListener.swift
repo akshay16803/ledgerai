@@ -15,7 +15,7 @@ final class TransactionListener {
         updateTask = Task(priority: .background) { [weak self] in
             guard let self else { return }
 
-            for await result in Transaction.updates {
+            for await result in StoreKit.Transaction.updates {
                 do {
                     let transaction = try self.checkVerified(result)
                     logger.info("Transaction update: \(transaction.productID) — revoked: \(transaction.revocationDate != nil)")
