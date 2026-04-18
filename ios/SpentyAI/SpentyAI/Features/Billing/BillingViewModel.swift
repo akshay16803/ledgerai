@@ -239,7 +239,7 @@ final class BillingViewModel {
 
     @MainActor
     func checkEntitlements() async {
-        for await result in Transaction.currentEntitlements {
+        for await result in StoreKit.Transaction.currentEntitlements {
             if let transaction = try? checkVerified(result) {
                 if Self.allProductIds.contains(transaction.productID) {
                     await loadStatus()
@@ -251,7 +251,7 @@ final class BillingViewModel {
 
     // MARK: - Helpers
 
-    private func checkVerified<T>(_ result: VerificationResult<T>) throws -> T {
+    private func checkVerified(_ result: VerificationResult<StoreKit.Transaction>) throws -> StoreKit.Transaction {
         switch result {
         case .unverified(_, let error):
             throw error
