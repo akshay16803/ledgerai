@@ -57,10 +57,10 @@ struct CustomersView: View {
             } content: {
                 CustomerFormSheet(viewModel: viewModel, editing: nil)
             }
-            .sheet(item: $viewModel.showEditCustomer) { customer in
-                CustomerFormSheet(viewModel: viewModel, editing: customer)
-            } onDismiss: {
+            .sheet(item: $viewModel.showEditCustomer, onDismiss: {
                 Task { await viewModel.refresh() }
+            }) { customer in
+                CustomerFormSheet(viewModel: viewModel, editing: customer)
             }
             .alert("Delete Customer", isPresented: .init(
                 get: { viewModel.showDeleteConfirm != nil },
