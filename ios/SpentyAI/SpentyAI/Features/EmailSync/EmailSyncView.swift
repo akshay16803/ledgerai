@@ -264,10 +264,7 @@ struct EmailSyncView: View {
                     }
                     Spacer()
                     if let amount = transaction.amount {
-                        MoneyText(
-                            amount: amount,
-                            type: transaction.type == "income" ? .income : .expense
-                        )
+                        MoneyText(amount, showSign: true)
                     }
                 }
 
