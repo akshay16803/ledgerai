@@ -296,7 +296,7 @@ struct CashFlowView: View {
     private var mandatesSection: some View {
         VStack(alignment: .leading, spacing: SpentySpacing.sm) {
             SectionHeader(
-                title: "Mandates",
+                "Mandates",
                 actionTitle: "Add",
                 action: { viewModel.showAddMandate = true }
             )

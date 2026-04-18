@@ -34,7 +34,7 @@ struct LaunchAnimationView: View {
                     .opacity(showSubtitle ? 1 : 0)
 
                 Spacer()
-                    .frame(height: SpentySpacing.large)
+                    .frame(height: SpentySpacing.xl)
 
                 // Pulsing dots loader
                 HStack(spacing: SpentySpacing.small) {
