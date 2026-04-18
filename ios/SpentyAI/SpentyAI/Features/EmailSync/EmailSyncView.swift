@@ -150,7 +150,7 @@ struct EmailSyncView: View {
 
         if viewModel.isSyncing {
             syncStatsGrid(status: status)
-                .modifier(ShimmerEffect())
+                .modifier(ShimmerEffect(isActive: true))
         } else {
             syncStatsGrid(status: status)
         }
