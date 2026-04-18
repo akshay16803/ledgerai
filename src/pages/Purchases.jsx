@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { PurchaseBillModal } from '../components/PurchaseBillModal';
+import { InternationalInvoiceModal } from '../components/InternationalInvoiceModal';
+import { usesExistingForms, getCountryConfig, formatCountryCurrency } from '../lib/countryConfig';
 import { Plus, Eye, PencilSimple, Trash, Printer, CurrencyInr, Package, X, Gear } from '@phosphor-icons/react';
 
 const PAYMENT_METHODS = [
@@ -108,6 +110,10 @@ function BillPrintModal({ billId, onClose }) {
   const isGST = bill?.bill_type === 'gst';
   const items = bill?.line_items || [];
   const firm = settings || {};
+  const countryCode = settings?.business_country || 'IN';
+  const config = getCountryConfig(countryCode);
+  const isIndian = usesExistingForms(countryCode);
+  const fmtCurrency = (amt) => formatCountryCurrency(amt, countryCode);
 
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', overflowY: 'auto', padding: '24px 8px' }}>
@@ -176,13 +182,13 @@ function BillPrintModal({ billId, onClose }) {
                     )}
                     {firm.firm_gstin && (
                       <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>
-                        GSTIN: {firm.firm_gstin}
+                        {isIndian ? 'GSTIN' : config.taxIdLabel?.split('(')[0]?.trim() || 'Tax ID'}: {firm.firm_gstin}
                       </div>
                     )}
                   </div>
                   <div style={{ textAlign: 'right' }}>
                     <div style={{ fontSize: 28, fontWeight: 800, color: '#1a1a1a', letterSpacing: '1px' }}>
-                      {isGST ? 'TAX PURCHASE BILL' : 'PURCHASE BILL'}
+                      {isIndian ? (isGST ? 'TAX PURCHASE BILL' : 'PURCHASE BILL') : (bill?.bill_type === 'tax' ? (config.printTitle?.tax || config.taxInvoiceLabel || 'TAX PURCHASE BILL') : (config.printTitle?.simple || config.simpleInvoiceLabel || 'PURCHASE BILL'))}
                     </div>
                     <div style={{ fontSize: 13, color: '#6b7280', marginTop: 8 }}>
                       <strong style={{ color: '#374151' }}>Bill #:</strong> {bill.bill_number}
@@ -220,7 +226,7 @@ function BillPrintModal({ billId, onClose }) {
                     </div>
                   )}
                   {bill.vendor?.gstin && (
-                    <div style={{ fontSize: 13, color: '#6b7280', marginTop: 2 }}>GSTIN: {bill.vendor.gstin}</div>
+                    <div style={{ fontSize: 13, color: '#6b7280', marginTop: 2 }}>{isIndian ? 'GSTIN' : config.taxIdLabel?.split('(')[0]?.trim() || 'Tax ID'}: {bill.vendor.gstin}</div>
                   )}
                   {bill.vendor?.phone && (
                     <div style={{ fontSize: 13, color: '#6b7280', marginTop: 2 }}>Phone: {bill.vendor.phone}</div>
@@ -258,10 +264,10 @@ function BillPrintModal({ billId, onClose }) {
                         <td style={{ ...tdStyle, textAlign: 'left', fontWeight: 500 }}>{item.description || '---'}</td>
                         {isGST && <td style={tdStyle}>{item.hsn_sac || '---'}</td>}
                         <td style={tdStyle}>{item.quantity}</td>
-                        <td style={tdStyle}>{formatCurrency(item.rate)}</td>
+                        <td style={tdStyle}>{fmtCurrency(item.rate)}</td>
                         <td style={tdStyle}>{item.discount_percent || 0}%</td>
                         {isGST && <td style={tdStyle}>{item.tax_rate || 0}%</td>}
-                        <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600 }}>{formatCurrency(item.amount)}</td>
+                        <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600 }}>{fmtCurrency(item.amount)}</td>
                       </tr>
                     ))}
                     {items.length === 0 && (
@@ -273,28 +279,28 @@ function BillPrintModal({ billId, onClose }) {
                 {/* Totals */}
                 <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 28 }}>
                   <div style={{ width: 300 }}>
-                    <TotalRow label="Subtotal" value={formatCurrency(bill.subtotal)} />
+                    <TotalRow label="Subtotal" value={fmtCurrency(bill.subtotal)} />
                     {(bill.total_discount > 0) && (
-                      <TotalRow label="Discount" value={`- ${formatCurrency(bill.total_discount)}`} />
+                      <TotalRow label="Discount" value={`- ${fmtCurrency(bill.total_discount)}`} />
                     )}
                     {isGST && bill.cgst != null && bill.cgst > 0 && (
                       <>
-                        <TotalRow label="CGST" value={formatCurrency(bill.cgst)} />
-                        <TotalRow label="SGST" value={formatCurrency(bill.sgst)} />
+                        <TotalRow label="CGST" value={fmtCurrency(bill.cgst)} />
+                        <TotalRow label="SGST" value={fmtCurrency(bill.sgst)} />
                       </>
                     )}
                     {isGST && bill.igst != null && bill.igst > 0 && (
-                      <TotalRow label="IGST" value={formatCurrency(bill.igst)} />
+                      <TotalRow label="IGST" value={fmtCurrency(bill.igst)} />
                     )}
                     {bill.round_off != null && bill.round_off !== 0 && (
-                      <TotalRow label="Round-off" value={formatCurrency(bill.round_off)} />
+                      <TotalRow label="Round-off" value={fmtCurrency(bill.round_off)} />
                     )}
                     <div style={{
                       display: 'flex', justifyContent: 'space-between', padding: '10px 0', marginTop: 4,
                       borderTop: '2px solid #1a1a1a', fontSize: 16, fontWeight: 800, color: '#1a1a1a',
                     }}>
                       <span>Grand Total</span>
-                      <span>{formatCurrency(bill.grand_total ?? bill.total)}</span>
+                      <span>{fmtCurrency(bill.grand_total ?? bill.total)}</span>
                     </div>
                   </div>
                 </div>
@@ -493,6 +499,7 @@ export default function Purchases() {
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [firmName, setFirmName] = useState('');
 
+  const [businessCountry, setBusinessCountry] = useState('IN');
   const [showNewBill, setShowNewBill] = useState(false);
   const [editingBill, setEditingBill] = useState(null);
   const [viewingBill, setViewingBill] = useState(null);
@@ -518,6 +525,7 @@ export default function Purchases() {
     try {
       const s = await api.get('/api/settings');
       setFirmName(s.firm_name || '');
+      setBusinessCountry(s.business_country || 'IN');
     } catch (_) { /* non-critical */ }
     finally { setSettingsLoaded(true); }
   }, []);
@@ -688,22 +696,44 @@ export default function Purchases() {
 
       {/* New Bill Modal */}
       {showNewBill && (
-        <PurchaseBillModal
-          bill={null}
-          accounts={accounts}
-          onSave={handleBillSaved}
-          onClose={() => setShowNewBill(false)}
-        />
+        usesExistingForms(businessCountry) ? (
+          <PurchaseBillModal
+            bill={null}
+            accounts={accounts}
+            onSave={handleBillSaved}
+            onClose={() => setShowNewBill(false)}
+          />
+        ) : (
+          <InternationalInvoiceModal
+            mode="purchase"
+            bill={null}
+            accounts={accounts}
+            countryCode={businessCountry}
+            onSave={handleBillSaved}
+            onClose={() => setShowNewBill(false)}
+          />
+        )
       )}
 
       {/* Edit Bill Modal */}
       {editingBill && (
-        <PurchaseBillModal
-          bill={editingBill}
-          accounts={accounts}
-          onSave={handleBillSaved}
-          onClose={() => setEditingBill(null)}
-        />
+        usesExistingForms(businessCountry) ? (
+          <PurchaseBillModal
+            bill={editingBill}
+            accounts={accounts}
+            onSave={handleBillSaved}
+            onClose={() => setEditingBill(null)}
+          />
+        ) : (
+          <InternationalInvoiceModal
+            mode="purchase"
+            bill={editingBill}
+            accounts={accounts}
+            countryCode={businessCountry}
+            onSave={handleBillSaved}
+            onClose={() => setEditingBill(null)}
+          />
+        )
       )}
 
       {/* View / Print Bill Modal */}

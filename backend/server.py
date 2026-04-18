@@ -6641,12 +6641,17 @@ async def update_settings(request: Request, user: dict = Depends(get_current_use
     if "date_format" in body:
         update_fields["date_format"] = body["date_format"]
 
+    # Business country
+    if "business_country" in body:
+        update_fields["business_country"] = body["business_country"]
+
     # Firm / invoicing settings
     invoicing_keys = [
         "firm_name", "firm_address", "firm_city", "firm_state", "firm_pincode",
         "firm_gstin", "firm_pan", "firm_phone", "firm_email",
         "invoice_bank_name", "invoice_bank_account_no", "invoice_bank_ifsc", "invoice_bank_branch",
         "invoice_prefix", "invoice_terms",
+        "bill_prefix", "bill_terms",
     ]
     for key in invoicing_keys:
         if key in body:

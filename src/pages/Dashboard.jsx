@@ -9,6 +9,8 @@ import {
 import { EditTransactionModal } from '../components/EditTransactionModal';
 import { SalesInvoiceModal } from '../components/SalesInvoiceModal';
 import { PurchaseBillModal } from '../components/PurchaseBillModal';
+import { InternationalInvoiceModal } from '../components/InternationalInvoiceModal';
+import { usesExistingForms } from '../lib/countryConfig';
 
 function StatCard({ testId, label, value, icon: Icon, color, accent }) {
   return (
@@ -278,6 +280,7 @@ export default function Dashboard() {
   const [modalCategories, setModalCategories] = useState([]);
   const [showSalesInvoice, setShowSalesInvoice] = useState(false);
   const [showPurchaseInvoice, setShowPurchaseInvoice] = useState(false);
+  const [businessCountry, setBusinessCountry] = useState('IN');
 
   const openNewTxnModal = async () => {
     setShowNewTxn(true);
@@ -297,6 +300,7 @@ export default function Dashboard() {
     // Check settings gate — firm name must be set
     try {
       const settings = await api.get('/api/settings');
+      setBusinessCountry(settings.business_country || 'IN');
       if (!settings.firm_name?.trim()) {
         navigate(type === 'sales_invoice' ? '/settings?setup=invoice' : '/settings?setup=bill');
         return;
@@ -462,22 +466,44 @@ export default function Dashboard() {
 
       {/* Sales Invoice Modal */}
       {showSalesInvoice && (
-        <SalesInvoiceModal
-          invoice={null}
-          accounts={modalAccounts}
-          onSave={() => { setShowSalesInvoice(false); loadData(); }}
-          onClose={() => setShowSalesInvoice(false)}
-        />
+        usesExistingForms(businessCountry) ? (
+          <SalesInvoiceModal
+            invoice={null}
+            accounts={modalAccounts}
+            onSave={() => { setShowSalesInvoice(false); loadData(); }}
+            onClose={() => setShowSalesInvoice(false)}
+          />
+        ) : (
+          <InternationalInvoiceModal
+            mode="sales"
+            invoice={null}
+            accounts={modalAccounts}
+            countryCode={businessCountry}
+            onSave={() => { setShowSalesInvoice(false); loadData(); }}
+            onClose={() => setShowSalesInvoice(false)}
+          />
+        )
       )}
 
       {/* Purchase Invoice Modal */}
       {showPurchaseInvoice && (
-        <PurchaseBillModal
-          bill={null}
-          accounts={modalAccounts}
-          onSave={() => { setShowPurchaseInvoice(false); loadData(); }}
-          onClose={() => setShowPurchaseInvoice(false)}
-        />
+        usesExistingForms(businessCountry) ? (
+          <PurchaseBillModal
+            bill={null}
+            accounts={modalAccounts}
+            onSave={() => { setShowPurchaseInvoice(false); loadData(); }}
+            onClose={() => setShowPurchaseInvoice(false)}
+          />
+        ) : (
+          <InternationalInvoiceModal
+            mode="purchase"
+            bill={null}
+            accounts={modalAccounts}
+            countryCode={businessCountry}
+            onSave={() => { setShowPurchaseInvoice(false); loadData(); }}
+            onClose={() => setShowPurchaseInvoice(false)}
+          />
+        )
       )}
     </div>
   );

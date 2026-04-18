@@ -6,6 +6,8 @@ import { useNavigate } from 'react-router-dom';
 import { EditTransactionModal } from '../components/EditTransactionModal';
 import { SalesInvoiceModal } from '../components/SalesInvoiceModal';
 import { PurchaseBillModal } from '../components/PurchaseBillModal';
+import { InternationalInvoiceModal } from '../components/InternationalInvoiceModal';
+import { usesExistingForms } from '../lib/countryConfig';
 
 function formatCurrency(amount) {
   return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2 }).format(amount);
@@ -29,6 +31,7 @@ export default function Transactions() {
   const [editingTxn, setEditingTxn] = useState(null);
   const [showSalesInvoice, setShowSalesInvoice] = useState(false);
   const [showPurchaseInvoice, setShowPurchaseInvoice] = useState(false);
+  const [businessCountry, setBusinessCountry] = useState('IN');
   const navigate = useNavigate();
 
   // Handle switch from transaction modal to invoice modals
@@ -36,6 +39,7 @@ export default function Transactions() {
     setShowNewTxn(false);
     try {
       const settings = await api.get('/api/settings');
+      setBusinessCountry(settings.business_country || 'IN');
       if (!settings.firm_name?.trim()) {
         navigate(type === 'sales_invoice' ? '/settings?setup=invoice' : '/settings?setup=bill');
         return;
@@ -409,22 +413,44 @@ export default function Transactions() {
 
       {/* Sales Invoice Modal */}
       {showSalesInvoice && (
-        <SalesInvoiceModal
-          invoice={null}
-          accounts={accounts}
-          onSave={() => { setShowSalesInvoice(false); loadData(); }}
-          onClose={() => setShowSalesInvoice(false)}
-        />
+        usesExistingForms(businessCountry) ? (
+          <SalesInvoiceModal
+            invoice={null}
+            accounts={accounts}
+            onSave={() => { setShowSalesInvoice(false); loadData(); }}
+            onClose={() => setShowSalesInvoice(false)}
+          />
+        ) : (
+          <InternationalInvoiceModal
+            mode="sales"
+            invoice={null}
+            accounts={accounts}
+            countryCode={businessCountry}
+            onSave={() => { setShowSalesInvoice(false); loadData(); }}
+            onClose={() => setShowSalesInvoice(false)}
+          />
+        )
       )}
 
       {/* Purchase Invoice Modal */}
       {showPurchaseInvoice && (
-        <PurchaseBillModal
-          bill={null}
-          accounts={accounts}
-          onSave={() => { setShowPurchaseInvoice(false); loadData(); }}
-          onClose={() => setShowPurchaseInvoice(false)}
-        />
+        usesExistingForms(businessCountry) ? (
+          <PurchaseBillModal
+            bill={null}
+            accounts={accounts}
+            onSave={() => { setShowPurchaseInvoice(false); loadData(); }}
+            onClose={() => setShowPurchaseInvoice(false)}
+          />
+        ) : (
+          <InternationalInvoiceModal
+            mode="purchase"
+            bill={null}
+            accounts={accounts}
+            countryCode={businessCountry}
+            onSave={() => { setShowPurchaseInvoice(false); loadData(); }}
+            onClose={() => setShowPurchaseInvoice(false)}
+          />
+        )
       )}
 
       {/* Edit Transaction Modal */}

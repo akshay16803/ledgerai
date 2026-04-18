@@ -2,7 +2,8 @@ import { useState, useEffect, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
-import { Check, Globe, CalendarBlank, Buildings, Bank, Warning, ArrowLeft, Receipt } from '@phosphor-icons/react';
+import { Check, Globe, CalendarBlank, Buildings, Bank, Warning, ArrowLeft, Receipt, MapPin } from '@phosphor-icons/react';
+import { COUNTRIES } from '../lib/countryConfig';
 
 const INDIAN_STATES = [
   'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chhattisgarh', 'Goa', 'Gujarat',
@@ -103,6 +104,8 @@ export default function Settings() {
   // Bill settings
   const [billPrefix, setBillPrefix] = useState('BILL-');
   const [billTerms, setBillTerms] = useState('');
+  // Country of business
+  const [businessCountry, setBusinessCountry] = useState('IN');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -128,6 +131,7 @@ export default function Settings() {
       setInvoiceTerms(s.invoice_terms || '');
       setBillPrefix(s.bill_prefix || 'BILL-');
       setBillTerms(s.bill_terms || '');
+      setBusinessCountry(s.business_country || 'IN');
     }).catch(() => {}).finally(() => setLoading(false));
   }, []);
 
@@ -164,6 +168,7 @@ export default function Settings() {
     try {
       await api.put('/api/settings', {
         base_currency: baseCurrency, date_format: dateFormat,
+        business_country: businessCountry,
         firm_name: firmName, firm_address: firmAddress, firm_city: firmCity,
         firm_state: firmState, firm_pincode: firmPincode, firm_gstin: firmGstin,
         firm_pan: firmPan, firm_phone: firmPhone, firm_email: firmEmail,
@@ -309,6 +314,33 @@ export default function Settings() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
           <Buildings size={18} weight="duotone" style={{ color: 'var(--info)' }} />
           <h2 style={{ fontSize: 16, fontWeight: 600 }}>Invoice Settings</h2>
+        </div>
+
+        {/* Country of Business */}
+        <div style={{ marginBottom: 20, padding: '16px 20px', background: 'var(--bg-secondary)', borderRadius: 4, border: '1px solid var(--border-subtle)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+            <MapPin size={16} weight="duotone" style={{ color: 'var(--brand-primary)' }} />
+            <label style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              Country of Business
+            </label>
+          </div>
+          <select data-testid="business-country" value={businessCountry} onChange={e => {
+            const code = e.target.value;
+            setBusinessCountry(code);
+            // Auto-set currency when country changes
+            const country = COUNTRIES.find(c => c.code === code);
+            if (country) setBaseCurrency(country.currency);
+          }} style={{
+            ...fieldStyle, maxWidth: 400,
+          }}>
+            {COUNTRIES.map(c => (
+              <option key={c.code} value={c.code}>{c.name} ({c.currencySymbol} {c.currency})</option>
+            ))}
+          </select>
+          <div style={{ marginTop: 6, fontSize: 12, color: 'var(--text-muted)' }}>
+            Invoice and purchase bill forms will adapt to your country's tax system and requirements.
+            {businessCountry !== 'IN' && ' Currency has been auto-set — you can change it above if needed.'}
+          </div>
         </div>
 
         {/* Setup mode banners */}
