@@ -9,7 +9,7 @@ struct User: Codable, Identifiable, Hashable {
     var subscriptionPlan: String?
     var subscriptionStatus: String?
     var subscriptionExpiry: String?
-    var settings: UserSettings?
+    var settings: AppSettings?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -24,12 +24,5 @@ struct User: Codable, Identifiable, Hashable {
     }
 }
 
-struct UserSettings: Codable, Hashable {
-    var baseCurrency: String?
-    var dateFormat: String?
-
-    enum CodingKeys: String, CodingKey {
-        case baseCurrency = "base_currency"
-        case dateFormat = "date_format"
-    }
-}
+// UserSettings merged into AppSettings (in Settings.swift) — kept as typealias for backwards compat
+typealias UserSettings = AppSettings
