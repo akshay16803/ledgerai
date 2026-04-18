@@ -23,7 +23,7 @@ Build a production-ready native iOS app (Swift + SwiftUI) for SpentyAI that achi
 - **Networking:** URLSession + Combine for streaming
 - **Local storage:** SwiftData (for offline cache) + Keychain (for auth tokens)
 - **Auth:** Google Sign-In SDK + ASWebAuthenticationSession fallback
-- **Payments:** Razorpay iOS SDK (NOT Apple IAP — you already have Razorpay backend)
+- **Payments:** StoreKit 2 (Apple In-App Purchase) — Razorpay stays on web only
 - **Push notifications:** APNs + backend integration
 - **AI features:** Same backend endpoints (no on-device models)
 - **File handling:** PhotosUI + UniformTypeIdentifiers for document/image picking
@@ -48,6 +48,11 @@ ios/
 │   │   │   ├── APIError.swift             # Typed error enum
 │   │   │   ├── TokenManager.swift         # Keychain read/write for session_token cookie
 │   │   │   └── MultipartUpload.swift      # FormData file upload helper
+│   │   │
+│   │   ├── StoreKit/
+│   │   │   ├── SubscriptionManager.swift  # StoreKit 2 product loading, purchase, restore
+│   │   │   ├── StoreKitProducts.swift     # Product ID constants + plan mapping
+│   │   │   └── TransactionListener.swift  # Background listener for renewals/revocations
 │   │   │
 │   │   ├── Models/                        # All Codable data models (mirrors backend schemas)
 │   │   │   ├── User.swift
@@ -345,39 +350,118 @@ Since all data lives on the same backend, real-time consistency is achieved thro
 │  (JS)    │        │                  │         │ MongoDB  │
 └──────────┘        └──────────────────┘         └────┬─────┘
                                                       │
-┌──────────┐        ┌──────────────────┐              │
-│ iOS App  │──pay──>│  Razorpay iOS SDK│──verify─────>│
-│ (Swift)  │        │                  │              │
-└──────────┘        └──────────────────┘              │
                                                       v
-                                            subscription_plan
+                                            subscription_plan        <── single source of truth
                                             subscription_status
                                             subscription_expiry
-                                            (stored per user in MongoDB)
+                                            purchase_platform
+                                                      ^
+                                                      │
+┌──────────┐        ┌──────────────────┐              │
+│ iOS App  │──pay──>│  Apple App Store │──receipt─────>│
+│ (Swift)  │        │  (StoreKit 2)    │              │
+└──────────┘        └──────────────────┘
 ```
 
-**Single source of truth:** The `users` collection in MongoDB stores `subscription_plan`, `subscription_status`, and `subscription_expiry`. Both web and iOS check this via `GET /api/auth/me`.
+**Two payment gateways, one subscription record:**
 
-**Why Razorpay, not Apple IAP:**
-- You already have Razorpay integrated on web with order creation + verification endpoints
-- Same subscription record regardless of purchase platform
-- No 30% Apple commission (Razorpay processes directly)
-- **Important caveat:** Apple's App Store guidelines require IAP for digital goods/services purchased within the app. Razorpay can ONLY be used if the subscription is for a service that works outside the app (which SpentyAI is — it's a web + mobile accounting service). This qualifies under Apple's "reader app" / "multi-platform service" exception, similar to how Netflix/Spotify handle it. However, Apple's rules evolve — we include an IAP fallback path in Phase 5.
+| Platform | Payment Provider | How It Works |
+|----------|-----------------|--------------|
+| **Web** | Razorpay | Existing flow: create order → pay → verify signature → update MongoDB |
+| **iOS** | Apple IAP (StoreKit 2) | New flow: purchase via App Store → send receipt to backend → backend verifies with Apple → update MongoDB |
 
-### 4.2 iOS Payment Flow
+**Single source of truth:** The `users` collection in MongoDB stores `subscription_plan`, `subscription_status`, `subscription_expiry`, and a new `purchase_platform` field (`"razorpay"` or `"apple"`). Both web and iOS check subscription status via `GET /api/auth/me`.
+
+**Why Apple IAP on iOS, Razorpay on web:**
+- Apple requires IAP for digital subscriptions purchased within iOS apps — no exceptions
+- Razorpay continues to work on web where there are no platform restrictions
+- The backend is the single gatekeeper: regardless of where the user pays, the subscription unlocks everywhere
+- If a user buys on web (Razorpay), the iOS app sees `subscription_status == "active"` and unlocks immediately
+- If a user buys on iOS (Apple), the web app sees the same status and unlocks immediately
+
+### 4.2 Apple IAP Product Configuration
+
+**Products to create in App Store Connect:**
+
+| Product ID | Type | Price | Maps to Backend Plan |
+|------------|------|-------|---------------------|
+| `com.spentyai.monthly` | Auto-Renewable Subscription | ₹199/month | `monthly` |
+| `com.spentyai.quarterly` | Auto-Renewable Subscription | ₹449/quarter | `quarterly` |
+| `com.spentyai.yearly` | Auto-Renewable Subscription | ₹1499/year | `yearly` |
+| `com.spentyai.lifetime` | Non-Consumable | ₹4999 one-time | `lifetime` |
+
+All auto-renewable subscriptions belong to a single **Subscription Group** called "SpentyAI Pro" so users can upgrade/downgrade between monthly, quarterly, and yearly seamlessly.
+
+### 4.3 iOS Payment Flow (StoreKit 2)
 
 ```
-1. User taps plan on BillingView
-2. ViewModel calls POST /api/payments/create-order → gets order_id, amount, key_id
-3. ViewModel opens Razorpay iOS SDK checkout with order details
-4. User completes payment in Razorpay sheet
-5. Razorpay returns razorpay_payment_id + razorpay_signature
-6. ViewModel calls POST /api/payments/verify with all 3 IDs
-7. Backend verifies signature, updates user subscription in MongoDB
-8. ViewModel refreshes AppState.subscription → app unlocks
+1. App launches → StoreKit 2 loads available products from App Store Connect
+2. User taps a plan on BillingView
+3. StoreKit 2 presents Apple's native payment sheet (Face ID / Touch ID / password)
+4. Apple processes payment → returns signed Transaction (JWS)
+5. iOS app sends the transaction's originalID + signedPayload to backend:
+       POST /api/payments/apple/verify
+6. Backend verifies the JWS with Apple's public key (local verification)
+   OR calls Apple's App Store Server API v2 to validate
+7. Backend extracts: productId, expiresDate, originalTransactionId
+8. Backend maps productId → plan, updates user's subscription in MongoDB:
+       subscription_plan = "yearly"
+       subscription_status = "active"
+       subscription_expiry = expiresDate
+       purchase_platform = "apple"
+       apple_original_transaction_id = "..."
+9. Backend returns success → iOS app refreshes AppState → app unlocks
 ```
 
-### 4.3 Subscription Gate
+### 4.4 Renewal, Cancellation & Grace Period Handling
+
+```swift
+// StoreKit 2 handles renewals automatically. The app listens for updates:
+
+// In SubscriptionManager.swift:
+func listenForTransactionUpdates() {
+    Task {
+        for await result in Transaction.updates {
+            if case .verified(let transaction) = result {
+                // Send to backend for verification + status update
+                await verifyWithBackend(transaction)
+                await transaction.finish()
+            }
+        }
+    }
+}
+```
+
+**Backend handles Apple Server-to-Server Notifications v2:**
+
+| Notification | Backend Action |
+|-------------|----------------|
+| `DID_RENEW` | Extend `subscription_expiry` to new period end |
+| `DID_FAIL_TO_RENEW` | Set `subscription_status = "grace_period"` (Apple gives 16-day grace) |
+| `EXPIRED` | Set `subscription_status = "expired"` |
+| `DID_CHANGE_RENEWAL_INFO` | Update plan if user upgraded/downgraded |
+| `REFUND` | Set `subscription_status = "expired"`, log refund |
+| `REVOKE` | Immediately revoke access |
+
+**Server notification endpoint:** `POST /api/payments/apple/webhook` — registered in App Store Connect under "App Store Server Notifications v2 URL".
+
+### 4.5 Cross-Platform Subscription Resolution
+
+When a user has BOTH a Razorpay and Apple subscription (edge case), the backend picks the one with the latest expiry:
+
+```python
+# In backend: resolve_subscription(user)
+if user.razorpay_expiry and user.apple_expiry:
+    # Use whichever expires later
+    if user.apple_expiry > user.razorpay_expiry:
+        active_plan = user.apple_plan
+        active_expiry = user.apple_expiry
+    else:
+        active_plan = user.razorpay_plan
+        active_expiry = user.razorpay_expiry
+```
+
+### 4.6 Subscription Gate
 
 ```swift
 // SubscriptionGate.swift
@@ -396,6 +480,27 @@ struct SubscriptionGate<Content: View>: View {
 ```
 
 Every protected screen is wrapped in `SubscriptionGate`. The gate checks `appState.user.subscription_status == "active"` and `subscription_expiry > now`.
+
+### 4.7 Restore Purchases
+
+StoreKit 2 automatically syncs purchases across devices. On login, the app calls:
+
+```swift
+// Check for existing Apple subscriptions on this Apple ID
+func restorePurchases() async {
+    for await result in Transaction.currentEntitlements {
+        if case .verified(let transaction) = result {
+            await verifyWithBackend(transaction)
+        }
+    }
+}
+```
+
+This handles: new device, reinstall, family sharing, and "I bought on web but also have Apple subscription" scenarios.
+
+### 4.8 Promo Codes
+
+Promo codes (lifetime grants) continue to work via the existing backend endpoints (`POST /api/promo/validate`, `POST /api/promo/activate`). These bypass both Razorpay and Apple — they directly set `subscription_status = "active"` and `subscription_plan = "lifetime"` in MongoDB. The iOS BillingView includes a promo code field just like the web app.
 
 ---
 
@@ -450,13 +555,17 @@ Every protected screen is wrapped in `SubscriptionGate`. The gate checks `appSta
 ---
 
 #### **Billing (BillingView)**
-- 4 plan cards: Monthly ₹199, Quarterly ₹449, Yearly ₹1499, Lifetime ₹4999
+- 4 plan cards loaded dynamically from App Store Connect via StoreKit 2: Monthly, Quarterly, Yearly, Lifetime
+- Prices shown in user's local currency (Apple handles currency conversion automatically)
 - Highlighted "Best Value" on Yearly
 - Feature inclusion checklist
-- Promo code text field + "Apply" button
-- "Pay" button triggers Razorpay iOS SDK
+- "Subscribe" button triggers Apple's native payment sheet (Face ID / password)
+- Promo code text field + "Apply" button (uses backend promo endpoints, NOT Apple promo codes)
+- "Restore Purchases" button (calls `Transaction.currentEntitlements`)
+- If user already has an active subscription (bought on web), this screen is never shown
 
-**APIs:** `POST /api/payments/create-order`, `POST /api/payments/verify`, `POST /api/promo/validate`, `POST /api/promo/activate`, `GET /api/payments/history`
+**StoreKit Products:** `com.spentyai.monthly`, `com.spentyai.quarterly`, `com.spentyai.yearly`, `com.spentyai.lifetime`
+**APIs:** `POST /api/payments/apple/verify`, `POST /api/promo/validate`, `POST /api/promo/activate`, `GET /api/payments/history`
 
 ---
 
@@ -770,15 +879,16 @@ enum SpentyRadius {
 | All Codable models (mirrors backend) | `Core/Models/` (18 files) | 3h |
 | AppState (auth + subscription observable) | `AppState.swift` | 1h |
 | Google Sign-In integration | `LoginView`, `LoginViewModel`, `AuthRepository` | 3h |
-| Subscription gate + BillingView with Razorpay | `SubscriptionGate`, `BillingView`, `BillingViewModel` | 4h |
+| StoreKit 2 integration (SubscriptionManager, TransactionListener, product loading) | `Core/StoreKit/` (3 files) | 4h |
+| Subscription gate + BillingView with Apple IAP | `SubscriptionGate`, `BillingView`, `BillingViewModel` | 4h |
 | Tab navigation + More menu | `MainTabView`, `MoreMenuView`, `Router` | 2h |
 | Dashboard (stats + accounts + recent txns + AI chat) | `Dashboard/` (3 files) | 4h |
 | Transactions (list + ledger + filters + CRUD) | `Transactions/` (6 files) | 6h |
 | EditTransactionSheet (full form + receipt upload) | 2 files | 4h |
 | Accounts (grouped cards + form + sub-types + OD/amortization) | `Accounts/` (6 files) | 5h |
-| **Phase 1 Total** | | **~41h** |
+| **Phase 1 Total** | | **~45h** |
 
-**Deliverable:** TestFlight build with login → billing → dashboard → transactions → accounts working end-to-end.
+**Deliverable:** TestFlight build with login → Apple IAP billing → dashboard → transactions → accounts working end-to-end.
 
 ---
 
@@ -844,8 +954,8 @@ enum SpentyRadius {
 | UI tests for critical flows (login → dashboard → create transaction) | 3h |
 | App Store Connect: screenshots, description, keywords, review notes | 2h |
 | TestFlight → App Store submission | 1h |
-| Apple IAP fallback integration (if App Review requires it) | 4h |
-| **Phase 5 Total** | **~36h** |
+| StoreKit 2 edge cases: family sharing, offer codes, subscription upgrades/downgrades | 3h |
+| **Phase 5 Total** | **~35h** |
 
 ---
 
@@ -853,29 +963,35 @@ enum SpentyRadius {
 
 | Phase | Hours | Timeline |
 |-------|-------|----------|
-| Phase 1: Foundation + Core | 41h | Week 1-2 |
+| Phase 1: Foundation + Core + Apple IAP | 45h | Week 1-2 |
 | Phase 2: Invoicing + Purchases | 24h | Week 3 |
 | Phase 3: Analytics + Reconciliation | 15h | Week 4 |
 | Phase 4: Email/SMS, Records, Rest | 17h | Week 5 |
-| Phase 5: Polish + App Store | 36h | Week 6 |
-| **Total** | **~133h** | **~6 weeks** |
+| Phase 5: Polish + App Store | 35h | Week 6 |
+| **Total** | **~136h** | **~6 weeks** |
 
 ---
 
 ## 8. Backend Changes Required
 
-The existing backend needs minimal changes to support iOS:
+The existing backend needs these changes to support iOS + Apple IAP:
 
 | Change | Why | Effort |
 |--------|-----|--------|
 | Accept `Authorization: Bearer <token>` alongside cookies | iOS can't rely on browser cookies; needs explicit token auth | 1h |
 | `POST /api/auth/google/mobile` endpoint | iOS sends Google `id_token` directly (no redirect flow); backend verifies with Google, creates session, returns token in JSON | 2h |
+| `POST /api/payments/apple/verify` endpoint | Receives StoreKit 2 signed transaction (JWS), verifies with Apple's public key or App Store Server API v2, extracts product ID + expiry, maps to plan, updates user subscription in MongoDB | 4h |
+| `POST /api/payments/apple/webhook` endpoint | Receives Apple App Store Server Notifications v2 (renewals, cancellations, refunds, billing issues). Updates subscription status accordingly. Must return HTTP 200 to acknowledge. | 3h |
+| Add `purchase_platform` + `apple_original_transaction_id` fields to user model | Track which platform the subscription came from; Apple's transaction ID needed for refund/dispute lookups | 0.5h |
+| Cross-platform subscription resolution in `GET /api/auth/me` | When user has both Razorpay and Apple subscriptions, return the one with latest expiry as active | 1h |
 | Add APNs device token storage + push send utility | For real-time push notifications (Phase 5) | 3h |
-| CORS: Allow iOS bundle origin (if needed) | May not be needed since iOS doesn't enforce same-origin | 0h |
+| Install `PyJWT` + Apple root certificates for JWS verification | Needed to verify StoreKit 2 signed transactions server-side | 0.5h |
 
-**Total backend work: ~6 hours**
+**Total backend work: ~15 hours**
 
-The rest of the 129 endpoints work as-is — the iOS app is just another HTTP client.
+**Apple App Store Server API v2** — the backend will use Apple's `/inApps/v1/transactions/{transactionId}` and `/inApps/v1/subscriptions/{originalTransactionId}` endpoints for server-side receipt validation. This requires an App Store Connect API key (generated in App Store Connect → Users and Access → Keys → In-App Purchase).
+
+The rest of the 129 existing endpoints work as-is — the iOS app is just another HTTP client.
 
 ---
 
@@ -884,14 +1000,14 @@ The rest of the 129 endpoints work as-is — the iOS app is just another HTTP cl
 | Library | Purpose | Source |
 |---------|---------|--------|
 | **GoogleSignIn** | Google OAuth for iOS | SPM: `google/GoogleSignIn-iOS` |
-| **Razorpay iOS SDK** | Payment checkout | CocoaPods or SPM from Razorpay |
 | **KeychainAccess** | Secure token storage | SPM: `kishikawakatsumi/KeychainAccess` |
 | **SwiftUI (built-in)** | UI framework | Apple |
+| **StoreKit 2 (built-in)** | Apple In-App Purchase | Apple (iOS 15+) |
 | **Swift Charts (built-in)** | Bar/line charts | Apple (iOS 16+) |
 | **SwiftData (built-in)** | Local cache | Apple (iOS 17+) |
 | **PhotosUI (built-in)** | Image/document picker | Apple |
 
-**Total external dependencies: 3** (Google Sign-In, Razorpay, KeychainAccess). Everything else is Apple frameworks.
+**Total external dependencies: 2** (Google Sign-In, KeychainAccess). Everything else — including payments — uses Apple's built-in frameworks. No Razorpay SDK on iOS.
 
 ---
 
@@ -937,11 +1053,15 @@ The rest of the 129 endpoints work as-is — the iOS app is just another HTTP cl
 
 | Risk | Impact | Mitigation |
 |------|--------|------------|
-| Apple rejects Razorpay and requires IAP | High — 30% commission, dual payment system | Phase 5 includes IAP fallback; qualify as multi-platform service (web + iOS) |
+| Apple App Review rejects the app | High — delays launch | Follow all App Store guidelines strictly; no external payment links; IAP is the only purchase path on iOS |
+| Apple's 30% commission reduces revenue on iOS purchases | Medium — ₹199 plan nets ₹139 | Price plans slightly higher on iOS to offset, or accept the margin. After Year 1 the commission drops to 15% (Small Business Program) |
+| StoreKit 2 receipt verification fails or is unreliable | Medium — users pay but don't get access | Implement both local JWS verification AND server-side App Store Server API v2 as fallback; add "Restore Purchases" button |
+| User buys on both Razorpay and Apple (double subscription) | Low — confusion | Backend resolves to latest-expiring subscription; show "Active via [platform]" in settings |
 | Google Sign-In SDK breaking changes | Medium — blocks auth | Pin SDK version; have ASWebAuthenticationSession fallback |
 | Large statement PDF upload fails on cellular | Medium — bad UX | Compress before upload; show progress; allow WiFi-only setting |
 | SwiftData migration issues across versions | Medium — data loss | Version the schema; keep cache as non-critical (server is source of truth) |
 | Backend cookie auth doesn't work on iOS | Low — blocks all API calls | Already mitigated: add Bearer token auth to backend (Section 8) |
+| Apple subscription renewal webhook delivery fails | Low — user loses access despite paying | iOS app checks `Transaction.currentEntitlements` on every launch as safety net; backend also polls Apple's API daily for active subscribers |
 
 ---
 
