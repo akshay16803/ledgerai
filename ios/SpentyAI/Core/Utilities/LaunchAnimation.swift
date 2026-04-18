@@ -37,7 +37,7 @@ struct LaunchAnimationView: View {
                     .frame(height: SpentySpacing.xl)
 
                 // Pulsing dots loader
-                HStack(spacing: SpentySpacing.small) {
+                HStack(spacing: SpentySpacing.sm) {
                     ForEach(0..<dotCount, id: \.self) { index in
                         Circle()
                             .fill(.white)
