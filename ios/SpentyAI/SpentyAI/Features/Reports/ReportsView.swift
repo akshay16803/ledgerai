@@ -161,6 +161,7 @@ struct ReportsView: View {
 
                 if periods.isEmpty {
                     EmptyState(
+                        icon: "chart.bar",
                         title: "No period data",
                         message: "Adjust your date range to see trends."
                     )
@@ -200,6 +201,7 @@ struct ReportsView: View {
             if categories.isEmpty {
                 SpentyCard {
                     EmptyState(
+                        icon: "folder",
                         title: "No categories",
                         message: "No category data for the selected filters."
                     )
