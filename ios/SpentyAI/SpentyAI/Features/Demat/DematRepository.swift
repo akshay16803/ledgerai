@@ -22,12 +22,8 @@ struct DematOverallSummary: Codable, Hashable {
 
 struct DematRepository {
 
-    func getStatements() async throws -> [DematStatement] {
-        try await APIClient.shared.get(APIEndpoints.Demat.statements)
-    }
-
-    func getStatement(_ id: String) async throws -> DematStatement {
-        try await APIClient.shared.get(APIEndpoints.Demat.statement(id))
+    func getStatements(accountId: String) async throws -> [DematStatement] {
+        try await APIClient.shared.get(APIEndpoints.Demat.statements(accountId))
     }
 
     func uploadStatement(
@@ -51,11 +47,11 @@ struct DematRepository {
         )
     }
 
-    func deleteStatement(_ id: String) async throws {
-        try await APIClient.shared.delete(APIEndpoints.Demat.delete(id))
+    func approveStatement(_ statementId: String) async throws -> DematStatement {
+        try await APIClient.shared.post(APIEndpoints.Demat.approve(statementId))
     }
 
-    func getSummary() async throws -> DematOverallSummary {
-        try await APIClient.shared.get(APIEndpoints.Demat.summary)
+    func rejectStatement(_ statementId: String) async throws -> DematStatement {
+        try await APIClient.shared.post(APIEndpoints.Demat.reject(statementId))
     }
 }

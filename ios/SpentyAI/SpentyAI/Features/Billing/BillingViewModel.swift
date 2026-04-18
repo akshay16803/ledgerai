@@ -59,7 +59,7 @@ final class BillingViewModel {
 
         do {
             let _: PromoActivateResponse = try await APIClient.shared.post(
-                APIEndpoints.Promo.apply,
+                APIEndpoints.Promo.activate,
                 body: PromoRequest(code: code)
             )
             logger.info("Promo code activated: \(code)")

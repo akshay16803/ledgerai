@@ -71,7 +71,7 @@ struct EmailSyncRepository {
     }
 
     func syncGmail() async throws -> SyncResult {
-        try await APIClient.shared.post(APIEndpoints.Gmail.sync)
+        try await APIClient.shared.post(APIEndpoints.EmailSync.startSync)
     }
 
     func disconnectGmail() async throws {
@@ -89,7 +89,7 @@ struct EmailSyncRepository {
     }
 
     func syncOutlook() async throws -> SyncResult {
-        try await APIClient.shared.post(APIEndpoints.Outlook.sync)
+        try await APIClient.shared.post(APIEndpoints.Outlook.sync)  // /api/outlook/start-sync
     }
 
     func disconnectOutlook() async throws {
@@ -99,6 +99,6 @@ struct EmailSyncRepository {
     // MARK: - Pending Review
 
     func getPendingReview() async throws -> [PendingTransaction] {
-        try await APIClient.shared.get(APIEndpoints.Gmail.records, query: ["status": "pending"])
+        try await APIClient.shared.get(APIEndpoints.EmailSync.pendingReview)
     }
 }

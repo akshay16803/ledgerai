@@ -62,7 +62,7 @@ struct SubscriptionRepository {
 
     func activatePromo(code: String) async throws -> PromoActivation {
         let body = ["code": code]
-        return try await APIClient.shared.post(APIEndpoints.Promo.apply, body: body)
+        return try await APIClient.shared.post(APIEndpoints.Promo.activate, body: body)
     }
 
     func getPaymentHistory() async throws -> PaymentHistory {

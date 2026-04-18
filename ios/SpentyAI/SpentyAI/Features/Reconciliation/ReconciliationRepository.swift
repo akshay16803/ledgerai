@@ -111,7 +111,7 @@ struct ReconciliationRepository {
 
     func unlockStatement(_ id: String, password: String) async throws -> Statement {
         try await APIClient.shared.post(
-            APIEndpoints.Reconciliation.password(id),
+            APIEndpoints.Reconciliation.unlock(id),
             body: PasswordRequest(password: password)
         )
     }

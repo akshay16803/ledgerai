@@ -25,6 +25,7 @@ final class DematViewModel {
     // MARK: - Private
 
     private let repo = DematRepository()
+    private let accountRepo = AccountRepository()
     private let logger = Logger(subsystem: "com.spentyai", category: "demat")
 
     // MARK: - Load Methods
@@ -35,13 +36,22 @@ final class DematViewModel {
         isLoading = true
         errorMessage = nil
 
-        async let statementsTask = repo.getStatements()
-        async let summaryTask = repo.getSummary()
-
         do {
-            let (stmts, sum) = try await (statementsTask, summaryTask)
-            statements = stmts
-            overallSummary = sum
+            // Get all accounts, filter investment/demat ones, fetch statements per account
+            let accounts = try await accountRepo.getAccounts()
+            let investmentAccounts = accounts.filter { account in
+                let type = account.accountType.lowercased()
+                let subType = (account.subType ?? "").lowercased()
+                return type == "investment" || type == "demat" || subType == "demat" || subType == "trading"
+            }
+
+            var allStatements: [DematStatement] = []
+            for account in investmentAccounts {
+                let stmts = try await repo.getStatements(accountId: account.accountId)
+                allStatements.append(contentsOf: stmts)
+            }
+            statements = allStatements
+            overallSummary = computeSummary(from: allStatements)
             logger.info("Demat data loaded successfully")
         } catch let error as APIError {
             errorMessage = error.errorDescription
@@ -52,34 +62,6 @@ final class DematViewModel {
         }
 
         isLoading = false
-    }
-
-    @MainActor
-    func loadStatements() async {
-        do {
-            statements = try await repo.getStatements()
-            logger.info("Statements loaded successfully")
-        } catch let error as APIError {
-            errorMessage = error.errorDescription
-            logger.error("Failed to load statements: \(error.localizedDescription)")
-        } catch {
-            errorMessage = "Failed to load statements."
-            logger.error("Unexpected error loading statements: \(error.localizedDescription)")
-        }
-    }
-
-    @MainActor
-    func loadSummary() async {
-        do {
-            overallSummary = try await repo.getSummary()
-            logger.info("Summary loaded successfully")
-        } catch let error as APIError {
-            errorMessage = error.errorDescription
-            logger.error("Failed to load summary: \(error.localizedDescription)")
-        } catch {
-            errorMessage = "Failed to load summary."
-            logger.error("Unexpected error loading summary: \(error.localizedDescription)")
-        }
     }
 
     @MainActor
@@ -105,8 +87,8 @@ final class DematViewModel {
             )
             statements.insert(statement, at: 0)
             showUploadSheet = false
+            overallSummary = computeSummary(from: statements)
             logger.info("Statement uploaded successfully")
-            await loadSummary()
         } catch let error as APIError {
             errorMessage = error.errorDescription
             logger.error("Failed to upload statement: \(error.localizedDescription)")
@@ -120,15 +102,17 @@ final class DematViewModel {
 
     @MainActor
     func deleteStatement(_ id: String) async {
+        // Deleting demat statements — the backend doesn't have a direct delete endpoint
+        // for demat. We can reject the statement which effectively removes it.
         isLoading = true
         errorMessage = nil
 
         do {
-            try await repo.deleteStatement(id)
+            _ = try await repo.rejectStatement(id)
             statements.removeAll { $0.statementId == id }
             showDeleteConfirm = nil
+            overallSummary = computeSummary(from: statements)
             logger.info("Statement deleted successfully")
-            await loadSummary()
         } catch let error as APIError {
             errorMessage = error.errorDescription
             logger.error("Failed to delete statement: \(error.localizedDescription)")
@@ -144,23 +128,31 @@ final class DematViewModel {
     func refresh() async {
         isRefreshing = true
         errorMessage = nil
+        await loadAll()
+        isRefreshing = false
+    }
 
-        async let statementsTask = repo.getStatements()
-        async let summaryTask = repo.getSummary()
+    // MARK: - Helpers
 
-        do {
-            let (stmts, sum) = try await (statementsTask, summaryTask)
-            statements = stmts
-            overallSummary = sum
-            logger.info("Demat data refreshed successfully")
-        } catch let error as APIError {
-            errorMessage = error.errorDescription
-            logger.error("Failed to refresh demat data: \(error.localizedDescription)")
-        } catch {
-            errorMessage = "Failed to refresh. Please try again."
-            logger.error("Unexpected error refreshing demat data: \(error.localizedDescription)")
+    private func computeSummary(from statements: [DematStatement]) -> DematOverallSummary {
+        var totalBuy = 0.0
+        var totalSell = 0.0
+        var totalCharges = 0.0
+
+        for stmt in statements {
+            if let summary = stmt.parsedSummary {
+                totalBuy += summary.totalBuyValue ?? 0
+                totalSell += summary.totalSellValue ?? 0
+                totalCharges += summary.totalCharges ?? 0
+            }
         }
 
-        isRefreshing = false
+        return DematOverallSummary(
+            totalBuyValue: totalBuy,
+            totalSellValue: totalSell,
+            totalCharges: totalCharges,
+            netPnl: totalSell - totalBuy - totalCharges,
+            statementCount: statements.count
+        )
     }
 }

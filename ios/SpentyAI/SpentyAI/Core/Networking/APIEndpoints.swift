@@ -68,8 +68,8 @@ enum APIEndpoints {
     // MARK: - Reports
     enum Reports {
         static let summary = "/api/reports/summary"
-        static let periodReport = "/api/reports/period"
-        static let categoryReport = "/api/reports/category"
+        static let periodReport = "/api/reports/by-period"
+        static let categoryReport = "/api/reports/by-category"
         static let accountReport = "/api/reports/account"
         static let incomeExpense = "/api/reports/income-expense"
         static let exportCSV = "/api/reports/export/csv"
@@ -79,7 +79,7 @@ enum APIEndpoints {
     // MARK: - Cash Flow
     enum CashFlow {
         static let projection = "/api/cashflow/projection"
-        static let recurring = "/api/cashflow/recurring"
+        static let recurring = "/api/recurring/list"
         static let history = "/api/cashflow/history"
     }
 
@@ -96,39 +96,47 @@ enum APIEndpoints {
 
     // MARK: - Reconciliation (Statements)
     enum Reconciliation {
-        static let statements = "/api/reconciliation/statements"
-        static let upload = "/api/reconciliation/upload"
-        static func statement(_ id: String) -> String { "/api/reconciliation/statements/\(id)" }
-        static func delete(_ id: String) -> String { "/api/reconciliation/statements/\(id)" }
-        static func entries(_ id: String) -> String { "/api/reconciliation/statements/\(id)/entries" }
-        static func approve(_ id: String) -> String { "/api/reconciliation/statements/\(id)/approve" }
-        static func reject(_ id: String) -> String { "/api/reconciliation/statements/\(id)/reject" }
-        static func reconcile(_ id: String) -> String { "/api/reconciliation/statements/\(id)/reconcile" }
-        static func password(_ id: String) -> String { "/api/reconciliation/statements/\(id)/password" }
+        static let statements = "/api/statements/list"
+        static let upload = "/api/statements/upload"
+        static func statement(_ id: String) -> String { "/api/statements/\(id)" }
+        static func delete(_ id: String) -> String { "/api/statements/\(id)" }
+        static func entries(_ id: String) -> String { "/api/statements/\(id)/entries" }
+        static func approve(_ id: String) -> String { "/api/statements/\(id)/approve" }
+        static func reject(_ id: String) -> String { "/api/statements/\(id)/reject" }
+        static func reconcile(_ id: String) -> String { "/api/statements/\(id)/reconcile" }
+        static func unlock(_ id: String) -> String { "/api/statements/\(id)/unlock" }
         static func updateEntry(_ statementId: String, entryIndex: Int) -> String {
-            "/api/reconciliation/statements/\(statementId)/entries/\(entryIndex)"
+            "/api/statements/\(statementId)/entries/\(entryIndex)"
         }
-        static func bulkCategorize(_ id: String) -> String { "/api/reconciliation/statements/\(id)/bulk-categorize" }
+        static func addMissing(_ id: String) -> String { "/api/statements/\(id)/add-missing" }
+        static func reaudit(_ id: String) -> String { "/api/statements/\(id)/reaudit" }
+        static func bulkCategorize(_ id: String) -> String { "/api/statements/\(id)/bulk-categorize" }
     }
 
     // MARK: - Email Sync — Gmail
     enum Gmail {
-        static let authURL = "/api/email-sync/gmail/auth-url"
-        static let callback = "/api/email-sync/gmail/callback"
-        static let status = "/api/email-sync/gmail/status"
-        static let sync = "/api/email-sync/gmail/sync"
-        static let disconnect = "/api/email-sync/gmail/disconnect"
-        static let records = "/api/email-sync/gmail/records"
+        static let authURL = "/api/gmail/connect"
+        static let callback = "/api/gmail/callback"
+        static let status = "/api/gmail/status"
+        static let disconnect = "/api/gmail/disconnect"
     }
 
     // MARK: - Email Sync — Outlook
     enum Outlook {
-        static let authURL = "/api/email-sync/outlook/auth-url"
-        static let callback = "/api/email-sync/outlook/callback"
-        static let status = "/api/email-sync/outlook/status"
-        static let sync = "/api/email-sync/outlook/sync"
-        static let disconnect = "/api/email-sync/outlook/disconnect"
-        static let records = "/api/email-sync/outlook/records"
+        static let authURL = "/api/outlook/connect"
+        static let callback = "/api/outlook/callback"
+        static let status = "/api/outlook/status"
+        static let sync = "/api/outlook/start-sync"
+        static let disconnect = "/api/outlook/disconnect"
+        static let retryPending = "/api/outlook/retry-pending"
+    }
+
+    // MARK: - Email Sync — General
+    enum EmailSync {
+        static let startSync = "/api/email/start-sync"
+        static let retryPending = "/api/email/retry-pending"
+        static let syncStats = "/api/email/sync-stats"
+        static let pendingReview = "/api/email/pending-review"
     }
 
     // MARK: - SMS
@@ -229,12 +237,11 @@ enum APIEndpoints {
 
     // MARK: - Demat
     enum Demat {
-        static let statements = "/api/demat/statements"
-        static let upload = "/api/demat/upload"
-        static func statement(_ id: String) -> String { "/api/demat/statements/\(id)" }
-        static func delete(_ id: String) -> String { "/api/demat/statements/\(id)" }
-        static func entries(_ id: String) -> String { "/api/demat/statements/\(id)/entries" }
-        static let summary = "/api/demat/summary"
+        static let upload = "/api/demat/upload-statement"
+        static let manualEntry = "/api/demat/manual-entry"
+        static func statements(_ accountId: String) -> String { "/api/demat/statements/\(accountId)" }
+        static func approve(_ statementId: String) -> String { "/api/demat/approve-statement/\(statementId)" }
+        static func reject(_ statementId: String) -> String { "/api/demat/reject-statement/\(statementId)" }
     }
 
     // MARK: - AI Chat
@@ -269,7 +276,7 @@ enum APIEndpoints {
 
     // MARK: - Promo
     enum Promo {
-        static let apply = "/api/promo/apply"
+        static let activate = "/api/promo/activate"
         static let validate = "/api/promo/validate"
     }
 
@@ -283,9 +290,9 @@ enum APIEndpoints {
 
     // MARK: - Support
     enum Support {
-        static let create = "/api/support/tickets"
-        static let list = "/api/support/tickets"
-        static func ticket(_ id: String) -> String { "/api/support/tickets/\(id)" }
+        static let create = "/api/support/ticket"
+        static let list = "/api/support/ticket"
+        static func ticket(_ id: String) -> String { "/api/support/ticket/\(id)" }
         static let faq = "/api/support/faq"
     }
 }
