@@ -77,8 +77,8 @@ openai_client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 # is not blocked while we wait on OpenAI (a long statement can take minutes).
 async_openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 
-RAZORPAY_KEY_ID = os.environ.get("RAZORPAY_KEY_ID", "rzp_test_SeasQ218doVXEa")
-RAZORPAY_KEY_SECRET = os.environ.get("RAZORPAY_KEY_SECRET", "ShpBIk1l8SWIkHhUqtTcBJzE")
+RAZORPAY_KEY_ID = os.environ.get("RAZORPAY_KEY_ID", "")
+RAZORPAY_KEY_SECRET = os.environ.get("RAZORPAY_KEY_SECRET", "")
 razorpay_client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
 
 # CORS origins from environment variable, defaults to allow all for flexibility
@@ -1772,6 +1772,7 @@ async def approve_transaction(transaction_id: str, user: dict = Depends(get_curr
         {"transaction_id": transaction_id},
         {"$set": {"status": "approved", "approved_at": datetime.now(timezone.utc)}}
     )
+    existing["status"] = "approved"
     await apply_transaction_to_balances(user["user_id"], existing)
 
     # Archive the source email with attachments if this is an email-sourced transaction
@@ -2218,6 +2219,8 @@ async def detect_mandates(user: dict = Depends(get_current_user)):
         # Check if amounts are similar (within 10%)
         amounts = [t["amount"] for t in group]
         avg_amount = sum(amounts) / len(amounts)
+        if avg_amount == 0:
+            continue
         if any(abs(a - avg_amount) / avg_amount > 0.1 for a in amounts):
             continue
 
@@ -2357,7 +2360,7 @@ async def _compute_od_monthly_interest(user_id: str, account: dict) -> float:
     for r in repayments:
         events.append({"date": r["date"], "delta": -r["amount"]})
     for e in expenses:
-        events.append({"date": e["date"], "delta": -e["amount"]})
+        events.append({"date": e["date"], "delta": e["amount"]})
     events.sort(key=lambda x: x["date"])
 
     balance = opening
@@ -3369,7 +3372,7 @@ async def approve_statement(statement_id: str, user: dict = Depends(get_current_
     if not stmt:
         raise HTTPException(status_code=404, detail="Statement not found")
 
-    entries = stmt.get("entries", [])
+    entries = stmt.get("parsed_entries", [])
     if not entries:
         raise HTTPException(status_code=400, detail="No entries to approve")
 
@@ -3432,7 +3435,7 @@ async def get_statement_entries(statement_id: str, user: dict = Depends(get_curr
     if not stmt:
         raise HTTPException(status_code=404, detail="Statement not found")
 
-    entries = stmt.get("entries", [])
+    entries = stmt.get("parsed_entries", [])
     return {"entries": entries, "total": len(entries), "statement_id": statement_id}
 
 
@@ -3450,7 +3453,7 @@ async def bulk_categorize_statement(statement_id: str, request: Request, user: d
     if not stmt:
         raise HTTPException(status_code=404, detail="Statement not found")
 
-    entries = stmt.get("entries", [])
+    entries = stmt.get("parsed_entries", [])
     updated_count = 0
 
     for upd in updates:
@@ -3465,7 +3468,7 @@ async def bulk_categorize_statement(statement_id: str, request: Request, user: d
 
     await db.statements.update_one(
         {"statement_id": statement_id, "user_id": user["user_id"]},
-        {"$set": {"entries": entries}},
+        {"$set": {"parsed_entries": entries}},
     )
 
     return {"updated": updated_count, "total": len(updates)}
@@ -6443,7 +6446,7 @@ async def analyze_email_with_ai(email_doc: dict, account_names: list, category_i
     prompt = _build_email_analysis_prompt(email_doc, account_names, category_info)
 
     try:
-        response = openai_client.chat.completions.create(
+        response = await async_openai_client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": "You are a financial transaction analyzer. Extract transaction details from emails. Respond only with valid JSON."},
@@ -6666,7 +6669,7 @@ Respond ONLY with valid JSON (no markdown):
 }}"""
 
     try:
-        response = openai_client.chat.completions.create(
+        response = await async_openai_client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": "You are a financial transaction analyzer specializing in SMS bank alerts and payment notifications. Extract transaction details from SMS. Respond only with valid JSON."},
@@ -7435,6 +7438,67 @@ async def list_tax_summaries(user: dict = Depends(get_current_user)):
             s["created_at"] = s["created_at"].isoformat()
     return {"summaries": summaries}
 
+@app.get("/api/tax-summary/available-emails")
+async def get_available_emails_for_tax(user: dict = Depends(get_current_user)):
+    """Get all connected Gmail and Outlook emails available for tax summary scanning."""
+    gmail_tokens = await db.gmail_tokens.find(
+        {"user_id": user["user_id"], "connected": True}, {"_id": 0, "gmail_email": 1}
+    ).to_list(10)
+    outlook_tokens = await db.outlook_tokens.find(
+        {"user_id": user["user_id"], "connected": True}, {"_id": 0, "outlook_email": 1}
+    ).to_list(10)
+
+    emails = []
+    for t in gmail_tokens:
+        emails.append({"email": t["gmail_email"], "provider": "gmail"})
+    for t in outlook_tokens:
+        emails.append({"email": t["outlook_email"], "provider": "outlook"})
+    return {"emails": emails}
+
+
+@app.get("/api/tax-summary/generate")
+async def generate_tax_summary_from_transactions(
+    date_from: str = None,
+    date_to: str = None,
+    user: dict = Depends(get_current_user),
+):
+    """Generate a tax summary from existing transactions (without email scanning)."""
+    user_id = user["user_id"]
+    if not date_from or not date_to:
+        raise HTTPException(status_code=400, detail="date_from and date_to are required")
+
+    txns = await db.transactions.find(
+        {"user_id": user_id, "status": "approved", "date": {"$gte": date_from, "$lte": date_to}},
+        {"_id": 0}
+    ).to_list(10000)
+
+    total_income = sum(t["amount"] for t in txns if t["transaction_type"] == "income")
+    total_expenses = sum(t["amount"] for t in txns if t["transaction_type"] == "expense")
+
+    # Group by category
+    categories = await db.categories.find({"user_id": user_id}, {"_id": 0}).to_list(200)
+    cat_map = {c["category_id"]: c["name"] for c in categories}
+
+    income_by_cat = {}
+    expense_by_cat = {}
+    for t in txns:
+        cat_name = cat_map.get(t.get("category_id"), "Uncategorized")
+        if t["transaction_type"] == "income":
+            income_by_cat[cat_name] = income_by_cat.get(cat_name, 0) + t["amount"]
+        elif t["transaction_type"] == "expense":
+            expense_by_cat[cat_name] = expense_by_cat.get(cat_name, 0) + t["amount"]
+
+    return {
+        "date_from": date_from,
+        "date_to": date_to,
+        "total_income": round(total_income, 2),
+        "total_expenses": round(total_expenses, 2),
+        "net": round(total_income - total_expenses, 2),
+        "transaction_count": len(txns),
+        "income_by_category": {k: round(v, 2) for k, v in sorted(income_by_cat.items(), key=lambda x: -x[1])},
+        "expense_by_category": {k: round(v, 2) for k, v in sorted(expense_by_cat.items(), key=lambda x: -x[1])},
+    }
+
 
 @app.get("/api/tax-summary/{summary_id}")
 async def get_tax_summary(summary_id: str, user: dict = Depends(get_current_user)):
@@ -7563,72 +7627,6 @@ async def export_tax_summary(summary_id: str, user: dict = Depends(get_current_u
         media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="{filename}.csv"'},
     )
-
-
-@app.get("/api/tax-summary/available-emails")
-async def get_available_emails_for_tax(user: dict = Depends(get_current_user)):
-    """Get all connected Gmail and Outlook emails available for tax summary scanning."""
-    gmail_tokens = await db.gmail_tokens.find(
-        {"user_id": user["user_id"], "connected": True}, {"_id": 0, "gmail_email": 1}
-    ).to_list(10)
-    outlook_tokens = await db.outlook_tokens.find(
-        {"user_id": user["user_id"], "connected": True}, {"_id": 0, "outlook_email": 1}
-    ).to_list(10)
-
-    emails = []
-    for t in gmail_tokens:
-        emails.append({"email": t["gmail_email"], "provider": "gmail"})
-    for t in outlook_tokens:
-        emails.append({"email": t["outlook_email"], "provider": "outlook"})
-    return {"emails": emails}
-
-
-
-@app.get("/api/tax-summary/generate")
-async def generate_tax_summary_from_transactions(
-    date_from: str = None,
-    date_to: str = None,
-    user: dict = Depends(get_current_user),
-):
-    """Generate a tax summary from existing transactions (without email scanning)."""
-    user_id = user["user_id"]
-    if not date_from or not date_to:
-        raise HTTPException(status_code=400, detail="date_from and date_to are required")
-
-    txns = await db.transactions.find(
-        {"user_id": user_id, "status": "approved", "date": {"$gte": date_from, "$lte": date_to}},
-        {"_id": 0}
-    ).to_list(10000)
-
-    total_income = sum(t["amount"] for t in txns if t["transaction_type"] == "income")
-    total_expenses = sum(t["amount"] for t in txns if t["transaction_type"] == "expense")
-
-    # Group by category
-    categories = await db.categories.find({"user_id": user_id}, {"_id": 0}).to_list(200)
-    cat_map = {c["category_id"]: c["name"] for c in categories}
-
-    income_by_cat = {}
-    expense_by_cat = {}
-    for t in txns:
-        cat_name = cat_map.get(t.get("category_id"), "Uncategorized")
-        if t["transaction_type"] == "income":
-            income_by_cat[cat_name] = income_by_cat.get(cat_name, 0) + t["amount"]
-        elif t["transaction_type"] == "expense":
-            expense_by_cat[cat_name] = expense_by_cat.get(cat_name, 0) + t["amount"]
-
-    return {
-        "date_from": date_from,
-        "date_to": date_to,
-        "total_income": round(total_income, 2),
-        "total_expenses": round(total_expenses, 2),
-        "net": round(total_income - total_expenses, 2),
-        "transaction_count": len(txns),
-        "income_by_category": {k: round(v, 2) for k, v in sorted(income_by_cat.items(), key=lambda x: -x[1])},
-        "expense_by_category": {k: round(v, 2) for k, v in sorted(expense_by_cat.items(), key=lambda x: -x[1])},
-    }
-
-
-# --- Endpoint 6.18: GET /api/tax-summary/{summary_id}/download ---
 
 @app.get("/api/tax-summary/{summary_id}/download")
 async def download_tax_summary(summary_id: str, user: dict = Depends(get_current_user)):
@@ -8292,7 +8290,7 @@ async def calculate_od_interest(account_id: str, month: str, user: dict = Depend
     for r in repayments:
         events.append({"date": r["date"], "delta": -r["amount"], "desc": r.get("description", "Repayment")})
     for e in expenses:
-        events.append({"date": e["date"], "delta": -e["amount"], "desc": e.get("description", "Expense")})
+        events.append({"date": e["date"], "delta": e["amount"], "desc": e.get("description", "Expense")})
     events.sort(key=lambda x: x["date"])
 
     # Walk from as_of_date to month_end, applying events to get daily outstanding
@@ -9320,12 +9318,19 @@ async def apple_webhook(request: Request):
     original_transaction_id = latest.get("original_transaction_id", "")
     logger.info(f"Apple webhook: {notification_type} for txn {original_transaction_id}")
 
+    # TODO: Implement Apple App Store signature verification (StoreKit 2 JWS)
+    # to ensure webhook payloads are authentic and haven't been tampered with.
+    # Basic payload validation
+    if not notification_type or not original_transaction_id:
+        raise HTTPException(status_code=400, detail="Missing required fields: notification_type and original_transaction_id")
+
     # Handle cancellation/expiry
     if notification_type in ("CANCEL", "DID_FAIL_TO_RENEW", "REFUND"):
         # Find user by apple transaction — search payment_orders
         order = await db.payment_orders.find_one({
             "payment_provider": "apple",
             "status": "paid",
+            "apple_transaction_id": original_transaction_id,
         })
         if order:
             await db.users.update_one(
@@ -10829,6 +10834,46 @@ async def list_invoices(
     total = await db.invoices.count_documents(query)
     return {"items": invoices, "total": total}
 
+@app.get("/api/invoices/next-number")
+async def get_next_invoice_number(user: dict = Depends(get_current_user)):
+    """Preview the next invoice number without consuming it."""
+    settings = await db.user_settings.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    prefix = (settings or {}).get("invoice_prefix", "INV")
+    next_num = (settings or {}).get("invoice_next_number", 1)
+    return {"next_number": f"{prefix}-{next_num:04d}"}
+
+@app.get("/api/invoices/{invoice_id}/pdf")
+
+@app.get("/api/invoices/stats")
+async def invoice_stats(user: dict = Depends(get_current_user)):
+    """Get invoice statistics for the user."""
+    user_id = user["user_id"]
+    total = await db.invoices.count_documents({"user_id": user_id})
+    paid = await db.invoices.count_documents({"user_id": user_id, "payment_status": "paid"})
+    unpaid = await db.invoices.count_documents({"user_id": user_id, "payment_status": "unpaid"})
+    partial = await db.invoices.count_documents({"user_id": user_id, "payment_status": "partial"})
+
+    invoices = await db.invoices.find(
+        {"user_id": user_id}, {"_id": 0, "grand_total": 1, "amount_paid": 1, "payment_status": 1}
+    ).to_list(10000)
+
+    total_invoiced = sum(i.get("grand_total", 0) for i in invoices)
+    total_received = sum(i.get("amount_paid", 0) for i in invoices)
+    total_outstanding = total_invoiced - total_received
+
+    return {
+        "total": total,
+        "paid": paid,
+        "unpaid": unpaid,
+        "partial": partial,
+        "total_invoiced": round(total_invoiced, 2),
+        "total_received": round(total_received, 2),
+        "total_outstanding": round(total_outstanding, 2),
+    }
+
+
+
+
 
 @app.get("/api/invoices/{invoice_id}")
 async def get_invoice(invoice_id: str, user: dict = Depends(get_current_user)):
@@ -10979,45 +11024,6 @@ async def record_payment(invoice_id: str, request: Request, user: dict = Depends
     return updated
 
 
-
-@app.get("/api/invoices/next-number")
-async def get_next_invoice_number(user: dict = Depends(get_current_user)):
-    """Preview the next invoice number without consuming it."""
-    settings = await db.user_settings.find_one({"user_id": user["user_id"]}, {"_id": 0})
-    prefix = (settings or {}).get("invoice_prefix", "INV")
-    next_num = (settings or {}).get("invoice_next_number", 1)
-    return {"next_number": f"{prefix}-{next_num:04d}"}
-
-
-@app.get("/api/invoices/stats")
-async def invoice_stats(user: dict = Depends(get_current_user)):
-    """Get invoice statistics for the user."""
-    user_id = user["user_id"]
-    total = await db.invoices.count_documents({"user_id": user_id})
-    paid = await db.invoices.count_documents({"user_id": user_id, "payment_status": "paid"})
-    unpaid = await db.invoices.count_documents({"user_id": user_id, "payment_status": "unpaid"})
-    partial = await db.invoices.count_documents({"user_id": user_id, "payment_status": "partial"})
-
-    invoices = await db.invoices.find(
-        {"user_id": user_id}, {"_id": 0, "grand_total": 1, "amount_paid": 1, "payment_status": 1}
-    ).to_list(10000)
-
-    total_invoiced = sum(i.get("grand_total", 0) for i in invoices)
-    total_received = sum(i.get("amount_paid", 0) for i in invoices)
-    total_outstanding = total_invoiced - total_received
-
-    return {
-        "total": total,
-        "paid": paid,
-        "unpaid": unpaid,
-        "partial": partial,
-        "total_invoiced": round(total_invoiced, 2),
-        "total_received": round(total_received, 2),
-        "total_outstanding": round(total_outstanding, 2),
-    }
-
-
-@app.get("/api/invoices/{invoice_id}/pdf")
 async def get_invoice_pdf(invoice_id: str, user: dict = Depends(get_current_user)):
     """Generate a PDF for the invoice (returns HTML for now, clients render)."""
     invoice = await db.invoices.find_one(
@@ -11499,6 +11505,46 @@ async def list_bills(
     total = await db.bills.count_documents(query)
     return {"items": bills, "total": total}
 
+@app.get("/api/bills/next-number")
+async def get_next_bill_number(user: dict = Depends(get_current_user)):
+    """Preview the next bill number without consuming it."""
+    settings = await db.user_settings.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    prefix = (settings or {}).get("bill_prefix", "BILL")
+    next_num = (settings or {}).get("bill_next_number", 1)
+    return {"next_number": f"{prefix}-{next_num:04d}"}
+
+@app.get("/api/bills/{bill_id}/pdf")
+
+@app.get("/api/bills/stats")
+async def bill_stats(user: dict = Depends(get_current_user)):
+    """Get bill statistics for the user."""
+    user_id = user["user_id"]
+    total = await db.bills.count_documents({"user_id": user_id})
+    paid = await db.bills.count_documents({"user_id": user_id, "payment_status": "paid"})
+    unpaid = await db.bills.count_documents({"user_id": user_id, "payment_status": "unpaid"})
+    partial = await db.bills.count_documents({"user_id": user_id, "payment_status": "partial"})
+
+    bills = await db.bills.find(
+        {"user_id": user_id}, {"_id": 0, "grand_total": 1, "amount_paid": 1, "payment_status": 1}
+    ).to_list(10000)
+
+    total_billed = sum(b.get("grand_total", 0) for b in bills)
+    total_paid = sum(b.get("amount_paid", 0) for b in bills)
+    total_outstanding = total_billed - total_paid
+
+    return {
+        "total": total,
+        "paid": paid,
+        "unpaid": unpaid,
+        "partial": partial,
+        "total_billed": round(total_billed, 2),
+        "total_paid": round(total_paid, 2),
+        "total_outstanding": round(total_outstanding, 2),
+    }
+
+
+
+
 
 @app.get("/api/bills/{bill_id}")
 async def get_bill(bill_id: str, user: dict = Depends(get_current_user)):
@@ -11649,45 +11695,6 @@ async def record_bill_payment(bill_id: str, request: Request, user: dict = Depen
     return updated
 
 
-
-@app.get("/api/bills/next-number")
-async def get_next_bill_number(user: dict = Depends(get_current_user)):
-    """Preview the next bill number without consuming it."""
-    settings = await db.user_settings.find_one({"user_id": user["user_id"]}, {"_id": 0})
-    prefix = (settings or {}).get("bill_prefix", "BILL")
-    next_num = (settings or {}).get("bill_next_number", 1)
-    return {"next_number": f"{prefix}-{next_num:04d}"}
-
-
-@app.get("/api/bills/stats")
-async def bill_stats(user: dict = Depends(get_current_user)):
-    """Get bill statistics for the user."""
-    user_id = user["user_id"]
-    total = await db.bills.count_documents({"user_id": user_id})
-    paid = await db.bills.count_documents({"user_id": user_id, "payment_status": "paid"})
-    unpaid = await db.bills.count_documents({"user_id": user_id, "payment_status": "unpaid"})
-    partial = await db.bills.count_documents({"user_id": user_id, "payment_status": "partial"})
-
-    bills = await db.bills.find(
-        {"user_id": user_id}, {"_id": 0, "grand_total": 1, "amount_paid": 1, "payment_status": 1}
-    ).to_list(10000)
-
-    total_billed = sum(b.get("grand_total", 0) for b in bills)
-    total_paid = sum(b.get("amount_paid", 0) for b in bills)
-    total_outstanding = total_billed - total_paid
-
-    return {
-        "total": total,
-        "paid": paid,
-        "unpaid": unpaid,
-        "partial": partial,
-        "total_billed": round(total_billed, 2),
-        "total_paid": round(total_paid, 2),
-        "total_outstanding": round(total_outstanding, 2),
-    }
-
-
-@app.get("/api/bills/{bill_id}/pdf")
 async def get_bill_pdf(bill_id: str, user: dict = Depends(get_current_user)):
     """Return bill data with settings for client-side PDF generation."""
     bill = await db.bills.find_one(
