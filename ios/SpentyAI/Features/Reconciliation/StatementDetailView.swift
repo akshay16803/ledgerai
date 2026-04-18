@@ -251,33 +251,34 @@ struct StatementDetailView: View {
                     }
 
                     // Subcategory picker
-                    if let parentId = selectedCategoryId,
-                       let parent = categories.first(where: { $0.categoryId == parentId }),
-                       let subcategories = parent.subcategories, !subcategories.isEmpty {
-                        VStack(alignment: .leading, spacing: SpentySpacing.sm) {
-                            Text("Subcategory")
-                                .font(SpentyFonts.caption)
-                                .foregroundStyle(SpentyColors.textSecondary)
+                    if let parentId = selectedCategoryId {
+                        let subcategories = categories.filter { $0.parentId == parentId }
+                        if !subcategories.isEmpty {
+                            VStack(alignment: .leading, spacing: SpentySpacing.sm) {
+                                Text("Subcategory")
+                                    .font(SpentyFonts.caption)
+                                    .foregroundStyle(SpentyColors.textSecondary)
 
-                            Picker("Subcategory", selection: $selectedSubcategoryId) {
-                                Text("None")
-                                    .tag(String?.none)
+                                Picker("Subcategory", selection: $selectedSubcategoryId) {
+                                    Text("None")
+                                        .tag(String?.none)
 
-                                ForEach(subcategories) { sub in
-                                    Text(sub.name)
-                                        .tag(Optional(sub.categoryId))
+                                    ForEach(subcategories) { sub in
+                                        Text(sub.name)
+                                            .tag(Optional(sub.categoryId))
+                                    }
                                 }
+                                .pickerStyle(.menu)
+                                .tint(SpentyColors.textPrimary)
+                                .padding(SpentySpacing.md)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(SpentyColors.surface)
+                                .clipShape(RoundedRectangle(cornerRadius: SpentyRadius.md))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: SpentyRadius.md)
+                                        .stroke(SpentyColors.borderSubtle, lineWidth: 1)
+                                )
                             }
-                            .pickerStyle(.menu)
-                            .tint(SpentyColors.textPrimary)
-                            .padding(SpentySpacing.md)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(SpentyColors.surface)
-                            .clipShape(RoundedRectangle(cornerRadius: SpentyRadius.md))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: SpentyRadius.md)
-                                    .stroke(SpentyColors.borderSubtle, lineWidth: 1)
-                            )
                         }
                     }
 

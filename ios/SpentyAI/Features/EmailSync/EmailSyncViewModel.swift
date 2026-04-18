@@ -83,10 +83,9 @@ final class EmailSyncViewModel {
                 return
             }
             let callbackCode = try await performOAuth(url: url, callbackScheme: "spentyai")
-            let _: AuthURLResponse = try await APIClient.shared.request(
+            let _: AuthURLResponse = try await APIClient.shared.get(
                 APIEndpoints.Gmail.callback,
-                method: .get,
-                queryItems: [URLQueryItem(name: "code", value: callbackCode)]
+                query: ["code": callbackCode]
             )
             await loadGmailStatus()
             await loadPending()
@@ -103,10 +102,9 @@ final class EmailSyncViewModel {
                 return
             }
             let callbackCode = try await performOAuth(url: url, callbackScheme: "spentyai")
-            let _: AuthURLResponse = try await APIClient.shared.request(
+            let _: AuthURLResponse = try await APIClient.shared.get(
                 APIEndpoints.Outlook.callback,
-                method: .get,
-                queryItems: [URLQueryItem(name: "code", value: callbackCode)]
+                query: ["code": callbackCode]
             )
             await loadOutlookStatus()
             await loadPending()

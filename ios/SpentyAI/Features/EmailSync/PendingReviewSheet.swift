@@ -11,6 +11,7 @@ struct PendingReviewSheet: View {
     @State private var selectedType: TransactionType
     @State private var selectedCategory: String
     @State private var selectedAccount: String
+    @State private var accounts: [Account] = []
 
     enum ReviewAction {
         case approved(amount: Double, type: String, category: String, account: String)
@@ -151,7 +152,7 @@ struct PendingReviewSheet: View {
 
                             FormField(label: "Account") {
                                 Menu {
-                                    ForEach(appState.accounts, id: \.id) { account in
+                                    ForEach(accounts, id: \.id) { account in
                                         Button(account.name) {
                                             selectedAccount = account.id
                                         }
@@ -207,7 +208,7 @@ struct PendingReviewSheet: View {
             .background(SpentyColors.bgPrimary)
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    SheetHeader(title: "Review Transaction")
+                    SheetHeader("Review Transaction") { dismiss() }
                 }
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
@@ -217,13 +218,19 @@ struct PendingReviewSheet: View {
         }
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
+        .task {
+            if accounts.isEmpty {
+                let repo = AccountRepository()
+                accounts = (try? await repo.getAccounts()) ?? []
+            }
+        }
     }
 
     private var accountDisplayName: String {
         if selectedAccount.isEmpty {
             return "Select Account"
         }
-        return appState.accounts.first(where: { $0.id == selectedAccount })?.name ?? selectedAccount
+        return accounts.first(where: { $0.id == selectedAccount })?.name ?? selectedAccount
     }
 }
 

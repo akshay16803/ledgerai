@@ -127,7 +127,9 @@ struct FeatureRequestsView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: SpentySpacing.xl) {
-                    SheetHeader(title: "Submit a Request")
+                    SheetHeader("Submit a Request") {
+                        viewModel.showSubmitForm = false
+                    }
 
                     // Title
                     FormField(label: "Title", isRequired: true) {

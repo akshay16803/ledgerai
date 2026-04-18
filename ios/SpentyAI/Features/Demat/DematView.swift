@@ -18,8 +18,10 @@ struct DematView: View {
         GridItem(.flexible(), spacing: SpentySpacing.md)
     ]
 
+    @State private var allAccounts: [Account] = []
+
     private var investmentAccounts: [Account] {
-        (appState.accounts ?? []).filter { account in
+        allAccounts.filter { account in
             let type = account.accountType.lowercased()
             let subType = (account.subType ?? "").lowercased()
             return type == "investment" || type == "demat" || subType == "demat" || subType == "trading"
@@ -69,6 +71,10 @@ struct DematView: View {
             .task {
                 if viewModel.statements.isEmpty {
                     await viewModel.loadAll()
+                }
+                if allAccounts.isEmpty {
+                    let repo = AccountRepository()
+                    allAccounts = (try? await repo.getAccounts()) ?? []
                 }
             }
             .overlay {
@@ -150,7 +156,7 @@ struct DematView: View {
     private var statementsSection: some View {
         VStack(alignment: .leading, spacing: SpentySpacing.sm) {
             SectionHeader(
-                title: "Statements",
+                "Statements",
                 actionTitle: "Upload",
                 action: { viewModel.showUploadSheet = true }
             )
@@ -245,7 +251,9 @@ struct DematView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: SpentySpacing.xl) {
-                    SheetHeader(title: "Upload Statement")
+                    SheetHeader("Upload Statement") {
+                        viewModel.showUploadSheet = false
+                    }
 
                     // Account Picker
                     VStack(alignment: .leading, spacing: SpentySpacing.sm) {
