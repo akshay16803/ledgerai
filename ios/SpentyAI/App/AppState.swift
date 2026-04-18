@@ -127,7 +127,7 @@ final class AppState {
 
 // MARK: - Response Helpers
 
-struct EmptyResponse: Codable {}
+// EmptyResponse is defined in Core/Repositories/EmptyResponse.swift
 
 struct CountResponse: Codable {
     let count: Int
