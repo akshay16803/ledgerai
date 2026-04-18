@@ -1,57 +1,73 @@
 import Foundation
 
-enum StatementStatus: String, Codable, Hashable, CaseIterable {
-    case parsing
-    case ready
-    case reconciled
-    case failed
-    case passwordNeeded = "password_needed"
+struct Statement: Codable, Identifiable {
+    let id: String
+    var filename: String?
+    var accountId: String?
+    var accountName: String?
+    var statementType: String?
+    var status: String?
+    var entryCount: Int?
+    var periodFrom: Date?
+    var periodTo: Date?
+    var uploadedAt: Date?
+    var parsedEntries: [ParsedEntry]?
+    var reconciliation: ReconciliationResult?
+    var auditStatus: String?
+    var processingProgress: Double?
+    var processingStageLabel: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id = "_id"
+        case filename
+        case accountId
+        case accountName
+        case statementType
+        case status
+        case entryCount
+        case periodFrom
+        case periodTo
+        case uploadedAt
+        case parsedEntries
+        case reconciliation
+        case auditStatus
+        case processingProgress
+        case processingStageLabel
+    }
 }
 
-struct ParsedEntry: Codable, Hashable {
-    var date: String?
+struct ParsedEntry: Codable, Identifiable {
+    var id: String { "\(date?.description ?? "")-\(amount ?? 0)-\(description ?? "")" }
+    var date: Date?
     var description: String?
-    var debit: Double?
-    var credit: Double?
+    var amount: Double?
+    var type: String?
+    var balance: Double?
     var categoryId: String?
-    var subcategoryId: String?
-    var transactionType: String?
+    var categoryName: String?
+    var matched: Bool?
+    var matchedTransactionId: String?
 
     enum CodingKeys: String, CodingKey {
         case date
         case description
-        case debit
-        case credit
-        case categoryId = "category_id"
-        case subcategoryId = "subcategory_id"
-        case transactionType = "transaction_type"
+        case amount
+        case type
+        case balance
+        case categoryId
+        case categoryName
+        case matched
+        case matchedTransactionId
     }
 }
 
-struct Statement: Codable, Identifiable, Hashable {
-    var id: String { statementId }
-
-    let statementId: String
-    let userId: String?
-    var accountId: String?
-    var filename: String?
-    var statementType: String?
-    var periodFrom: String?
-    var periodTo: String?
-    var status: StatementStatus?
-    var parsedEntries: [ParsedEntry]?
-    var createdAt: String?
-
-    enum CodingKeys: String, CodingKey {
-        case statementId = "statement_id"
-        case userId = "user_id"
-        case accountId = "account_id"
-        case filename
-        case statementType = "statement_type"
-        case periodFrom = "period_from"
-        case periodTo = "period_to"
-        case status
-        case parsedEntries = "parsed_entries"
-        case createdAt = "created_at"
-    }
+struct ReconciliationResult: Codable {
+    var totalEntries: Int?
+    var matched: Int?
+    var unmatched: Int?
+    var missing: Int?
+    var openingBalance: Double?
+    var closingBalance: Double?
+    var computedClosing: Double?
+    var difference: Double?
 }

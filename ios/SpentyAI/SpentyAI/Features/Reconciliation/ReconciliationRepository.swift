@@ -1,136 +1,135 @@
 import Foundation
 
-// MARK: - Inline Response Types
-
-struct ReconciliationResult: Codable, Hashable {
-    var matchedCount: Int?
-    var missingCount: Int?
-    var conflictCount: Int?
-    var transactions: [ReconciliationTransaction]?
-
-    enum CodingKeys: String, CodingKey {
-        case matchedCount = "matched_count"
-        case missingCount = "missing_count"
-        case conflictCount = "conflict_count"
-        case transactions
-    }
+struct StatementListResponse: Codable {
+    let statements: [Statement]
 }
 
-struct ReconciliationTransaction: Codable, Hashable {
-    var date: String?
-    var description: String?
-    var amount: Double?
-    var status: String?
-    var categoryId: String?
-    var transactionType: String?
-
-    enum CodingKeys: String, CodingKey {
-        case date
-        case description
-        case amount
-        case status
-        case categoryId = "category_id"
-        case transactionType = "transaction_type"
-    }
+struct StatementUploadResponse: Codable {
+    let statement: Statement?
+    let message: String?
 }
 
-struct EntryUpdate: Codable {
-    var categoryId: String?
-    var subcategoryId: String?
-    var transactionType: String?
-
-    enum CodingKeys: String, CodingKey {
-        case categoryId = "category_id"
-        case subcategoryId = "subcategory_id"
-        case transactionType = "transaction_type"
-    }
+struct ReconcileResponse: Codable {
+    let statement: Statement?
+    let reconciliation: ReconciliationResult?
+    let message: String?
 }
 
-struct BulkCategoryEntry: Codable {
-    var entryIndex: Int
-    var categoryId: String
-    var subcategoryId: String?
-
-    enum CodingKeys: String, CodingKey {
-        case entryIndex = "entry_index"
-        case categoryId = "category_id"
-        case subcategoryId = "subcategory_id"
-    }
+struct UnlockBody: Codable {
+    let password: String
 }
 
-struct BulkCategorizeRequest: Codable {
-    var entries: [BulkCategoryEntry]
+struct EntryUpdateBody: Codable {
+    let categoryId: String?
+    let categoryName: String?
 }
 
-struct PasswordRequest: Codable {
-    var password: String
+struct BulkCategorizeBody: Codable {
+    let categoryId: String
 }
 
-// MARK: - Repository
+final class ReconciliationRepository: Sendable {
 
-struct ReconciliationRepository {
+    static let shared = ReconciliationRepository()
+    private let api = APIClient.shared
 
-    func getStatements() async throws -> [Statement] {
-        try await APIClient.shared.get(APIEndpoints.Reconciliation.statements)
+    private init() {}
+
+    // MARK: - Statements List
+
+    func fetchStatements() async throws -> [Statement] {
+        let response: StatementListResponse = try await api.get(APIEndpoints.statementsList)
+        return response.statements
     }
 
-    func getStatement(_ id: String) async throws -> Statement {
-        try await APIClient.shared.get(APIEndpoints.Reconciliation.statement(id))
+    func fetchStatement(id: String) async throws -> Statement {
+        return try await api.get(APIEndpoints.statement(id))
     }
+
+    func deleteStatement(id: String) async throws -> MessageResponse {
+        return try await api.delete(APIEndpoints.statement(id))
+    }
+
+    // MARK: - Upload
 
     func uploadStatement(
         fileData: Data,
-        fileName: String,
+        filename: String,
         mimeType: String,
         accountId: String,
-        subType: String? = nil,
-        periodFrom: String? = nil,
-        periodTo: String? = nil
+        periodFrom: String,
+        periodTo: String
     ) async throws -> Statement {
-        var fields: [String: String] = ["account_id": accountId]
-        if let subType { fields["sub_type"] = subType }
-        if let periodFrom { fields["period_from"] = periodFrom }
-        if let periodTo { fields["period_to"] = periodTo }
-
-        return try await APIClient.shared.upload(
-            APIEndpoints.Reconciliation.upload,
-            fileData: fileData,
-            fileName: fileName,
+        let fields: [String: String] = [
+            "account_id": accountId,
+            "period_from": periodFrom,
+            "period_to": periodTo
+        ]
+        return try await api.upload(
+            APIEndpoints.statementsUpload,
+            data: fileData,
+            filename: filename,
             mimeType: mimeType,
-            extraFields: fields
+            fields: fields
         )
     }
 
-    func deleteStatement(_ id: String) async throws {
-        try await APIClient.shared.delete(APIEndpoints.Reconciliation.delete(id))
+    // MARK: - Entries
+
+    func fetchEntries(statementId: String) async throws -> [ParsedEntry] {
+        return try await api.get(APIEndpoints.statementEntries(statementId))
     }
 
-    func reconcile(_ id: String) async throws -> ReconciliationResult {
-        try await APIClient.shared.post(APIEndpoints.Reconciliation.reconcile(id))
+    func updateEntry(statementId: String, index: Int, categoryId: String?, categoryName: String?) async throws -> Statement {
+        let body = EntryUpdateBody(categoryId: categoryId, categoryName: categoryName)
+        return try await api.patch(APIEndpoints.statementEntryUpdate(statementId, index), body: body)
     }
 
-    func unlockStatement(_ id: String, password: String) async throws -> Statement {
-        try await APIClient.shared.post(
-            APIEndpoints.Reconciliation.unlock(id),
-            body: PasswordRequest(password: password)
-        )
+    func bulkCategorize(statementId: String, categoryId: String) async throws -> Statement {
+        let body = BulkCategorizeBody(categoryId: categoryId)
+        return try await api.post(APIEndpoints.statementBulkCategorize(statementId), body: body)
     }
 
-    func updateEntry(
-        _ statementId: String,
-        entryIndex: Int,
-        update: EntryUpdate
-    ) async throws -> Statement {
-        try await APIClient.shared.put(
-            APIEndpoints.Reconciliation.updateEntry(statementId, entryIndex: entryIndex),
-            body: update
-        )
+    // MARK: - Reconciliation Actions
+
+    func reconcile(statementId: String) async throws -> Statement {
+        return try await api.post(APIEndpoints.statementReconcile(statementId))
     }
 
-    func bulkCategorize(_ id: String, entries: [BulkCategoryEntry]) async throws -> Statement {
-        try await APIClient.shared.post(
-            APIEndpoints.Reconciliation.bulkCategorize(id),
-            body: BulkCategorizeRequest(entries: entries)
-        )
+    func addMissingToLedger(statementId: String) async throws -> Statement {
+        return try await api.post(APIEndpoints.statementAddMissing(statementId))
+    }
+
+    func reaudit(statementId: String) async throws -> Statement {
+        return try await api.post(APIEndpoints.statementReaudit(statementId))
+    }
+
+    func unlock(statementId: String, password: String) async throws -> Statement {
+        let body = UnlockBody(password: password)
+        return try await api.post(APIEndpoints.statementUnlock(statementId), body: body)
+    }
+
+    // MARK: - Approve / Reject
+
+    func approveStatement(id: String) async throws -> Statement {
+        return try await api.post(APIEndpoints.statementApprove(id))
+    }
+
+    func rejectStatement(id: String) async throws -> Statement {
+        return try await api.post(APIEndpoints.statementReject(id))
+    }
+
+    // MARK: - Supporting Data
+
+    func fetchAccounts() async throws -> [Account] {
+        return try await api.get(APIEndpoints.accounts)
+    }
+
+    func fetchAccountSubTypes() async throws -> [AccountSubType] {
+        return try await api.get(APIEndpoints.accountSubTypes)
+    }
+
+    func fetchCategories() async throws -> [Category] {
+        return try await api.get(APIEndpoints.categories)
     }
 }

@@ -1,391 +1,344 @@
 import SwiftUI
 
 struct DashboardView: View {
-    @Environment(AppState.self) private var appState
+
     @State private var viewModel = DashboardViewModel()
 
-    private let statsColumns = [
-        GridItem(.flexible(), spacing: SpentySpacing.md),
-        GridItem(.flexible(), spacing: SpentySpacing.md)
-    ]
-
     var body: some View {
-        ZStack(alignment: .bottomTrailing) {
-            ScrollView {
-                VStack(spacing: SpentySpacing.xl) {
-                    statsGridSection
-                    quickActionsSection
-                    accountsSection
-                    recentTransactionsSection
+        NavigationStack {
+            ZStack(alignment: .bottomTrailing) {
+                Group {
+                    if viewModel.isLoading && !viewModel.hasData {
+                        LoadingView(message: "Loading your dashboard...")
+                    } else {
+                        mainContent
+                    }
                 }
-                .padding(.horizontal, SpentySpacing.lg)
-                .padding(.vertical, SpentySpacing.md)
-                .padding(.bottom, 80) // Space for floating button
-            }
-            .refreshable {
-                await viewModel.refresh()
-            }
-            .shimmer(isActive: viewModel.isLoading && viewModel.summary == nil)
 
-            floatingAIChatButton
-        }
-        .background(SpentyColors.bgPrimary)
-        .navigationTitle("Dashboard")
-        .task {
-            if viewModel.summary == nil {
-                await viewModel.loadDashboard()
+                floatingButtons
+            }
+            .background(Color.spentyBgPrimary)
+            .navigationTitle("Dashboard")
+            .navigationBarTitleDisplayMode(.large)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        viewModel.showAIChat = true
+                    } label: {
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 18, weight: .medium))
+                            .foregroundColor(.spentyPrimary)
+                    }
+                }
+            }
+            .task {
+                await viewModel.loadSummary()
+            }
+            .sheet(isPresented: $viewModel.showNewTransaction) {
+                NavigationStack {
+                    TransactionFormView(viewModel: TransactionsViewModel())
+                }
+            }
+            .sheet(isPresented: $viewModel.showAIChat) {
+                AIChatView()
             }
         }
-        .sheet(isPresented: $viewModel.showNewTransaction) {
-            EditTransactionSheet(transaction: nil, onSaved: {
-                Task { await viewModel.refresh() }
-            })
+    }
+
+    // MARK: - Main Scrollable Content
+
+    private var mainContent: some View {
+        ScrollView {
+            VStack(spacing: 20) {
+
+                // Error banner
+                if viewModel.showError {
+                    ErrorBanner(message: viewModel.errorMessage) {
+                        viewModel.showError = false
+                    }
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                }
+
+                // Stat cards grid
+                statsGrid
+                    .padding(.horizontal, 16)
+
+                // Accounts section
+                if !viewModel.accounts.isEmpty {
+                    accountsSection
+                        .padding(.horizontal, 16)
+                }
+
+                // Recent transactions section
+                if !viewModel.recentTransactions.isEmpty {
+                    recentTransactionsSection
+                        .padding(.horizontal, 16)
+                }
+
+                // Bottom spacer for floating button clearance
+                Spacer()
+                    .frame(height: 80)
+            }
+            .padding(.top, 8)
         }
-        .sheet(isPresented: $viewModel.showSalesInvoice) {
-            SalesInvoiceSheet(editingInvoice: nil, settings: appState.user?.settings, onSaved: { _ in
-                Task { await viewModel.refresh() }
-            })
-        }
-        .sheet(isPresented: $viewModel.showPurchaseBill) {
-            PurchaseBillSheet(settings: appState.user?.settings, onSaved: {
-                await viewModel.refresh()
-            })
-        }
-        .sheet(isPresented: $viewModel.showAIChat) {
-            AIChatSheet()
+        .refreshable {
+            await viewModel.refresh()
         }
     }
 
     // MARK: - Stats Grid
 
-    @ViewBuilder
-    private var statsGridSection: some View {
-        let summary = viewModel.summary
-        LazyVGrid(columns: statsColumns, spacing: SpentySpacing.md) {
+    private var statsGrid: some View {
+        LazyVGrid(
+            columns: [
+                GridItem(.flexible(), spacing: 12),
+                GridItem(.flexible(), spacing: 12)
+            ],
+            spacing: 12
+        ) {
             StatCard(
-                title: "Net Worth",
-                value: formatCurrency(summary?.netWorth),
-                subtitle: "Assets - Liabilities",
-                icon: "wallet.pass",
-                iconColor: SpentyColors.info
+                label: "Net Worth",
+                value: formatCurrency(viewModel.netWorth),
+                icon: "banknote.fill",
+                color: viewModel.netWorth >= 0 ? .spentySuccess : .spentyError
             )
 
             StatCard(
-                title: "Income This Month",
-                value: formatCurrency(summary?.incomeThisMonth),
-                subtitle: "Revenue",
-                icon: "arrow.down.circle",
-                iconColor: SpentyColors.success
+                label: "Income This Month",
+                value: formatCurrency(viewModel.incomeThisMonth),
+                icon: "arrow.down.circle.fill",
+                color: .spentySuccess
             )
 
             StatCard(
-                title: "Expenses This Month",
-                value: formatCurrency(summary?.expenseThisMonth),
-                subtitle: "Spending",
-                icon: "arrow.up.circle",
-                iconColor: SpentyColors.danger
+                label: "Expenses This Month",
+                value: formatCurrency(viewModel.expenseThisMonth),
+                icon: "arrow.up.circle.fill",
+                color: .spentyAccent1
             )
 
             StatCard(
-                title: "Pending Review",
-                value: "\(summary?.pendingReview ?? 0)",
-                subtitle: "Needs attention",
-                icon: "clock",
-                iconColor: SpentyColors.warning
+                label: "Pending Review",
+                value: "\(viewModel.pendingReview)",
+                icon: "clock.fill",
+                color: .spentyWarning
             )
         }
-    }
-
-    // MARK: - Quick Actions
-
-    @ViewBuilder
-    private var quickActionsSection: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: SpentySpacing.md) {
-                quickActionButton(
-                    title: "New Transaction",
-                    icon: "plus.circle.fill",
-                    color: SpentyColors.brandPrimary
-                ) {
-                    viewModel.showNewTransaction = true
-                }
-
-                if appState.hasInvoices {
-                    quickActionButton(
-                        title: "Sales Invoice",
-                        icon: "doc.text.fill",
-                        color: SpentyColors.success
-                    ) {
-                        viewModel.showSalesInvoice = true
-                    }
-                }
-
-                if appState.hasBills {
-                    quickActionButton(
-                        title: "Purchase Bill",
-                        icon: "doc.plaintext.fill",
-                        color: SpentyColors.info
-                    ) {
-                        viewModel.showPurchaseBill = true
-                    }
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func quickActionButton(
-        title: String,
-        icon: String,
-        color: Color,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            HStack(spacing: SpentySpacing.sm) {
-                Image(systemName: icon)
-                    .font(.system(size: 14, weight: .medium))
-                Text(title)
-                    .font(SpentyFonts.caption)
-            }
-            .foregroundStyle(color)
-            .padding(.horizontal, SpentySpacing.lg)
-            .padding(.vertical, SpentySpacing.md)
-            .background(color.opacity(0.1))
-            .clipShape(RoundedRectangle(cornerRadius: SpentyRadius.md))
-            .overlay(
-                RoundedRectangle(cornerRadius: SpentyRadius.md)
-                    .stroke(color.opacity(0.2), lineWidth: 1)
-            )
-        }
-        .buttonStyle(.plain)
     }
 
     // MARK: - Accounts Section
 
-    @ViewBuilder
     private var accountsSection: some View {
-        VStack(alignment: .leading, spacing: SpentySpacing.md) {
-            SectionHeader("Accounts", actionTitle: "View All") {
-                // Navigate to accounts list
-            }
+        VStack(alignment: .leading, spacing: 12) {
+            sectionHeader(title: "Accounts", icon: "building.columns.fill")
 
-            let accounts = viewModel.summary?.accounts ?? []
+            VStack(spacing: 0) {
+                ForEach(viewModel.accounts) { account in
+                    NavigationLink(value: account.id) {
+                        accountRow(account)
+                    }
+                    .buttonStyle(.plain)
 
-            if accounts.isEmpty {
-                SpentyCard {
-                    EmptyState(
-                        icon: "building.columns",
-                        title: "No Accounts",
-                        message: "Add your first account to track balances."
-                    )
-                    .frame(height: 140)
-                }
-            } else {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: SpentySpacing.md) {
-                        ForEach(accounts) { account in
-                            accountCard(account)
-                        }
+                    if account.id != viewModel.accounts.last?.id {
+                        Divider()
+                            .padding(.leading, 48)
                     }
                 }
             }
+            .cardStyle()
         }
     }
 
-    @ViewBuilder
-    private func accountCard(_ account: Account) -> some View {
-        SpentyCard {
-            VStack(alignment: .leading, spacing: SpentySpacing.sm) {
-                Text(account.name)
-                    .font(SpentyFonts.subheading)
-                    .foregroundStyle(SpentyColors.textPrimary)
-                    .lineLimit(1)
-
-                StatusBadge(accountTypeBadge(account.accountType))
-
-                Spacer()
-
-                MoneyText(
-                    account.currentBalance ?? 0,
-                    currency: account.currency ?? "INR",
-                    showSign: true,
-                    size: SpentyFonts.subheading
-                )
-            }
-            .frame(width: 160, height: 100)
-        }
-    }
-
-    // MARK: - Recent Transactions Section
-
-    @ViewBuilder
-    private var recentTransactionsSection: some View {
-        VStack(alignment: .leading, spacing: SpentySpacing.md) {
-            SectionHeader("Recent Transactions", actionTitle: "View All") {
-                // Navigate to transactions list
-            }
-
-            let transactions = Array((viewModel.summary?.recentTransactions ?? []).prefix(5))
-
-            if transactions.isEmpty {
-                SpentyCard {
-                    EmptyState(
-                        icon: "arrow.left.arrow.right",
-                        title: "No Transactions",
-                        message: "Your recent transactions will appear here."
-                    )
-                    .frame(height: 140)
-                }
-            } else {
-                VStack(spacing: 0) {
-                    ForEach(Array(transactions.enumerated()), id: \.element.id) { index, transaction in
-                        transactionRow(transaction)
-
-                        if index < transactions.count - 1 {
-                            Divider()
-                                .foregroundStyle(SpentyColors.borderSubtle)
-                        }
-                    }
-                }
-                .cardStyle()
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func transactionRow(_ transaction: Transaction) -> some View {
-        HStack(spacing: SpentySpacing.md) {
-            // Type icon
+    private func accountRow(_ account: Account) -> some View {
+        HStack(spacing: 12) {
             Circle()
-                .fill(transactionColor(transaction.transactionType).opacity(0.15))
+                .fill(Color.spentyPrimary.opacity(0.1))
                 .frame(width: 36, height: 36)
                 .overlay(
-                    Image(systemName: transactionIcon(transaction.transactionType))
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(transactionColor(transaction.transactionType))
+                    Image(systemName: iconForAccountType(account.accountType))
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.spentyPrimary)
                 )
 
-            VStack(alignment: .leading, spacing: SpentySpacing.xs) {
-                HStack(spacing: SpentySpacing.sm) {
-                    Text(transaction.description ?? transaction.transactionType.rawValue.capitalized)
-                        .font(SpentyFonts.body)
-                        .foregroundStyle(SpentyColors.textPrimary)
-                        .lineLimit(1)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(account.name ?? "Unnamed Account")
+                    .font(SpentyFonts.subheadline)
+                    .foregroundColor(.spentyTextPrimary)
+                    .lineLimit(1)
 
-                    if transaction.source == "ai" || transaction.source == "email" || transaction.source == "sms" {
-                        AIBadge()
-                    }
-                }
-
-                HStack(spacing: SpentySpacing.sm) {
-                    Text(formatDate(transaction.date))
-                        .font(SpentyFonts.caption)
-                        .foregroundStyle(SpentyColors.textMuted)
-
-                    transactionTypeBadge(transaction.transactionType)
+                if let accountType = account.accountType {
+                    Text(accountType.capitalized)
+                        .font(SpentyFonts.caption1)
+                        .foregroundColor(.spentyTextSecondary)
                 }
             }
 
             Spacer()
 
-            MoneyText(
-                transaction.transactionType == .expense ? -transaction.amount : transaction.amount,
-                showSign: true,
-                size: SpentyFonts.body
+            CurrencyText(
+                amount: account.balance ?? 0,
+                font: SpentyFonts.amountSmall
             )
+
+            Image(systemName: "chevron.right")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(.spentyTextSecondary.opacity(0.5))
         }
-        .padding(.vertical, SpentySpacing.md)
+        .padding(.vertical, 10)
     }
 
-    // MARK: - Floating AI Chat Button
+    // MARK: - Recent Transactions Section
 
-    @ViewBuilder
-    private var floatingAIChatButton: some View {
-        Button {
-            viewModel.showAIChat = true
-        } label: {
-            Image(systemName: "sparkles")
-                .font(.system(size: 22, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: 56, height: 56)
-                .background(SpentyColors.brandAccent)
-                .clipShape(Circle())
-                .shadow(color: SpentyColors.brandAccent.opacity(0.4), radius: 8, y: 4)
+    private var recentTransactionsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sectionHeader(title: "Recent Transactions", icon: "clock.arrow.circlepath")
+
+            VStack(spacing: 0) {
+                ForEach(viewModel.recentTransactions) { txn in
+                    transactionRow(txn)
+
+                    if txn.id != viewModel.recentTransactions.last?.id {
+                        Divider()
+                            .padding(.leading, 48)
+                    }
+                }
+            }
+            .cardStyle()
         }
-        .padding(.trailing, SpentySpacing.xl)
-        .padding(.bottom, SpentySpacing.xl)
+    }
+
+    private func transactionRow(_ txn: Transaction) -> some View {
+        HStack(spacing: 12) {
+            Circle()
+                .fill(colorForTransactionType(txn.transactionType).opacity(0.12))
+                .frame(width: 36, height: 36)
+                .overlay(
+                    Image(systemName: iconForTransactionType(txn.transactionType))
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(colorForTransactionType(txn.transactionType))
+                )
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(txn.description ?? "Transaction")
+                    .font(SpentyFonts.subheadline)
+                    .foregroundColor(.spentyTextPrimary)
+                    .lineLimit(1)
+
+                if let date = txn.date {
+                    Text(date, style: .date)
+                        .font(SpentyFonts.caption1)
+                        .foregroundColor(.spentyTextSecondary)
+                }
+            }
+
+            Spacer()
+
+            VStack(alignment: .trailing, spacing: 2) {
+                CurrencyText(
+                    amount: txn.amount ?? 0,
+                    font: SpentyFonts.amountSmall,
+                    color: colorForTransactionType(txn.transactionType)
+                )
+
+                if let status = txn.status, status.lowercased() == "pending" {
+                    Text("Pending")
+                        .font(SpentyFonts.caption2)
+                        .foregroundColor(.spentyWarning)
+                }
+            }
+        }
+        .padding(.vertical, 10)
+    }
+
+    // MARK: - Floating Buttons
+
+    private var floatingButtons: some View {
+        VStack(spacing: 12) {
+            // New Transaction FAB
+            Button {
+                viewModel.showNewTransaction = true
+            } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundColor(.white)
+                    .frame(width: 56, height: 56)
+                    .background(
+                        Circle()
+                            .fill(Color.spentyPrimary)
+                            .shadow(color: Color.spentyPrimary.opacity(0.35), radius: 12, x: 0, y: 6)
+                    )
+            }
+        }
+        .padding(.trailing, 20)
+        .padding(.bottom, 24)
+    }
+
+    // MARK: - Section Header
+
+    private func sectionHeader(title: String, icon: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundColor(.spentyPrimary)
+
+            Text(title)
+                .font(SpentyFonts.headline)
+                .foregroundColor(.spentyTextPrimary)
+
+            Spacer()
+        }
     }
 
     // MARK: - Helpers
 
-    private func formatCurrency(_ amount: Double?) -> String {
-        guard let amount else { return "--" }
-        return CurrencyFormatter.format(amount: amount, currencyCode: appState.user?.settings?.baseCurrency ?? "INR")
+    private func formatCurrency(_ value: Double) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .currency
+        formatter.currencyCode = "INR"
+        formatter.maximumFractionDigits = 0
+        formatter.minimumFractionDigits = 0
+        if abs(value) >= 100_000 {
+            formatter.maximumFractionDigits = 0
+        } else {
+            formatter.maximumFractionDigits = 2
+            formatter.minimumFractionDigits = 2
+        }
+        return formatter.string(from: NSNumber(value: value)) ?? "\(value)"
     }
 
-    private func formatDate(_ dateString: String) -> String {
-        let inputFormatter = DateFormatter()
-        inputFormatter.dateFormat = "yyyy-MM-dd"
-        inputFormatter.locale = Locale(identifier: "en_US_POSIX")
-
-        let outputFormatter = DateFormatter()
-        outputFormatter.dateFormat = "dd MMM"
-
-        if let date = inputFormatter.date(from: dateString) {
-            return outputFormatter.string(from: date)
-        }
-
-        // Try ISO format
-        let isoFormatter = ISO8601DateFormatter()
-        if let date = isoFormatter.date(from: dateString) {
-            return outputFormatter.string(from: date)
-        }
-
-        return dateString
-    }
-
-    private func transactionColor(_ type: TransactionType) -> Color {
-        switch type {
-        case .income: SpentyColors.success
-        case .expense: SpentyColors.danger
-        case .transfer: SpentyColors.info
+    private func iconForAccountType(_ type: String?) -> String {
+        switch type?.lowercased() {
+        case "bank": return "building.columns.fill"
+        case "credit_card", "credit card": return "creditcard.fill"
+        case "cash": return "banknote.fill"
+        case "wallet", "digital_wallet": return "wallet.pass.fill"
+        case "investment", "demat": return "chart.line.uptrend.xyaxis"
+        case "loan": return "percent"
+        default: return "building.columns.fill"
         }
     }
 
-    private func transactionIcon(_ type: TransactionType) -> String {
-        switch type {
-        case .income: "arrow.down.left"
-        case .expense: "arrow.up.right"
-        case .transfer: "arrow.left.arrow.right"
+    private func iconForTransactionType(_ type: String?) -> String {
+        switch type?.lowercased() {
+        case "income": return "arrow.down.circle.fill"
+        case "expense": return "arrow.up.circle.fill"
+        case "transfer": return "arrow.left.arrow.right"
+        default: return "arrow.up.circle.fill"
         }
     }
 
-    @ViewBuilder
-    private func transactionTypeBadge(_ type: TransactionType) -> some View {
-        let color = transactionColor(type)
-        Text(type.rawValue.capitalized)
-            .font(.system(size: 10, weight: .semibold))
-            .foregroundStyle(color)
-            .padding(.horizontal, SpentySpacing.sm)
-            .padding(.vertical, 2)
-            .background(color.opacity(0.1))
-            .clipShape(Capsule())
-    }
-
-    private func accountTypeBadge(_ type: String) -> StatusType {
-        switch type.lowercased() {
-        case "bank", "savings": .active
-        case "credit_card", "credit card": .partial
-        case "loan": .pending
-        case "investment", "demat": .processing
-        default: .active
+    private func colorForTransactionType(_ type: String?) -> Color {
+        switch type?.lowercased() {
+        case "income": return .spentySuccess
+        case "expense": return .spentyAccent1
+        case "transfer": return .spentyInfo
+        default: return .spentyTextSecondary
         }
     }
 }
 
+// MARK: - Preview
+
 #Preview {
-    NavigationStack {
-        DashboardView()
-    }
-    .environment(AppState())
+    DashboardView()
 }

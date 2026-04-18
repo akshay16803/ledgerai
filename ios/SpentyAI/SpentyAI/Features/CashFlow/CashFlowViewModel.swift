@@ -1,176 +1,212 @@
 import Foundation
-import os
 
 @Observable
 final class CashFlowViewModel {
 
-    // MARK: - Data
+    // MARK: - State
 
     var projection: CashFlowProjection?
     var mandates: [Mandate] = []
-
-    // MARK: - Loading State
-
+    var recurringItems: [RecurringItem] = []
+    var upcomingMandates: [Mandate] = []
     var isLoading = false
-    var isRefreshing = false
-    var isSaving = false
-    var errorMessage: String?
+    var errorMessage = ""
+    var showError = false
+    var isDetecting = false
 
-    // MARK: - Sheet State
+    // MARK: - Dependencies
 
-    var showAddMandate = false
-    var showEditMandate: Mandate?
-    var showDeleteConfirm: Mandate?
+    private let repository: CashFlowRepository
 
-    // MARK: - Private
+    // MARK: - Init
 
-    private let repo = CashFlowRepository()
-    private let logger = Logger(subsystem: "com.spentyai", category: "cashflow")
+    init(repository: CashFlowRepository = .shared) {
+        self.repository = repository
+    }
 
-    // MARK: - Load Methods
+    // MARK: - Load All
 
     @MainActor
     func loadAll() async {
-        guard !isLoading else { return }
         isLoading = true
-        errorMessage = nil
+        showError = false
 
-        async let projectionTask = repo.getProjection()
-        async let mandatesTask = repo.getMandates()
+        async let p = repository.getProjection()
+        async let m = repository.getMandates()
+        async let r = repository.getRecurringList()
+        async let u = repository.getUpcoming()
 
         do {
-            let (proj, mands) = try await (projectionTask, mandatesTask)
-            projection = proj
-            mandates = mands
-            logger.info("Cash flow data loaded successfully")
-        } catch let error as APIError {
-            errorMessage = error.errorDescription
-            logger.error("Failed to load cash flow: \(error.localizedDescription)")
+            projection = try await p
         } catch {
-            errorMessage = "Failed to load cash flow data. Please try again."
-            logger.error("Unexpected error loading cash flow: \(error.localizedDescription)")
+            handleError(error)
+        }
+
+        do {
+            mandates = try await m
+        } catch {
+            // Non-fatal — projection may still load
+        }
+
+        do {
+            recurringItems = try await r
+        } catch {
+            // Non-fatal
+        }
+
+        do {
+            upcomingMandates = try await u
+        } catch {
+            // Non-fatal
         }
 
         isLoading = false
     }
 
+    // MARK: - Individual Loaders
+
     @MainActor
     func loadProjection() async {
         do {
-            projection = try await repo.getProjection()
-            logger.info("Projection loaded successfully")
-        } catch let error as APIError {
-            errorMessage = error.errorDescription
-            logger.error("Failed to load projection: \(error.localizedDescription)")
+            projection = try await repository.getProjection()
         } catch {
-            errorMessage = "Failed to load projection."
-            logger.error("Unexpected error loading projection: \(error.localizedDescription)")
+            handleError(error)
         }
     }
 
     @MainActor
     func loadMandates() async {
         do {
-            mandates = try await repo.getMandates()
-            logger.info("Mandates loaded successfully")
-        } catch let error as APIError {
-            errorMessage = error.errorDescription
-            logger.error("Failed to load mandates: \(error.localizedDescription)")
+            mandates = try await repository.getMandates()
         } catch {
-            errorMessage = "Failed to load mandates."
-            logger.error("Unexpected error loading mandates: \(error.localizedDescription)")
+            handleError(error)
         }
     }
 
     @MainActor
-    func createMandate(_ body: MandateCreate) async {
-        isSaving = true
-        errorMessage = nil
-
+    func loadUpcoming() async {
         do {
-            let mandate = try await repo.createMandate(body)
-            mandates.append(mandate)
-            showAddMandate = false
-            logger.info("Mandate created successfully")
+            upcomingMandates = try await repository.getUpcoming()
+        } catch {
+            handleError(error)
+        }
+    }
+
+    @MainActor
+    func loadRecurring() async {
+        do {
+            recurringItems = try await repository.getRecurringList()
+        } catch {
+            handleError(error)
+        }
+    }
+
+    // MARK: - Actions
+
+    @MainActor
+    func toggleRecurring(transactionId: String) async {
+        do {
+            _ = try await repository.toggleRecurring(transactionId: transactionId)
+            await loadRecurring()
             await loadProjection()
-        } catch let error as APIError {
-            errorMessage = error.errorDescription
-            logger.error("Failed to create mandate: \(error.localizedDescription)")
         } catch {
-            errorMessage = "Failed to create mandate. Please try again."
-            logger.error("Unexpected error creating mandate: \(error.localizedDescription)")
+            handleError(error)
         }
-
-        isSaving = false
     }
 
     @MainActor
-    func updateMandate(_ id: String, _ body: MandateCreate) async {
-        isSaving = true
-        errorMessage = nil
-
+    func createMandate(merchant: String, amount: Double, frequency: String, mandateType: String? = nil) async {
         do {
-            let updated = try await repo.updateMandate(id, body)
-            if let index = mandates.firstIndex(where: { $0.mandateId == id }) {
+            let mandate = try await repository.createMandate(merchant: merchant, amount: amount, frequency: frequency, mandateType: mandateType)
+            mandates.append(mandate)
+            await loadProjection()
+        } catch {
+            handleError(error)
+        }
+    }
+
+    @MainActor
+    func updateMandate(id: String, amount: Double? = nil, status: String? = nil, frequency: String? = nil) async {
+        do {
+            let updated = try await repository.updateMandate(id: id, amount: amount, status: status, frequency: frequency)
+            if let index = mandates.firstIndex(where: { $0.id == id }) {
                 mandates[index] = updated
             }
-            showEditMandate = nil
-            logger.info("Mandate updated successfully")
             await loadProjection()
-        } catch let error as APIError {
-            errorMessage = error.errorDescription
-            logger.error("Failed to update mandate: \(error.localizedDescription)")
         } catch {
-            errorMessage = "Failed to update mandate. Please try again."
-            logger.error("Unexpected error updating mandate: \(error.localizedDescription)")
+            handleError(error)
         }
-
-        isSaving = false
     }
 
     @MainActor
-    func deleteMandate(_ id: String) async {
-        isSaving = true
-        errorMessage = nil
-
+    func deleteMandate(id: String) async {
         do {
-            try await repo.deleteMandate(id)
-            mandates.removeAll { $0.mandateId == id }
-            showDeleteConfirm = nil
-            logger.info("Mandate deleted successfully")
+            _ = try await repository.deleteMandate(id: id)
+            mandates.removeAll { $0.id == id }
             await loadProjection()
-        } catch let error as APIError {
-            errorMessage = error.errorDescription
-            logger.error("Failed to delete mandate: \(error.localizedDescription)")
         } catch {
-            errorMessage = "Failed to delete mandate. Please try again."
-            logger.error("Unexpected error deleting mandate: \(error.localizedDescription)")
+            handleError(error)
         }
+    }
 
-        isSaving = false
+    @MainActor
+    func detectMandates() async {
+        isDetecting = true
+        do {
+            _ = try await repository.detectMandates()
+            await loadMandates()
+            await loadUpcoming()
+            await loadProjection()
+        } catch {
+            handleError(error)
+        }
+        isDetecting = false
     }
 
     @MainActor
     func refresh() async {
-        isRefreshing = true
-        errorMessage = nil
+        await loadAll()
+    }
 
-        async let projectionTask = repo.getProjection()
-        async let mandatesTask = repo.getMandates()
+    // MARK: - Computed
 
-        do {
-            let (proj, mands) = try await (projectionTask, mandatesTask)
-            projection = proj
-            mandates = mands
-            logger.info("Cash flow refreshed successfully")
-        } catch let error as APIError {
-            errorMessage = error.errorDescription
-            logger.error("Failed to refresh cash flow: \(error.localizedDescription)")
-        } catch {
-            errorMessage = "Failed to refresh. Please try again."
-            logger.error("Unexpected error refreshing cash flow: \(error.localizedDescription)")
+    var monthlyIncome: Double {
+        projection?.monthlyRecurringIncome ?? 0
+    }
+
+    var monthlyExpense: Double {
+        projection?.monthlyRecurringExpense ?? 0
+    }
+
+    var monthlyMandates: Double {
+        projection?.monthlyMandateExpense ?? 0
+    }
+
+    var monthlyODInterest: Double {
+        projection?.monthlyOdInterest ?? 0
+    }
+
+    var monthlyNet: Double {
+        projection?.monthlyNet ?? 0
+    }
+
+    var projectionMonths: [ProjectionMonth] {
+        projection?.projection ?? []
+    }
+
+    var hasData: Bool {
+        projection != nil
+    }
+
+    // MARK: - Helpers
+
+    @MainActor
+    private func handleError(_ error: Error) {
+        if let apiError = error as? APIError {
+            errorMessage = apiError.localizedDescription
+        } else {
+            errorMessage = error.localizedDescription
         }
-
-        isRefreshing = false
+        showError = true
     }
 }

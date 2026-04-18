@@ -1,156 +1,139 @@
 import Foundation
-import os
-
-enum CategoryTab: String, CaseIterable {
-    case expense = "Expense"
-    case income = "Income"
-
-    var categoryType: CategoryType {
-        switch self {
-        case .expense: .expense
-        case .income: .income
-        }
-    }
-}
+import SwiftUI
 
 @Observable
 final class CategoriesViewModel {
 
     // MARK: - State
 
-    var expenseCategories: [Category] = []
-    var incomeCategories: [Category] = []
-    var selectedTab: CategoryTab = .expense
-
+    var categories: [Category] = []
+    var activeTab: CategoryType = .expense
     var isLoading = false
-    var errorMessage: String?
+    var showForm = false
+    var editingCategory: Category?
+    var selectedParent: Category?
+    var errorMessage = ""
+    var showError = false
 
-    var showAddCategory = false
-    var showAddSubcategory = false
-    var parentForSubcategory: Category?
-    var newCategoryName = ""
-    var expandedParents: Set<String> = []
+    // MARK: - Dependencies
 
-    // MARK: - Computed
+    private let repository = CategoryRepository.shared
 
-    var currentCategories: [Category] {
-        switch selectedTab {
-        case .expense: expenseCategories
-        case .income: incomeCategories
+    // MARK: - Computed — Tree
+
+    /// Top-level categories for the active tab, each with its children attached.
+    var categoryTree: [Category] {
+        let filtered = categories.filter { $0.categoryType == activeTab }
+        let topLevel = filtered.filter { $0.parentId == nil }
+
+        return topLevel.map { parent in
+            var copy = parent
+            copy.children = filtered.filter { $0.parentId == parent.id }
+            return copy
         }
+        .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 
-    var parentCategories: [Category] {
-        currentCategories.filter { $0.parentId == nil }
+    /// Flat list of top-level categories (for parent picker in form).
+    var topLevelCategories: [Category] {
+        categories
+            .filter { $0.categoryType == activeTab && $0.parentId == nil }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 
-    func subcategories(for parentId: String) -> [Category] {
-        currentCategories.filter { $0.parentId == parentId }
-    }
-
-    // MARK: - Private
-
-    private let repository = CategoryRepository()
-    private let logger = Logger(subsystem: "com.spentyai", category: "categories")
-
-    // MARK: - Methods
+    // MARK: - Actions
 
     @MainActor
     func loadCategories() async {
         isLoading = true
-        errorMessage = nil
+        defer { isLoading = false }
 
         do {
-            let all = try await repository.getCategories()
-            expenseCategories = all.filter { $0.categoryType == .expense }
-            incomeCategories = all.filter { $0.categoryType == .income }
-            logger.info("Loaded \(all.count) categories")
+            categories = try await repository.getCategories()
         } catch {
-            errorMessage = "Failed to load categories."
-            logger.error("Load categories error: \(error.localizedDescription)")
-        }
-
-        isLoading = false
-    }
-
-    @MainActor
-    func addCategory() async {
-        let trimmed = newCategoryName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-
-        do {
-            let create = CategoryCreate(
-                name: trimmed,
-                categoryType: selectedTab.categoryType,
-                parentId: parentForSubcategory?.categoryId
-            )
-            let created = try await repository.createCategory(create)
-
-            switch selectedTab {
-            case .expense: expenseCategories.append(created)
-            case .income: incomeCategories.append(created)
-            }
-
-            // If adding a subcategory, ensure parent is expanded
-            if let parentId = parentForSubcategory?.categoryId {
-                expandedParents.insert(parentId)
-            }
-
-            newCategoryName = ""
-            showAddCategory = false
-            showAddSubcategory = false
-            parentForSubcategory = nil
-            logger.info("Created category: \(created.name)")
-        } catch {
-            errorMessage = "Failed to create category."
-            logger.error("Create category error: \(error.localizedDescription)")
+            handleError(error)
         }
     }
 
     @MainActor
-    func deleteCategory(_ category: Category) async {
+    func createCategory(name: String, type: CategoryType, parentId: String?) async {
         do {
-            try await repository.deleteCategory(category.categoryId)
-
-            switch selectedTab {
-            case .expense:
-                expenseCategories.removeAll { $0.categoryId == category.categoryId }
-            case .income:
-                incomeCategories.removeAll { $0.categoryId == category.categoryId }
-            }
-            logger.info("Deleted category: \(category.name)")
+            let created = try await repository.createCategory(name: name, type: type, parentId: parentId)
+            categories.append(created)
         } catch {
-            errorMessage = "Failed to delete category."
-            logger.error("Delete category error: \(error.localizedDescription)")
+            handleError(error)
         }
     }
 
-    func toggleExpanded(_ parentId: String) {
-        if expandedParents.contains(parentId) {
-            expandedParents.remove(parentId)
+    @MainActor
+    func updateCategory(id: String, name: String) async {
+        do {
+            let updated = try await repository.updateCategory(id: id, name: name)
+            if let index = categories.firstIndex(where: { $0.id == id }) {
+                categories[index] = updated
+            }
+        } catch {
+            handleError(error)
+        }
+    }
+
+    @MainActor
+    func deleteCategory(id: String) async {
+        do {
+            try await repository.deleteCategory(id: id)
+            categories.removeAll { $0.id == id }
+        } catch {
+            handleError(error)
+        }
+    }
+
+    @MainActor
+    func loadDefaults() async {
+        do {
+            let defaults = try await repository.loadDefaults()
+            categories = defaults
+        } catch {
+            handleError(error)
+        }
+    }
+
+    @MainActor
+    func mergeCategories(sourceId: String, targetId: String) async {
+        do {
+            _ = try await repository.mergeCategories(sourceId: sourceId, targetId: targetId)
+            await loadCategories()
+        } catch {
+            handleError(error)
+        }
+    }
+
+    // MARK: - Form Helpers
+
+    func beginCreate(parent: Category? = nil) {
+        editingCategory = nil
+        selectedParent = parent
+        showForm = true
+    }
+
+    func beginEdit(_ category: Category) {
+        editingCategory = category
+        selectedParent = categories.first { $0.id == category.parentId }
+        showForm = true
+    }
+
+    func dismissError() {
+        showError = false
+        errorMessage = ""
+    }
+
+    // MARK: - Private
+
+    private func handleError(_ error: Error) {
+        if let apiError = error as? APIError {
+            errorMessage = apiError.localizedDescription
         } else {
-            expandedParents.insert(parentId)
+            errorMessage = error.localizedDescription
         }
-    }
-
-    func cancelAdd() {
-        newCategoryName = ""
-        showAddCategory = false
-        showAddSubcategory = false
-        parentForSubcategory = nil
-    }
-
-    func startAddSubcategory(parent: Category) {
-        parentForSubcategory = parent
-        showAddSubcategory = true
-        showAddCategory = false
-        newCategoryName = ""
-    }
-
-    func startAddCategory() {
-        parentForSubcategory = nil
-        showAddCategory = true
-        showAddSubcategory = false
-        newCategoryName = ""
+        showError = true
     }
 }

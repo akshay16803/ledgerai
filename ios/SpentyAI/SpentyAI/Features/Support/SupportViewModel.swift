@@ -1,92 +1,163 @@
 import Foundation
-import os
+import SwiftUI
+
+// MARK: - Enums
+
+enum TicketCategory: String, CaseIterable, Identifiable {
+    case bug      = "bug"
+    case feature  = "feature"
+    case billing  = "billing"
+    case account  = "account"
+    case data     = "data"
+    case general  = "general"
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .bug:     return "Bug Report"
+        case .feature: return "Feature Request"
+        case .billing: return "Billing"
+        case .account: return "Account"
+        case .data:    return "Data"
+        case .general: return "General"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .bug:     return "ladybug.fill"
+        case .feature: return "lightbulb.fill"
+        case .billing: return "creditcard.fill"
+        case .account: return "person.fill"
+        case .data:    return "externaldrive.fill"
+        case .general: return "questionmark.circle.fill"
+        }
+    }
+}
+
+enum TicketPriority: String, CaseIterable, Identifiable {
+    case low    = "low"
+    case medium = "medium"
+    case high   = "high"
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .low:    return "Low"
+        case .medium: return "Medium"
+        case .high:   return "High"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .low:    return .green
+        case .medium: return .orange
+        case .high:   return .red
+        }
+    }
+}
+
+// MARK: - ViewModel
 
 @Observable
 final class SupportViewModel {
 
-    // MARK: - Loading State
-
-    var isSubmitting = false
-    var showSuccess = false
-    var errorMessage: String?
-
     // MARK: - Form State
 
     var subject: String = ""
+    var category: TicketCategory = .general
+    var priority: TicketPriority = .medium
     var message: String = ""
-    var selectedCategory: String = "general"
-    var selectedPriority: String = "medium"
 
-    static let categories = ["general", "billing", "bug", "other"]
-    static let categoryLabels: [String: String] = [
-        "general": "General",
-        "billing": "Billing",
-        "bug": "Bug Report",
-        "other": "Other"
-    ]
+    // MARK: - UI State
 
-    static let priorities = ["low", "medium", "high"]
-    static let priorityLabels: [String: String] = [
-        "low": "Low",
-        "medium": "Medium",
-        "high": "High"
-    ]
+    var isSubmitting = false
+    var isSubmitted = false
+    var faqItems: [FAQItem] = []
+    var errorMessage: String?
+    var isLoadingFAQ = false
 
-    // MARK: - Private
+    // MARK: - Dependencies
 
-    private let logger = Logger(subsystem: "com.spentyai", category: "support")
+    private let repository: SupportRepository
 
-    // MARK: - Methods
+    // MARK: - Init
+
+    init(repository: SupportRepository = .shared) {
+        self.repository = repository
+    }
+
+    // MARK: - Validation
+
+    var isFormValid: Bool {
+        !subject.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        && !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    // MARK: - Actions
 
     @MainActor
-    func submitTicket() async -> Bool {
-        guard !subject.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            errorMessage = "Please enter a subject."
-            return false
-        }
-
-        guard !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            errorMessage = "Please enter a message."
-            return false
+    func submitTicket() async {
+        guard isFormValid else {
+            errorMessage = "Please fill in both subject and message."
+            return
         }
 
         isSubmitting = true
         errorMessage = nil
 
-        let body = SupportTicketCreate(
+        let ticket = SupportTicket(
             subject: subject.trimmingCharacters(in: .whitespacesAndNewlines),
-            message: message.trimmingCharacters(in: .whitespacesAndNewlines),
-            category: selectedCategory,
-            priority: selectedPriority
+            category: category.rawValue,
+            priority: priority.rawValue,
+            message: message.trimmingCharacters(in: .whitespacesAndNewlines)
         )
 
         do {
-            let _: SupportTicketResponse = try await APIClient.shared.post(
-                APIEndpoints.Support.create,
-                body: body
-            )
-            showSuccess = true
+            _ = try await repository.submitTicket(ticket)
+            isSubmitted = true
             resetForm()
-            logger.info("Support ticket submitted successfully")
-            isSubmitting = false
-            return true
         } catch let error as APIError {
-            errorMessage = error.errorDescription
-            logger.error("Failed to submit ticket: \(error.localizedDescription)")
-            isSubmitting = false
-            return false
+            errorMessage = error.localizedDescription
         } catch {
-            errorMessage = "Failed to submit ticket. Please try again."
-            logger.error("Unexpected error submitting ticket: \(error.localizedDescription)")
-            isSubmitting = false
-            return false
+            errorMessage = "Something went wrong. Please try again."
         }
+
+        isSubmitting = false
     }
+
+    @MainActor
+    func loadFAQ() async {
+        isLoadingFAQ = true
+
+        do {
+            faqItems = try await repository.getFAQ()
+        } catch let error as APIError {
+            errorMessage = error.localizedDescription
+        } catch {
+            errorMessage = "Could not load FAQ. Please try again later."
+        }
+
+        isLoadingFAQ = false
+    }
+
+    // MARK: - Helpers
 
     func resetForm() {
         subject = ""
+        category = .general
+        priority = .medium
         message = ""
-        selectedCategory = "general"
-        selectedPriority = "medium"
+    }
+
+    func dismissError() {
+        errorMessage = nil
+    }
+
+    func dismissSuccess() {
+        isSubmitted = false
     }
 }

@@ -1,33 +1,27 @@
 import Foundation
 
-struct Customer: Codable, Identifiable, Hashable {
-    var id: String { customerId }
-
-    let customerId: String
-    var name: String
-    var gstin: String?
-    var pan: String?
-    var phone: String?
+struct Customer: Codable, Identifiable {
+    let id: String
+    var name: String?
     var email: String?
+    var phone: String?
+    var gstin: String?
     var billingAddress: String?
-    var city: String?
-    var state: String?
-    var pincode: String?
-    var notes: String?
-    var createdAt: String?
+    var shippingAddress: String?
+    var totalInvoiced: Double?
+    var totalPaid: Double?
+    var outstanding: Double?
 
     enum CodingKeys: String, CodingKey {
-        case customerId = "customer_id"
+        case id = "_id"
         case name
-        case gstin
-        case pan
-        case phone
         case email
-        case billingAddress = "billing_address"
-        case city
-        case state
-        case pincode
-        case notes
-        case createdAt = "created_at"
+        case phone
+        case gstin
+        case billingAddress
+        case shippingAddress
+        case totalInvoiced
+        case totalPaid
+        case outstanding
     }
 }

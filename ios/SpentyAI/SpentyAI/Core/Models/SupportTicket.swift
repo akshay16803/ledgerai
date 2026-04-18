@@ -1,20 +1,21 @@
 import Foundation
 
-struct SupportTicketCreate: Codable {
-    var subject: String
-    var message: String
+struct SupportTicket: Codable {
+    var subject: String?
     var category: String?
     var priority: String?
+    var message: String?
 }
 
-struct SupportTicketResponse: Codable, Hashable {
-    let success: Bool
-    let ticketId: String?
-    let emailSent: Bool?
+struct FAQItem: Codable, Identifiable {
+    var id: String { question ?? UUID().uuidString }
+    var question: String?
+    var answer: String?
+    var category: String?
 
     enum CodingKeys: String, CodingKey {
-        case success
-        case ticketId = "ticket_id"
-        case emailSent = "email_sent"
+        case question
+        case answer
+        case category
     }
 }

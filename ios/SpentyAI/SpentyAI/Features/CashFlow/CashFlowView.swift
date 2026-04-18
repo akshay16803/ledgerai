@@ -1,404 +1,234 @@
 import SwiftUI
-import Charts
 
 struct CashFlowView: View {
-    @Environment(AppState.self) private var appState
-    @State private var viewModel = CashFlowViewModel()
 
-    private let statsColumns = [
-        GridItem(.flexible(), spacing: SpentySpacing.md),
-        GridItem(.flexible(), spacing: SpentySpacing.md)
-    ]
+    @State private var viewModel = CashFlowViewModel()
 
     var body: some View {
         NavigationStack {
-            ZStack {
-                ScrollView {
-                    VStack(spacing: SpentySpacing.xl) {
-                        statsGridSection
-                        projectionChartSection
-                        odInterestSection
-                        recurringItemsSection
-                        mandatesSection
-                    }
-                    .padding(.horizontal, SpentySpacing.lg)
-                    .padding(.vertical, SpentySpacing.md)
-                    .padding(.bottom, 80)
-                }
-                .refreshable {
-                    await viewModel.refresh()
-                }
-                .shimmer(isActive: viewModel.isLoading && viewModel.projection == nil)
-
-                // FAB to add mandate
-                VStack {
-                    Spacer()
-                    HStack {
-                        Spacer()
-                        Button {
-                            viewModel.showAddMandate = true
-                        } label: {
-                            Image(systemName: "plus")
-                                .font(.title2.weight(.semibold))
-                                .foregroundStyle(.white)
-                                .frame(width: 56, height: 56)
-                                .background(SpentyColors.brandPrimary)
-                                .clipShape(Circle())
-                                .shadow(color: SpentyColors.brandPrimary.opacity(0.3), radius: 8, y: 4)
-                        }
-                        .padding(.trailing, SpentySpacing.lg)
-                        .padding(.bottom, SpentySpacing.lg)
-                    }
+            Group {
+                if viewModel.isLoading && !viewModel.hasData {
+                    LoadingView(message: "Loading cash flow...")
+                } else {
+                    mainContent
                 }
             }
-            .background(SpentyColors.bgPrimary)
+            .background(Color.spentyBgPrimary)
             .navigationTitle("Cash Flow")
+            .navigationBarTitleDisplayMode(.large)
             .task {
-                if viewModel.projection == nil {
-                    await viewModel.loadAll()
-                }
+                await viewModel.loadAll()
             }
-            .overlay {
-                LoadingOverlay(isPresented: .constant(viewModel.isSaving))
-            }
-            .sheet(isPresented: $viewModel.showAddMandate) {
-                MandateFormSheet(
-                    editingMandate: nil,
-                    onSaved: { body in
-                        Task { await viewModel.createMandate(body) }
+        }
+    }
+
+    // MARK: - Main Content
+
+    private var mainContent: some View {
+        ScrollView {
+            VStack(spacing: 20) {
+
+                // Error banner
+                if viewModel.showError {
+                    ErrorBanner(message: viewModel.errorMessage) {
+                        viewModel.showError = false
                     }
-                )
-            }
-            .sheet(item: $viewModel.showEditMandate) { mandate in
-                MandateFormSheet(
-                    editingMandate: mandate,
-                    onSaved: { body in
-                        Task { await viewModel.updateMandate(mandate.mandateId, body) }
-                    }
-                )
-            }
-            .alert("Delete Mandate", isPresented: .init(
-                get: { viewModel.showDeleteConfirm != nil },
-                set: { if !$0 { viewModel.showDeleteConfirm = nil } }
-            )) {
-                Button("Cancel", role: .cancel) {
-                    viewModel.showDeleteConfirm = nil
+                    .transition(.move(edge: .top).combined(with: .opacity))
                 }
-                Button("Delete", role: .destructive) {
-                    if let mandate = viewModel.showDeleteConfirm {
-                        Task { await viewModel.deleteMandate(mandate.mandateId) }
-                    }
+
+                // Summary stat cards
+                statsGrid
+                    .padding(.horizontal, 16)
+
+                // 24-month projection chart
+                CashFlowChartView(projectionMonths: viewModel.projectionMonths)
+                    .padding(.horizontal, 16)
+
+                // Recurring transactions
+                RecurringListView(viewModel: viewModel)
+
+                // Mandates
+                MandatesListView(viewModel: viewModel)
+
+                // Monthly breakdown table
+                if !viewModel.projectionMonths.isEmpty {
+                    monthlyBreakdown
+                        .padding(.horizontal, 16)
                 }
-            } message: {
-                if let mandate = viewModel.showDeleteConfirm {
-                    Text("Are you sure you want to delete the mandate for \(mandate.merchant ?? "this merchant")?")
-                }
+
+                Spacer().frame(height: 40)
             }
+            .padding(.top, 8)
+        }
+        .refreshable {
+            await viewModel.refresh()
         }
     }
 
     // MARK: - Stats Grid
 
-    @ViewBuilder
-    private var statsGridSection: some View {
-        let proj = viewModel.projection
-        let mandateTotal = proj?.mandateItems?.compactMap(\.amount).reduce(0, +) ?? 0
-        let odTotal = proj?.odInterestItems?.compactMap(\.estimatedInterest).reduce(0, +) ?? 0
-        let monthlyNet = proj?.monthlyNet ?? 0
-
-        LazyVGrid(columns: statsColumns, spacing: SpentySpacing.md) {
+    private var statsGrid: some View {
+        LazyVGrid(
+            columns: [
+                GridItem(.flexible(), spacing: 12),
+                GridItem(.flexible(), spacing: 12)
+            ],
+            spacing: 12
+        ) {
             StatCard(
-                title: "Monthly Income",
-                value: formatCurrency(proj?.monthlyIncome),
-                subtitle: "Inflows",
-                icon: "arrow.down.circle",
-                iconColor: SpentyColors.success
+                label: "Monthly Income",
+                value: formatCurrency(viewModel.monthlyIncome),
+                icon: "arrow.down.circle.fill",
+                color: .spentySuccess
             )
 
             StatCard(
-                title: "Monthly Expense",
-                value: formatCurrency(proj?.monthlyExpense),
-                subtitle: "Outflows",
-                icon: "arrow.up.circle",
-                iconColor: SpentyColors.danger
+                label: "Monthly Expense",
+                value: formatCurrency(viewModel.monthlyExpense),
+                icon: "arrow.up.circle.fill",
+                color: .spentyAccent1
             )
 
             StatCard(
-                title: "Monthly Mandates",
-                value: formatCurrency(mandateTotal),
-                subtitle: "Auto-debits",
-                icon: "arrow.triangle.2.circlepath",
-                iconColor: SpentyColors.info
+                label: "Monthly Mandates",
+                value: formatCurrency(viewModel.monthlyMandates),
+                icon: "doc.text.fill",
+                color: .spentyWarning
             )
 
             StatCard(
-                title: "OD Interest",
-                value: formatCurrency(odTotal),
-                subtitle: "Estimated",
+                label: "OD Interest",
+                value: formatCurrency(viewModel.monthlyODInterest),
                 icon: "percent",
-                iconColor: SpentyColors.warning
-            )
-        }
-
-        // Full-width net card
-        StatCard(
-            title: "Monthly Net",
-            value: formatCurrency(monthlyNet),
-            subtitle: monthlyNet >= 0 ? "Surplus" : "Deficit",
-            icon: monthlyNet >= 0 ? "chart.line.uptrend.xyaxis" : "chart.line.downtrend.xyaxis",
-            iconColor: monthlyNet >= 0 ? SpentyColors.success : SpentyColors.danger
-        )
-    }
-
-    // MARK: - 24-Month Projection Chart
-
-    @ViewBuilder
-    private var projectionChartSection: some View {
-        if let entries = viewModel.projection?.projection, !entries.isEmpty {
-            VStack(alignment: .leading, spacing: SpentySpacing.sm) {
-                SectionHeader( "24-Month Projection", actionTitle: nil, action: nil)
-
-                SpentyCard {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        Chart {
-                            ForEach(Array(entries.enumerated()), id: \.offset) { index, entry in
-                                let label = entry.label ?? entry.month ?? "M\(index + 1)"
-
-                                BarMark(
-                                    x: .value("Month", label),
-                                    y: .value("Amount", entry.projectedIncome ?? 0)
-                                )
-                                .foregroundStyle(SpentyColors.success)
-                                .position(by: .value("Type", "Income"))
-
-                                BarMark(
-                                    x: .value("Month", label),
-                                    y: .value("Amount", entry.projectedExpense ?? 0)
-                                )
-                                .foregroundStyle(SpentyColors.danger)
-                                .position(by: .value("Type", "Expense"))
-                            }
-                        }
-                        .chartForegroundStyleScale([
-                            "Income": SpentyColors.success,
-                            "Expense": SpentyColors.danger
-                        ])
-                        .chartLegend(position: .top, alignment: .leading)
-                        .chartYAxis {
-                            AxisMarks(position: .leading) { value in
-                                AxisGridLine()
-                                AxisValueLabel {
-                                    if let amount = value.as(Double.self) {
-                                        Text(shortCurrency(amount))
-                                            .font(SpentyFonts.caption)
-                                            .foregroundStyle(SpentyColors.textMuted)
-                                    }
-                                }
-                            }
-                        }
-                        .chartXAxis {
-                            AxisMarks { value in
-                                AxisValueLabel {
-                                    if let label = value.as(String.self) {
-                                        Text(label)
-                                            .font(SpentyFonts.caption)
-                                            .foregroundStyle(SpentyColors.textMuted)
-                                            .rotationEffect(.degrees(-45))
-                                    }
-                                }
-                            }
-                        }
-                        .frame(width: max(CGFloat(entries.count) * 60, 300), height: 250)
-                    }
-                }
-            }
-        }
-    }
-
-    // MARK: - OD Interest Section
-
-    @ViewBuilder
-    private var odInterestSection: some View {
-        if let items = viewModel.projection?.odInterestItems, !items.isEmpty {
-            VStack(alignment: .leading, spacing: SpentySpacing.sm) {
-                SectionHeader( "OD Interest", actionTitle: nil, action: nil)
-
-                ForEach(Array(items.enumerated()), id: \.offset) { _, item in
-                    SpentyCard {
-                        HStack {
-                            VStack(alignment: .leading, spacing: SpentySpacing.xs) {
-                                Text(item.accountName ?? "Account")
-                                    .font(SpentyFonts.body)
-                                    .foregroundStyle(SpentyColors.textPrimary)
-                            }
-                            Spacer()
-                            Text(formatCurrency(item.estimatedInterest))
-                                .font(SpentyFonts.stat)
-                                .foregroundStyle(SpentyColors.warning)
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // MARK: - Recurring Items Section
-
-    @ViewBuilder
-    private var recurringItemsSection: some View {
-        if let items = viewModel.projection?.recurringItems, !items.isEmpty {
-            VStack(alignment: .leading, spacing: SpentySpacing.sm) {
-                SectionHeader( "Recurring Items", actionTitle: nil, action: nil)
-
-                ForEach(Array(items.enumerated()), id: \.offset) { _, item in
-                    SpentyCard {
-                        HStack {
-                            VStack(alignment: .leading, spacing: SpentySpacing.xs) {
-                                Text(item.description ?? "Untitled")
-                                    .font(SpentyFonts.body)
-                                    .foregroundStyle(SpentyColors.textPrimary)
-
-                                HStack(spacing: SpentySpacing.sm) {
-                                    Text(item.frequency ?? "")
-                                        .font(SpentyFonts.caption)
-                                        .foregroundStyle(SpentyColors.textMuted)
-
-                                    if let type = item.type {
-                                        Text(type.capitalized)
-                                            .font(SpentyFonts.caption)
-                                            .foregroundStyle(type == "income" ? SpentyColors.success : SpentyColors.danger)
-                                            .padding(.horizontal, SpentySpacing.sm)
-                                            .padding(.vertical, 2)
-                                            .background(
-                                                (type == "income" ? SpentyColors.success : SpentyColors.danger)
-                                                    .opacity(0.1)
-                                            )
-                                            .clipShape(RoundedRectangle(cornerRadius: SpentyRadius.sm))
-                                    }
-                                }
-                            }
-                            Spacer()
-                            Text(formatCurrency(item.amount))
-                                .font(SpentyFonts.stat)
-                                .foregroundStyle(
-                                    item.type == "income" ? SpentyColors.success : SpentyColors.danger
-                                )
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // MARK: - Mandates Section
-
-    @ViewBuilder
-    private var mandatesSection: some View {
-        VStack(alignment: .leading, spacing: SpentySpacing.sm) {
-            SectionHeader(
-                "Mandates",
-                actionTitle: "Add",
-                action: { viewModel.showAddMandate = true }
+                color: .spentyError
             )
 
-            if viewModel.mandates.isEmpty && !viewModel.isLoading {
-                EmptyState(
-                    icon: "doc.text.magnifyingglass",
-                    title: "No Mandates",
-                    message: "Add mandates to track your recurring auto-debits."
-                )
-            } else {
-                ForEach(viewModel.mandates) { mandate in
-                    SpentyCard {
-                        HStack {
-                            VStack(alignment: .leading, spacing: SpentySpacing.xs) {
-                                Text(mandate.merchant ?? "Unknown Merchant")
-                                    .font(SpentyFonts.body)
-                                    .foregroundStyle(SpentyColors.textPrimary)
+            StatCard(
+                label: "Monthly Net",
+                value: formatCurrency(viewModel.monthlyNet),
+                icon: "equal.circle.fill",
+                color: viewModel.monthlyNet >= 0 ? .spentySuccess : .spentyError
+            )
+        }
+    }
 
-                                HStack(spacing: SpentySpacing.sm) {
-                                    if let frequency = mandate.frequency {
-                                        Text(frequency.capitalized)
-                                            .font(SpentyFonts.caption)
-                                            .foregroundStyle(SpentyColors.textMuted)
-                                    }
+    // MARK: - Monthly Breakdown Table
 
-                                    if let day = mandate.debitDay {
-                                        Text("Day \(day)")
-                                            .font(SpentyFonts.caption)
-                                            .foregroundStyle(SpentyColors.textSecondary)
-                                    }
+    private var monthlyBreakdown: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "tablecells")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.spentyPrimary)
 
-                                    if let status = mandate.status {
-                                        Text(status.capitalized)
-                                            .font(SpentyFonts.caption)
-                                            .foregroundStyle(statusColor(status))
-                                            .padding(.horizontal, SpentySpacing.sm)
-                                            .padding(.vertical, 2)
-                                            .background(statusColor(status).opacity(0.1))
-                                            .clipShape(RoundedRectangle(cornerRadius: SpentyRadius.sm))
-                                    }
-                                }
-                            }
-                            Spacer()
-                            Text(formatCurrency(mandate.amount))
-                                .font(SpentyFonts.stat)
-                                .foregroundStyle(SpentyColors.textPrimary)
+                Text("Monthly Breakdown")
+                    .font(SpentyFonts.headline)
+                    .foregroundColor(.spentyTextPrimary)
+
+                Spacer()
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                VStack(spacing: 0) {
+                    // Header row
+                    tableHeaderRow
+
+                    Divider()
+
+                    // Data rows
+                    ForEach(Array(viewModel.projectionMonths.prefix(24).enumerated()), id: \.offset) { index, month in
+                        tableDataRow(month, isEven: index % 2 == 0)
+
+                        if index < min(viewModel.projectionMonths.count, 24) - 1 {
+                            Divider()
                         }
-                    }
-                    .swipeActions(edge: .trailing) {
-                        Button(role: .destructive) {
-                            viewModel.showDeleteConfirm = mandate
-                        } label: {
-                            Label("Delete", systemImage: "trash")
-                        }
-
-                        Button {
-                            viewModel.showEditMandate = mandate
-                        } label: {
-                            Label("Edit", systemImage: "pencil")
-                        }
-                        .tint(SpentyColors.info)
                     }
                 }
             }
+            .cardStyle()
         }
+    }
+
+    private var tableHeaderRow: some View {
+        HStack(spacing: 0) {
+            tableCell("Month", width: 70, isHeader: true, alignment: .leading)
+            tableCell("Income", width: 80, isHeader: true)
+            tableCell("Expense", width: 80, isHeader: true)
+            tableCell("Mandates", width: 80, isHeader: true)
+            tableCell("OD Int.", width: 70, isHeader: true)
+            tableCell("Net", width: 80, isHeader: true)
+        }
+        .padding(.vertical, 8)
+    }
+
+    private func tableDataRow(_ month: ProjectionMonth, isEven: Bool) -> some View {
+        HStack(spacing: 0) {
+            tableCell(formattedMonth(month.month), width: 70, alignment: .leading)
+            tableCell(shortCurrency(month.income ?? 0), width: 80, color: .spentySuccess)
+            tableCell(shortCurrency(month.expense ?? 0), width: 80, color: .spentyAccent1)
+            tableCell(shortCurrency(month.mandates ?? 0), width: 80, color: .spentyWarning)
+            tableCell(shortCurrency(month.odInterest ?? 0), width: 70, color: .spentyError)
+            tableCell(shortCurrency(month.net ?? 0), width: 80, color: (month.net ?? 0) >= 0 ? .spentySuccess : .spentyError)
+        }
+        .padding(.vertical, 6)
+        .background(isEven ? Color.spentyBgPrimary.opacity(0.5) : Color.clear)
+    }
+
+    private func tableCell(_ text: String, width: CGFloat, isHeader: Bool = false, color: Color = .spentyTextPrimary, alignment: Alignment = .trailing) -> some View {
+        Text(text)
+            .font(isHeader ? SpentyFonts.caption1.bold() : SpentyFonts.caption1)
+            .foregroundColor(isHeader ? .spentyTextSecondary : color)
+            .frame(width: width, alignment: alignment)
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)
     }
 
     // MARK: - Helpers
 
-    private func formatCurrency(_ amount: Double?) -> String {
-        guard let amount else { return "--" }
-        return CurrencyFormatter.format(
-            amount: amount,
-            currencyCode: appState.user?.settings?.baseCurrency ?? "INR"
-        )
-    }
-
-    private func formatCurrency(_ amount: Double) -> String {
-        CurrencyFormatter.format(
-            amount: amount,
-            currencyCode: appState.user?.settings?.baseCurrency ?? "INR"
-        )
-    }
-
-    private func shortCurrency(_ amount: Double) -> String {
-        if abs(amount) >= 10_000_000 {
-            return String(format: "%.1fCr", amount / 10_000_000)
-        } else if abs(amount) >= 100_000 {
-            return String(format: "%.1fL", amount / 100_000)
-        } else if abs(amount) >= 1_000 {
-            return String(format: "%.1fK", amount / 1_000)
+    private func formatCurrency(_ value: Double) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .currency
+        formatter.currencyCode = "INR"
+        formatter.maximumFractionDigits = 0
+        formatter.minimumFractionDigits = 0
+        if abs(value) < 100_000 {
+            formatter.maximumFractionDigits = 2
+            formatter.minimumFractionDigits = 2
         }
-        return String(format: "%.0f", amount)
+        return formatter.string(from: NSNumber(value: value)) ?? "\(value)"
     }
 
-    private func statusColor(_ status: String) -> Color {
-        switch status.lowercased() {
-        case "active": return SpentyColors.success
-        case "paused", "pending": return SpentyColors.warning
-        case "cancelled", "expired": return SpentyColors.danger
-        default: return SpentyColors.textMuted
+    private func shortCurrency(_ value: Double) -> String {
+        let abs = abs(value)
+        let sign = value < 0 ? "-" : ""
+        if abs >= 10_000_000 {
+            return String(format: "%@%.1fCr", sign, abs / 10_000_000)
+        } else if abs >= 100_000 {
+            return String(format: "%@%.1fL", sign, abs / 100_000)
+        } else if abs >= 1_000 {
+            return String(format: "%@%.1fK", sign, abs / 1_000)
         }
+        return String(format: "%@%.0f", sign, abs)
     }
+
+    private func formattedMonth(_ raw: String?) -> String {
+        guard let raw else { return "---" }
+        let inFmt = DateFormatter()
+        inFmt.locale = Locale(identifier: "en_US_POSIX")
+        for fmt in ["yyyy-MM", "yyyy-MM-dd"] {
+            inFmt.dateFormat = fmt
+            if let date = inFmt.date(from: raw) {
+                let outFmt = DateFormatter()
+                outFmt.dateFormat = "MMM yy"
+                return outFmt.string(from: date)
+            }
+        }
+        return String(raw.prefix(7))
+    }
+}
+
+// MARK: - Preview
+
+#Preview {
+    CashFlowView()
 }

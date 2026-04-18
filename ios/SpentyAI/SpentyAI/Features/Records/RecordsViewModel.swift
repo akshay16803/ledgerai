@@ -1,132 +1,322 @@
 import Foundation
-import os
+import Observation
+import SwiftUI
+
+enum RecordsTab: String, CaseIterable {
+    case emails = "Emails"
+    case receipts = "Receipts"
+}
 
 @Observable
 final class RecordsViewModel {
-
-    // MARK: - Tab
-
-    enum Tab: String, CaseIterable {
-        case emailRecords = "Email Records"
-        case receipts = "Receipts"
-    }
 
     // MARK: - Data
 
     var records: [Record] = []
     var receipts: [Receipt] = []
+    var recordsTotal: Int = 0
+    var receiptsTotal: Int = 0
 
-    // MARK: - State
+    // MARK: - Tab
 
-    var isLoading = false
-    var isRefreshing = false
-    var errorMessage: String?
-    var searchText = ""
-    var selectedTab: Tab = .emailRecords
-    var showDeleteConfirm = false
-    var deletingRecordId: String?
-    var deletingReceiptId: String?
+    var activeTab: RecordsTab = .emails
 
-    // MARK: - Computed
+    // MARK: - Filters (Emails)
 
-    var filteredRecords: [Record] {
-        guard !searchText.isEmpty else { return records }
-        let query = searchText.lowercased()
-        return records.filter { record in
-            (record.subject?.lowercased().contains(query) ?? false) ||
-            (record.sender?.lowercased().contains(query) ?? false)
-        }
-    }
+    var searchQuery: String = ""
+    var dateFrom: Date? = nil
+    var dateTo: Date? = nil
+    var amountMin: String = ""
+    var amountMax: String = ""
+
+    // MARK: - UI State
+
+    var isLoading: Bool = false
+    var isLoadingMore: Bool = false
+    var page: Int = 1
+    var hasMore: Bool = true
+
+    var receiptsPage: Int = 1
+    var receiptsHasMore: Bool = true
+    var isLoadingReceipts: Bool = false
+    var isLoadingMoreReceipts: Bool = false
+
+    var selectedRecord: Record? = nil
+    var errorMessage: String? = nil
+
+    var isDownloadingZip: Bool = false
+    var isDownloadingEml: Bool = false
+
+    var shareItem: ShareItem? = nil
 
     // MARK: - Private
 
-    private let repo = RecordsRepository()
-    private let logger = Logger(subsystem: "com.spentyai", category: "records")
+    private let repository = RecordsRepository.shared
+    private let pageSize = 30
 
-    // MARK: - Methods
+    private static let queryDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        return f
+    }()
+
+    // MARK: - Record Operations
 
     @MainActor
-    func loadAll() async {
+    func loadRecords() async {
         isLoading = true
         errorMessage = nil
-
-        async let recordsTask: () = loadRecords()
-        async let receiptsTask: () = loadReceipts()
-        _ = await (recordsTask, receiptsTask)
-
+        page = 1
+        do {
+            let response = try await fetchRecordsPage(page: 1)
+            records = response.records
+            recordsTotal = response.total
+            hasMore = records.count < recordsTotal
+        } catch {
+            errorMessage = error.localizedDescription
+        }
         isLoading = false
     }
 
     @MainActor
-    func loadRecords() async {
+    func loadMoreRecords() async {
+        guard !isLoadingMore, hasMore else { return }
+        isLoadingMore = true
+        page += 1
         do {
-            let result = try await repo.getRecords()
-            records = result.items
+            let response = try await fetchRecordsPage(page: page)
+            records.append(contentsOf: response.records)
+            hasMore = records.count < recordsTotal
         } catch {
-            errorMessage = "Failed to load email records."
-            logger.error("Load records error: \(error.localizedDescription)")
+            page -= 1
+            errorMessage = error.localizedDescription
         }
+        isLoadingMore = false
     }
 
     @MainActor
-    func loadReceipts() async {
+    func refreshRecords() async {
+        page = 1
+        errorMessage = nil
         do {
-            let result = try await repo.getReceipts()
-            receipts = result.items
+            let response = try await fetchRecordsPage(page: 1)
+            records = response.records
+            recordsTotal = response.total
+            hasMore = records.count < recordsTotal
         } catch {
-            errorMessage = "Failed to load receipts."
-            logger.error("Load receipts error: \(error.localizedDescription)")
+            errorMessage = error.localizedDescription
         }
     }
 
     @MainActor
     func searchRecords() async {
-        guard !searchText.isEmpty else {
-            await loadRecords()
+        guard !searchQuery.isEmpty else {
+            await refreshRecords()
             return
         }
-
+        isLoading = true
+        errorMessage = nil
         do {
-            records = try await repo.searchRecords(query: searchText)
+            let response = try await repository.searchRecords(query: searchQuery)
+            records = response.records
+            recordsTotal = response.total
+            hasMore = false
         } catch {
-            logger.error("Search records error: \(error.localizedDescription)")
+            errorMessage = error.localizedDescription
+        }
+        isLoading = false
+    }
+
+    @MainActor
+    func deleteRecord(id: String) async {
+        do {
+            _ = try await repository.deleteRecord(id: id)
+            records.removeAll { $0.id == id }
+            recordsTotal -= 1
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 
     @MainActor
-    func deleteRecord(_ id: String) async {
+    func downloadEml(id: String, subject: String?) async {
+        isDownloadingEml = true
         do {
-            try await repo.deleteRecord(id)
-            records.removeAll { $0.archiveId == id }
-            logger.info("Deleted record: \(id)")
+            let data = try await repository.downloadEml(id: id)
+            let filename = (subject ?? "email").replacingOccurrences(of: "/", with: "-") + ".eml"
+            let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
+            try data.write(to: tempURL)
+            shareItem = ShareItem(url: tempURL)
         } catch {
-            errorMessage = "Failed to delete record."
-            logger.error("Delete record error: \(error.localizedDescription)")
+            errorMessage = error.localizedDescription
         }
-
-        showDeleteConfirm = false
-        deletingRecordId = nil
+        isDownloadingEml = false
     }
 
     @MainActor
-    func deleteReceipt(_ id: String) async {
+    func downloadAttachment(recordId: String, index: Int, filename: String?) async {
         do {
-            try await repo.deleteReceipt(id)
-            receipts.removeAll { $0.receiptId == id }
-            logger.info("Deleted receipt: \(id)")
+            let data = try await repository.downloadAttachment(id: recordId, index: index)
+            let name = filename ?? "attachment_\(index)"
+            let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(name)
+            try data.write(to: tempURL)
+            shareItem = ShareItem(url: tempURL)
         } catch {
-            errorMessage = "Failed to delete receipt."
-            logger.error("Delete receipt error: \(error.localizedDescription)")
+            errorMessage = error.localizedDescription
         }
-
-        showDeleteConfirm = false
-        deletingReceiptId = nil
     }
 
     @MainActor
-    func refresh() async {
-        isRefreshing = true
-        await loadAll()
-        isRefreshing = false
+    func downloadZip() async {
+        isDownloadingZip = true
+        do {
+            let data = try await repository.downloadZip()
+            let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("records_export.zip")
+            try data.write(to: tempURL)
+            shareItem = ShareItem(url: tempURL)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        isDownloadingZip = false
     }
+
+    // MARK: - Receipt Operations
+
+    @MainActor
+    func loadReceipts() async {
+        isLoadingReceipts = true
+        errorMessage = nil
+        receiptsPage = 1
+        do {
+            let response = try await repository.fetchReceipts(page: 1, limit: pageSize)
+            receipts = response.receipts
+            receiptsTotal = response.total
+            receiptsHasMore = receipts.count < receiptsTotal
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        isLoadingReceipts = false
+    }
+
+    @MainActor
+    func loadMoreReceipts() async {
+        guard !isLoadingMoreReceipts, receiptsHasMore else { return }
+        isLoadingMoreReceipts = true
+        receiptsPage += 1
+        do {
+            let response = try await repository.fetchReceipts(page: receiptsPage, limit: pageSize)
+            receipts.append(contentsOf: response.receipts)
+            receiptsHasMore = receipts.count < receiptsTotal
+        } catch {
+            receiptsPage -= 1
+            errorMessage = error.localizedDescription
+        }
+        isLoadingMoreReceipts = false
+    }
+
+    @MainActor
+    func refreshReceipts() async {
+        receiptsPage = 1
+        errorMessage = nil
+        do {
+            let response = try await repository.fetchReceipts(page: 1, limit: pageSize)
+            receipts = response.receipts
+            receiptsTotal = response.total
+            receiptsHasMore = receipts.count < receiptsTotal
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    func deleteReceipt(id: String) async {
+        do {
+            _ = try await repository.deleteReceipt(id: id)
+            receipts.removeAll { $0.id == id }
+            receiptsTotal -= 1
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    func downloadReceipt(id: String, filename: String?) async {
+        do {
+            let data = try await repository.downloadReceipt(id: id)
+            let name = filename ?? "receipt_\(id)"
+            let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(name)
+            try data.write(to: tempURL)
+            shareItem = ShareItem(url: tempURL)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    func uploadReceipt(imageData: Data, filename: String, mimeType: String) async -> String? {
+        do {
+            let response = try await repository.uploadReceipt(
+                imageData: imageData,
+                filename: filename,
+                mimeType: mimeType
+            )
+            await loadReceipts()
+            return response.id
+        } catch {
+            errorMessage = error.localizedDescription
+            return nil
+        }
+    }
+
+    @MainActor
+    func parseReceipt(id: String) async -> Receipt? {
+        do {
+            let parsed = try await repository.parseReceipt(id: id)
+            if let idx = receipts.firstIndex(where: { $0.id == id }) {
+                receipts[idx] = parsed
+            }
+            return parsed
+        } catch {
+            errorMessage = error.localizedDescription
+            return nil
+        }
+    }
+
+    @MainActor
+    func linkReceiptToTransaction(receiptId: String, transactionId: String) async {
+        do {
+            let updated = try await repository.linkReceipt(id: receiptId, transactionId: transactionId)
+            if let idx = receipts.firstIndex(where: { $0.id == receiptId }) {
+                receipts[idx] = updated
+            }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    // MARK: - Helpers
+
+    private func fetchRecordsPage(page: Int) async throws -> RecordListResponse {
+        let dateFromStr = dateFrom.map { Self.queryDateFormatter.string(from: $0) }
+        let dateToStr = dateTo.map { Self.queryDateFormatter.string(from: $0) }
+        let minAmt = Double(amountMin)
+        let maxAmt = Double(amountMax)
+
+        return try await repository.fetchRecords(
+            page: page,
+            limit: pageSize,
+            dateFrom: dateFromStr,
+            dateTo: dateToStr,
+            amountMin: minAmt,
+            amountMax: maxAmt
+        )
+    }
+}
+
+// MARK: - Share Item
+
+struct ShareItem: Identifiable {
+    let id = UUID()
+    let url: URL
 }

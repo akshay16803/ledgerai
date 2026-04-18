@@ -1,204 +1,172 @@
 import SwiftUI
 
 struct PastInsightsView: View {
-    @Environment(AppState.self) private var appState
-    @State private var viewModel = PastInsightsViewModel()
-    @State private var selectedSummary: TaxSummary?
 
-    private var currency: String {
-        appState.user?.settings?.baseCurrency ?? "INR"
+    // MARK: - Constants
+
+    private enum Brand {
+        static let primary    = Color(red: 0x3A / 255, green: 0x5C / 255, blue: 0x4A / 255)
+        static let background = Color(red: 0xF8 / 255, green: 0xF6 / 255, blue: 0xF3 / 255)
     }
+
+    // MARK: - State
+
+    @State private var viewModel = PastInsightsViewModel()
 
     // MARK: - Body
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                content
-            }
-            .background(SpentyColors.bgPrimary.ignoresSafeArea())
-            .navigationTitle("Past Insights")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        viewModel.showCreateForm = true
-                    } label: {
-                        Image(systemName: "plus.circle.fill")
-                            .font(.system(size: 20))
-                            .foregroundStyle(SpentyColors.brandAccent)
+            ZStack {
+                Brand.background.ignoresSafeArea()
+
+                Group {
+                    if viewModel.isLoading && viewModel.summaries.isEmpty {
+                        loadingView
+                    } else if viewModel.summaries.isEmpty && !viewModel.isLoading {
+                        emptyState
+                    } else {
+                        summaryList
                     }
                 }
             }
-            .task {
-                await viewModel.loadSummaries()
-            }
-            .refreshable {
-                await viewModel.refresh()
-            }
-            .overlay {
-                LoadingOverlay(isPresented: .constant(viewModel.isLoading && viewModel.summaries.isEmpty))
+            .navigationTitle("Past Insights")
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        viewModel.startCreate()
+                        Task { await viewModel.loadAvailableEmails() }
+                    } label: {
+                        Image(systemName: "plus")
+                            .fontWeight(.semibold)
+                    }
+                    .tint(Brand.primary)
+                }
             }
             .sheet(isPresented: $viewModel.showCreateForm) {
                 createFormSheet
             }
-            .sheet(item: $selectedSummary) { summary in
-                summaryDetailSheet(summary)
+            .alert("Error", isPresented: $viewModel.showError) {
+                Button("OK") { viewModel.dismissError() }
+            } message: {
+                Text(viewModel.errorMessage)
             }
-            .alert(
-                "Delete Insight",
-                isPresented: .init(
-                    get: { viewModel.showDeleteConfirm != nil },
-                    set: { if !$0 { viewModel.showDeleteConfirm = nil } }
-                ),
-                presenting: viewModel.showDeleteConfirm
-            ) { summary in
-                Button("Delete", role: .destructive) {
-                    Task { await viewModel.deleteSummary(summary.summaryId) }
-                }
-                Button("Cancel", role: .cancel) {
-                    viewModel.showDeleteConfirm = nil
-                }
-            } message: { _ in
-                Text("Are you sure you want to delete this insight? This action cannot be undone.")
+            .task {
+                await viewModel.loadSummaries()
             }
         }
     }
 
-    // MARK: - Content
+    // MARK: - Loading
 
-    @ViewBuilder
-    private var content: some View {
-        if let error = viewModel.errorMessage, viewModel.summaries.isEmpty {
-            EmptyState(
-                icon: "exclamationmark.triangle",
-                title: "Something Went Wrong",
-                message: error,
-                actionTitle: "Retry"
-            ) {
-                Task { await viewModel.loadSummaries() }
-            }
-        } else if viewModel.summaries.isEmpty && !viewModel.isLoading {
-            EmptyState(
-                icon: "chart.bar.doc.horizontal",
-                title: "No Insights Yet",
-                message: "Create your first insight to get a summary of your income, expenses, and tax-related data.",
-                actionTitle: "New Insight"
-            ) {
-                viewModel.showCreateForm = true
-            }
-        } else {
-            summariesList
+    private var loadingView: some View {
+        VStack(spacing: 12) {
+            ProgressView()
+                .tint(Brand.primary)
+            Text("Loading tax summaries...")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
         }
     }
 
-    // MARK: - Summaries List
+    // MARK: - Empty State
 
-    private var summariesList: some View {
+    private var emptyState: some View {
+        ContentUnavailableView {
+            Label("No Tax Summaries", systemImage: "doc.text.magnifyingglass")
+                .foregroundStyle(Brand.primary)
+        } description: {
+            Text("Create a tax summary to analyze your income and expenses over a date range.")
+        } actions: {
+            Button {
+                viewModel.startCreate()
+                Task { await viewModel.loadAvailableEmails() }
+            } label: {
+                Text("Create Summary")
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 10)
+                    .background(Brand.primary, in: Capsule())
+            }
+        }
+    }
+
+    // MARK: - Summary List
+
+    private var summaryList: some View {
         List {
             ForEach(viewModel.summaries) { summary in
-                summaryRow(summary)
-                    .listRowInsets(EdgeInsets())
-                    .listRowSeparator(.hidden)
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        if summary.status == "ready" {
-                            selectedSummary = summary
-                        }
-                    }
-                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                        Button(role: .destructive) {
-                            viewModel.showDeleteConfirm = summary
-                        } label: {
-                            Label("Delete", systemImage: "trash")
-                        }
-                    }
+                NavigationLink {
+                    PastInsightDetailView(viewModel: viewModel, summary: summary)
+                } label: {
+                    summaryRow(summary)
+                }
+                .listRowBackground(Color.white)
+            }
+            .onDelete { offsets in
+                Task { await viewModel.deleteSummary(at: offsets) }
             }
         }
-        .listStyle(.plain)
+        .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
+        .refreshable {
+            await viewModel.refresh()
+        }
     }
 
     private func summaryRow(_ summary: TaxSummary) -> some View {
-        SpentyCard {
-            VStack(alignment: .leading, spacing: SpentySpacing.sm) {
-                HStack {
-                    Text(summary.name ?? "Untitled")
-                        .font(SpentyFonts.subheading)
-                        .foregroundStyle(SpentyColors.textPrimary)
-                        .lineLimit(1)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(summary.name ?? "Untitled")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
 
-                    Spacer()
+                Spacer()
 
-                    statusBadge(for: summary.status)
-                }
+                statusBadge(summary.status ?? "unknown")
+            }
 
-                // Date range
-                if let from = summary.dateFrom, let to = summary.dateTo {
-                    HStack(spacing: SpentySpacing.xs) {
-                        Image(systemName: "calendar")
-                            .font(.system(size: 11))
-                        Text("\(DateFormatting.shortDate(from: from)) - \(DateFormatting.shortDate(from: to))")
-                            .font(SpentyFonts.caption)
-                    }
-                    .foregroundStyle(SpentyColors.textMuted)
-                }
+            if let from = summary.dateFrom, let to = summary.dateTo {
+                Text("\(formatDate(from)) - \(formatDate(to))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
 
-                // Totals if ready
-                if summary.status == "ready", let totals = summary.totals {
-                    Divider().overlay(SpentyColors.borderSubtle)
-
-                    HStack(spacing: SpentySpacing.lg) {
-                        totalItem(label: "Income", amount: totals.income, color: SpentyColors.success)
-                        totalItem(label: "Expense", amount: totals.expense, color: SpentyColors.danger)
-                        totalItem(label: "Net", amount: totals.net, color: SpentyColors.brandAccent)
-                    }
-                }
-
-                // Provider info
-                if let provider = summary.provider {
-                    HStack(spacing: SpentySpacing.xs) {
-                        Image(systemName: "server.rack")
-                            .font(.system(size: 11))
-                        Text(provider)
-                            .font(SpentyFonts.caption)
-                    }
-                    .foregroundStyle(SpentyColors.textMuted)
-                }
+            HStack(spacing: 16) {
+                financialPill(label: "Income", value: summary.totalIncome, color: .green)
+                financialPill(label: "Expense", value: summary.totalExpense, color: .red)
+                financialPill(label: "Net", value: summary.net, color: Brand.primary)
             }
         }
-        .shimmer(isActive: summary.status == "processing")
-        .padding(.horizontal, SpentySpacing.lg)
-        .padding(.vertical, SpentySpacing.xs)
+        .padding(.vertical, 4)
     }
 
-    @ViewBuilder
-    private func statusBadge(for status: String?) -> some View {
-        switch status {
-        case "processing":
-            StatusBadge(.processing)
-        case "ready":
-            StatusBadge(.active)
-        case "failed":
-            StatusBadge(.failed)
-        default:
-            StatusBadge(.pending)
+    private func statusBadge(_ status: String) -> some View {
+        let color: Color = switch status.lowercased() {
+        case "completed": .green
+        case "processing": .orange
+        case "failed": .red
+        default: .secondary
         }
+
+        return Text(status.capitalized)
+            .font(.caption2.weight(.semibold))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .foregroundStyle(color)
+            .background(color.opacity(0.12), in: Capsule())
     }
 
-    private func totalItem(label: String, amount: Double?, color: Color) -> some View {
+    private func financialPill(label: String, value: Double?, color: Color) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(label)
-                .font(SpentyFonts.caption)
-                .foregroundStyle(SpentyColors.textMuted)
-
-            if let amount {
-                MoneyText(amount, currency: currency, size: SpentyFonts.caption)
-            } else {
-                Text("--")
-                    .font(SpentyFonts.caption)
-                    .foregroundStyle(SpentyColors.textMuted)
-            }
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Text(formatCurrency(value ?? 0))
+                .font(.caption.weight(.medium).monospacedDigit())
+                .foregroundStyle(color)
         }
     }
 
@@ -206,168 +174,98 @@ struct PastInsightsView: View {
 
     private var createFormSheet: some View {
         NavigationStack {
-            Form {
-                Section("Insight Details") {
-                    TextField("Name", text: $viewModel.formName)
-                        .font(SpentyFonts.body)
-                }
+            ZStack {
+                Brand.background.ignoresSafeArea()
 
-                Section("Date Range") {
-                    DatePicker("From", selection: $viewModel.formDateFrom, displayedComponents: .date)
-                        .font(SpentyFonts.body)
+                Form {
+                    Section("Summary Details") {
+                        TextField("Name", text: $viewModel.createName)
 
-                    DatePicker("To", selection: $viewModel.formDateTo, displayedComponents: .date)
-                        .font(SpentyFonts.body)
-                }
+                        DatePicker("From", selection: $viewModel.createDateFrom, displayedComponents: .date)
+                            .tint(Brand.primary)
 
-                Section("Source") {
-                    TextField("Email Address", text: $viewModel.formSelectedEmail)
-                        .font(SpentyFonts.body)
-                        .textContentType(.emailAddress)
-                        .keyboardType(.emailAddress)
-                        .autocapitalization(.none)
-
-                    Picker("Provider", selection: $viewModel.formSelectedProvider) {
-                        Text("Select Provider").tag("")
-                        Text("Gmail").tag("gmail")
-                        Text("Outlook").tag("outlook")
-                        Text("Yahoo").tag("yahoo")
-                        Text("Other").tag("other")
+                        DatePicker("To", selection: $viewModel.createDateTo, displayedComponents: .date)
+                            .tint(Brand.primary)
                     }
-                    .font(SpentyFonts.body)
+
+                    Section("Email Account") {
+                        if viewModel.availableEmails.isEmpty {
+                            HStack {
+                                ProgressView()
+                                    .tint(Brand.primary)
+                                Text("Loading email accounts...")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                            }
+                        } else {
+                            Picker("Email", selection: $viewModel.createSelectedEmail) {
+                                ForEach(viewModel.availableEmails, id: \.self) { email in
+                                    Text(email).tag(email)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                        }
+                    }
+
+                    Section {
+                        Button {
+                            Task { await viewModel.createSummary() }
+                        } label: {
+                            HStack {
+                                Spacer()
+                                if viewModel.isCreating {
+                                    ProgressView()
+                                        .tint(.white)
+                                } else {
+                                    Text("Generate Tax Summary")
+                                        .fontWeight(.semibold)
+                                }
+                                Spacer()
+                            }
+                            .padding(.vertical, 4)
+                            .foregroundStyle(.white)
+                        }
+                        .listRowBackground(
+                            Brand.primary.opacity(viewModel.isCreating ? 0.6 : 1)
+                        )
+                        .disabled(viewModel.isCreating)
+                    }
                 }
+                .scrollContentBackground(.hidden)
             }
-            .scrollContentBackground(.hidden)
-            .background(SpentyColors.bgPrimary)
-            .navigationTitle("New Insight")
+            .navigationTitle("New Tax Summary")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
                         viewModel.showCreateForm = false
                     }
-                    .foregroundStyle(SpentyColors.textSecondary)
-                }
-
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Create") {
-                        Task { await viewModel.createSummary() }
-                    }
-                    .fontWeight(.semibold)
-                    .foregroundStyle(SpentyColors.brandAccent)
-                    .disabled(!viewModel.isFormValid || viewModel.isCreating)
-                }
-            }
-            .overlay {
-                LoadingOverlay(isPresented: .constant(viewModel.isCreating))
-            }
-        }
-    }
-
-    // MARK: - Detail Sheet
-
-    private func summaryDetailSheet(_ summary: TaxSummary) -> some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: SpentySpacing.lg) {
-                    // Header
-                    SpentyCard {
-                        VStack(alignment: .leading, spacing: SpentySpacing.md) {
-                            Text(summary.name ?? "Untitled")
-                                .font(SpentyFonts.heading)
-                                .foregroundStyle(SpentyColors.textPrimary)
-
-                            if let from = summary.dateFrom, let to = summary.dateTo {
-                                HStack(spacing: SpentySpacing.xs) {
-                                    Image(systemName: "calendar")
-                                        .font(.system(size: 12))
-                                    Text("\(DateFormatting.shortDate(from: from)) - \(DateFormatting.shortDate(from: to))")
-                                        .font(SpentyFonts.body)
-                                }
-                                .foregroundStyle(SpentyColors.textSecondary)
-                            }
-
-                            if let email = summary.emailAddress {
-                                HStack(spacing: SpentySpacing.xs) {
-                                    Image(systemName: "envelope")
-                                        .font(.system(size: 12))
-                                    Text(email)
-                                        .font(SpentyFonts.body)
-                                }
-                                .foregroundStyle(SpentyColors.textSecondary)
-                            }
-                        }
-                    }
-
-                    // Totals breakdown
-                    if let totals = summary.totals {
-                        SectionHeader("Summary Breakdown")
-
-                        HStack(spacing: SpentySpacing.md) {
-                            StatCard(
-                                title: "Income",
-                                value: formatCurrency(totals.income),
-                                icon: "arrow.down.circle.fill",
-                                iconColor: SpentyColors.success
-                            )
-
-                            StatCard(
-                                title: "Expense",
-                                value: formatCurrency(totals.expense),
-                                icon: "arrow.up.circle.fill",
-                                iconColor: SpentyColors.danger
-                            )
-                        }
-
-                        StatCard(
-                            title: "Net",
-                            value: formatCurrency(totals.net),
-                            icon: "equal.circle.fill",
-                            iconColor: SpentyColors.brandAccent
-                        )
-                    }
-
-                    // Export button
-                    PrimaryButton(
-                        "Share / Export",
-                        icon: "square.and.arrow.up",
-                        isFullWidth: true
-                    ) {
-                        // Export action handled via share sheet
-                    }
-                }
-                .padding(.horizontal, SpentySpacing.lg)
-                .padding(.vertical, SpentySpacing.md)
-            }
-            .background(SpentyColors.bgPrimary.ignoresSafeArea())
-            .navigationTitle("Insight Details")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") {
-                        selectedSummary = nil
-                    }
-                    .foregroundStyle(SpentyColors.brandAccent)
+                    .tint(Brand.primary)
                 }
             }
         }
+        .presentationDetents([.medium, .large])
     }
 
     // MARK: - Helpers
 
-    private func formatCurrency(_ amount: Double?) -> String {
-        guard let amount else { return "--" }
+    private func formatCurrency(_ value: Double) -> String {
         let formatter = NumberFormatter()
         formatter.numberStyle = .currency
-        formatter.currencyCode = currency
-        if currency == "INR" {
-            formatter.locale = Locale(identifier: "en_IN")
-        }
-        return formatter.string(from: NSNumber(value: amount)) ?? "\(amount)"
+        formatter.maximumFractionDigits = 0
+        return formatter.string(from: NSNumber(value: value)) ?? "\(value)"
+    }
+
+    private func formatDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .none
+        return formatter.string(from: date)
     }
 }
 
+// MARK: - Preview
+
 #Preview {
     PastInsightsView()
-        .environment(AppState())
 }

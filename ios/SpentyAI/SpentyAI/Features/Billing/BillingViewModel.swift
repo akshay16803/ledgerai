@@ -1,103 +1,290 @@
 import Foundation
-import os
+import StoreKit
+import SwiftUI
 
 @Observable
 final class BillingViewModel {
 
-    var promoCode = ""
-    var promoValid: Bool?
-    var promoError: String?
-    var promoMessage: String?
-    var isValidating = false
-    var isActivating = false
+    // MARK: - Published State
 
-    private let logger = Logger(subsystem: "com.spentyai", category: "billing")
+    var plans: [PlanDTO] = []
+    var currentStatus: SubscriptionStatus?
+    var paymentHistory: [PaymentOrder] = []
+    var isLoading = false
+    var errorMessage = ""
+    var showError = false
+
+    // Promo
+    var promoCode = ""
+    var promoMessage = ""
+    var promoValid: Bool?
+    var isValidatingPromo = false
+    var isActivatingPromo = false
+
+    // Purchase
+    var isPurchasing = false
+    var purchasingProductId: String?
+
+    // Cancel
+    var showCancelConfirmation = false
+    var isCancelling = false
+
+    // MARK: - StoreKit Products (cached)
+
+    private(set) var storeProducts: [String: Product] = [:]
+
+    // MARK: - Dependencies
+
+    private let repository: BillingRepository
+
+    // MARK: - Constants
+
+    static let subscriptionGroupId = "com.spentyai.premium"
+
+    static let allProductIds: Set<String> = [
+        "com.spentyai.monthly",
+        "com.spentyai.quarterly",
+        "com.spentyai.yearly",
+        "com.spentyai.lifetime"
+    ]
+
+    // MARK: - Init
+
+    init(repository: BillingRepository = .shared) {
+        self.repository = repository
+    }
+
+    // MARK: - Load All
+
+    @MainActor
+    func loadAll() async {
+        isLoading = true
+        showError = false
+
+        async let plansTask: ()   = loadPlans()
+        async let statusTask: ()  = loadStatus()
+        async let historyTask: () = loadHistory()
+        async let productsTask: () = loadStoreProducts()
+
+        _ = await (plansTask, statusTask, historyTask, productsTask)
+
+        isLoading = false
+    }
+
+    // MARK: - Plans
+
+    @MainActor
+    func loadPlans() async {
+        do {
+            plans = try await repository.getPlans()
+        } catch {
+            handleError(error)
+        }
+    }
+
+    // MARK: - Subscription Status
+
+    @MainActor
+    func loadStatus() async {
+        do {
+            currentStatus = try await repository.getStatus()
+        } catch {
+            handleError(error)
+        }
+    }
+
+    // MARK: - Payment History
+
+    @MainActor
+    func loadHistory() async {
+        do {
+            paymentHistory = try await repository.getHistory()
+        } catch {
+            handleError(error)
+        }
+    }
+
+    // MARK: - StoreKit Products
+
+    @MainActor
+    func loadStoreProducts() async {
+        do {
+            let products = try await Product.products(for: Self.allProductIds)
+            for product in products {
+                storeProducts[product.id] = product
+            }
+        } catch {
+            print("[Billing] Failed to load StoreKit products: \(error)")
+        }
+    }
+
+    // MARK: - Purchase
+
+    @MainActor
+    func purchasePlan(_ productId: String) async {
+        guard let product = storeProducts[productId] else {
+            errorMessage = "Product not available. Please try again later."
+            showError = true
+            return
+        }
+
+        isPurchasing = true
+        purchasingProductId = productId
+
+        do {
+            let result = try await product.purchase()
+
+            switch result {
+            case .success(let verification):
+                let transaction = try checkVerified(verification)
+
+                // Send receipt to backend
+                let jwsRepresentation = verification.jwsRepresentation
+                let response = try await repository.verifyApplePurchase(
+                    receiptData: jwsRepresentation,
+                    productId: productId
+                )
+
+                if response.success {
+                    await transaction.finish()
+                    await loadStatus()
+                    await loadHistory()
+                } else {
+                    errorMessage = response.message ?? "Purchase verification failed."
+                    showError = true
+                }
+
+            case .userCancelled:
+                break
+
+            case .pending:
+                errorMessage = "Purchase is pending approval."
+                showError = true
+
+            @unknown default:
+                break
+            }
+        } catch {
+            handleError(error)
+        }
+
+        isPurchasing = false
+        purchasingProductId = nil
+    }
 
     // MARK: - Promo Code
 
     @MainActor
     func validatePromo() async {
         let code = promoCode.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !code.isEmpty else {
-            promoError = "Please enter a promo code."
-            promoValid = false
-            return
-        }
+        guard !code.isEmpty else { return }
 
-        isValidating = true
-        promoError = nil
+        isValidatingPromo = true
         promoValid = nil
-        promoMessage = nil
+        promoMessage = ""
 
         do {
-            let response: PromoValidateResponse = try await APIClient.shared.post(
-                APIEndpoints.Promo.validate,
-                body: PromoRequest(code: code)
-            )
+            let response = try await repository.validatePromo(code: code)
             promoValid = response.valid
-            if response.valid {
-                promoMessage = response.message ?? "Promo code is valid."
-            } else {
-                promoError = response.message ?? "Invalid promo code."
-            }
+            promoMessage = response.message
         } catch {
             promoValid = false
-            promoError = "Failed to validate promo code."
-            logger.error("Promo validation error: \(error.localizedDescription)")
+            promoMessage = "Failed to validate promo code."
         }
 
-        isValidating = false
+        isValidatingPromo = false
     }
 
     @MainActor
-    func activatePromo(appState: AppState) async {
+    func activatePromo() async {
         let code = promoCode.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !code.isEmpty else { return }
+        guard !code.isEmpty, promoValid == true else { return }
 
-        isActivating = true
-        promoError = nil
+        isActivatingPromo = true
 
         do {
-            let _: PromoActivateResponse = try await APIClient.shared.post(
-                APIEndpoints.Promo.activate,
-                body: PromoRequest(code: code)
-            )
-            logger.info("Promo code activated: \(code)")
+            let response = try await repository.activatePromo(code: code)
+            promoMessage = response.message
 
-            // Refresh user to pick up new subscription state
-            await appState.refreshSubscription()
+            if response.valid {
+                promoCode = ""
+                promoValid = nil
+                await loadStatus()
+                await loadHistory()
+            }
         } catch {
-            promoError = "Failed to activate promo code."
-            logger.error("Promo activation error: \(error.localizedDescription)")
+            promoMessage = "Failed to activate promo code."
         }
 
-        isActivating = false
+        isActivatingPromo = false
     }
-}
 
-// MARK: - Request / Response Models
+    // MARK: - Cancel Subscription
 
-private struct PromoRequest: Codable {
-    let code: String
-}
+    @MainActor
+    func cancelSubscription() async {
+        isCancelling = true
 
-struct PromoValidateResponse: Codable {
-    let valid: Bool
-    let message: String?
-    let plan: String?
-    let duration: String?
-}
+        do {
+            _ = try await repository.cancelSubscription()
+            await loadStatus()
+        } catch {
+            handleError(error)
+        }
 
-struct PromoActivateResponse: Codable {
-    let success: Bool
-    let message: String?
-    let subscriptionPlan: String?
-    let subscriptionExpiry: String?
+        isCancelling = false
+    }
 
-    enum CodingKeys: String, CodingKey {
-        case success
-        case message
-        case subscriptionPlan = "subscription_plan"
-        case subscriptionExpiry = "subscription_expiry"
+    // MARK: - Entitlements Check
+
+    @MainActor
+    func checkEntitlements() async {
+        for await result in Transaction.currentEntitlements {
+            if let transaction = try? checkVerified(result) {
+                if Self.allProductIds.contains(transaction.productID) {
+                    await loadStatus()
+                    return
+                }
+            }
+        }
+    }
+
+    // MARK: - Helpers
+
+    private func checkVerified<T>(_ result: VerificationResult<T>) throws -> T {
+        switch result {
+        case .unverified(_, let error):
+            throw error
+        case .verified(let value):
+            return value
+        }
+    }
+
+    @MainActor
+    private func handleError(_ error: Error) {
+        if let apiError = error as? APIError {
+            errorMessage = apiError.localizedDescription
+        } else {
+            errorMessage = error.localizedDescription
+        }
+        showError = true
+    }
+
+    // MARK: - Computed
+
+    var isSubscribed: Bool {
+        currentStatus?.isActive == true
+    }
+
+    var currentPlanName: String? {
+        currentStatus?.plan
+    }
+
+    func isCurrentPlan(_ productId: String) -> Bool {
+        currentStatus?.isActive == true && currentStatus?.productId == productId
+    }
+
+    func displayPrice(for productId: String) -> String? {
+        storeProducts[productId]?.displayPrice
     }
 }

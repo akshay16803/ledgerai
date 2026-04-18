@@ -2,9 +2,8 @@ import Foundation
 
 enum APIError: LocalizedError {
     case unauthorized
-    case forbidden
-    case notFound
     case badRequest(String)
+    case notFound
     case serverError(String)
     case networkError(Error)
     case decodingError(Error)
@@ -13,21 +12,19 @@ enum APIError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .unauthorized:
-            return "Session expired. Please sign in again."
-        case .forbidden:
-            return "You don't have permission to perform this action."
-        case .notFound:
-            return "The requested resource was not found."
+            return "Your session has expired. Please sign in again."
         case .badRequest(let message):
             return message
+        case .notFound:
+            return "The requested resource was not found."
         case .serverError(let message):
             return "Server error: \(message)"
         case .networkError(let error):
             return "Network error: \(error.localizedDescription)"
         case .decodingError(let error):
-            return "Failed to parse response: \(error.localizedDescription)"
+            return "Failed to process server response: \(error.localizedDescription)"
         case .unknown(let code, let message):
-            return "Unexpected error (\(code)): \(message ?? "Unknown")"
+            return message ?? "An unexpected error occurred (code \(code))."
         }
     }
 }

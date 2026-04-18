@@ -1,0 +1,267 @@
+import SwiftUI
+
+struct AccountFormView: View {
+
+    @Bindable var viewModel: AccountsViewModel
+    let account: Account?
+
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var name = ""
+    @State private var accountType = "asset"
+    @State private var subType = ""
+    @State private var accountNumber = ""
+    @State private var openingBalance = ""
+    @State private var balanceAsOfDate = Date()
+    @State private var currency = "INR"
+    @State private var descriptionText = ""
+
+    // Loan fields
+    @State private var loanInterestRate = ""
+    @State private var loanTenureMonths = ""
+    @State private var loanEmiAmount = ""
+    @State private var loanEmiDay = ""
+    @State private var loanSanctionedAmount = ""
+
+    // Demat fields
+    @State private var brokerName = ""
+
+    private var isEditing: Bool { account != nil }
+    private var isLiability: Bool { accountType.lowercased() == "liability" }
+    private var isInvestment: Bool { accountType.lowercased() == "investment" }
+    private var isDematSubType: Bool {
+        subType.lowercased().contains("demat") || subType.lowercased().contains("dmat")
+    }
+    private var isFormValid: Bool { !name.trimmingCharacters(in: .whitespaces).isEmpty }
+
+    private var filteredSubTypes: [AccountSubType] {
+        viewModel.subTypesForType(accountType)
+    }
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                Color.spentyBgPrimary.ignoresSafeArea()
+
+                Form {
+                    basicInfoSection
+                    balanceSection
+
+                    if isLiability {
+                        loanSection
+                    }
+
+                    if isInvestment && isDematSubType {
+                        dematSection
+                    }
+
+                    notesSection
+                }
+                .scrollContentBackground(.hidden)
+            }
+            .navigationTitle(isEditing ? "Edit Account" : "New Account")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Cancel") { dismiss() }
+                        .foregroundColor(.spentyTextSecondary)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(isEditing ? "Save" : "Add") {
+                        Task { await save() }
+                    }
+                    .fontWeight(.semibold)
+                    .foregroundColor(isFormValid ? .spentyPrimary : .spentyTextSecondary)
+                    .disabled(!isFormValid || viewModel.isSaving)
+                }
+            }
+            .onAppear(perform: populateForm)
+            .overlay {
+                if viewModel.isSaving {
+                    Color.black.opacity(0.15).ignoresSafeArea()
+                    ProgressView("Saving...")
+                        .padding(24)
+                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+                }
+            }
+        }
+    }
+
+    // MARK: - Sections
+
+    private var basicInfoSection: some View {
+        Section {
+            TextField("Account Name", text: $name)
+                .font(SpentyFonts.body)
+
+            Picker("Account Type", selection: $accountType) {
+                ForEach(AccountsViewModel.accountTypes, id: \.self) { type in
+                    Text(type.capitalized).tag(type)
+                }
+            }
+
+            if filteredSubTypes.isEmpty {
+                TextField("Sub-Type", text: $subType)
+                    .font(SpentyFonts.body)
+            } else {
+                Picker("Sub-Type", selection: $subType) {
+                    Text("None").tag("")
+                    ForEach(filteredSubTypes) { st in
+                        Text(st.name ?? "").tag(st.name ?? "")
+                    }
+                }
+            }
+
+            TextField("Account Number", text: $accountNumber)
+                .font(SpentyFonts.body)
+                .textContentType(.creditCardNumber)
+
+            Picker("Currency", selection: $currency) {
+                ForEach(["INR", "USD", "EUR", "GBP", "AED", "SGD", "AUD", "CAD", "JPY"], id: \.self) { code in
+                    Text(code).tag(code)
+                }
+            }
+        } header: {
+            Text("Basic Information")
+                .font(SpentyFonts.caption1)
+                .foregroundColor(.spentyTextSecondary)
+        }
+    }
+
+    private var balanceSection: some View {
+        Section {
+            HStack {
+                Text("Opening Balance")
+                    .font(SpentyFonts.body)
+                Spacer()
+                TextField("0.00", text: $openingBalance)
+                    .keyboardType(.decimalPad)
+                    .multilineTextAlignment(.trailing)
+                    .frame(maxWidth: 160)
+                    .font(SpentyFonts.amountSmall)
+            }
+
+            DatePicker(
+                "Balance As-of Date",
+                selection: $balanceAsOfDate,
+                displayedComponents: .date
+            )
+            .font(SpentyFonts.body)
+        } header: {
+            Text("Balance")
+                .font(SpentyFonts.caption1)
+                .foregroundColor(.spentyTextSecondary)
+        }
+    }
+
+    private var loanSection: some View {
+        Section {
+            formNumberField("Interest Rate (%)", text: $loanInterestRate)
+            formNumberField("Tenure (Months)", text: $loanTenureMonths, isDecimal: false)
+            formNumberField("EMI Amount", text: $loanEmiAmount)
+            formNumberField("EMI Day (1-31)", text: $loanEmiDay, isDecimal: false)
+            formNumberField("Sanctioned Amount", text: $loanSanctionedAmount)
+        } header: {
+            HStack(spacing: 6) {
+                Image(systemName: "percent")
+                    .font(.system(size: 11))
+                Text("Loan Details")
+            }
+            .font(SpentyFonts.caption1)
+            .foregroundColor(.spentyError)
+        }
+    }
+
+    private var dematSection: some View {
+        Section {
+            TextField("Broker Name", text: $brokerName)
+                .font(SpentyFonts.body)
+        } header: {
+            HStack(spacing: 6) {
+                Image(systemName: "chart.line.uptrend.xyaxis")
+                    .font(.system(size: 11))
+                Text("Demat Details")
+            }
+            .font(SpentyFonts.caption1)
+            .foregroundColor(.spentyWarning)
+        }
+    }
+
+    private var notesSection: some View {
+        Section {
+            TextField("Description / Notes", text: $descriptionText, axis: .vertical)
+                .lineLimit(3...6)
+                .font(SpentyFonts.body)
+        } header: {
+            Text("Notes")
+                .font(SpentyFonts.caption1)
+                .foregroundColor(.spentyTextSecondary)
+        }
+    }
+
+    // MARK: - Helpers
+
+    private func formNumberField(_ title: String, text: Binding<String>, isDecimal: Bool = true) -> some View {
+        HStack {
+            Text(title)
+                .font(SpentyFonts.body)
+            Spacer()
+            TextField("0", text: text)
+                .keyboardType(isDecimal ? .decimalPad : .numberPad)
+                .multilineTextAlignment(.trailing)
+                .frame(maxWidth: 120)
+                .font(SpentyFonts.amountSmall)
+        }
+    }
+
+    private func populateForm() {
+        guard let account else { return }
+        name = account.name ?? ""
+        accountType = account.accountType?.lowercased() ?? "asset"
+        subType = account.subType ?? ""
+        accountNumber = account.accountNumber ?? ""
+        openingBalance = account.openingBalance.map { String($0) } ?? ""
+        balanceAsOfDate = account.balanceAsOfDate ?? Date()
+        currency = account.currency ?? "INR"
+        descriptionText = account.description ?? ""
+        loanInterestRate = account.loanInterestRate.map { String($0) } ?? ""
+        loanTenureMonths = account.loanTenureMonths.map { String($0) } ?? ""
+        loanEmiAmount = account.loanEmiAmount.map { String($0) } ?? ""
+        loanEmiDay = account.loanEmiDay.map { String($0) } ?? ""
+        loanSanctionedAmount = account.loanSanctionedAmount.map { String($0) } ?? ""
+        brokerName = account.brokerName ?? ""
+    }
+
+    private func save() async {
+        var payload: [String: Any] = [
+            "name": name.trimmingCharacters(in: .whitespaces),
+            "accountType": accountType,
+            "currency": currency
+        ]
+
+        if !subType.isEmpty { payload["subType"] = subType }
+        if !accountNumber.isEmpty { payload["accountNumber"] = accountNumber }
+        if let val = Double(openingBalance) { payload["openingBalance"] = val }
+        payload["balanceAsOfDate"] = balanceAsOfDate
+        if !descriptionText.isEmpty { payload["description"] = descriptionText }
+
+        if isLiability {
+            if let val = Double(loanInterestRate) { payload["loanInterestRate"] = val }
+            if let val = Int(loanTenureMonths) { payload["loanTenureMonths"] = val }
+            if let val = Double(loanEmiAmount) { payload["loanEmiAmount"] = val }
+            if let val = Int(loanEmiDay) { payload["loanEmiDay"] = val }
+            if let val = Double(loanSanctionedAmount) { payload["loanSanctionedAmount"] = val }
+        }
+
+        if isInvestment && isDematSubType && !brokerName.isEmpty {
+            payload["brokerName"] = brokerName
+        }
+
+        let success = await viewModel.saveAccount(payload, editId: account?.id)
+        if success { dismiss() }
+    }
+}
+
+#Preview {
+    AccountFormView(viewModel: AccountsViewModel(), account: nil)
+}

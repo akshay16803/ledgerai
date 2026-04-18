@@ -1,160 +1,317 @@
 import Foundation
-import os
+import SwiftUI
 
 @Observable
 final class PastInsightsViewModel {
 
-    // MARK: - Data
-
-    var summaries: [TaxSummary] = []
-
     // MARK: - State
 
+    var summaries: [TaxSummary] = []
+    var availableEmails: [String] = []
+    var selectedSummary: TaxSummary?
+    var detailTransactions: [TaxSummaryTransaction] = []
     var isLoading = false
-    var isRefreshing = false
     var isCreating = false
-    var errorMessage: String?
-    var showCreateForm = false
-    var showDeleteConfirm: TaxSummary?
+    var isLoadingTransactions = false
+    var errorMessage = ""
+    var showError = false
 
     // MARK: - Create Form State
 
-    var formName = ""
-    var formDateFrom = Date()
-    var formDateTo = Date()
-    var formSelectedEmail = ""
-    var formSelectedProvider = ""
+    var showCreateForm = false
+    var createName = ""
+    var createDateFrom = Calendar.current.date(byAdding: .year, value: -1, to: Date()) ?? Date()
+    var createDateTo = Date()
+    var createSelectedEmail = ""
 
-    var isFormValid: Bool {
-        !formName.trimmingCharacters(in: .whitespaces).isEmpty &&
-        !formSelectedEmail.trimmingCharacters(in: .whitespaces).isEmpty &&
-        !formSelectedProvider.trimmingCharacters(in: .whitespaces).isEmpty
-    }
+    // MARK: - Transaction Form State
 
-    // MARK: - Private
+    var showAddTransaction = false
+    var editingTransaction: TaxSummaryTransaction?
+    var txnDate = Date()
+    var txnDescription = ""
+    var txnAmount = ""
+    var txnType = "expense"
+    var txnCategory = ""
 
-    private let repo = PastInsightsRepository()
-    private let logger = Logger(subsystem: "com.spentyai", category: "past-insights")
-    private var pollingTask: Task<Void, Never>?
+    // MARK: - Share Sheet
 
-    private let dateFormatter: ISO8601DateFormatter = {
+    var shareItem: ShareableFile?
+    var showShareSheet = false
+
+    // MARK: - Dependencies
+
+    private let repository = PastInsightsRepository.shared
+
+    // MARK: - Date Formatter
+
+    private let isoFormatter: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withFullDate]
         return f
     }()
 
-    // MARK: - Methods
+    // MARK: - Summaries CRUD
 
     @MainActor
     func loadSummaries() async {
         isLoading = true
-        errorMessage = nil
-
         do {
-            summaries = try await repo.getSummaries()
-            startPollingIfNeeded()
+            summaries = try await repository.getSummaries()
         } catch {
-            errorMessage = "Failed to load insights."
-            logger.error("Load summaries error: \(error.localizedDescription)")
+            setError(error)
         }
-
         isLoading = false
     }
 
     @MainActor
-    func createSummary() async {
-        isCreating = true
+    func refresh() async {
+        do {
+            summaries = try await repository.getSummaries()
+        } catch {
+            setError(error)
+        }
+    }
 
-        let body = TaxSummaryCreate(
-            name: formName.trimmingCharacters(in: .whitespaces),
-            dateFrom: dateFormatter.string(from: formDateFrom),
-            dateTo: dateFormatter.string(from: formDateTo),
-            emailAddress: formSelectedEmail.trimmingCharacters(in: .whitespaces),
-            provider: formSelectedProvider
+    @MainActor
+    func loadAvailableEmails() async {
+        do {
+            availableEmails = try await repository.getAvailableEmails()
+            if createSelectedEmail.isEmpty, let first = availableEmails.first {
+                createSelectedEmail = first
+            }
+        } catch {
+            setError(error)
+        }
+    }
+
+    @MainActor
+    func createSummary() async {
+        guard !createName.trimmingCharacters(in: .whitespaces).isEmpty else {
+            errorMessage = "Please enter a name for the summary."
+            showError = true
+            return
+        }
+
+        isCreating = true
+        let request = CreateTaxSummaryRequest(
+            name: createName.trimmingCharacters(in: .whitespaces),
+            dateFrom: isoFormatter.string(from: createDateFrom),
+            dateTo: isoFormatter.string(from: createDateTo),
+            emailAddress: createSelectedEmail
         )
 
         do {
-            let created = try await repo.createSummary(body)
-            summaries.insert(created, at: 0)
-            resetForm()
-            showCreateForm = false
-            startPollingIfNeeded()
-            logger.info("Created summary: \(created.summaryId)")
-        } catch {
-            errorMessage = "Failed to create insight."
-            logger.error("Create summary error: \(error.localizedDescription)")
-        }
+            let summary = try await repository.createSummary(request)
+            summaries.insert(summary, at: 0)
 
+            // Trigger generation
+            _ = try? await repository.generateSummary()
+
+            resetCreateForm()
+            showCreateForm = false
+        } catch {
+            setError(error)
+        }
         isCreating = false
     }
 
     @MainActor
-    func deleteSummary(_ id: String) async {
-        do {
-            try await repo.deleteSummary(id)
-            summaries.removeAll { $0.summaryId == id }
-            logger.info("Deleted summary: \(id)")
-        } catch {
-            errorMessage = "Failed to delete insight."
-            logger.error("Delete summary error: \(error.localizedDescription)")
+    func deleteSummary(at offsets: IndexSet) async {
+        let toDelete = offsets.map { summaries[$0] }
+        for summary in toDelete {
+            do {
+                try await repository.deleteSummary(id: summary.id)
+                summaries.removeAll { $0.id == summary.id }
+            } catch {
+                setError(error)
+            }
         }
+    }
 
-        showDeleteConfirm = nil
+    // MARK: - Detail / Transactions
+
+    @MainActor
+    func loadDetail(for summary: TaxSummary) async {
+        selectedSummary = summary
+        isLoadingTransactions = true
+        do {
+            let fresh = try await repository.getSummary(id: summary.id)
+            selectedSummary = fresh
+            if let idx = summaries.firstIndex(where: { $0.id == summary.id }) {
+                summaries[idx] = fresh
+            }
+            detailTransactions = try await repository.getTransactions(summaryId: summary.id)
+        } catch {
+            setError(error)
+        }
+        isLoadingTransactions = false
     }
 
     @MainActor
-    func refresh() async {
-        isRefreshing = true
-        await loadSummaries()
-        isRefreshing = false
+    func refreshDetail() async {
+        guard let summary = selectedSummary else { return }
+        await loadDetail(for: summary)
     }
 
-    // MARK: - Polling
-
-    private func startPollingIfNeeded() {
-        let hasProcessing = summaries.contains { $0.status == "processing" }
-        guard hasProcessing else {
-            pollingTask?.cancel()
-            pollingTask = nil
+    @MainActor
+    func addTransaction() async {
+        guard let summaryId = selectedSummary?.id else { return }
+        guard !txnDescription.trimmingCharacters(in: .whitespaces).isEmpty,
+              let amount = Double(txnAmount) else {
+            errorMessage = "Please fill in description and a valid amount."
+            showError = true
             return
         }
 
-        guard pollingTask == nil else { return }
+        let request = AddTransactionRequest(
+            date: isoFormatter.string(from: txnDate),
+            description: txnDescription.trimmingCharacters(in: .whitespaces),
+            amount: amount,
+            transactionType: txnType,
+            categoryName: txnCategory.isEmpty ? nil : txnCategory
+        )
 
-        pollingTask = Task { [weak self] in
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(5))
-                guard !Task.isCancelled else { break }
-                await self?.pollProcessingSummaries()
-            }
+        do {
+            let txn = try await repository.addTransaction(summaryId: summaryId, request)
+            detailTransactions.insert(txn, at: 0)
+            resetTransactionForm()
+            showAddTransaction = false
+        } catch {
+            setError(error)
         }
     }
 
     @MainActor
-    private func pollProcessingSummaries() async {
+    func updateTransaction() async {
+        guard let summaryId = selectedSummary?.id,
+              let txnId = editingTransaction?.id else { return }
+
+        let request = UpdateTransactionRequest(
+            date: isoFormatter.string(from: txnDate),
+            description: txnDescription.trimmingCharacters(in: .whitespaces),
+            amount: Double(txnAmount),
+            transactionType: txnType,
+            categoryName: txnCategory.isEmpty ? nil : txnCategory
+        )
+
         do {
-            summaries = try await repo.getSummaries()
-            let hasProcessing = summaries.contains { $0.status == "processing" }
-            if !hasProcessing {
-                pollingTask?.cancel()
-                pollingTask = nil
+            let updated = try await repository.updateTransaction(summaryId: summaryId, txnId: txnId, request)
+            if let idx = detailTransactions.firstIndex(where: { $0.id == txnId }) {
+                detailTransactions[idx] = updated
             }
+            resetTransactionForm()
+            editingTransaction = nil
+            showAddTransaction = false
         } catch {
-            logger.error("Polling error: \(error.localizedDescription)")
+            setError(error)
         }
     }
 
-    // MARK: - Helpers
-
-    private func resetForm() {
-        formName = ""
-        formDateFrom = Date()
-        formDateTo = Date()
-        formSelectedEmail = ""
-        formSelectedProvider = ""
+    @MainActor
+    func deleteTransaction(_ txn: TaxSummaryTransaction) async {
+        guard let summaryId = selectedSummary?.id else { return }
+        do {
+            try await repository.deleteTransaction(summaryId: summaryId, txnId: txn.id)
+            detailTransactions.removeAll { $0.id == txn.id }
+        } catch {
+            setError(error)
+        }
     }
 
-    deinit {
-        pollingTask?.cancel()
+    // MARK: - Export / Download
+
+    @MainActor
+    func exportCSV() async {
+        guard let summaryId = selectedSummary?.id else { return }
+        do {
+            let data = try await repository.exportCSV(summaryId: summaryId)
+            let name = selectedSummary?.name ?? "tax-summary"
+            let sanitized = name.replacingOccurrences(of: " ", with: "-").lowercased()
+            let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(sanitized).csv")
+            try data.write(to: tempURL)
+            shareItem = ShareableFile(url: tempURL)
+            showShareSheet = true
+        } catch {
+            setError(error)
+        }
     }
+
+    @MainActor
+    func downloadPDF() async {
+        guard let summaryId = selectedSummary?.id else { return }
+        do {
+            let data = try await repository.downloadPDF(summaryId: summaryId)
+            let name = selectedSummary?.name ?? "tax-summary"
+            let sanitized = name.replacingOccurrences(of: " ", with: "-").lowercased()
+            let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(sanitized).pdf")
+            try data.write(to: tempURL)
+            shareItem = ShareableFile(url: tempURL)
+            showShareSheet = true
+        } catch {
+            setError(error)
+        }
+    }
+
+    // MARK: - Form Helpers
+
+    func startCreate() {
+        resetCreateForm()
+        showCreateForm = true
+    }
+
+    func startAddTransaction() {
+        resetTransactionForm()
+        editingTransaction = nil
+        showAddTransaction = true
+    }
+
+    func startEditTransaction(_ txn: TaxSummaryTransaction) {
+        editingTransaction = txn
+        txnDate = txn.date ?? Date()
+        txnDescription = txn.description ?? ""
+        txnAmount = txn.amount.map { String(format: "%.2f", $0) } ?? ""
+        txnType = txn.transactionType ?? "expense"
+        txnCategory = txn.categoryName ?? ""
+        showAddTransaction = true
+    }
+
+    func dismissError() {
+        showError = false
+        errorMessage = ""
+    }
+
+    // MARK: - Private
+
+    private func resetCreateForm() {
+        createName = ""
+        createDateFrom = Calendar.current.date(byAdding: .year, value: -1, to: Date()) ?? Date()
+        createDateTo = Date()
+        createSelectedEmail = availableEmails.first ?? ""
+    }
+
+    private func resetTransactionForm() {
+        txnDate = Date()
+        txnDescription = ""
+        txnAmount = ""
+        txnType = "expense"
+        txnCategory = ""
+    }
+
+    @MainActor
+    private func setError(_ error: Error) {
+        if let apiError = error as? APIError {
+            errorMessage = apiError.localizedDescription
+        } else {
+            errorMessage = error.localizedDescription
+        }
+        showError = true
+    }
+}
+
+// MARK: - Shareable File
+
+struct ShareableFile: Identifiable {
+    let id = UUID()
+    let url: URL
 }

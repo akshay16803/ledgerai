@@ -1,257 +1,415 @@
 import Foundation
 import AuthenticationServices
-import SwiftUI
 
 @Observable
 final class EmailSyncViewModel {
 
     // MARK: - State
 
-    var gmailStatus: EmailSyncStatus?
-    var outlookStatus: EmailSyncStatus?
+    var gmailAccounts: [EmailAccount] = []
+    var outlookAccounts: [EmailAccount] = []
+    var smsStats: SMSSyncStats?
+    var syncStatsResponse: EmailSyncStatsResponse?
     var pendingTransactions: [PendingTransaction] = []
+
     var isLoading = false
+    var isConnecting = false
     var isSyncing = false
-    var error: String?
-    var showDisconnectConfirm: String? // provider name or nil
+    var isRetrying = false
+    var isLoadingPending = false
 
-    // MARK: - Private
+    var errorMessage = ""
+    var showError = false
+    var successMessage = ""
+    var showSuccess = false
 
-    private let repository = EmailSyncRepository()
+    var showDisconnectConfirm = false
+    var disconnectProvider: String?
 
-    // MARK: - Load All
+    // MARK: - Pending Review Edit
 
+    var editingTransaction: PendingTransaction?
+    var showEditSheet = false
+    var editDescription = ""
+    var editAmount = ""
+    var editAccountId = ""
+    var editCategoryId = ""
+
+    // MARK: - Selection for bulk actions
+
+    var selectedTransactionIds: Set<String> = []
+
+    // MARK: - Dependencies
+
+    private let repository: EmailSyncRepository
+
+    // MARK: - Init
+
+    init(repository: EmailSyncRepository = .shared) {
+        self.repository = repository
+    }
+
+    // MARK: - Load All Data
+
+    @MainActor
     func loadAll() async {
         isLoading = true
-        error = nil
+        showError = false
 
-        async let gmail: () = loadGmailStatus()
-        async let outlook: () = loadOutlookStatus()
-        async let pending: () = loadPending()
+        async let gmailTask: () = loadGmailStatus()
+        async let outlookTask: () = loadOutlookStatus()
+        async let statsTask: () = loadSyncStats()
+        async let smsTask: () = loadSMSStats()
 
-        _ = await (gmail, outlook, pending)
+        _ = await (gmailTask, outlookTask, statsTask, smsTask)
+
         isLoading = false
     }
 
+    // MARK: - Gmail
+
+    @MainActor
+    func connectGmail() async {
+        isConnecting = true
+        showError = false
+
+        do {
+            let response = try await repository.connectGmail()
+            if let urlString = response.authUrl, let url = URL(string: urlString) {
+                await openOAuthSession(url: url, provider: "gmail")
+            }
+        } catch {
+            handleError(error)
+        }
+
+        isConnecting = false
+    }
+
+    @MainActor
     func loadGmailStatus() async {
         do {
-            gmailStatus = try await repository.getGmailStatus()
+            let status = try await repository.gmailStatus()
+            gmailAccounts = status.accounts ?? []
         } catch {
-            gmailStatus = EmailSyncStatus(
-                connected: false,
-                lastSyncDate: nil,
-                totalRecords: nil,
-                foundTransactions: nil,
-                skippedCount: nil,
-                pendingCount: nil,
-                failedCount: nil
-            )
+            // Silently handle — may not have Gmail connected
         }
     }
 
+    @MainActor
+    func disconnectGmail() async {
+        isLoading = true
+        showError = false
+
+        do {
+            _ = try await repository.disconnectGmail()
+            gmailAccounts = []
+            showSuccessMessage("Gmail disconnected successfully")
+            await loadSyncStats()
+        } catch {
+            handleError(error)
+        }
+
+        isLoading = false
+    }
+
+    // MARK: - Outlook
+
+    @MainActor
+    func connectOutlook() async {
+        isConnecting = true
+        showError = false
+
+        do {
+            let response = try await repository.connectOutlook()
+            if let urlString = response.authUrl, let url = URL(string: urlString) {
+                await openOAuthSession(url: url, provider: "outlook")
+            }
+        } catch {
+            handleError(error)
+        }
+
+        isConnecting = false
+    }
+
+    @MainActor
     func loadOutlookStatus() async {
         do {
-            outlookStatus = try await repository.getOutlookStatus()
+            let status = try await repository.outlookStatus()
+            outlookAccounts = status.accounts ?? []
         } catch {
-            outlookStatus = EmailSyncStatus(
-                connected: false,
-                lastSyncDate: nil,
-                totalRecords: nil,
-                foundTransactions: nil,
-                skippedCount: nil,
-                pendingCount: nil,
-                failedCount: nil
-            )
+            // Silently handle — may not have Outlook connected
         }
     }
 
-    func loadPending() async {
-        do {
-            pendingTransactions = try await repository.getPendingReview()
-        } catch {
-            pendingTransactions = []
-        }
-    }
+    @MainActor
+    func disconnectOutlook() async {
+        isLoading = true
+        showError = false
 
-    // MARK: - Connect
-
-    func connectGmail() async {
         do {
-            let authResponse = try await repository.getGmailAuthURL()
-            guard let url = URL(string: authResponse.url) else {
-                self.error = "Invalid Gmail auth URL"
-                return
-            }
-            let callbackCode = try await performOAuth(url: url, callbackScheme: "spentyai")
-            let _: AuthURLResponse = try await APIClient.shared.get(
-                APIEndpoints.Gmail.callback,
-                query: ["code": callbackCode]
-            )
-            await loadGmailStatus()
-            await loadPending()
+            _ = try await repository.disconnectOutlook()
+            outlookAccounts = []
+            showSuccessMessage("Outlook disconnected successfully")
+            await loadSyncStats()
         } catch {
-            self.error = "Failed to connect Gmail: \(error.localizedDescription)"
+            handleError(error)
         }
-    }
 
-    func connectOutlook() async {
-        do {
-            let authResponse = try await repository.getOutlookAuthURL()
-            guard let url = URL(string: authResponse.url) else {
-                self.error = "Invalid Outlook auth URL"
-                return
-            }
-            let callbackCode = try await performOAuth(url: url, callbackScheme: "spentyai")
-            let _: AuthURLResponse = try await APIClient.shared.get(
-                APIEndpoints.Outlook.callback,
-                query: ["code": callbackCode]
-            )
-            await loadOutlookStatus()
-            await loadPending()
-        } catch {
-            self.error = "Failed to connect Outlook: \(error.localizedDescription)"
-        }
+        isLoading = false
     }
 
     // MARK: - Sync
 
-    func syncGmail() async {
+    @MainActor
+    func startSync() async {
         isSyncing = true
+        showError = false
+
         do {
-            let result = try await repository.syncGmail()
-            if !result.success {
-                self.error = result.message ?? "Gmail sync failed"
-            }
+            let response = try await repository.startSync()
+            showSuccessMessage(response.message ?? "Sync started")
+            await loadSyncStats()
             await loadGmailStatus()
-            await loadPending()
-        } catch {
-            self.error = "Gmail sync failed: \(error.localizedDescription)"
-        }
-        isSyncing = false
-    }
-
-    func syncOutlook() async {
-        isSyncing = true
-        do {
-            let result = try await repository.syncOutlook()
-            if !result.success {
-                self.error = result.message ?? "Outlook sync failed"
-            }
             await loadOutlookStatus()
-            await loadPending()
         } catch {
-            self.error = "Outlook sync failed: \(error.localizedDescription)"
+            handleError(error)
         }
+
         isSyncing = false
     }
-
-    // MARK: - Disconnect
-
-    func disconnectGmail() async {
-        do {
-            try await repository.disconnectGmail()
-            gmailStatus = EmailSyncStatus(
-                connected: false,
-                lastSyncDate: nil,
-                totalRecords: nil,
-                foundTransactions: nil,
-                skippedCount: nil,
-                pendingCount: nil,
-                failedCount: nil
-            )
-            await loadPending()
-        } catch {
-            self.error = "Failed to disconnect Gmail: \(error.localizedDescription)"
-        }
-    }
-
-    func disconnectOutlook() async {
-        do {
-            try await repository.disconnectOutlook()
-            outlookStatus = EmailSyncStatus(
-                connected: false,
-                lastSyncDate: nil,
-                totalRecords: nil,
-                foundTransactions: nil,
-                skippedCount: nil,
-                pendingCount: nil,
-                failedCount: nil
-            )
-            await loadPending()
-        } catch {
-            self.error = "Failed to disconnect Outlook: \(error.localizedDescription)"
-        }
-    }
-
-    // MARK: - Transaction Actions
-
-    func approveTransaction(_ id: String) async {
-        pendingTransactions.removeAll { $0.id == id }
-    }
-
-    func rejectTransaction(_ id: String) async {
-        pendingTransactions.removeAll { $0.id == id }
-    }
-
-    // MARK: - Refresh
-
-    func refresh() async {
-        await loadAll()
-    }
-
-    // MARK: - OAuth Helper
 
     @MainActor
-    private func performOAuth(url: URL, callbackScheme: String) async throws -> String {
-        try await withCheckedThrowingContinuation { continuation in
+    func retryPending() async {
+        isRetrying = true
+        showError = false
+
+        do {
+            let response = try await repository.retryPending()
+            let msg = response.message ?? "Retried \(response.retried ?? 0) emails"
+            showSuccessMessage(msg)
+            await loadSyncStats()
+        } catch {
+            handleError(error)
+        }
+
+        isRetrying = false
+    }
+
+    // MARK: - Stats
+
+    @MainActor
+    func loadSyncStats() async {
+        do {
+            syncStatsResponse = try await repository.syncStats()
+        } catch {
+            // Non-critical
+        }
+    }
+
+    @MainActor
+    func loadSMSStats() async {
+        do {
+            smsStats = try await repository.smsStats()
+        } catch {
+            // Non-critical
+        }
+    }
+
+    // MARK: - Pending Review
+
+    @MainActor
+    func loadPendingReview() async {
+        isLoadingPending = true
+        showError = false
+
+        do {
+            pendingTransactions = try await repository.pendingReview()
+        } catch {
+            handleError(error)
+        }
+
+        isLoadingPending = false
+    }
+
+    @MainActor
+    func approveTransaction(_ id: String) async {
+        do {
+            _ = try await repository.approveTransaction(id)
+            pendingTransactions.removeAll { $0.id == id }
+            selectedTransactionIds.remove(id)
+            await loadSyncStats()
+        } catch {
+            handleError(error)
+        }
+    }
+
+    @MainActor
+    func rejectTransaction(_ id: String) async {
+        do {
+            _ = try await repository.rejectTransaction(id)
+            pendingTransactions.removeAll { $0.id == id }
+            selectedTransactionIds.remove(id)
+            await loadSyncStats()
+        } catch {
+            handleError(error)
+        }
+    }
+
+    @MainActor
+    func bulkApprove() async {
+        guard !selectedTransactionIds.isEmpty else { return }
+        let ids = Array(selectedTransactionIds)
+
+        do {
+            _ = try await repository.bulkApproveTransactions(ids: ids)
+            pendingTransactions.removeAll { ids.contains($0.id) }
+            selectedTransactionIds.removeAll()
+            showSuccessMessage("Approved \(ids.count) transaction\(ids.count == 1 ? "" : "s")")
+            await loadSyncStats()
+        } catch {
+            handleError(error)
+        }
+    }
+
+    @MainActor
+    func bulkReject() async {
+        guard !selectedTransactionIds.isEmpty else { return }
+        let ids = Array(selectedTransactionIds)
+
+        do {
+            _ = try await repository.bulkRejectTransactions(ids: ids)
+            pendingTransactions.removeAll { ids.contains($0.id) }
+            selectedTransactionIds.removeAll()
+            showSuccessMessage("Rejected \(ids.count) transaction\(ids.count == 1 ? "" : "s")")
+            await loadSyncStats()
+        } catch {
+            handleError(error)
+        }
+    }
+
+    @MainActor
+    func beginEditTransaction(_ transaction: PendingTransaction) {
+        editingTransaction = transaction
+        editDescription = transaction.description ?? ""
+        editAmount = transaction.amount.map { String(format: "%.2f", $0) } ?? ""
+        editAccountId = transaction.accountId ?? ""
+        editCategoryId = transaction.categoryId ?? ""
+        showEditSheet = true
+    }
+
+    @MainActor
+    func saveEditedTransaction() async {
+        guard let txn = editingTransaction else { return }
+
+        let update = PendingTransactionUpdate(
+            description: editDescription.isEmpty ? nil : editDescription,
+            amount: Double(editAmount),
+            accountId: editAccountId.isEmpty ? nil : editAccountId,
+            categoryId: editCategoryId.isEmpty ? nil : editCategoryId
+        )
+
+        do {
+            _ = try await repository.updateTransaction(txn.id, body: update)
+            showEditSheet = false
+            editingTransaction = nil
+            await loadPendingReview()
+            showSuccessMessage("Transaction updated")
+        } catch {
+            handleError(error)
+        }
+    }
+
+    // MARK: - Selection Helpers
+
+    func toggleSelection(_ id: String) {
+        if selectedTransactionIds.contains(id) {
+            selectedTransactionIds.remove(id)
+        } else {
+            selectedTransactionIds.insert(id)
+        }
+    }
+
+    func selectAll() {
+        selectedTransactionIds = Set(pendingTransactions.map(\.id))
+    }
+
+    func deselectAll() {
+        selectedTransactionIds.removeAll()
+    }
+
+    var allSelected: Bool {
+        !pendingTransactions.isEmpty && selectedTransactionIds.count == pendingTransactions.count
+    }
+
+    // MARK: - OAuth
+
+    @MainActor
+    private func openOAuthSession(url: URL, provider: String) async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             let session = ASWebAuthenticationSession(
                 url: url,
-                callbackURLScheme: callbackScheme
-            ) { callbackURL, error in
+                callbackURLScheme: "spentyai"
+            ) { [weak self] callbackURL, error in
                 if let error {
-                    continuation.resume(throwing: error)
-                    return
+                    if (error as NSError).code != ASWebAuthenticationSessionError.canceledLogin.rawValue {
+                        Task { @MainActor in
+                            self?.errorMessage = "Authentication cancelled or failed: \(error.localizedDescription)"
+                            self?.showError = true
+                        }
+                    }
+                } else {
+                    Task { @MainActor in
+                        self?.showSuccessMessage("\(provider.capitalized) connected successfully")
+                        if provider == "gmail" {
+                            await self?.loadGmailStatus()
+                        } else {
+                            await self?.loadOutlookStatus()
+                        }
+                        await self?.loadSyncStats()
+                    }
                 }
-                guard let callbackURL,
-                      let components = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false),
-                      let code = components.queryItems?.first(where: { $0.name == "code" })?.value
-                else {
-                    continuation.resume(throwing: EmailSyncError.oauthFailed)
-                    return
-                }
-                continuation.resume(returning: code)
+                continuation.resume()
             }
-            session.prefersEphemeralWebBrowserSession = true
-            session.presentationContextProvider = OAuthPresentationContext.shared
+            session.prefersEphemeralWebBrowserSession = false
             session.start()
         }
     }
-}
 
-// MARK: - Error
+    // MARK: - Computed
 
-enum EmailSyncError: LocalizedError {
-    case oauthFailed
-
-    var errorDescription: String? {
-        switch self {
-        case .oauthFailed:
-            return "OAuth authentication failed. Please try again."
-        }
+    var totalConnectedAccounts: Int {
+        gmailAccounts.count + outlookAccounts.count
     }
-}
 
-// MARK: - OAuth Presentation Context
+    var hasAnyAccount: Bool {
+        !gmailAccounts.isEmpty || !outlookAccounts.isEmpty
+    }
 
-private final class OAuthPresentationContext: NSObject, ASWebAuthenticationPresentationContextProviding {
-    static let shared = OAuthPresentationContext()
+    var pendingReviewCount: Int {
+        syncStatsResponse?.pendingReview ?? 0
+    }
 
-    func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
-        guard let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-              let window = scene.windows.first
-        else {
-            return ASPresentationAnchor()
+    var isAnySyncing: Bool {
+        gmailAccounts.contains { $0.syncing == true } ||
+        outlookAccounts.contains { $0.syncing == true } ||
+        syncStatsResponse?.isProcessing == true
+    }
+
+    // MARK: - Helpers
+
+    @MainActor
+    private func handleError(_ error: Error) {
+        if let apiError = error as? APIError {
+            errorMessage = apiError.localizedDescription
+        } else {
+            errorMessage = error.localizedDescription
         }
-        return window
+        showError = true
+    }
+
+    @MainActor
+    private func showSuccessMessage(_ message: String) {
+        successMessage = message
+        showSuccess = true
     }
 }

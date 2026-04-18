@@ -1,54 +1,90 @@
 import Foundation
 
-// MARK: - Request Types
-
-struct MandateCreate: Codable {
-    var merchant: String
-    var amount: Double
-    var frequency: String
-    var mandateType: String
-    var startDate: String
-    var endDate: String?
-    var debitDay: Int
-    var accountId: String?
-
-    enum CodingKeys: String, CodingKey {
-        case merchant
-        case amount
-        case frequency
-        case mandateType = "mandate_type"
-        case startDate = "start_date"
-        case endDate = "end_date"
-        case debitDay = "debit_day"
-        case accountId = "account_id"
-    }
+struct RecurringListResponse: Codable {
+    let items: [RecurringItem]
 }
 
-// MARK: - Repository
+struct MandateListResponse: Codable {
+    let mandates: [Mandate]
+}
 
-struct CashFlowRepository {
+struct UpcomingMandatesResponse: Codable {
+    let upcoming: [Mandate]
+}
+
+struct DetectMandatesResponse: Codable {
+    let detected: Int?
+    let message: String?
+}
+
+struct MandateCreateBody: Codable {
+    let merchant: String
+    let amount: Double
+    let frequency: String
+    let mandateType: String?
+}
+
+struct MandateUpdateBody: Codable {
+    let amount: Double?
+    let status: String?
+    let frequency: String?
+}
+
+final class CashFlowRepository: Sendable {
+
+    static let shared = CashFlowRepository()
+    private let api = APIClient.shared
+
+    private init() {}
+
+    // MARK: - Projection
 
     func getProjection() async throws -> CashFlowProjection {
-        try await APIClient.shared.get(APIEndpoints.CashFlow.projection)
+        try await api.get(APIEndpoints.cashflowProjection)
     }
 
-    func getRecurring() async throws -> [CashFlowRecurringItem] {
-        try await APIClient.shared.get(APIEndpoints.CashFlow.recurring)
+    func getHistory() async throws -> CashFlowProjection {
+        try await api.get(APIEndpoints.cashflowHistory)
     }
+
+    // MARK: - Mandates
 
     func getMandates() async throws -> [Mandate] {
-        try await APIClient.shared.get(APIEndpoints.Mandates.list)
+        let response: MandateListResponse = try await api.get(APIEndpoints.mandates)
+        return response.mandates
     }
 
-    func createMandate(_ body: MandateCreate) async throws -> Mandate {
-        try await APIClient.shared.post(APIEndpoints.Mandates.create, body: body)
+    func getUpcoming() async throws -> [Mandate] {
+        let response: UpcomingMandatesResponse = try await api.get(APIEndpoints.mandatesUpcoming)
+        return response.upcoming
     }
 
-    func updateMandate(_ id: String, _ body: MandateCreate) async throws -> Mandate {
-        try await APIClient.shared.put(APIEndpoints.Mandates.update(id), body: body)
+    func createMandate(merchant: String, amount: Double, frequency: String, mandateType: String? = nil) async throws -> Mandate {
+        let body = MandateCreateBody(merchant: merchant, amount: amount, frequency: frequency, mandateType: mandateType)
+        return try await api.post(APIEndpoints.mandates, body: body)
     }
 
-    func deleteMandate(_ id: String) async throws {
-        try await APIClient.shared.delete(APIEndpoints.Mandates.delete(id))
+    func updateMandate(id: String, amount: Double? = nil, status: String? = nil, frequency: String? = nil) async throws -> Mandate {
+        let body = MandateUpdateBody(amount: amount, status: status, frequency: frequency)
+        return try await api.patch(APIEndpoints.mandate(id), body: body)
+    }
+
+    func deleteMandate(id: String) async throws -> MessageResponse {
+        try await api.delete(APIEndpoints.mandate(id))
+    }
+
+    func detectMandates() async throws -> DetectMandatesResponse {
+        try await api.post(APIEndpoints.mandatesDetect)
+    }
+
+    // MARK: - Recurring
+
+    func getRecurringList() async throws -> [RecurringItem] {
+        let response: RecurringListResponse = try await api.get(APIEndpoints.recurringList)
+        return response.items
+    }
+
+    func toggleRecurring(transactionId: String) async throws -> Transaction {
+        try await api.post(APIEndpoints.transactionToggleRecurring(transactionId))
     }
 }

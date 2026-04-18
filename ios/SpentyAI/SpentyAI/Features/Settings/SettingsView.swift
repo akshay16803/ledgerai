@@ -1,454 +1,396 @@
 import SwiftUI
+import PhotosUI
 
 struct SettingsView: View {
 
-    @State private var viewModel = SettingsViewModel()
-    @Environment(AppState.self) private var appState
-
     // MARK: - Constants
 
-    private static let currencies = [
-        "INR", "USD", "GBP", "EUR", "AED", "SGD", "AUD", "CAD", "JPY",
-        "KRW", "CNY", "HKD", "MYR", "NZD", "ZAR", "BRL", "MXN", "CHF",
-        "SEK", "NOK", "DKK", "PLN", "CZK", "HUF", "TRY", "THB", "IDR",
-        "PHP", "VND", "TWD", "BDT", "PKR", "LKR", "NPR", "NGN", "KES",
-        "EGP", "ARS", "CLP", "COP", "PEN", "RON", "RUB", "ILS", "SAR",
-        "QAR", "KWD", "BHD", "OMR"
-    ]
-
-    private static let dateFormats = [
-        "dd/MM/yyyy",
-        "MM/dd/yyyy",
-        "yyyy-MM-dd",
-        "dd-MMM-yyyy",
-        "MMM dd, yyyy"
-    ]
-
-    private static let indianStates = [
-        "Andhra Pradesh", "Arunachal Pradesh", "Assam", "Bihar",
-        "Chhattisgarh", "Goa", "Gujarat", "Haryana", "Himachal Pradesh",
-        "Jharkhand", "Karnataka", "Kerala", "Madhya Pradesh", "Maharashtra",
-        "Manipur", "Meghalaya", "Mizoram", "Nagaland", "Odisha", "Punjab",
-        "Rajasthan", "Sikkim", "Tamil Nadu", "Telangana", "Tripura",
-        "Uttar Pradesh", "Uttarakhand", "West Bengal", "Delhi",
-        "Jammu & Kashmir", "Ladakh", "Puducherry", "Chandigarh",
-        "Dadra & Nagar Haveli and Daman & Diu", "Lakshadweep",
-        "Andaman & Nicobar Islands"
-    ]
-
-    private var sortedCountries: [(code: String, name: String)] {
-        CountryConfig.all.values
-            .sorted { $0.name < $1.name }
-            .map { (code: $0.code, name: $0.name) }
+    private enum Brand {
+        static let primary = Color(red: 0x3A / 255, green: 0x5C / 255, blue: 0x4A / 255)
+        static let background = Color(red: 0xF8 / 255, green: 0xF6 / 255, blue: 0xF3 / 255)
     }
+
+    // MARK: - State
+
+    @State private var viewModel: SettingsViewModel
+
+    // Photo pickers
+    @State private var logoPickerItem: PhotosPickerItem?
+    @State private var signaturePickerItem: PhotosPickerItem?
+
+    // MARK: - Init
+
+    init(authManager: AuthManager) {
+        _viewModel = State(initialValue: SettingsViewModel(authManager: authManager))
+    }
+
+    // MARK: - Body
 
     var body: some View {
         ZStack {
-            SpentyColors.bgPrimary.ignoresSafeArea()
+            Brand.background
+                .ignoresSafeArea()
 
-            if viewModel.isLoading {
-                ProgressView()
-                    .controlSize(.large)
+            if viewModel.isLoading && viewModel.settings.firmName == nil {
+                ProgressView("Loading settings...")
+                    .tint(Brand.primary)
             } else {
                 settingsForm
             }
-
-            // Saved banner
-            if viewModel.showSaved {
-                VStack {
-                    savedBanner
-                    Spacer()
-                }
-                .transition(.move(edge: .top).combined(with: .opacity))
-                .animation(.easeInOut(duration: 0.3), value: viewModel.showSaved)
-            }
         }
         .navigationTitle("Settings")
-        .navigationBarTitleDisplayMode(.inline)
-        .task {
-            await viewModel.loadSettings()
+        .navigationBarTitleDisplayMode(.large)
+        .task { await viewModel.loadSettings() }
+        .alert("Error", isPresented: $viewModel.showError) {
+            Button("OK") { viewModel.dismissError() }
+        } message: {
+            Text(viewModel.errorMessage)
+        }
+        .confirmationDialog(
+            "Delete Account",
+            isPresented: $viewModel.showDeleteConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Delete My Account", role: .destructive) {
+                Task { await viewModel.deleteAccount() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This action is permanent. All your data will be erased and cannot be recovered.")
         }
     }
 
     // MARK: - Settings Form
 
     private var settingsForm: some View {
-        ScrollView {
-            VStack(spacing: SpentySpacing.xl) {
-                // Error message
-                if let error = viewModel.errorMessage {
-                    errorBanner(error)
-                }
-
-                // Setup mode warning
-                if let mode = viewModel.setupMode, !viewModel.requiredFieldsMissing.isEmpty {
-                    setupWarning(mode: mode)
-                }
-
-                generalSection
-                businessProfileSection
-                invoiceSettingsSection
-                billSettingsSection
-
-                // Save button
-                PrimaryButton(
-                    "Save Settings",
-                    icon: "checkmark",
-                    isLoading: viewModel.isSaving,
-                    isFullWidth: true
-                ) {
-                    Task { await viewModel.saveSettings() }
-                }
-                .padding(.horizontal, SpentySpacing.lg)
-                .padding(.bottom, SpentySpacing.xxl)
-            }
-            .padding(.top, SpentySpacing.md)
+        Form {
+            businessProfileSection
+            currencyLocaleSection
+            invoiceCustomizationSection
+            accountSection
         }
-    }
-
-    // MARK: - General Section
-
-    private var generalSection: some View {
-        VStack(alignment: .leading, spacing: SpentySpacing.md) {
-            SectionHeader("General")
-                .padding(.horizontal, SpentySpacing.lg)
-
-            SpentyCard {
-                VStack(spacing: SpentySpacing.lg) {
-                    // Base Currency
-                    VStack(alignment: .leading, spacing: SpentySpacing.xs) {
-                        Text("Base Currency")
-                            .font(SpentyFonts.caption)
-                            .foregroundStyle(SpentyColors.textSecondary)
-
-                        Picker("Currency", selection: $viewModel.baseCurrency) {
-                            Text("Select Currency").tag("")
-                            ForEach(Self.currencies, id: \.self) { code in
-                                Text("\(code) - \(CurrencyFormatter.symbol(for: code))")
-                                    .tag(code)
-                            }
-                        }
-                        .pickerStyle(.menu)
-                        .tint(SpentyColors.textPrimary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-
-                    Divider()
-
-                    // Date Format
-                    VStack(alignment: .leading, spacing: SpentySpacing.xs) {
-                        Text("Date Format")
-                            .font(SpentyFonts.caption)
-                            .foregroundStyle(SpentyColors.textSecondary)
-
-                        Picker("Date Format", selection: $viewModel.dateFormat) {
-                            Text("Select Format").tag("")
-                            ForEach(Self.dateFormats, id: \.self) { format in
-                                Text(format).tag(format)
-                            }
-                        }
-                        .pickerStyle(.menu)
-                        .tint(SpentyColors.textPrimary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-
-                    Divider()
-
-                    // Business Country
-                    VStack(alignment: .leading, spacing: SpentySpacing.xs) {
-                        Text("Business Country")
-                            .font(SpentyFonts.caption)
-                            .foregroundStyle(SpentyColors.textSecondary)
-
-                        Picker("Country", selection: $viewModel.businessCountry) {
-                            Text("Select Country").tag("")
-                            ForEach(sortedCountries, id: \.code) { country in
-                                Text("\(flag(for: country.code)) \(country.name)")
-                                    .tag(country.code)
-                            }
-                        }
-                        .pickerStyle(.menu)
-                        .tint(SpentyColors.textPrimary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                }
-            }
-            .padding(.horizontal, SpentySpacing.lg)
-        }
+        .scrollContentBackground(.hidden)
     }
 
     // MARK: - Business Profile Section
 
     private var businessProfileSection: some View {
-        let isSetupHighlighted = viewModel.setupMode == "invoice" || viewModel.setupMode == "gst"
+        Section {
+            NavigationLink {
+                BusinessProfileView(viewModel: viewModel)
+            } label: {
+                HStack(spacing: 14) {
+                    sectionIcon("building.2.fill", color: Brand.primary)
 
-        return VStack(alignment: .leading, spacing: SpentySpacing.md) {
-            SectionHeader("Business Profile")
-                .padding(.horizontal, SpentySpacing.lg)
-
-            SpentyCard {
-                VStack(spacing: SpentySpacing.lg) {
-                    FormField(
-                        "Firm Name",
-                        text: $viewModel.firmName,
-                        placeholder: "Your business name",
-                        isRequired: viewModel.setupMode != nil,
-                        errorMessage: isSetupHighlighted && viewModel.firmName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                            ? "Required for setup"
-                            : nil
-                    )
-
-                    FormField(
-                        "Address",
-                        text: $viewModel.firmAddress,
-                        placeholder: "Street address"
-                    )
-
-                    FormField(
-                        "City",
-                        text: $viewModel.firmCity,
-                        placeholder: "City"
-                    )
-
-                    // State - picker for India, text field otherwise
-                    if viewModel.isIndianBusiness {
-                        VStack(alignment: .leading, spacing: SpentySpacing.xs) {
-                            Text("State")
-                                .font(SpentyFonts.caption)
-                                .foregroundStyle(SpentyColors.textSecondary)
-
-                            Picker("State", selection: $viewModel.firmState) {
-                                Text("Select State").tag("")
-                                ForEach(Self.indianStates, id: \.self) { state in
-                                    Text(state).tag(state)
-                                }
-                            }
-                            .pickerStyle(.menu)
-                            .tint(SpentyColors.textPrimary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                    } else {
-                        FormField(
-                            "State / Province",
-                            text: $viewModel.firmState,
-                            placeholder: "State or province"
-                        )
-                    }
-
-                    FormField(
-                        "Pincode / ZIP",
-                        text: $viewModel.firmPincode,
-                        placeholder: "Postal code",
-                        keyboardType: .numberPad
-                    )
-
-                    if viewModel.isIndianBusiness {
-                        FormField(
-                            "GSTIN",
-                            text: $viewModel.firmGstin,
-                            placeholder: "22AAAAA0000A1Z5"
-                        )
-
-                        FormField(
-                            "PAN",
-                            text: $viewModel.firmPan,
-                            placeholder: "AAAAA0000A"
-                        )
-                    }
-
-                    FormField(
-                        "Phone",
-                        text: $viewModel.firmPhone,
-                        placeholder: "Business phone",
-                        keyboardType: .phonePad
-                    )
-
-                    FormField(
-                        "Email",
-                        text: $viewModel.firmEmail,
-                        placeholder: "business@example.com",
-                        keyboardType: .emailAddress
-                    )
-                }
-            }
-            .padding(.horizontal, SpentySpacing.lg)
-            .overlay(
-                isSetupHighlighted
-                    ? RoundedRectangle(cornerRadius: SpentyRadius.card)
-                        .stroke(SpentyColors.warning, lineWidth: 2)
-                        .padding(.horizontal, SpentySpacing.lg)
-                    : nil
-            )
-        }
-    }
-
-    // MARK: - Invoice Settings Section
-
-    private var invoiceSettingsSection: some View {
-        VStack(alignment: .leading, spacing: SpentySpacing.md) {
-            SectionHeader("Invoice Settings")
-                .padding(.horizontal, SpentySpacing.lg)
-
-            SpentyCard {
-                VStack(spacing: SpentySpacing.lg) {
-                    FormField(
-                        "Bank Name",
-                        text: $viewModel.invoiceBankName,
-                        placeholder: "Bank name"
-                    )
-
-                    FormField(
-                        "Account Number",
-                        text: $viewModel.invoiceBankAccountNo,
-                        placeholder: "Account number",
-                        keyboardType: .numberPad
-                    )
-
-                    if viewModel.isIndianBusiness {
-                        FormField(
-                            "IFSC Code",
-                            text: $viewModel.invoiceBankIfsc,
-                            placeholder: "IFSC code"
-                        )
-                    }
-
-                    FormField(
-                        "Branch",
-                        text: $viewModel.invoiceBankBranch,
-                        placeholder: "Branch name"
-                    )
-
-                    FormField(
-                        "Invoice Prefix",
-                        text: $viewModel.invoicePrefix,
-                        placeholder: "INV-"
-                    )
-
-                    // Invoice Terms (multiline)
-                    VStack(alignment: .leading, spacing: SpentySpacing.xs) {
-                        Text("Invoice Terms")
-                            .font(SpentyFonts.caption)
-                            .foregroundStyle(SpentyColors.textSecondary)
-
-                        TextEditor(text: $viewModel.invoiceTerms)
-                            .font(SpentyFonts.body)
-                            .foregroundStyle(SpentyColors.textPrimary)
-                            .scrollContentBackground(.hidden)
-                            .frame(minHeight: 80)
-                            .padding(SpentySpacing.sm)
-                            .background(SpentyColors.surface)
-                            .clipShape(RoundedRectangle(cornerRadius: SpentyRadius.md))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: SpentyRadius.md)
-                                    .stroke(SpentyColors.borderSubtle, lineWidth: 1)
-                            )
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Business Profile")
+                            .font(.body.weight(.medium))
+                            .foregroundStyle(.primary)
+                        Text(viewModel.settings.firmName ?? "Set up your business details")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
                     }
                 }
+                .padding(.vertical, 4)
             }
-            .padding(.horizontal, SpentySpacing.lg)
+        } header: {
+            Label("Business", systemImage: "briefcase.fill")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Brand.primary)
+                .textCase(nil)
         }
     }
 
-    // MARK: - Bill Settings Section
+    // MARK: - Currency & Locale Section
 
-    private var billSettingsSection: some View {
-        VStack(alignment: .leading, spacing: SpentySpacing.md) {
-            SectionHeader("Bill Settings")
-                .padding(.horizontal, SpentySpacing.lg)
+    private var currencyLocaleSection: some View {
+        Section {
+            NavigationLink {
+                CurrencySettingsView(viewModel: viewModel)
+            } label: {
+                HStack(spacing: 14) {
+                    sectionIcon("coloncurrencysign.circle.fill", color: .orange)
 
-            SpentyCard {
-                VStack(spacing: SpentySpacing.lg) {
-                    FormField(
-                        "Bill Prefix",
-                        text: $viewModel.billPrefix,
-                        placeholder: "BILL-"
-                    )
-
-                    // Bill Terms (multiline)
-                    VStack(alignment: .leading, spacing: SpentySpacing.xs) {
-                        Text("Bill Terms")
-                            .font(SpentyFonts.caption)
-                            .foregroundStyle(SpentyColors.textSecondary)
-
-                        TextEditor(text: $viewModel.billTerms)
-                            .font(SpentyFonts.body)
-                            .foregroundStyle(SpentyColors.textPrimary)
-                            .scrollContentBackground(.hidden)
-                            .frame(minHeight: 80)
-                            .padding(SpentySpacing.sm)
-                            .background(SpentyColors.surface)
-                            .clipShape(RoundedRectangle(cornerRadius: SpentyRadius.md))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: SpentyRadius.md)
-                                    .stroke(SpentyColors.borderSubtle, lineWidth: 1)
-                            )
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Currency & Locale")
+                            .font(.body.weight(.medium))
+                            .foregroundStyle(.primary)
+                        Text(currencySubtitle)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
                     }
                 }
+                .padding(.vertical, 4)
             }
-            .padding(.horizontal, SpentySpacing.lg)
+        } header: {
+            Label("Regional", systemImage: "globe")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Brand.primary)
+                .textCase(nil)
         }
     }
 
-    // MARK: - Banners
-
-    private var savedBanner: some View {
-        HStack(spacing: SpentySpacing.sm) {
-            Image(systemName: "checkmark.circle.fill")
-                .foregroundStyle(SpentyColors.success)
-            Text("Saved!")
-                .font(SpentyFonts.subheading)
-                .foregroundStyle(SpentyColors.success)
-        }
-        .padding(.horizontal, SpentySpacing.xl)
-        .padding(.vertical, SpentySpacing.md)
-        .background(SpentyColors.success.opacity(0.1))
-        .clipShape(RoundedRectangle(cornerRadius: SpentyRadius.md))
-        .padding(.top, SpentySpacing.sm)
+    private var currencySubtitle: String {
+        let parts = [viewModel.settings.defaultCurrency, viewModel.settings.dateFormat].compactMap { $0 }
+        return parts.isEmpty ? "Set currency and date format" : parts.joined(separator: " / ")
     }
 
-    private func errorBanner(_ message: String) -> some View {
-        HStack(spacing: SpentySpacing.sm) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(SpentyColors.danger)
-            Text(message)
-                .font(SpentyFonts.body)
-                .foregroundStyle(SpentyColors.danger)
+    // MARK: - Invoice Customization Section
+
+    private var invoiceCustomizationSection: some View {
+        Section {
+            // Logo upload
+            VStack(alignment: .leading, spacing: 10) {
+                Label("Business Logo", systemImage: "photo.badge.plus")
+                    .font(.subheadline.weight(.medium))
+
+                if let logoUrl = viewModel.settings.logoUrl, !logoUrl.isEmpty {
+                    logoPreview(url: logoUrl)
+                } else {
+                    logoPlaceholder
+                }
+            }
+            .padding(.vertical, 4)
+
+            // Signature upload
+            VStack(alignment: .leading, spacing: 10) {
+                Label("Signature", systemImage: "signature")
+                    .font(.subheadline.weight(.medium))
+
+                if let sigUrl = viewModel.settings.signatureUrl, !sigUrl.isEmpty {
+                    signaturePreview(url: sigUrl)
+                } else {
+                    signaturePlaceholder
+                }
+            }
+            .padding(.vertical, 4)
+        } header: {
+            Label("Invoice Customization", systemImage: "doc.richtext")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Brand.primary)
+                .textCase(nil)
         }
-        .padding(SpentySpacing.md)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(SpentyColors.danger.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: SpentyRadius.md))
-        .padding(.horizontal, SpentySpacing.lg)
     }
 
-    private func setupWarning(mode: String) -> some View {
-        HStack(spacing: SpentySpacing.sm) {
-            Image(systemName: "info.circle.fill")
-                .foregroundStyle(SpentyColors.warning)
-            Text("Complete the highlighted fields to continue with \(mode) setup.")
-                .font(SpentyFonts.body)
-                .foregroundStyle(SpentyColors.textSecondary)
+    // MARK: - Logo Views
+
+    private func logoPreview(url: String) -> some View {
+        VStack(spacing: 8) {
+            AsyncImage(url: URL(string: url)) { phase in
+                switch phase {
+                case .success(let image):
+                    image
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxHeight: 80)
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                case .failure:
+                    imageFallback(icon: "photo.fill")
+                case .empty:
+                    ProgressView()
+                        .frame(height: 60)
+                @unknown default:
+                    EmptyView()
+                }
+            }
+
+            HStack(spacing: 12) {
+                PhotosPicker(selection: $logoPickerItem, matching: .images) {
+                    Label("Replace", systemImage: "arrow.triangle.2.circlepath")
+                        .font(.caption.weight(.medium))
+                }
+                .tint(Brand.primary)
+
+                Button(role: .destructive) {
+                    Task { await viewModel.deleteLogo() }
+                } label: {
+                    Label("Remove", systemImage: "trash")
+                        .font(.caption.weight(.medium))
+                }
+                .disabled(viewModel.isDeletingLogo)
+
+                if viewModel.isUploadingLogo || viewModel.isDeletingLogo {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+            }
         }
-        .padding(SpentySpacing.md)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(SpentyColors.warning.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: SpentyRadius.md))
-        .padding(.horizontal, SpentySpacing.lg)
+        .onChange(of: logoPickerItem) { _, newItem in
+            handleLogoPick(newItem)
+        }
     }
 
-    // MARK: - Helpers
+    private var logoPlaceholder: some View {
+        PhotosPicker(selection: $logoPickerItem, matching: .images) {
+            HStack(spacing: 10) {
+                Image(systemName: "plus.circle.fill")
+                    .font(.title3)
+                    .foregroundStyle(Brand.primary)
+                Text("Upload Logo")
+                    .font(.subheadline)
+                    .foregroundStyle(Brand.primary)
 
-    private func flag(for countryCode: String) -> String {
-        let base: UInt32 = 127397
-        return String(countryCode.uppercased().unicodeScalars.compactMap {
-            UnicodeScalar(base + $0.value)
-        }.map { Character($0) })
+                if viewModel.isUploadingLogo {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+            }
+            .frame(maxWidth: .infinity, minHeight: 56)
+            .background(Brand.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+        .onChange(of: logoPickerItem) { _, newItem in
+            handleLogoPick(newItem)
+        }
+    }
+
+    // MARK: - Signature Views
+
+    private func signaturePreview(url: String) -> some View {
+        VStack(spacing: 8) {
+            AsyncImage(url: URL(string: url)) { phase in
+                switch phase {
+                case .success(let image):
+                    image
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxHeight: 60)
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                case .failure:
+                    imageFallback(icon: "signature")
+                case .empty:
+                    ProgressView()
+                        .frame(height: 40)
+                @unknown default:
+                    EmptyView()
+                }
+            }
+
+            HStack(spacing: 12) {
+                PhotosPicker(selection: $signaturePickerItem, matching: .images) {
+                    Label("Replace", systemImage: "arrow.triangle.2.circlepath")
+                        .font(.caption.weight(.medium))
+                }
+                .tint(Brand.primary)
+
+                Button(role: .destructive) {
+                    Task { await viewModel.deleteSignature() }
+                } label: {
+                    Label("Remove", systemImage: "trash")
+                        .font(.caption.weight(.medium))
+                }
+                .disabled(viewModel.isDeletingSignature)
+
+                if viewModel.isUploadingSignature || viewModel.isDeletingSignature {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+            }
+        }
+        .onChange(of: signaturePickerItem) { _, newItem in
+            handleSignaturePick(newItem)
+        }
+    }
+
+    private var signaturePlaceholder: some View {
+        PhotosPicker(selection: $signaturePickerItem, matching: .images) {
+            HStack(spacing: 10) {
+                Image(systemName: "plus.circle.fill")
+                    .font(.title3)
+                    .foregroundStyle(Brand.primary)
+                Text("Upload Signature")
+                    .font(.subheadline)
+                    .foregroundStyle(Brand.primary)
+
+                if viewModel.isUploadingSignature {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+            }
+            .frame(maxWidth: .infinity, minHeight: 56)
+            .background(Brand.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+        .onChange(of: signaturePickerItem) { _, newItem in
+            handleSignaturePick(newItem)
+        }
+    }
+
+    // MARK: - Account Section
+
+    private var accountSection: some View {
+        Section {
+            Button(role: .destructive) {
+                viewModel.showDeleteConfirm = true
+            } label: {
+                HStack(spacing: 14) {
+                    sectionIcon("person.crop.circle.badge.xmark", color: .red)
+
+                    Text("Delete Account")
+                        .font(.body.weight(.medium))
+                        .foregroundStyle(.red)
+                }
+                .padding(.vertical, 4)
+            }
+        } header: {
+            Label("Account", systemImage: "person.circle")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Brand.primary)
+                .textCase(nil)
+        } footer: {
+            Text("Permanently deletes your account and all associated data.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    // MARK: - Helper Views
+
+    private func sectionIcon(_ systemName: String, color: Color) -> some View {
+        Image(systemName: systemName)
+            .font(.body)
+            .foregroundStyle(.white)
+            .frame(width: 32, height: 32)
+            .background(color, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+    }
+
+    private func imageFallback(icon: String) -> some View {
+        RoundedRectangle(cornerRadius: 8, style: .continuous)
+            .fill(Color.gray.opacity(0.12))
+            .frame(height: 60)
+            .overlay {
+                Image(systemName: icon)
+                    .foregroundStyle(.secondary)
+            }
+    }
+
+    // MARK: - Photo Handling
+
+    private func handleLogoPick(_ item: PhotosPickerItem?) {
+        guard let item else { return }
+        Task {
+            if let data = try? await item.loadTransferable(type: Data.self) {
+                await viewModel.uploadLogo(imageData: data)
+            }
+            logoPickerItem = nil
+        }
+    }
+
+    private func handleSignaturePick(_ item: PhotosPickerItem?) {
+        guard let item else { return }
+        Task {
+            if let data = try? await item.loadTransferable(type: Data.self) {
+                await viewModel.uploadSignature(imageData: data)
+            }
+            signaturePickerItem = nil
+        }
     }
 }
 
+// MARK: - Preview
+
 #Preview {
     NavigationStack {
-        SettingsView()
-            .environment(AppState())
+        SettingsView(authManager: AuthManager())
     }
 }

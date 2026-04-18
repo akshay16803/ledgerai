@@ -1,143 +1,187 @@
 import Foundation
-import os
+import SwiftUI
 
 @Observable
 final class SettingsViewModel {
 
-    // MARK: - Settings Fields
+    // MARK: - State
 
-    var baseCurrency = ""
-    var dateFormat = ""
-    var businessCountry = ""
-    var firmName = ""
-    var firmAddress = ""
-    var firmCity = ""
-    var firmState = ""
-    var firmPincode = ""
-    var firmGstin = ""
-    var firmPan = ""
-    var firmPhone = ""
-    var firmEmail = ""
-    var invoiceBankName = ""
-    var invoiceBankAccountNo = ""
-    var invoiceBankIfsc = ""
-    var invoiceBankBranch = ""
-    var invoicePrefix = "INV-"
-    var invoiceTerms = ""
-    var billPrefix = "BILL-"
-    var billTerms = ""
-
-    // MARK: - UI State
-
+    var settings = AppSettings()
+    var currencies: [CurrencyOption] = []
+    var dateFormats: [DateFormatOption] = []
     var isLoading = false
     var isSaving = false
-    var errorMessage: String?
-    var showSaved = false
-    var setupMode: String?
+    var errorMessage = ""
+    var showError = false
+    var showDeleteConfirm = false
+    var showSaveSuccess = false
 
-    // MARK: - Computed
+    // Image upload state
+    var isUploadingLogo = false
+    var isUploadingSignature = false
+    var isDeletingLogo = false
+    var isDeletingSignature = false
 
-    var isIndianBusiness: Bool {
-        businessCountry == "IN"
+    // MARK: - Dependencies
+
+    private let repository: SettingsRepository
+    private let authManager: AuthManager
+
+    // MARK: - Init
+
+    init(repository: SettingsRepository = .shared, authManager: AuthManager) {
+        self.repository = repository
+        self.authManager = authManager
     }
 
-    var requiredFieldsMissing: [String] {
-        guard setupMode != nil else { return [] }
-        var missing: [String] = []
-        if firmName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            missing.append("Firm Name")
-        }
-        return missing
-    }
-
-    // MARK: - Private
-
-    private let repository = SettingsRepository()
-    private let logger = Logger(subsystem: "com.spentyai", category: "settings")
-
-    // MARK: - Methods
+    // MARK: - Load Settings
 
     @MainActor
     func loadSettings() async {
         isLoading = true
-        errorMessage = nil
+        showError = false
 
         do {
-            let settings = try await repository.getSettings()
-            populateFrom(settings)
-            logger.info("Loaded settings")
+            settings = try await repository.getSettings()
         } catch {
-            errorMessage = "Failed to load settings."
-            logger.error("Load settings error: \(error.localizedDescription)")
+            handleError(error)
         }
 
         isLoading = false
     }
 
+    // MARK: - Save Settings
+
     @MainActor
     func saveSettings() async {
         isSaving = true
-        errorMessage = nil
-
-        let update = SettingsUpdate(
-            baseCurrency: baseCurrency.isEmpty ? nil : baseCurrency,
-            dateFormat: dateFormat.isEmpty ? nil : dateFormat,
-            businessCountry: businessCountry.isEmpty ? nil : businessCountry,
-            firmName: firmName.isEmpty ? nil : firmName,
-            firmAddress: firmAddress.isEmpty ? nil : firmAddress,
-            firmCity: firmCity.isEmpty ? nil : firmCity,
-            firmState: firmState.isEmpty ? nil : firmState,
-            firmPincode: firmPincode.isEmpty ? nil : firmPincode,
-            firmPhone: firmPhone.isEmpty ? nil : firmPhone,
-            firmEmail: firmEmail.isEmpty ? nil : firmEmail,
-            firmGstin: firmGstin.isEmpty ? nil : firmGstin,
-            firmPan: firmPan.isEmpty ? nil : firmPan,
-            invoiceBankName: invoiceBankName.isEmpty ? nil : invoiceBankName,
-            invoiceBankAccountNumber: invoiceBankAccountNo.isEmpty ? nil : invoiceBankAccountNo,
-            invoiceBankIfsc: invoiceBankIfsc.isEmpty ? nil : invoiceBankIfsc,
-            invoiceBankBranch: invoiceBankBranch.isEmpty ? nil : invoiceBankBranch,
-            invoicePrefix: invoicePrefix.isEmpty ? nil : invoicePrefix,
-            invoiceTerms: invoiceTerms.isEmpty ? nil : invoiceTerms,
-            billPrefix: billPrefix.isEmpty ? nil : billPrefix,
-            billTerms: billTerms.isEmpty ? nil : billTerms
-        )
+        showError = false
 
         do {
-            let saved = try await repository.updateSettings(update)
-            populateFrom(saved)
-            showSaved = true
-            logger.info("Settings saved successfully")
-
-            try? await Task.sleep(for: .seconds(2))
-            showSaved = false
+            settings = try await repository.updateSettings(settings)
+            showSaveSuccess = true
         } catch {
-            errorMessage = "Failed to save settings."
-            logger.error("Save settings error: \(error.localizedDescription)")
+            handleError(error)
         }
 
         isSaving = false
     }
 
-    func populateFrom(_ settings: AppSettings) {
-        baseCurrency = settings.baseCurrency ?? ""
-        dateFormat = settings.dateFormat ?? ""
-        businessCountry = settings.businessCountry ?? ""
-        firmName = settings.firmName ?? ""
-        firmAddress = settings.firmAddress ?? ""
-        firmCity = settings.firmCity ?? ""
-        firmState = settings.firmState ?? ""
-        firmPincode = settings.firmPincode ?? ""
-        firmGstin = settings.firmGstin ?? ""
-        firmPan = settings.firmPan ?? ""
-        firmPhone = settings.firmPhone ?? ""
-        firmEmail = settings.firmEmail ?? ""
-        invoiceBankName = settings.invoiceBankName ?? ""
-        invoiceBankAccountNo = settings.invoiceBankAccountNumber ?? ""
-        invoiceBankIfsc = settings.invoiceBankIfsc ?? ""
-        invoiceBankBranch = settings.invoiceBankBranch ?? ""
-        invoicePrefix = settings.invoicePrefix ?? "INV-"
-        invoiceTerms = settings.invoiceTerms ?? ""
-        billPrefix = settings.billPrefix ?? "BILL-"
-        billTerms = settings.billTerms ?? ""
+    // MARK: - Currencies
+
+    @MainActor
+    func loadCurrencies() async {
+        do {
+            currencies = try await repository.getCurrencies()
+        } catch {
+            handleError(error)
+        }
+    }
+
+    // MARK: - Date Formats
+
+    @MainActor
+    func loadDateFormats() async {
+        do {
+            dateFormats = try await repository.getDateFormats()
+        } catch {
+            handleError(error)
+        }
+    }
+
+    // MARK: - Logo
+
+    @MainActor
+    func uploadLogo(imageData: Data) async {
+        isUploadingLogo = true
+        showError = false
+
+        do {
+            let response = try await repository.uploadLogo(imageData: imageData)
+            settings.logoUrl = response.url
+        } catch {
+            handleError(error)
+        }
+
+        isUploadingLogo = false
+    }
+
+    @MainActor
+    func deleteLogo() async {
+        isDeletingLogo = true
+        showError = false
+
+        do {
+            _ = try await repository.deleteLogo()
+            settings.logoUrl = nil
+        } catch {
+            handleError(error)
+        }
+
+        isDeletingLogo = false
+    }
+
+    // MARK: - Signature
+
+    @MainActor
+    func uploadSignature(imageData: Data) async {
+        isUploadingSignature = true
+        showError = false
+
+        do {
+            let response = try await repository.uploadSignature(imageData: imageData)
+            settings.signatureUrl = response.url
+        } catch {
+            handleError(error)
+        }
+
+        isUploadingSignature = false
+    }
+
+    @MainActor
+    func deleteSignature() async {
+        isDeletingSignature = true
+        showError = false
+
+        do {
+            _ = try await repository.deleteSignature()
+            settings.signatureUrl = nil
+        } catch {
+            handleError(error)
+        }
+
+        isDeletingSignature = false
+    }
+
+    // MARK: - Delete Account
+
+    @MainActor
+    func deleteAccount() async {
+        isLoading = true
+        showError = false
+
+        do {
+            try await authManager.deleteAccount()
+        } catch {
+            handleError(error)
+            isLoading = false
+        }
+    }
+
+    // MARK: - Helpers
+
+    @MainActor
+    private func handleError(_ error: Error) {
+        if let apiError = error as? APIError {
+            errorMessage = apiError.localizedDescription
+        } else {
+            errorMessage = error.localizedDescription
+        }
+        showError = true
+    }
+
+    func dismissError() {
+        showError = false
+        errorMessage = ""
     }
 }

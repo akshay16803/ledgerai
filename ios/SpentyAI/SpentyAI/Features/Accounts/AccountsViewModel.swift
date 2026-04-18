@@ -1,5 +1,5 @@
 import Foundation
-import os
+import SwiftUI
 
 @Observable
 final class AccountsViewModel {
@@ -7,92 +7,293 @@ final class AccountsViewModel {
     // MARK: - State
 
     var accounts: [Account] = []
+    var subTypes: [AccountSubType] = []
+    var selectedAccount: Account?
+    var accountTransactions: [Transaction] = []
+    var amortizationSchedule: [AmortizationEntry] = []
+    var amortizationTotalInterest: Double = 0
+    var amortizationTotalPayment: Double = 0
+
     var isLoading = false
-    var isRefreshing = false
+    var isDetailLoading = false
+    var isSaving = false
     var errorMessage: String?
+    var searchText = ""
 
-    // Sheet state
-    var showAddAccount = false
-    var showEditAccount = false
+    // Form state
+    var showingForm = false
     var editingAccount: Account?
-    var showDeleteConfirm = false
-    var deletingAccount: Account?
-    var showSubTypeManager = false
 
-    // Navigation
-    var selectedAccountForDetail: Account?
+    // OD Interest
+    var odFromDate = Calendar.current.date(byAdding: .month, value: -1, to: Date()) ?? Date()
+    var odToDate = Date()
+    var odInterestResult: ODInterestResponse?
+    var isCalculatingOD = false
 
-    // MARK: - Computed
+    // Sub-type management
+    var isLoadingSubTypes = false
+    var newSubTypeName = ""
+    var newSubTypeAccountType = "asset"
+    var editingSubType: AccountSubType?
+    var editingSubTypeName = ""
 
-    /// Accounts grouped by account_type in display order.
-    var grouped: [String: [Account]] {
-        Dictionary(grouping: accounts, by: { $0.accountType })
-    }
-
-    /// Ordered group keys for consistent display.
-    static let groupOrder = ["Asset", "Liability", "Equity", "Investment"]
-
-    // MARK: - Private
+    // Demat
+    var dematStatements: [DematStatement] = []
+    var isUploadingDemat = false
+    var isDematLoading = false
 
     private let repository = AccountRepository()
-    private let logger = Logger(subsystem: "com.spentyai", category: "accounts")
 
-    // MARK: - Methods
+    // MARK: - Computed Properties
+
+    var filteredAccounts: [Account] {
+        guard !searchText.isEmpty else { return accounts }
+        let query = searchText.lowercased()
+        return accounts.filter { account in
+            (account.name?.lowercased().contains(query) ?? false) ||
+            (account.accountType?.lowercased().contains(query) ?? false) ||
+            (account.subType?.lowercased().contains(query) ?? false) ||
+            (account.accountNumber?.lowercased().contains(query) ?? false)
+        }
+    }
+
+    var groupedAccounts: [(type: String, accounts: [Account])] {
+        let typeOrder = ["asset", "liability", "equity", "investment"]
+        let grouped = Dictionary(grouping: filteredAccounts) { $0.accountType?.lowercased() ?? "other" }
+        return typeOrder.compactMap { type in
+            guard let items = grouped[type], !items.isEmpty else { return nil }
+            return (type: type, accounts: items)
+        } + (grouped.keys.contains(where: { !typeOrder.contains($0) })
+              ? grouped.filter { !typeOrder.contains($0.key) }.map { (type: $0.key, accounts: $0.value) }
+              : [])
+    }
+
+    var totalBalance: Double {
+        accounts.reduce(0) { $0 + ($1.balance ?? 0) }
+    }
+
+    func subTypesForType(_ accountType: String) -> [AccountSubType] {
+        subTypes.filter { ($0.accountType?.lowercased() ?? "") == accountType.lowercased() }
+    }
+
+    // MARK: - Account CRUD
 
     @MainActor
     func loadAccounts() async {
         isLoading = true
         errorMessage = nil
-
         do {
-            accounts = try await repository.getAccounts()
-            logger.info("Loaded \(self.accounts.count) accounts")
+            accounts = try await repository.fetchAccounts()
         } catch {
-            errorMessage = "Failed to load accounts."
-            logger.error("Load accounts error: \(error.localizedDescription)")
+            errorMessage = error.localizedDescription
         }
-
         isLoading = false
     }
 
     @MainActor
-    func refresh() async {
-        isRefreshing = true
+    func loadAccountDetail(_ id: String) async {
+        isDetailLoading = true
         errorMessage = nil
-
         do {
-            accounts = try await repository.getAccounts()
+            async let accountTask = repository.fetchAccount(id)
+            async let transactionsTask = repository.fetchAccountTransactions(id)
+            selectedAccount = try await accountTask
+            accountTransactions = try await transactionsTask
         } catch {
-            errorMessage = "Failed to refresh accounts."
-            logger.error("Refresh accounts error: \(error.localizedDescription)")
+            errorMessage = error.localizedDescription
         }
-
-        isRefreshing = false
+        isDetailLoading = false
     }
 
     @MainActor
-    func deleteAccount(_ account: Account) async {
+    func saveAccount(_ payload: [String: Any], editId: String? = nil) async -> Bool {
+        isSaving = true
+        errorMessage = nil
         do {
-            try await repository.deleteAccount(account.accountId)
-            accounts.removeAll { $0.accountId == account.accountId }
-            logger.info("Deleted account: \(account.name)")
-        } catch {
-            errorMessage = "Failed to delete account."
-            logger.error("Delete account error: \(error.localizedDescription)")
-        }
-    }
-
-    @MainActor
-    func recalculateBalance(_ account: Account) async {
-        do {
-            let updated = try await repository.recalculateBalance(account.accountId)
-            if let index = accounts.firstIndex(where: { $0.accountId == account.accountId }) {
-                accounts[index] = updated
+            if let editId {
+                let updated = try await repository.updateAccount(editId, payload)
+                if let idx = accounts.firstIndex(where: { $0.id == editId }) {
+                    accounts[idx] = updated
+                }
+                selectedAccount = updated
+            } else {
+                let created = try await repository.createAccount(payload)
+                accounts.append(created)
             }
-            logger.info("Recalculated balance for: \(account.name)")
+            isSaving = false
+            return true
         } catch {
-            errorMessage = "Failed to recalculate balance."
-            logger.error("Recalculate error: \(error.localizedDescription)")
+            errorMessage = error.localizedDescription
+            isSaving = false
+            return false
+        }
+    }
+
+    @MainActor
+    func deleteAccount(_ id: String) async {
+        do {
+            try await repository.deleteAccount(id)
+            accounts.removeAll { $0.id == id }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    // MARK: - Amortization
+
+    @MainActor
+    func loadAmortization(_ accountId: String) async {
+        do {
+            let response = try await repository.fetchAmortization(accountId)
+            amortizationSchedule = response.schedule
+            amortizationTotalInterest = response.totalInterest ?? 0
+            amortizationTotalPayment = response.totalPayment ?? 0
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    // MARK: - OD Interest
+
+    @MainActor
+    func calculateODInterest(_ accountId: String) async {
+        isCalculatingOD = true
+        do {
+            odInterestResult = try await repository.calculateODInterest(accountId, from: odFromDate, to: odToDate)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        isCalculatingOD = false
+    }
+
+    // MARK: - Sub-Types
+
+    @MainActor
+    func loadSubTypes() async {
+        isLoadingSubTypes = true
+        do {
+            subTypes = try await repository.fetchSubTypes()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        isLoadingSubTypes = false
+    }
+
+    @MainActor
+    func createSubType() async {
+        guard !newSubTypeName.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+        do {
+            let payload: [String: String] = [
+                "name": newSubTypeName.trimmingCharacters(in: .whitespaces),
+                "accountType": newSubTypeAccountType
+            ]
+            let created = try await repository.createSubType(payload)
+            subTypes.append(created)
+            newSubTypeName = ""
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    func updateSubType(_ id: String) async {
+        guard !editingSubTypeName.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+        do {
+            let payload: [String: String] = ["name": editingSubTypeName.trimmingCharacters(in: .whitespaces)]
+            let updated = try await repository.updateSubType(id, payload)
+            if let idx = subTypes.firstIndex(where: { $0.id == id }) {
+                subTypes[idx] = updated
+            }
+            editingSubType = nil
+            editingSubTypeName = ""
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    func deleteSubType(_ id: String) async {
+        do {
+            try await repository.deleteSubType(id)
+            subTypes.removeAll { $0.id == id }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    // MARK: - Demat
+
+    @MainActor
+    func loadDematStatements(_ accountId: String) async {
+        isDematLoading = true
+        do {
+            dematStatements = try await repository.fetchDematStatements(accountId)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        isDematLoading = false
+    }
+
+    @MainActor
+    func uploadDematStatement(data: Data, filename: String, accountId: String) async -> Bool {
+        isUploadingDemat = true
+        do {
+            _ = try await repository.uploadDematStatement(data: data, filename: filename, accountId: accountId)
+            await loadDematStatements(accountId)
+            isUploadingDemat = false
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            isUploadingDemat = false
+            return false
+        }
+    }
+
+    @MainActor
+    func approveDematStatement(_ id: String, accountId: String) async {
+        do {
+            try await repository.approveDematStatement(id)
+            await loadDematStatements(accountId)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    func rejectDematStatement(_ id: String, accountId: String) async {
+        do {
+            try await repository.rejectDematStatement(id)
+            await loadDematStatements(accountId)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    // MARK: - Helpers
+
+    func dismissError() {
+        errorMessage = nil
+    }
+
+    static let accountTypes = ["asset", "liability", "equity", "investment"]
+
+    static func iconForAccountType(_ type: String) -> String {
+        switch type.lowercased() {
+        case "asset": return "building.columns.fill"
+        case "liability": return "creditcard.fill"
+        case "equity": return "chart.pie.fill"
+        case "investment": return "chart.line.uptrend.xyaxis"
+        default: return "banknote.fill"
+        }
+    }
+
+    static func colorForAccountType(_ type: String) -> Color {
+        switch type.lowercased() {
+        case "asset": return .spentyPrimary
+        case "liability": return .spentyError
+        case "equity": return .spentyInfo
+        case "investment": return .spentyWarning
+        default: return .spentyTextSecondary
         }
     }
 }

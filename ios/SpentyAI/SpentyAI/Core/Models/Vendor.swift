@@ -1,33 +1,25 @@
 import Foundation
 
-struct Vendor: Codable, Identifiable, Hashable {
-    var id: String { vendorId }
-
-    let vendorId: String
-    var name: String
-    var gstin: String?
-    var pan: String?
-    var phone: String?
+struct Vendor: Codable, Identifiable {
+    let id: String
+    var name: String?
     var email: String?
-    var billingAddress: String?
-    var city: String?
-    var state: String?
-    var pincode: String?
-    var notes: String?
-    var createdAt: String?
+    var phone: String?
+    var gstin: String?
+    var address: String?
+    var totalBilled: Double?
+    var totalPaid: Double?
+    var outstanding: Double?
 
     enum CodingKeys: String, CodingKey {
-        case vendorId = "vendor_id"
+        case id = "_id"
         case name
-        case gstin
-        case pan
-        case phone
         case email
-        case billingAddress = "billing_address"
-        case city
-        case state
-        case pincode
-        case notes
-        case createdAt = "created_at"
+        case phone
+        case gstin
+        case address
+        case totalBilled
+        case totalPaid
+        case outstanding
     }
 }

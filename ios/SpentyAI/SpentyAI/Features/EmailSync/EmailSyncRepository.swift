@@ -1,104 +1,167 @@
 import Foundation
 
-// MARK: - Response Types
+final class EmailSyncRepository {
 
-struct AuthURLResponse: Codable {
-    let url: String
-}
-
-struct EmailSyncStatus: Codable {
-    let connected: Bool
-    let lastSyncDate: String?
-    let totalRecords: Int?
-    let foundTransactions: Int?
-    let skippedCount: Int?
-    let pendingCount: Int?
-    let failedCount: Int?
-
-    enum CodingKeys: String, CodingKey {
-        case connected
-        case lastSyncDate = "last_sync_date"
-        case totalRecords = "total_records"
-        case foundTransactions = "found_transactions"
-        case skippedCount = "skipped_count"
-        case pendingCount = "pending_count"
-        case failedCount = "failed_count"
-    }
-}
-
-struct SyncResult: Codable {
-    let success: Bool
-    let newRecords: Int?
-    let message: String?
-
-    enum CodingKeys: String, CodingKey {
-        case success
-        case newRecords = "new_records"
-        case message
-    }
-}
-
-struct PendingTransaction: Codable, Identifiable {
-    let id: String
-    let date: String?
-    let description: String?
-    let amount: Double?
-    let type: String?
-    let suggestedCategory: String?
-
-    enum CodingKeys: String, CodingKey {
-        case id
-        case date
-        case description
-        case amount
-        case type
-        case suggestedCategory = "suggested_category"
-    }
-}
-
-// MARK: - Repository
-
-struct EmailSyncRepository {
+    static let shared = EmailSyncRepository()
+    private init() {}
 
     // MARK: - Gmail
 
-    func getGmailAuthURL() async throws -> AuthURLResponse {
-        try await APIClient.shared.get(APIEndpoints.Gmail.authURL)
+    func connectGmail() async throws -> OAuthConnectResponse {
+        try await APIClient.shared.get(APIEndpoints.gmailConnect)
     }
 
-    func getGmailStatus() async throws -> EmailSyncStatus {
-        try await APIClient.shared.get(APIEndpoints.Gmail.status)
+    func gmailStatus() async throws -> EmailProviderStatus {
+        try await APIClient.shared.get(APIEndpoints.gmailStatus)
     }
 
-    func syncGmail() async throws -> SyncResult {
-        try await APIClient.shared.post(APIEndpoints.EmailSync.startSync)
-    }
-
-    func disconnectGmail() async throws {
-        let _: EmptyResponse = try await APIClient.shared.post(APIEndpoints.Gmail.disconnect)
+    func disconnectGmail() async throws -> GenericMessageResponse {
+        try await APIClient.shared.post(APIEndpoints.gmailDisconnect)
     }
 
     // MARK: - Outlook
 
-    func getOutlookAuthURL() async throws -> AuthURLResponse {
-        try await APIClient.shared.get(APIEndpoints.Outlook.authURL)
+    func connectOutlook() async throws -> OAuthConnectResponse {
+        try await APIClient.shared.get(APIEndpoints.outlookConnect)
     }
 
-    func getOutlookStatus() async throws -> EmailSyncStatus {
-        try await APIClient.shared.get(APIEndpoints.Outlook.status)
+    func outlookStatus() async throws -> EmailProviderStatus {
+        try await APIClient.shared.get(APIEndpoints.outlookStatus)
     }
 
-    func syncOutlook() async throws -> SyncResult {
-        try await APIClient.shared.post(APIEndpoints.Outlook.sync)  // /api/outlook/start-sync
+    func disconnectOutlook() async throws -> GenericMessageResponse {
+        try await APIClient.shared.post(APIEndpoints.outlookDisconnect)
     }
 
-    func disconnectOutlook() async throws {
-        let _: EmptyResponse = try await APIClient.shared.post(APIEndpoints.Outlook.disconnect)
+    // MARK: - Sync
+
+    func startSync() async throws -> EmailSyncResponse {
+        try await APIClient.shared.post(APIEndpoints.emailStartSync)
     }
 
-    // MARK: - Pending Review
+    func retryPending() async throws -> EmailRetryResponse {
+        try await APIClient.shared.post(APIEndpoints.emailRetryPending)
+    }
 
-    func getPendingReview() async throws -> [PendingTransaction] {
-        try await APIClient.shared.get(APIEndpoints.EmailSync.pendingReview)
+    // MARK: - Stats & Review
+
+    func syncStats() async throws -> EmailSyncStatsResponse {
+        try await APIClient.shared.get(APIEndpoints.emailSyncStats)
+    }
+
+    func pendingReview() async throws -> [PendingTransaction] {
+        try await APIClient.shared.get(APIEndpoints.emailPendingReview)
+    }
+
+    func approveTransaction(_ id: String) async throws -> GenericMessageResponse {
+        try await APIClient.shared.post(APIEndpoints.transactionApprove(id))
+    }
+
+    func rejectTransaction(_ id: String) async throws -> GenericMessageResponse {
+        try await APIClient.shared.post(APIEndpoints.transactionReject(id))
+    }
+
+    func bulkApproveTransactions(ids: [String]) async throws -> GenericMessageResponse {
+        let body = BulkTransactionRequest(transactionIds: ids)
+        return try await APIClient.shared.post(APIEndpoints.transactionsBulkApprove, body: body)
+    }
+
+    func bulkRejectTransactions(ids: [String]) async throws -> GenericMessageResponse {
+        let body = BulkTransactionRequest(transactionIds: ids)
+        return try await APIClient.shared.post(APIEndpoints.transactionsBulkReject, body: body)
+    }
+
+    func updateTransaction(_ id: String, body: PendingTransactionUpdate) async throws -> Transaction {
+        try await APIClient.shared.patch(APIEndpoints.transaction(id), body: body)
+    }
+
+    // MARK: - SMS Stats (for cross-link)
+
+    func smsStats() async throws -> SMSSyncStats {
+        try await APIClient.shared.get(APIEndpoints.smsStats)
+    }
+}
+
+// MARK: - Request Models
+
+struct BulkTransactionRequest: Encodable {
+    let transactionIds: [String]
+}
+
+struct PendingTransactionUpdate: Encodable {
+    var description: String?
+    var amount: Double?
+    var accountId: String?
+    var categoryId: String?
+    var date: Date?
+}
+
+// MARK: - Response Models
+
+struct OAuthConnectResponse: Decodable {
+    let authUrl: String?
+    let message: String?
+}
+
+struct EmailProviderStatus: Decodable {
+    let connected: Bool?
+    let accounts: [EmailAccount]?
+    let message: String?
+}
+
+struct EmailSyncResponse: Decodable {
+    let syncing: Bool?
+    let message: String?
+    let emailsFound: Int?
+}
+
+struct EmailRetryResponse: Decodable {
+    let retried: Int?
+    let succeeded: Int?
+    let failed: Int?
+    let message: String?
+}
+
+struct EmailSyncStatsResponse: Decodable {
+    let totalEmails: Int?
+    let processedEmails: Int?
+    let transactionsCreated: Int?
+    let pendingReview: Int?
+    let aiFailed: Int?
+    let aiPending: Int?
+    let isProcessing: Bool?
+    let lastSyncAt: Date?
+}
+
+struct GenericMessageResponse: Decodable {
+    let message: String?
+    let success: Bool?
+}
+
+struct PendingTransaction: Codable, Identifiable {
+    let id: String
+    var date: Date?
+    var description: String?
+    var amount: Double?
+    var accountId: String?
+    var accountName: String?
+    var categoryId: String?
+    var categoryName: String?
+    var transactionType: String?
+    var source: String?
+    var status: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id = "_id"
+        case date
+        case description
+        case amount
+        case accountId
+        case accountName
+        case categoryId
+        case categoryName
+        case transactionType
+        case source
+        case status
     }
 }

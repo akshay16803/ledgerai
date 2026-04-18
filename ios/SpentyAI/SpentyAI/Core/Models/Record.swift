@@ -1,25 +1,61 @@
 import Foundation
 
-struct Record: Codable, Identifiable, Hashable {
-    var id: String { archiveId }
-
-    let archiveId: String
-    let userId: String?
+struct Record: Codable, Identifiable {
+    let id: String
     var subject: String?
     var sender: String?
-    var date: String?
+    var receivedDate: Date?
+    var source: String?
     var amount: Double?
+    var transactionType: String?
+    var hasAttachments: Bool?
     var attachmentCount: Int?
-    var createdAt: String?
 
     enum CodingKeys: String, CodingKey {
-        case archiveId = "archive_id"
-        case userId = "user_id"
+        case id = "_id"
         case subject
         case sender
-        case date
+        case receivedDate
+        case source
         case amount
-        case attachmentCount = "attachment_count"
-        case createdAt = "created_at"
+        case transactionType
+        case hasAttachments
+        case attachmentCount
     }
+}
+
+struct Receipt: Codable, Identifiable {
+    let id: String
+    var filename: String?
+    var mimeType: String?
+    var uploadedAt: Date?
+    var parsedData: ReceiptParsedData?
+    var transactionId: String?
+    var fileSize: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case id = "_id"
+        case filename
+        case mimeType
+        case uploadedAt
+        case parsedData
+        case transactionId
+        case fileSize
+    }
+}
+
+struct ReceiptParsedData: Codable {
+    var merchant: String?
+    var amount: Double?
+    var date: Date?
+    var items: [ReceiptItem]?
+    var tax: Double?
+    var total: Double?
+}
+
+struct ReceiptItem: Codable, Identifiable {
+    var id: String { description ?? UUID().uuidString }
+    var description: String?
+    var amount: Double?
+    var quantity: Double?
 }

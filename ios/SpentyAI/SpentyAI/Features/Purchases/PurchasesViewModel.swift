@@ -1,5 +1,5 @@
 import Foundation
-import os
+import SwiftUI
 
 @Observable
 final class PurchasesViewModel {
@@ -7,212 +7,291 @@ final class PurchasesViewModel {
     // MARK: - State
 
     var bills: [Bill] = []
+    var stats: BillStatsResponse?
+    var creditors: [CreditorSummary] = []
+    var aging: [AgingBucket] = []
+    var purchasesByVendor: [VendorPurchaseSummary] = []
+
     var isLoading = false
-    var isRefreshing = false
+    var showForm = false
+    var editingBill: Bill?
+    var nextNumber: String = ""
+
+    var vendors: [Vendor] = []
+    var accounts: [Account] = []
+
     var errorMessage: String?
-    var statusFilter: String? = nil
-    var settings: AppSettings?
-    var needsSetup = false
 
-    // MARK: - Sheet States
+    var searchText: String = ""
+    var statusFilter: String = "all"
 
-    var showNewBill = false
-    var showEditBill = false
+    var showPaymentSheet = false
+    var paymentBill: Bill?
+
     var showPreview = false
-    var showRecordPayment = false
-    var showDeleteConfirm = false
+    var previewBillId: String?
+    var pdfData: Data?
 
-    // MARK: - Selection
-
-    var selectedBill: Bill?
-
-    // MARK: - Record Payment Fields
-
-    var paymentAmount: String = ""
-    var paymentMethod: String = "bank_transfer"
-    var paymentDate: Date = .init()
-    var paymentAccountId: String?
-    var isRecordingPayment = false
-
-    // MARK: - Delete
-
-    var isDeleting = false
-
-    // MARK: - Private
-
-    private let billRepo = BillRepository()
-    private let settingsRepo = SettingsRepository()
-    private let logger = Logger(subsystem: "com.spentyai", category: "purchases")
+    var showUploadParser = false
+    var parsedBill: BillParseResponse?
+    var isUploading = false
 
     // MARK: - Computed
 
     var filteredBills: [Bill] {
-        bills
+        var result = bills
+
+        if statusFilter != "all" {
+            result = result.filter { ($0.paymentStatus?.lowercased() ?? "") == statusFilter.lowercased() }
+        }
+
+        if !searchText.isEmpty {
+            let query = searchText.lowercased()
+            result = result.filter { bill in
+                (bill.billNumber?.lowercased().contains(query) ?? false)
+                    || (bill.vendorName?.lowercased().contains(query) ?? false)
+            }
+        }
+
+        return result
     }
 
-    var isIndia: Bool {
-        CountryConfig.usesExistingForms(code: settings?.businessCountry ?? "")
-    }
+    static let statusOptions = ["all", "unpaid", "partial", "paid", "overdue"]
 
-    var currency: String {
-        settings?.baseCurrency ?? "INR"
-    }
+    // MARK: - Dependencies
+
+    private let repository = PurchaseRepository.shared
 
     // MARK: - Load
 
     @MainActor
-    func loadInitialData() async {
-        guard !isLoading else { return }
+    func loadBills() async {
         isLoading = true
         errorMessage = nil
-
         do {
-            settings = try await settingsRepo.getSettings()
-
-            if settings?.firmName == nil || settings?.firmName?.isEmpty == true {
-                needsSetup = true
-                isLoading = false
-                return
-            }
-            needsSetup = false
-
-            let result = try await billRepo.getBills(status: statusFilter)
-            bills = result.items
+            bills = try await repository.fetchBills()
         } catch {
-            errorMessage = "Failed to load bills: \(error.localizedDescription)"
-            logger.error("Load bills failed: \(error.localizedDescription)")
+            errorMessage = error.localizedDescription
         }
-
         isLoading = false
     }
 
     @MainActor
-    func refresh() async {
-        isRefreshing = true
-        errorMessage = nil
-
+    func loadStats() async {
         do {
-            let result = try await billRepo.getBills(status: statusFilter)
-            bills = result.items
+            stats = try await repository.fetchStats()
         } catch {
-            errorMessage = "Failed to refresh bills: \(error.localizedDescription)"
-            logger.error("Refresh bills failed: \(error.localizedDescription)")
+            errorMessage = error.localizedDescription
         }
-
-        isRefreshing = false
     }
 
     @MainActor
-    func applyFilter(_ status: String?) async {
-        statusFilter = status
+    func loadCreditors() async {
+        do {
+            creditors = try await repository.fetchCreditors()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    func loadAging() async {
+        do {
+            aging = try await repository.fetchAging()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    func loadPurchasesByVendor() async {
+        do {
+            purchasesByVendor = try await repository.fetchPurchasesByVendor()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    func loadAll() async {
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { await self.loadBills() }
+            group.addTask { await self.loadStats() }
+            group.addTask { await self.loadVendors() }
+            group.addTask { await self.loadAccounts() }
+        }
+    }
+
+    // MARK: - CRUD
+
+    @MainActor
+    func createBill(_ payload: BillPayload) async -> Bool {
         isLoading = true
-
+        errorMessage = nil
         do {
-            let result = try await billRepo.getBills(status: statusFilter)
-            bills = result.items
+            let bill = try await repository.createBill(payload)
+            bills.insert(bill, at: 0)
+            isLoading = false
+            return true
         } catch {
-            errorMessage = "Failed to filter bills."
-            logger.error("Filter bills failed: \(error.localizedDescription)")
+            errorMessage = error.localizedDescription
+            isLoading = false
+            return false
         }
-
-        isLoading = false
     }
 
-    // MARK: - Delete
-
     @MainActor
-    func deleteBill() async {
-        guard let bill = selectedBill else { return }
-        isDeleting = true
-
+    func updateBill(id: String, _ payload: BillPayload) async -> Bool {
+        isLoading = true
+        errorMessage = nil
         do {
-            try await billRepo.deleteBill(bill.billId)
-            bills.removeAll { $0.billId == bill.billId }
-            showDeleteConfirm = false
-            selectedBill = nil
-            logger.info("Deleted bill \(bill.billId)")
-        } catch {
-            errorMessage = "Failed to delete bill."
-            logger.error("Delete bill failed: \(error.localizedDescription)")
-        }
-
-        isDeleting = false
-    }
-
-    // MARK: - Record Payment
-
-    @MainActor
-    func recordPayment() async {
-        guard let bill = selectedBill else { return }
-        guard let amount = Double(paymentAmount), amount > 0 else {
-            errorMessage = "Enter a valid payment amount."
-            return
-        }
-
-        isRecordingPayment = true
-        let dateStr = DateFormatting.format(paymentDate, format: "yyyy-MM-dd")
-
-        do {
-            let updated = try await billRepo.recordPayment(
-                bill.billId,
-                amount: amount,
-                accountId: paymentAccountId,
-                paymentMethod: paymentMethod,
-                date: dateStr
-            )
-            if let idx = bills.firstIndex(where: { $0.billId == bill.billId }) {
-                bills[idx] = updated
+            let updated = try await repository.updateBill(id: id, payload)
+            if let index = bills.firstIndex(where: { $0.id == id }) {
+                bills[index] = updated
             }
-            showRecordPayment = false
-            resetPaymentFields()
-            logger.info("Recorded payment for bill \(bill.billId)")
+            isLoading = false
+            return true
         } catch {
-            errorMessage = "Failed to record payment."
-            logger.error("Record payment failed: \(error.localizedDescription)")
+            errorMessage = error.localizedDescription
+            isLoading = false
+            return false
         }
+    }
 
-        isRecordingPayment = false
+    @MainActor
+    func deleteBill(id: String) async {
+        errorMessage = nil
+        do {
+            try await repository.deleteBill(id: id)
+            bills.removeAll { $0.id == id }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    // MARK: - Actions
+
+    @MainActor
+    func recordPayment(id: String, _ payload: RecordBillPaymentPayload) async -> Bool {
+        errorMessage = nil
+        do {
+            let updated = try await repository.recordPayment(id: id, payload)
+            if let index = bills.firstIndex(where: { $0.id == id }) {
+                bills[index] = updated
+            }
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    @MainActor
+    func markPaid(id: String) async {
+        errorMessage = nil
+        do {
+            let updated = try await repository.markPaid(id: id)
+            if let index = bills.firstIndex(where: { $0.id == id }) {
+                bills[index] = updated
+            }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    func duplicateBill(id: String) async {
+        errorMessage = nil
+        do {
+            let duplicate = try await repository.duplicateBill(id: id)
+            bills.insert(duplicate, at: 0)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    // MARK: - Next Number
+
+    @MainActor
+    func getNextNumber() async {
+        do {
+            nextNumber = try await repository.getNextNumber()
+        } catch {
+            nextNumber = ""
+        }
+    }
+
+    // MARK: - PDF
+
+    @MainActor
+    func loadBillPDF(id: String) async {
+        pdfData = nil
+        do {
+            pdfData = try await repository.fetchBillPDF(id: id)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    // MARK: - Upload & Parse
+
+    @MainActor
+    func uploadAndParseBill(data: Data, filename: String, mimeType: String) async {
+        isUploading = true
+        parsedBill = nil
+        errorMessage = nil
+        do {
+            parsedBill = try await repository.uploadAndParseBill(data: data, filename: filename, mimeType: mimeType)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        isUploading = false
+    }
+
+    // MARK: - Supporting Data
+
+    @MainActor
+    func loadVendors() async {
+        do {
+            vendors = try await repository.fetchVendors()
+        } catch {
+            // Non-critical; silently fail
+        }
+    }
+
+    @MainActor
+    func loadAccounts() async {
+        do {
+            accounts = try await repository.fetchAccounts()
+        } catch {
+            // Non-critical; silently fail
+        }
     }
 
     // MARK: - Helpers
 
-    func openPreview(_ bill: Bill) {
-        selectedBill = bill
+    func startCreate() {
+        editingBill = nil
+        showForm = true
+    }
+
+    func startEdit(_ bill: Bill) {
+        editingBill = bill
+        showForm = true
+    }
+
+    func startPayment(_ bill: Bill) {
+        paymentBill = bill
+        showPaymentSheet = true
+    }
+
+    func startPreview(_ bill: Bill) {
+        previewBillId = bill.id
         showPreview = true
     }
 
-    func openEdit(_ bill: Bill) {
-        selectedBill = bill
-        showEditBill = true
-    }
-
-    func openRecordPayment(_ bill: Bill) {
-        selectedBill = bill
-        paymentAmount = ""
-        let remaining = (bill.grandTotal ?? 0) - (bill.amountPaid ?? 0)
-        if remaining > 0 {
-            paymentAmount = String(format: "%.2f", remaining)
-        }
-        showRecordPayment = true
-    }
-
-    func openDeleteConfirm(_ bill: Bill) {
-        selectedBill = bill
-        showDeleteConfirm = true
-    }
-
-    func statusType(for bill: Bill) -> StatusType {
-        switch bill.paymentStatus?.lowercased() {
-        case "paid": return .paid
-        case "partial": return .partial
-        default: return .unpaid
-        }
-    }
-
-    private func resetPaymentFields() {
-        paymentAmount = ""
-        paymentMethod = "bank_transfer"
-        paymentDate = Date()
-        paymentAccountId = nil
+    func startUpload() {
+        parsedBill = nil
+        showUploadParser = true
     }
 }

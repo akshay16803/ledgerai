@@ -1,211 +1,323 @@
 import Foundation
-import os
+import Observation
 
 @Observable
 final class ReconciliationViewModel {
 
-    // MARK: - State
+    // MARK: - Data
 
     var statements: [Statement] = []
-    var selectedStatement: Statement?
-    var isLoading = false
-    var isUploading = false
-    var isReconciling = false
+    var accounts: [Account] = []
+    var accountSubTypes: [AccountSubType] = []
+    var categories: [Category] = []
+    var activeStatement: Statement?
+    var parsedEntries: [ParsedEntry] = []
+    var reconciliationResult: ReconciliationResult?
+
+    // MARK: - Upload State
+
+    var selectedSubType: String = ""
+    var selectedAccountId: String = ""
+    var periodFrom: Date = Date()
+    var periodTo: Date = Date()
+    var isUploading: Bool = false
+    var uploadProgress: Double = 0
+
+    // MARK: - UI State
+
+    var isLoading: Bool = false
+    var isReconciling: Bool = false
+    var isProcessing: Bool = false
+    var showUploadSheet: Bool = false
+    var showUnlockSheet: Bool = false
+    var unlockPassword: String = ""
     var errorMessage: String?
-
-    // Sheet state
-    var showUploadSheet = false
-    var showPasswordSheet: Statement?
-    var showDeleteConfirm: Statement?
-
-    // Upload form state
-    var selectedAccountId: String?
-    var selectedSubType: String?
-    var periodFrom: Date?
-    var periodTo: Date?
-
-    // Reconciliation result (cached after reconcile)
-    var lastReconciliationResult: ReconciliationResult?
+    var successMessage: String?
 
     // MARK: - Private
 
-    private let repository = ReconciliationRepository()
-    private let logger = Logger(subsystem: "com.spentyai", category: "reconciliation")
+    private let repository = ReconciliationRepository.shared
 
-    // MARK: - Computed
+    private static let dateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        return f
+    }()
 
-    var canUpload: Bool {
-        selectedAccountId != nil
+    // MARK: - Filtered Accounts
+
+    var filteredAccounts: [Account] {
+        guard !selectedSubType.isEmpty else { return accounts }
+        return accounts.filter { $0.subType?.lowercased() == selectedSubType.lowercased() }
     }
 
-    // MARK: - Methods
+    // MARK: - Load
 
     @MainActor
-    func loadStatements() async {
+    func loadInitial() async {
         isLoading = true
         errorMessage = nil
-
         do {
-            statements = try await repository.getStatements()
-            logger.info("Loaded \(self.statements.count) statements")
-        } catch {
-            errorMessage = "Failed to load statements."
-            logger.error("Load statements error: \(error.localizedDescription)")
-        }
+            async let stmts = repository.fetchStatements()
+            async let accts = repository.fetchAccounts()
+            async let subTypes = repository.fetchAccountSubTypes()
+            async let cats = repository.fetchCategories()
 
+            statements = try await stmts
+            accounts = try await accts
+            accountSubTypes = try await subTypes
+            categories = try await cats
+        } catch {
+            errorMessage = error.localizedDescription
+        }
         isLoading = false
     }
 
     @MainActor
-    func refresh() async {
+    func refreshStatements() async {
         errorMessage = nil
-
         do {
-            statements = try await repository.getStatements()
+            statements = try await repository.fetchStatements()
         } catch {
-            errorMessage = "Failed to refresh statements."
-            logger.error("Refresh statements error: \(error.localizedDescription)")
+            errorMessage = error.localizedDescription
         }
     }
 
-    @MainActor
-    func uploadStatement(data: Data, name: String, mimeType: String) async {
-        guard let accountId = selectedAccountId else { return }
+    // MARK: - Upload
 
+    @MainActor
+    func uploadStatement(fileData: Data, filename: String) async {
+        guard !selectedAccountId.isEmpty else {
+            errorMessage = "Please select an account."
+            return
+        }
         isUploading = true
         errorMessage = nil
-
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "yyyy-MM-dd"
-
-        let fromStr = periodFrom.map { dateFormatter.string(from: $0) }
-        let toStr = periodTo.map { dateFormatter.string(from: $0) }
-
+        let mimeType = filename.lowercased().hasSuffix(".pdf") ? "application/pdf" : "text/csv"
         do {
             let statement = try await repository.uploadStatement(
-                fileData: data,
-                fileName: name,
+                fileData: fileData,
+                filename: filename,
                 mimeType: mimeType,
-                accountId: accountId,
-                subType: selectedSubType,
-                periodFrom: fromStr,
-                periodTo: toStr
+                accountId: selectedAccountId,
+                periodFrom: Self.dateFormatter.string(from: periodFrom),
+                periodTo: Self.dateFormatter.string(from: periodTo)
             )
             statements.insert(statement, at: 0)
+            showUploadSheet = false
+            successMessage = "Statement uploaded successfully."
             resetUploadForm()
-            logger.info("Uploaded statement: \(statement.filename ?? name)")
         } catch {
-            errorMessage = "Failed to upload statement."
-            logger.error("Upload statement error: \(error.localizedDescription)")
+            errorMessage = error.localizedDescription
         }
-
         isUploading = false
     }
 
-    @MainActor
-    func deleteStatement(_ id: String) async {
-        do {
-            try await repository.deleteStatement(id)
-            statements.removeAll { $0.statementId == id }
-            logger.info("Deleted statement: \(id)")
-        } catch {
-            errorMessage = "Failed to delete statement."
-            logger.error("Delete statement error: \(error.localizedDescription)")
-        }
+    private func resetUploadForm() {
+        selectedSubType = ""
+        selectedAccountId = ""
+        periodFrom = Date()
+        periodTo = Date()
     }
 
+    // MARK: - Statement Detail
+
     @MainActor
-    func reconcile(_ id: String) async {
+    func loadStatement(id: String) async {
+        isLoading = true
+        errorMessage = nil
+        do {
+            async let stmt = repository.fetchStatement(id: id)
+            async let entries = repository.fetchEntries(statementId: id)
+
+            activeStatement = try await stmt
+            parsedEntries = try await entries
+            reconciliationResult = activeStatement?.reconciliation
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        isLoading = false
+    }
+
+    // MARK: - Reconcile
+
+    @MainActor
+    func reconcile(statementId: String) async {
         isReconciling = true
         errorMessage = nil
-
         do {
-            let result = try await repository.reconcile(id)
-            lastReconciliationResult = result
-
-            // Refresh the statement to get updated status
-            if let updated = try? await repository.getStatement(id),
-               let index = statements.firstIndex(where: { $0.statementId == id }) {
-                statements[index] = updated
-                selectedStatement = updated
-            }
-
-            logger.info("Reconciled statement \(id): matched=\(result.matchedCount ?? 0)")
+            let updated = try await repository.reconcile(statementId: statementId)
+            activeStatement = updated
+            reconciliationResult = updated.reconciliation
+            updateStatementInList(updated)
+            successMessage = "Reconciliation complete."
         } catch {
-            errorMessage = "Failed to reconcile statement."
-            logger.error("Reconcile error: \(error.localizedDescription)")
+            errorMessage = error.localizedDescription
         }
-
         isReconciling = false
     }
 
-    @MainActor
-    func unlockStatement(_ id: String, password: String) async {
-        errorMessage = nil
+    // MARK: - Add Missing to Ledger
 
+    @MainActor
+    func addMissingToLedger(statementId: String) async {
+        isProcessing = true
+        errorMessage = nil
         do {
-            let updated = try await repository.unlockStatement(id, password: password)
-            if let index = statements.firstIndex(where: { $0.statementId == id }) {
-                statements[index] = updated
-            }
-            showPasswordSheet = nil
-            logger.info("Unlocked statement: \(id)")
+            let updated = try await repository.addMissingToLedger(statementId: statementId)
+            activeStatement = updated
+            updateStatementInList(updated)
+            successMessage = "Missing entries added to ledger."
         } catch {
-            errorMessage = "Incorrect password or unlock failed."
-            logger.error("Unlock error: \(error.localizedDescription)")
+            errorMessage = error.localizedDescription
+        }
+        isProcessing = false
+    }
+
+    // MARK: - Re-audit
+
+    @MainActor
+    func reaudit(statementId: String) async {
+        isProcessing = true
+        errorMessage = nil
+        do {
+            let updated = try await repository.reaudit(statementId: statementId)
+            activeStatement = updated
+            reconciliationResult = updated.reconciliation
+            updateStatementInList(updated)
+            successMessage = "Re-audit complete."
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        isProcessing = false
+    }
+
+    // MARK: - Unlock
+
+    @MainActor
+    func unlock(statementId: String) async {
+        guard !unlockPassword.isEmpty else {
+            errorMessage = "Please enter the PDF password."
+            return
+        }
+        isProcessing = true
+        errorMessage = nil
+        do {
+            let updated = try await repository.unlock(statementId: statementId, password: unlockPassword)
+            activeStatement = updated
+            parsedEntries = updated.parsedEntries ?? []
+            updateStatementInList(updated)
+            showUnlockSheet = false
+            unlockPassword = ""
+            successMessage = "Statement unlocked and parsed."
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        isProcessing = false
+    }
+
+    // MARK: - Entry Category Update
+
+    @MainActor
+    func updateEntryCategory(statementId: String, index: Int, categoryId: String?, categoryName: String?) async {
+        errorMessage = nil
+        do {
+            let updated = try await repository.updateEntry(
+                statementId: statementId,
+                index: index,
+                categoryId: categoryId,
+                categoryName: categoryName
+            )
+            activeStatement = updated
+            parsedEntries = updated.parsedEntries ?? parsedEntries
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 
-    @MainActor
-    func updateEntry(
-        statementId: String,
-        entryIndex: Int,
-        categoryId: String?,
-        subcategoryId: String?,
-        transactionType: String?
-    ) async {
-        let update = EntryUpdate(
-            categoryId: categoryId,
-            subcategoryId: subcategoryId,
-            transactionType: transactionType
-        )
+    // MARK: - Bulk Categorize
 
+    @MainActor
+    func bulkCategorize(statementId: String, categoryId: String) async {
+        isProcessing = true
+        errorMessage = nil
         do {
-            let updated = try await repository.updateEntry(statementId, entryIndex: entryIndex, update: update)
-            if let index = statements.firstIndex(where: { $0.statementId == statementId }) {
-                statements[index] = updated
-            }
-            selectedStatement = updated
-            logger.info("Updated entry \(entryIndex) for statement \(statementId)")
+            let updated = try await repository.bulkCategorize(statementId: statementId, categoryId: categoryId)
+            activeStatement = updated
+            parsedEntries = updated.parsedEntries ?? parsedEntries
+            successMessage = "All entries categorized."
         } catch {
-            errorMessage = "Failed to update entry."
-            logger.error("Update entry error: \(error.localizedDescription)")
+            errorMessage = error.localizedDescription
         }
+        isProcessing = false
+    }
+
+    // MARK: - Approve / Reject
+
+    @MainActor
+    func approveStatement(id: String) async {
+        isProcessing = true
+        errorMessage = nil
+        do {
+            let updated = try await repository.approveStatement(id: id)
+            activeStatement = updated
+            updateStatementInList(updated)
+            successMessage = "Statement approved."
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        isProcessing = false
     }
 
     @MainActor
-    func bulkCategorize(_ id: String, entries: [BulkCategoryEntry]) async {
+    func rejectStatement(id: String) async {
+        isProcessing = true
         errorMessage = nil
-
         do {
-            let updated = try await repository.bulkCategorize(id, entries: entries)
-            if let index = statements.firstIndex(where: { $0.statementId == id }) {
-                statements[index] = updated
-            }
-            selectedStatement = updated
-            logger.info("Bulk categorized \(entries.count) entries for statement \(id)")
+            let updated = try await repository.rejectStatement(id: id)
+            activeStatement = updated
+            updateStatementInList(updated)
+            successMessage = "Statement rejected."
         } catch {
-            errorMessage = "Failed to bulk categorize entries."
-            logger.error("Bulk categorize error: \(error.localizedDescription)")
+            errorMessage = error.localizedDescription
+        }
+        isProcessing = false
+    }
+
+    // MARK: - Delete
+
+    @MainActor
+    func deleteStatement(id: String) async {
+        errorMessage = nil
+        do {
+            _ = try await repository.deleteStatement(id: id)
+            statements.removeAll { $0.id == id }
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 
     // MARK: - Helpers
 
-    private func resetUploadForm() {
-        selectedAccountId = nil
-        selectedSubType = nil
-        periodFrom = nil
-        periodTo = nil
+    func accountName(for id: String?) -> String {
+        guard let id else { return "Unknown" }
+        return accounts.first(where: { $0.id == id })?.name ?? "Unknown"
+    }
+
+    func categoryName(for id: String?) -> String {
+        guard let id else { return "Uncategorized" }
+        return categories.first(where: { $0.id == id })?.name ?? "Uncategorized"
+    }
+
+    func subcategories(for categoryId: String?) -> [Category] {
+        guard let categoryId else { return [] }
+        return categories.first(where: { $0.id == categoryId })?.children ?? []
+    }
+
+    private func updateStatementInList(_ statement: Statement) {
+        if let idx = statements.firstIndex(where: { $0.id == statement.id }) {
+            statements[idx] = statement
+        }
     }
 }

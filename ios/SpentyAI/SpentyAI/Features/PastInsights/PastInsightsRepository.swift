@@ -1,44 +1,98 @@
 import Foundation
 
-// MARK: - Request Types
+// MARK: - Request Models
 
-struct TaxSummaryCreate: Codable {
-    var name: String
-    var dateFrom: String
-    var dateTo: String
-    var emailAddress: String
-    var provider: String
+struct CreateTaxSummaryRequest: Codable {
+    let name: String
+    let dateFrom: String
+    let dateTo: String
+    let emailAddress: String
+}
 
-    enum CodingKeys: String, CodingKey {
-        case name
-        case dateFrom = "date_from"
-        case dateTo = "date_to"
-        case emailAddress = "email_address"
-        case provider
-    }
+struct UpdateTransactionRequest: Codable {
+    let date: String?
+    let description: String?
+    let amount: Double?
+    let transactionType: String?
+    let categoryName: String?
+}
+
+struct AddTransactionRequest: Codable {
+    let date: String
+    let description: String
+    let amount: Double
+    let transactionType: String
+    let categoryName: String?
+}
+
+struct AvailableEmailsResponse: Codable {
+    let emails: [String]
+}
+
+struct GenerateResponse: Codable {
+    let message: String?
+    let id: String?
 }
 
 // MARK: - Repository
 
-struct PastInsightsRepository {
+final class PastInsightsRepository {
+
+    static let shared = PastInsightsRepository()
+    private init() {}
+
+    // MARK: - Summaries
 
     func getSummaries() async throws -> [TaxSummary] {
-        try await APIClient.shared.get(APIEndpoints.TaxSummary.list)
+        try await APIClient.shared.get(APIEndpoints.taxSummary)
     }
 
-    func getSummary(_ id: String) async throws -> TaxSummary {
-        try await APIClient.shared.get(APIEndpoints.TaxSummary.summary(id))
+    func getSummary(id: String) async throws -> TaxSummary {
+        try await APIClient.shared.get(APIEndpoints.taxSummaryDetail(id))
     }
 
-    func createSummary(_ body: TaxSummaryCreate) async throws -> TaxSummary {
-        try await APIClient.shared.post(APIEndpoints.TaxSummary.create, body: body)
+    func createSummary(_ request: CreateTaxSummaryRequest) async throws -> TaxSummary {
+        try await APIClient.shared.post(APIEndpoints.taxSummary, body: request)
     }
 
-    func deleteSummary(_ id: String) async throws {
-        try await APIClient.shared.delete(APIEndpoints.TaxSummary.delete(id))
+    func generateSummary() async throws -> GenerateResponse {
+        try await APIClient.shared.get(APIEndpoints.taxSummaryGenerate)
     }
 
-    func generateSummary(_ id: String) async throws -> TaxSummary {
-        try await APIClient.shared.post(APIEndpoints.TaxSummary.generate)
+    func deleteSummary(id: String) async throws {
+        let _: EmptyResponse = try await APIClient.shared.delete(APIEndpoints.taxSummaryDetail(id))
+    }
+
+    func getAvailableEmails() async throws -> [String] {
+        let response: AvailableEmailsResponse = try await APIClient.shared.get(APIEndpoints.taxSummaryAvailableEmails)
+        return response.emails
+    }
+
+    // MARK: - Transactions
+
+    func getTransactions(summaryId: String) async throws -> [TaxSummaryTransaction] {
+        try await APIClient.shared.get(APIEndpoints.taxSummaryTransactions(summaryId))
+    }
+
+    func addTransaction(summaryId: String, _ request: AddTransactionRequest) async throws -> TaxSummaryTransaction {
+        try await APIClient.shared.post(APIEndpoints.taxSummaryTransactions(summaryId), body: request)
+    }
+
+    func updateTransaction(summaryId: String, txnId: String, _ request: UpdateTransactionRequest) async throws -> TaxSummaryTransaction {
+        try await APIClient.shared.put(APIEndpoints.taxSummaryTransaction(summaryId, txnId), body: request)
+    }
+
+    func deleteTransaction(summaryId: String, txnId: String) async throws {
+        let _: EmptyResponse = try await APIClient.shared.delete(APIEndpoints.taxSummaryTransaction(summaryId, txnId))
+    }
+
+    // MARK: - Export / Download
+
+    func exportCSV(summaryId: String) async throws -> Data {
+        try await APIClient.shared.getRaw(APIEndpoints.taxSummaryExport(summaryId))
+    }
+
+    func downloadPDF(summaryId: String) async throws -> Data {
+        try await APIClient.shared.getRaw(APIEndpoints.taxSummaryDownload(summaryId))
     }
 }

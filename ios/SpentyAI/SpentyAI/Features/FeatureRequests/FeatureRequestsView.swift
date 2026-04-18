@@ -1,230 +1,192 @@
 import SwiftUI
 
 struct FeatureRequestsView: View {
+
+    // MARK: - Constants
+
+    private enum Brand {
+        static let primary = Color(red: 0x3A / 255, green: 0x5C / 255, blue: 0x4A / 255)
+        static let background = Color(red: 0xF8 / 255, green: 0xF6 / 255, blue: 0xF3 / 255)
+    }
+
+    // MARK: - State
+
     @State private var viewModel = FeatureRequestsViewModel()
 
+    // MARK: - Body
+
     var body: some View {
-        NavigationStack {
-            ZStack {
-                ScrollView {
-                    VStack(spacing: SpentySpacing.xl) {
-                        requestsListSection
-                    }
-                    .padding(.horizontal, SpentySpacing.lg)
-                    .padding(.vertical, SpentySpacing.md)
-                    .padding(.bottom, 80)
-                }
-                .refreshable {
-                    await viewModel.refresh()
-                }
-                .shimmer(isActive: viewModel.isLoading && viewModel.requests.isEmpty)
+        ZStack {
+            Brand.background
+                .ignoresSafeArea()
 
-                // FAB to submit
-                VStack {
-                    Spacer()
-                    HStack {
-                        Spacer()
-                        Button {
-                            viewModel.showSubmitForm = true
-                        } label: {
-                            Image(systemName: "plus")
-                                .font(.title2.weight(.semibold))
-                                .foregroundStyle(.white)
-                                .frame(width: 56, height: 56)
-                                .background(SpentyColors.brandPrimary)
-                                .clipShape(Circle())
-                                .shadow(color: SpentyColors.brandPrimary.opacity(0.3), radius: 8, y: 4)
-                        }
-                        .padding(.trailing, SpentySpacing.lg)
-                        .padding(.bottom, SpentySpacing.lg)
-                    }
+            Group {
+                if viewModel.isLoading && viewModel.requests.isEmpty {
+                    ProgressView("Loading requests...")
+                        .tint(Brand.primary)
+                } else if viewModel.requests.isEmpty {
+                    emptyState
+                } else {
+                    requestList
                 }
             }
-            .background(SpentyColors.bgPrimary)
-            .navigationTitle("Feature Requests")
-            .task {
-                if viewModel.requests.isEmpty {
-                    await viewModel.loadRequests()
+        }
+        .navigationTitle("Feature Requests")
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    viewModel.showForm = true
+                } label: {
+                    Image(systemName: "plus")
+                        .fontWeight(.semibold)
                 }
+                .tint(Brand.primary)
             }
-            .sheet(isPresented: $viewModel.showSubmitForm) {
-                submitFormSheet
+        }
+        .sheet(isPresented: $viewModel.showForm) {
+            FeatureRequestFormView { title, description, category in
+                await viewModel.submitRequest(
+                    title: title,
+                    description: description,
+                    category: category
+                )
             }
+        }
+        .alert("Error", isPresented: .init(
+            get: { viewModel.errorMessage != nil },
+            set: { if !$0 { viewModel.errorMessage = nil } }
+        )) {
+            Button("OK") { viewModel.errorMessage = nil }
+        } message: {
+            Text(viewModel.errorMessage ?? "")
+        }
+        .task {
+            await viewModel.loadRequests()
         }
     }
 
-    // MARK: - Requests List
+    // MARK: - Sub-views
 
-    @ViewBuilder
-    private var requestsListSection: some View {
-        if viewModel.requests.isEmpty && !viewModel.isLoading {
-            EmptyState(
-                icon: "lightbulb",
-                title: "No Requests Yet",
-                message: "Be the first to suggest a feature or improvement."
-            )
-        } else {
+    private var emptyState: some View {
+        ContentUnavailableView {
+            Label("No Requests Yet", systemImage: "lightbulb")
+                .foregroundStyle(Brand.primary)
+        } description: {
+            Text("Be the first to suggest a feature!")
+        } actions: {
+            Button("Submit a Request") {
+                viewModel.showForm = true
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(Brand.primary)
+        }
+    }
+
+    private var requestList: some View {
+        List {
             ForEach(viewModel.requests) { request in
-                SpentyCard {
-                    VStack(alignment: .leading, spacing: SpentySpacing.sm) {
-                        HStack(alignment: .top) {
-                            VStack(alignment: .leading, spacing: SpentySpacing.xs) {
-                                Text(request.title)
-                                    .font(SpentyFonts.subheading)
-                                    .foregroundStyle(SpentyColors.textPrimary)
-
-                                if let desc = request.description, !desc.isEmpty {
-                                    Text(desc)
-                                        .font(SpentyFonts.body)
-                                        .foregroundStyle(SpentyColors.textSecondary)
-                                        .lineLimit(2)
-                                }
-                            }
-                            Spacer()
-
-                            Button {
-                                Task { await viewModel.voteForRequest(request.requestId) }
-                            } label: {
-                                Image(systemName: "heart")
-                                    .font(.title3)
-                                    .foregroundStyle(SpentyColors.brandAccent)
-                            }
-                            .buttonStyle(.plain)
-                        }
-
-                        HStack(spacing: SpentySpacing.sm) {
-                            if let category = request.category {
-                                Text(category.capitalized)
-                                    .font(.system(size: 11, weight: .semibold))
-                                    .foregroundStyle(categoryColor(category))
-                                    .padding(.horizontal, SpentySpacing.sm)
-                                    .padding(.vertical, SpentySpacing.xs)
-                                    .background(categoryColor(category).opacity(0.15))
-                                    .clipShape(Capsule())
-                            }
-
-                            if let status = request.status {
-                                Text(status.capitalized)
-                                    .font(.system(size: 11, weight: .semibold))
-                                    .foregroundStyle(statusColor(status))
-                                    .padding(.horizontal, SpentySpacing.sm)
-                                    .padding(.vertical, SpentySpacing.xs)
-                                    .background(statusColor(status).opacity(0.15))
-                                    .clipShape(Capsule())
-                            }
-
-                            Spacer()
-
-                            if let date = request.createdAt {
-                                Text(date)
-                                    .font(SpentyFonts.caption)
-                                    .foregroundStyle(SpentyColors.textMuted)
-                            }
-                        }
-                    }
-                }
+                requestRow(request)
+                    .listRowBackground(Color.white)
             }
+        }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .refreshable {
+            await viewModel.loadRequests()
         }
     }
 
-    // MARK: - Submit Form Sheet
+    private func requestRow(_ request: FeatureRequest) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            // Vote button
+            voteButton(request)
 
-    private var submitFormSheet: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: SpentySpacing.xl) {
-                    SheetHeader("Submit a Request") {
-                        viewModel.showSubmitForm = false
-                    }
+            // Content
+            VStack(alignment: .leading, spacing: 6) {
+                Text(request.title)
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(.primary)
 
-                    // Title
-                    FormField(
-                        "Title",
-                        text: $viewModel.title,
-                        placeholder: "What would you like to see?",
-                        isRequired: true
-                    )
-
-                    // Description
-                    VStack(alignment: .leading, spacing: SpentySpacing.xs) {
-                        Text("Description")
-                            .font(SpentyFonts.caption)
-                            .foregroundStyle(SpentyColors.textSecondary)
-                        TextEditor(text: $viewModel.description)
-                            .font(SpentyFonts.body)
-                            .frame(minHeight: 100)
-                            .padding(SpentySpacing.sm)
-                            .scrollContentBackground(.hidden)
-                            .background(SpentyColors.surface)
-                            .clipShape(RoundedRectangle(cornerRadius: SpentyRadius.md))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: SpentyRadius.md)
-                                    .stroke(SpentyColors.borderSubtle, lineWidth: 1)
-                            )
-                    }
-
-                    // Category Picker
-                    VStack(alignment: .leading, spacing: SpentySpacing.xs) {
-                        Text("Category")
-                            .font(SpentyFonts.caption)
-                            .foregroundStyle(SpentyColors.textSecondary)
-                        Picker("Category", selection: $viewModel.category) {
-                            ForEach(FeatureRequestsViewModel.categories, id: \.self) { cat in
-                                Text(cat.capitalized).tag(cat)
-                            }
-                        }
-                        .pickerStyle(.segmented)
-                    }
-
-                    // Submit Button
-                    PrimaryButton(
-                        "Submit",
-                        isLoading: viewModel.isSubmitting,
-                        isDisabled: viewModel.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    ) {
-                        Task { await viewModel.submitRequest() }
-                    }
-
-                    if let error = viewModel.errorMessage {
-                        Text(error)
-                            .font(SpentyFonts.caption)
-                            .foregroundStyle(SpentyColors.danger)
-                            .multilineTextAlignment(.center)
-                    }
+                if let description = request.description, !description.isEmpty {
+                    Text(description)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
                 }
-                .padding(.horizontal, SpentySpacing.lg)
-                .padding(.vertical, SpentySpacing.md)
-            }
-            .background(SpentyColors.bgPrimary)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
-                        viewModel.showSubmitForm = false
-                    }
+
+                HStack(spacing: 8) {
+                    categoryBadge(request.category)
+                    statusBadge(request.status)
                 }
             }
         }
-        .presentationDetents([.large])
+        .padding(.vertical, 4)
     }
 
-    // MARK: - Helpers
+    private func voteButton(_ request: FeatureRequest) -> some View {
+        Button {
+            Task { await viewModel.voteForRequest(id: request.id) }
+        } label: {
+            VStack(spacing: 2) {
+                Image(systemName: "arrow.up")
+                    .font(.caption.weight(.bold))
+                Text("\(request.votes)")
+                    .font(.caption2.weight(.semibold))
+                    .monospacedDigit()
+            }
+            .foregroundStyle(Brand.primary)
+            .frame(width: 44, height: 48)
+            .background(Brand.primary.opacity(0.1))
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
 
-    private func categoryColor(_ category: String) -> Color {
-        switch category.lowercased() {
-        case "bug": return SpentyColors.danger
-        case "feature": return SpentyColors.info
-        case "improvement": return SpentyColors.warning
-        default: return SpentyColors.textMuted
+    private func categoryBadge(_ category: FeatureRequestCategory) -> some View {
+        Text(category.rawValue)
+            .font(.caption2.weight(.medium))
+            .foregroundStyle(Brand.primary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(Brand.primary.opacity(0.1))
+            .clipShape(Capsule())
+    }
+
+    private func statusBadge(_ status: FeatureRequestStatus) -> some View {
+        Text(status.displayName)
+            .font(.caption2.weight(.medium))
+            .foregroundStyle(status.color)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(status.color.opacity(0.12))
+            .clipShape(Capsule())
+    }
+}
+
+// MARK: - Status Helpers
+
+extension FeatureRequestStatus {
+    var displayName: String {
+        switch self {
+        case .pending:    return "Pending"
+        case .inProgress: return "In Progress"
+        case .completed:  return "Completed"
         }
     }
 
-    private func statusColor(_ status: String) -> Color {
-        switch status.lowercased() {
-        case "completed", "done": return SpentyColors.success
-        case "in_progress", "in progress": return SpentyColors.warning
-        case "pending", "open": return SpentyColors.info
-        case "rejected", "closed": return SpentyColors.danger
-        default: return SpentyColors.textMuted
+    var color: Color {
+        switch self {
+        case .pending:    return .yellow.opacity(0.9)
+        case .inProgress: return .blue
+        case .completed:  return .green
         }
+    }
+}
+
+// MARK: - Preview
+
+#Preview {
+    NavigationStack {
+        FeatureRequestsView()
     }
 }

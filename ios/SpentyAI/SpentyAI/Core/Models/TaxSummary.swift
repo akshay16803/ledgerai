@@ -1,33 +1,49 @@
 import Foundation
 
-struct TaxTotals: Codable, Hashable {
-    var income: Double?
-    var expense: Double?
-    var net: Double?
-}
-
-struct TaxSummary: Codable, Identifiable, Hashable {
-    var id: String { summaryId }
-
-    let summaryId: String
+struct TaxSummary: Codable, Identifiable {
+    let id: String
     var name: String?
-    var dateFrom: String?
-    var dateTo: String?
+    var dateFrom: Date?
+    var dateTo: Date?
+    var status: String?
+    var totalIncome: Double?
+    var totalExpense: Double?
+    var net: Double?
+    var transactionCount: Int?
     var emailAddress: String?
     var provider: String?
-    var status: String?
-    var totals: TaxTotals?
-    var createdAt: String?
 
     enum CodingKeys: String, CodingKey {
-        case summaryId = "summary_id"
+        case id = "_id"
         case name
-        case dateFrom = "date_from"
-        case dateTo = "date_to"
-        case emailAddress = "email_address"
-        case provider
+        case dateFrom
+        case dateTo
         case status
-        case totals
-        case createdAt = "created_at"
+        case totalIncome
+        case totalExpense
+        case net
+        case transactionCount
+        case emailAddress
+        case provider
+    }
+}
+
+struct TaxSummaryTransaction: Codable, Identifiable {
+    let id: String
+    var date: Date?
+    var description: String?
+    var amount: Double?
+    var transactionType: String?
+    var categoryName: String?
+    var accountName: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id = "_id"
+        case date
+        case description
+        case amount
+        case transactionType
+        case categoryName
+        case accountName
     }
 }

@@ -1,5 +1,10 @@
 import Foundation
-import os
+import Observation
+
+enum TransactionViewMode: String, CaseIterable {
+    case list = "List"
+    case ledger = "Ledger"
+}
 
 @Observable
 final class TransactionsViewModel {
@@ -7,192 +12,305 @@ final class TransactionsViewModel {
     // MARK: - Data
 
     var transactions: [Transaction] = []
-    var totalCount: Int = 0
+    var total: Int = 0
+    var accounts: [Account] = []
+    var categories: [Category] = []
 
-    // MARK: - Loading State
+    // MARK: - Filters
 
-    var isLoading = false
-    var isRefreshing = false
-    var errorMessage: String?
+    var filterType: String = "All"
+    var filterAccountId: String = ""
+    var filterDateFrom: Date? = nil
+    var filterDateTo: Date? = nil
+    var searchQuery: String = ""
 
-    // MARK: - Filter State
+    // MARK: - UI State
 
-    var selectedType: TransactionType?
-    var selectedAccountId: String?
-    var dateFrom: Date?
-    var dateTo: Date?
+    var viewMode: TransactionViewMode = .list
+    var isLoading: Bool = false
+    var isLoadingMore: Bool = false
+    var page: Int = 1
+    var hasMore: Bool = true
+    var showForm: Bool = false
+    var editingTransaction: Transaction? = nil
+    var errorMessage: String? = nil
 
-    var hasActiveFilters: Bool {
-        selectedType != nil || selectedAccountId != nil || dateFrom != nil || dateTo != nil
-    }
+    // MARK: - Bulk Selection
 
-    // MARK: - Sheet State
-
-    var showEditTransaction = false
-    var editingTransaction: Transaction?
-    var showDeleteConfirm = false
-    var deletingTransaction: Transaction?
-
-    // MARK: - View Mode
-
-    enum ViewMode: String, CaseIterable {
-        case list = "List"
-        case ledger = "Ledger"
-    }
-
-    var viewMode: ViewMode = .list
-
-    // MARK: - Pagination
-
-    private let pageSize = 50
-    var currentPage = 0
-
-    var canLoadMore: Bool {
-        transactions.count < totalCount
-    }
+    var isSelecting: Bool = false
+    var selectedIds: Set<String> = []
 
     // MARK: - Private
 
-    private let repo = TransactionRepository()
-    private let dateFormatter: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withFullDate]
+    private let repository = TransactionRepository.shared
+    private let pageSize = 30
+
+    private static let queryDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        f.locale = Locale(identifier: "en_US_POSIX")
         return f
     }()
-    private let logger = Logger(subsystem: "com.spentyai", category: "transactions")
 
-    // MARK: - Methods
+    // MARK: - Load
 
     @MainActor
-    func loadTransactions() async {
+    func loadInitial() async {
         isLoading = true
         errorMessage = nil
-        currentPage = 0
-
+        page = 1
         do {
-            let result = try await repo.getTransactions(
-                type: selectedType?.rawValue,
-                fromDate: dateFrom.map { dateFormatter.string(from: $0) },
-                toDate: dateTo.map { dateFormatter.string(from: $0) },
-                accountId: selectedAccountId,
-                limit: pageSize,
-                skip: 0
-            )
-            transactions = result.items
-            totalCount = result.total
-        } catch {
-            errorMessage = "Failed to load transactions."
-            logger.error("Load transactions error: \(error.localizedDescription)")
-        }
+            async let txnResult = fetchTransactionsPage(page: 1)
+            async let accts = repository.fetchAccounts()
+            async let cats = repository.fetchCategories()
 
+            let response = try await txnResult
+            transactions = response.transactions
+            total = response.total
+            hasMore = transactions.count < total
+            accounts = try await accts
+            categories = try await cats
+        } catch {
+            errorMessage = error.localizedDescription
+        }
         isLoading = false
     }
 
     @MainActor
     func loadMore() async {
-        guard canLoadMore, !isLoading else { return }
-
-        currentPage += 1
-        let skip = currentPage * pageSize
-
+        guard !isLoadingMore, hasMore else { return }
+        isLoadingMore = true
+        page += 1
         do {
-            let result = try await repo.getTransactions(
-                type: selectedType?.rawValue,
-                fromDate: dateFrom.map { dateFormatter.string(from: $0) },
-                toDate: dateTo.map { dateFormatter.string(from: $0) },
-                accountId: selectedAccountId,
-                limit: pageSize,
-                skip: skip
-            )
-            transactions.append(contentsOf: result.items)
-            totalCount = result.total
+            let response = try await fetchTransactionsPage(page: page)
+            transactions.append(contentsOf: response.transactions)
+            hasMore = transactions.count < total
         } catch {
-            currentPage = max(0, currentPage - 1)
-            logger.error("Load more error: \(error.localizedDescription)")
+            page -= 1
+            errorMessage = error.localizedDescription
         }
+        isLoadingMore = false
     }
 
     @MainActor
     func refresh() async {
-        isRefreshing = true
-        currentPage = 0
-
+        page = 1
+        errorMessage = nil
         do {
-            let result = try await repo.getTransactions(
-                type: selectedType?.rawValue,
-                fromDate: dateFrom.map { dateFormatter.string(from: $0) },
-                toDate: dateTo.map { dateFormatter.string(from: $0) },
-                accountId: selectedAccountId,
-                limit: pageSize,
-                skip: 0
-            )
-            transactions = result.items
-            totalCount = result.total
+            let response = try await fetchTransactionsPage(page: 1)
+            transactions = response.transactions
+            total = response.total
+            hasMore = transactions.count < total
         } catch {
-            logger.error("Refresh error: \(error.localizedDescription)")
-        }
-
-        isRefreshing = false
-    }
-
-    @MainActor
-    func applyFilters() async {
-        currentPage = 0
-        await loadTransactions()
-    }
-
-    @MainActor
-    func clearFilters() {
-        selectedType = nil
-        selectedAccountId = nil
-        dateFrom = nil
-        dateTo = nil
-        Task {
-            await loadTransactions()
+            errorMessage = error.localizedDescription
         }
     }
 
+    // MARK: - Search
+
     @MainActor
-    func deleteTransaction(_ txn: Transaction) async {
+    func performSearch() async {
+        guard !searchQuery.isEmpty else {
+            await refresh()
+            return
+        }
+        isLoading = true
+        errorMessage = nil
         do {
-            try await repo.deleteTransaction(txn.transactionId)
-            transactions.removeAll { $0.transactionId == txn.transactionId }
-            totalCount = max(0, totalCount - 1)
-            logger.info("Deleted transaction: \(txn.transactionId)")
+            let response = try await repository.search(query: searchQuery)
+            transactions = response.transactions
+            total = response.total
+            hasMore = false
         } catch {
-            errorMessage = "Failed to delete transaction."
-            logger.error("Delete error: \(error.localizedDescription)")
+            errorMessage = error.localizedDescription
         }
+        isLoading = false
+    }
 
-        showDeleteConfirm = false
-        deletingTransaction = nil
+    // MARK: - CRUD
+
+    @MainActor
+    func createTransaction(_ transaction: Transaction) async {
+        do {
+            let created = try await repository.createTransaction(transaction)
+            transactions.insert(created, at: 0)
+            total += 1
+            showForm = false
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 
     @MainActor
-    func approveTransaction(_ txn: Transaction) async {
+    func updateTransaction(_ transaction: Transaction) async {
         do {
-            let updated = try await repo.approveTransaction(txn.transactionId)
-            if let index = transactions.firstIndex(where: { $0.transactionId == txn.transactionId }) {
-                transactions[index] = updated
+            let updated = try await repository.updateTransaction(id: transaction.id, transaction)
+            if let idx = transactions.firstIndex(where: { $0.id == transaction.id }) {
+                transactions[idx] = updated
             }
-            logger.info("Approved transaction: \(txn.transactionId)")
+            editingTransaction = nil
+            showForm = false
         } catch {
-            errorMessage = "Failed to approve transaction."
-            logger.error("Approve error: \(error.localizedDescription)")
+            errorMessage = error.localizedDescription
         }
     }
 
     @MainActor
-    func rejectTransaction(_ txn: Transaction) async {
+    func deleteTransaction(id: String) async {
         do {
-            try await repo.rejectTransaction(txn.transactionId)
-            if let index = transactions.firstIndex(where: { $0.transactionId == txn.transactionId }) {
-                transactions[index].status = .rejected
-            }
-            logger.info("Rejected transaction: \(txn.transactionId)")
+            _ = try await repository.deleteTransaction(id: id)
+            transactions.removeAll { $0.id == id }
+            total -= 1
+            selectedIds.remove(id)
         } catch {
-            errorMessage = "Failed to reject transaction."
-            logger.error("Reject error: \(error.localizedDescription)")
+            errorMessage = error.localizedDescription
         }
+    }
+
+    // MARK: - Approve / Reject
+
+    @MainActor
+    func approveTransaction(id: String) async {
+        do {
+            let updated = try await repository.approveTransaction(id: id)
+            if let idx = transactions.firstIndex(where: { $0.id == id }) {
+                transactions[idx] = updated
+            }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    func rejectTransaction(id: String) async {
+        do {
+            let updated = try await repository.rejectTransaction(id: id)
+            if let idx = transactions.firstIndex(where: { $0.id == id }) {
+                transactions[idx] = updated
+            }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    // MARK: - Recurring
+
+    @MainActor
+    func toggleRecurring(id: String) async {
+        do {
+            let updated = try await repository.toggleRecurring(id: id)
+            if let idx = transactions.firstIndex(where: { $0.id == id }) {
+                transactions[idx] = updated
+            }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    // MARK: - Bulk Operations
+
+    func toggleSelection(_ id: String) {
+        if selectedIds.contains(id) {
+            selectedIds.remove(id)
+        } else {
+            selectedIds.insert(id)
+        }
+    }
+
+    func selectAll() {
+        selectedIds = Set(transactions.map(\.id))
+    }
+
+    func clearSelection() {
+        selectedIds.removeAll()
+        isSelecting = false
+    }
+
+    @MainActor
+    func bulkApprove() async {
+        guard !selectedIds.isEmpty else { return }
+        do {
+            _ = try await repository.bulkApprove(ids: Array(selectedIds))
+            await refresh()
+            clearSelection()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    func bulkReject() async {
+        guard !selectedIds.isEmpty else { return }
+        do {
+            _ = try await repository.bulkReject(ids: Array(selectedIds))
+            await refresh()
+            clearSelection()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    func bulkDelete() async {
+        guard !selectedIds.isEmpty else { return }
+        do {
+            _ = try await repository.bulkDelete(ids: Array(selectedIds))
+            transactions.removeAll { selectedIds.contains($0.id) }
+            total -= selectedIds.count
+            clearSelection()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    // MARK: - Helpers
+
+    func accountName(for id: String?) -> String {
+        guard let id else { return "Unknown" }
+        return accounts.first(where: { $0.id == id })?.name ?? "Unknown"
+    }
+
+    func categoryName(for id: String?) -> String {
+        guard let id else { return "Uncategorized" }
+        return categories.first(where: { $0.id == id })?.name ?? "Uncategorized"
+    }
+
+    func subcategoryName(for categoryId: String?, subcategoryId: String?) -> String? {
+        guard let categoryId, let subcategoryId else { return nil }
+        guard let parent = categories.first(where: { $0.id == categoryId }) else { return nil }
+        return parent.children?.first(where: { $0.id == subcategoryId })?.name
+    }
+
+    func subcategories(for categoryId: String?) -> [Category] {
+        guard let categoryId else { return [] }
+        return categories.first(where: { $0.id == categoryId })?.children ?? []
+    }
+
+    func beginCreate() {
+        editingTransaction = nil
+        showForm = true
+    }
+
+    func beginEdit(_ transaction: Transaction) {
+        editingTransaction = transaction
+        showForm = true
+    }
+
+    // MARK: - Private
+
+    private func fetchTransactionsPage(page: Int) async throws -> TransactionListResponse {
+        let typeParam: String? = filterType == "All" ? nil : filterType.lowercased()
+        let dateFrom = filterDateFrom.map { Self.queryDateFormatter.string(from: $0) }
+        let dateTo = filterDateTo.map { Self.queryDateFormatter.string(from: $0) }
+        let acctId = filterAccountId.isEmpty ? nil : filterAccountId
+
+        return try await repository.fetchTransactions(
+            page: page,
+            limit: pageSize,
+            type: typeParam,
+            accountId: acctId,
+            dateFrom: dateFrom,
+            dateTo: dateTo
+        )
     }
 }

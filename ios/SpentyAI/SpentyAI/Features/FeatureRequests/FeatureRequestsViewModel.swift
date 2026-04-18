@@ -1,148 +1,85 @@
 import Foundation
-import os
-
-// MARK: - Request Types
-
-struct FeatureRequestCreate: Codable {
-    var title: String
-    var description: String?
-    var category: String?
-}
+import SwiftUI
 
 @Observable
 final class FeatureRequestsViewModel {
 
-    // MARK: - Data
+    // MARK: - State
 
     var requests: [FeatureRequest] = []
-
-    // MARK: - Loading State
-
     var isLoading = false
-    var isRefreshing = false
-    var isSubmitting = false
+    var showForm = false
     var errorMessage: String?
 
-    // MARK: - Sheet State
+    // MARK: - Dependencies
 
-    var showSubmitForm = false
+    private let repository: FeatureRequestsRepository
 
-    // MARK: - Form State
+    // MARK: - Init
 
-    var title: String = ""
-    var description: String = ""
-    var category: String = "feature"
+    init(repository: FeatureRequestsRepository = .shared) {
+        self.repository = repository
+    }
 
-    static let categories = ["bug", "feature", "improvement", "other"]
-
-    // MARK: - Private
-
-    private let logger = Logger(subsystem: "com.spentyai", category: "featureRequests")
-
-    // MARK: - Load Methods
+    // MARK: - Actions
 
     @MainActor
     func loadRequests() async {
-        guard !isLoading else { return }
         isLoading = true
         errorMessage = nil
 
         do {
-            requests = try await APIClient.shared.get(APIEndpoints.FeatureRequests.list)
-            logger.info("Feature requests loaded successfully")
+            requests = try await repository.getAll()
         } catch let error as APIError {
-            errorMessage = error.errorDescription
-            logger.error("Failed to load feature requests: \(error.localizedDescription)")
+            errorMessage = error.localizedDescription
         } catch {
-            errorMessage = "Failed to load feature requests. Please try again."
-            logger.error("Unexpected error loading feature requests: \(error.localizedDescription)")
+            errorMessage = "Failed to load feature requests."
         }
 
         isLoading = false
     }
 
     @MainActor
-    func submitRequest() async {
-        guard !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            errorMessage = "Please enter a title."
-            return
-        }
-
-        isSubmitting = true
+    func submitRequest(title: String, description: String, category: FeatureRequestCategory) async {
         errorMessage = nil
 
-        let body = FeatureRequestCreate(
-            title: title.trimmingCharacters(in: .whitespacesAndNewlines),
-            description: description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                ? nil
-                : description.trimmingCharacters(in: .whitespacesAndNewlines),
-            category: category
-        )
-
         do {
-            let created: FeatureRequest = try await APIClient.shared.post(
-                APIEndpoints.FeatureRequests.create,
-                body: body
+            let newRequest = try await repository.create(
+                title: title,
+                description: description,
+                category: category
             )
-            requests.insert(created, at: 0)
-            showSubmitForm = false
-            resetForm()
-            logger.info("Feature request submitted successfully")
+            requests.insert(newRequest, at: 0)
+            showForm = false
         } catch let error as APIError {
-            errorMessage = error.errorDescription
-            logger.error("Failed to submit feature request: \(error.localizedDescription)")
+            errorMessage = error.localizedDescription
         } catch {
-            errorMessage = "Failed to submit request. Please try again."
-            logger.error("Unexpected error submitting feature request: \(error.localizedDescription)")
-        }
-
-        isSubmitting = false
-    }
-
-    @MainActor
-    func voteForRequest(_ id: String) async {
-        do {
-            let _: FeatureRequest = try await APIClient.shared.post(
-                APIEndpoints.FeatureRequests.vote(id),
-                body: EmptyBody()
-            )
-            logger.info("Vote registered for request \(id)")
-            await loadRequests()
-        } catch let error as APIError {
-            errorMessage = error.errorDescription
-            logger.error("Failed to vote: \(error.localizedDescription)")
-        } catch {
-            errorMessage = "Failed to register vote."
-            logger.error("Unexpected error voting: \(error.localizedDescription)")
+            errorMessage = "Failed to submit your request."
         }
     }
 
     @MainActor
-    func refresh() async {
-        isRefreshing = true
+    func voteForRequest(id: String) async {
         errorMessage = nil
 
         do {
-            requests = try await APIClient.shared.get(APIEndpoints.FeatureRequests.list)
-            logger.info("Feature requests refreshed successfully")
+            let response = try await repository.vote(id: id)
+            if let index = requests.firstIndex(where: { $0.id == id }) {
+                let old = requests[index]
+                requests[index] = FeatureRequest(
+                    id: old.id,
+                    title: old.title,
+                    description: old.description,
+                    category: old.category,
+                    status: old.status,
+                    votes: response.votes,
+                    createdAt: old.createdAt
+                )
+            }
         } catch let error as APIError {
-            errorMessage = error.errorDescription
-            logger.error("Failed to refresh feature requests: \(error.localizedDescription)")
+            errorMessage = error.localizedDescription
         } catch {
-            errorMessage = "Failed to refresh. Please try again."
-            logger.error("Unexpected error refreshing feature requests: \(error.localizedDescription)")
+            errorMessage = "Failed to register your vote."
         }
-
-        isRefreshing = false
-    }
-
-    // MARK: - Helpers
-
-    private func resetForm() {
-        title = ""
-        description = ""
-        category = "feature"
     }
 }
-
-private struct EmptyBody: Codable {}

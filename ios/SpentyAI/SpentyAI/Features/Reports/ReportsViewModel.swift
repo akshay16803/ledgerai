@@ -1,6 +1,7 @@
 import Foundation
+import SwiftUI
 
-enum ReportPeriod: String, CaseIterable, Identifiable {
+enum PeriodPreset: String, CaseIterable, Identifiable {
     case thisMonth = "This Month"
     case last3Months = "Last 3 Months"
     case last6Months = "Last 6 Months"
@@ -11,20 +12,11 @@ enum ReportPeriod: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
-enum ReportTransactionType: String, CaseIterable, Identifiable {
-    case all = "All"
+enum CategoryType: String, CaseIterable, Identifiable {
     case expense = "Expense"
     case income = "Income"
 
     var id: String { rawValue }
-
-    var apiValue: String? {
-        switch self {
-        case .all: return nil
-        case .expense: return "expense"
-        case .income: return "income"
-        }
-    }
 }
 
 @Observable
@@ -32,119 +24,158 @@ final class ReportsViewModel {
 
     // MARK: - State
 
-    var selectedPeriod: ReportPeriod = .thisMonth
-    var customStartDate: Date = Calendar.current.date(byAdding: .month, value: -1, to: .now) ?? .now
-    var customEndDate: Date = .now
-
     var summary: ReportSummary?
-    var periodReport: PeriodReport?
-    var categoryReport: CategoryReport?
+    var periods: [ReportPeriod] = []
+    var categories: [ReportCategory] = []
 
-    var isLoading: Bool = false
-    var error: String?
+    var activePreset: PeriodPreset = .thisMonth
+    var startDate: Date = Date()
+    var endDate: Date = Date()
+    var catType: CategoryType = .expense
 
-    var expandedCategories: Set<String> = []
-    var selectedType: ReportTransactionType = .expense
+    var isLoading = false
+    var errorMessage = ""
+    var showError = false
+
+    var exportedFileURL: URL?
+    var showShareSheet = false
+    var isExporting = false
 
     // MARK: - Dependencies
 
-    private let repository = ReportRepository()
+    private let repository: ReportsRepository
 
-    // MARK: - Computed
+    // MARK: - Init
 
-    var dateRange: (startDate: String?, endDate: String?) {
+    init(repository: ReportsRepository = .shared) {
+        self.repository = repository
+        applyPreset(.thisMonth)
+    }
+
+    // MARK: - Preset Calculation
+
+    func applyPreset(_ preset: PeriodPreset) {
+        activePreset = preset
         let calendar = Calendar.current
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd"
+        let now = Date()
 
-        let now = Date.now
-
-        switch selectedPeriod {
+        switch preset {
         case .thisMonth:
-            let start = calendar.date(from: calendar.dateComponents([.year, .month], from: now))!
-            return (formatter.string(from: start), formatter.string(from: now))
+            startDate = calendar.date(from: calendar.dateComponents([.year, .month], from: now))!
+            endDate = calendar.date(byAdding: DateComponents(month: 1, day: -1), to: startDate)!
 
         case .last3Months:
-            let start = calendar.date(byAdding: .month, value: -3, to: now)!
-            return (formatter.string(from: start), formatter.string(from: now))
+            endDate = now
+            startDate = calendar.date(byAdding: .month, value: -3, to: now)!
 
         case .last6Months:
-            let start = calendar.date(byAdding: .month, value: -6, to: now)!
-            return (formatter.string(from: start), formatter.string(from: now))
+            endDate = now
+            startDate = calendar.date(byAdding: .month, value: -6, to: now)!
 
         case .thisYear:
-            let start = calendar.date(from: calendar.dateComponents([.year], from: now))!
-            return (formatter.string(from: start), formatter.string(from: now))
+            startDate = calendar.date(from: calendar.dateComponents([.year], from: now))!
+            endDate = calendar.date(byAdding: DateComponents(year: 1, day: -1), to: startDate)!
 
         case .allTime:
-            return (nil, nil)
+            startDate = calendar.date(from: DateComponents(year: 2000, month: 1, day: 1))!
+            endDate = now
 
         case .custom:
-            return (formatter.string(from: customStartDate), formatter.string(from: customEndDate))
+            break
         }
     }
 
-    // MARK: - Methods
+    // MARK: - Load Data
 
-    func loadAll() async {
+    @MainActor
+    func loadData() async {
         isLoading = true
-        error = nil
+        showError = false
 
-        async let summaryTask: () = loadSummary()
-        async let periodTask: () = loadPeriodReport()
-        async let categoryTask: () = loadCategoryReport()
+        do {
+            async let summaryTask = repository.getSummary(from: startDate, to: endDate)
+            async let periodsTask = repository.getPeriods(from: startDate, to: endDate)
+            async let categoriesTask = repository.getCategories(
+                from: startDate, to: endDate, type: catType.rawValue.lowercased()
+            )
 
-        _ = await (summaryTask, periodTask, categoryTask)
+            let (s, p, c) = try await (summaryTask, periodsTask, categoriesTask)
+            summary = s
+            periods = p
+            categories = c
+        } catch {
+            handleError(error)
+        }
 
         isLoading = false
     }
 
-    func loadSummary() async {
-        let range = dateRange
+    // MARK: - Reload Categories Only
+
+    @MainActor
+    func reloadCategories() async {
         do {
-            summary = try await repository.getSummary(
-                startDate: range.startDate,
-                endDate: range.endDate
+            categories = try await repository.getCategories(
+                from: startDate, to: endDate, type: catType.rawValue.lowercased()
             )
         } catch {
-            self.error = error.localizedDescription
+            handleError(error)
         }
     }
 
-    func loadPeriodReport() async {
-        let range = dateRange
+    // MARK: - Export
+
+    @MainActor
+    func exportCSV() async {
+        isExporting = true
         do {
-            periodReport = try await repository.getByPeriod(
-                startDate: range.startDate,
-                endDate: range.endDate
-            )
+            let data = try await repository.exportCSV(from: startDate, to: endDate)
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent("SpentyAI_Report.csv")
+            try data.write(to: url)
+            exportedFileURL = url
+            showShareSheet = true
         } catch {
-            self.error = error.localizedDescription
+            handleError(error)
         }
+        isExporting = false
     }
 
-    func loadCategoryReport() async {
-        let range = dateRange
+    @MainActor
+    func exportPDF() async {
+        isExporting = true
         do {
-            categoryReport = try await repository.getByCategory(
-                startDate: range.startDate,
-                endDate: range.endDate,
-                transactionType: selectedType.apiValue
-            )
+            let data = try await repository.exportPDF(from: startDate, to: endDate)
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent("SpentyAI_Report.pdf")
+            try data.write(to: url)
+            exportedFileURL = url
+            showShareSheet = true
         } catch {
-            self.error = error.localizedDescription
+            handleError(error)
         }
+        isExporting = false
     }
 
-    func refresh() async {
-        await loadAll()
+    // MARK: - Computed
+
+    var totalIncome: Double { summary?.totalIncome ?? 0 }
+    var totalExpense: Double { summary?.totalExpense ?? 0 }
+    var net: Double { summary?.net ?? 0 }
+    var transactionCount: Int { summary?.transactionCount ?? 0 }
+    var hasData: Bool { summary != nil }
+
+    var totalCategoryAmount: Double {
+        categories.reduce(0) { $0 + abs($1.amount ?? 0) }
     }
 
-    func toggleCategory(id: String) {
-        if expandedCategories.contains(id) {
-            expandedCategories.remove(id)
+    // MARK: - Helpers
+
+    @MainActor
+    private func handleError(_ error: Error) {
+        if let apiError = error as? APIError {
+            errorMessage = apiError.localizedDescription
         } else {
-            expandedCategories.insert(id)
+            errorMessage = error.localizedDescription
         }
+        showError = true
     }
 }

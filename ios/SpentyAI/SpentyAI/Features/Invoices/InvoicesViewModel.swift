@@ -1,160 +1,277 @@
 import Foundation
-import os
+import SwiftUI
 
 @Observable
 final class InvoicesViewModel {
 
-    // MARK: - Data
+    // MARK: - State
 
     var invoices: [Invoice] = []
-    var totalCount: Int = 0
-    var settings: AppSettings?
-
-    // MARK: - Loading State
-
+    var stats: InvoiceStats?
+    var debtors: [InvoiceDebtor] = []
+    var aging: [InvoiceAgingBucket] = []
+    var salesByCustomer: [InvoiceSalesByCustomer] = []
     var isLoading = false
-    var isRefreshing = false
-    var isLoadingMore = false
+    var showForm = false
+    var editingInvoice: Invoice?
+    var selectedInvoice: Invoice?
+    var nextNumber: String = ""
+    var customers: [Customer] = []
+    var accounts: [Account] = []
     var errorMessage: String?
-    var isSaving = false
 
-    // MARK: - Filter
+    // MARK: - Filters
 
-    var statusFilter: String? = nil
+    var searchText: String = ""
+    var statusFilter: StatusFilter = .all
 
-    // MARK: - Sheet State
+    enum StatusFilter: String, CaseIterable, Identifiable {
+        case all = "All"
+        case paid = "paid"
+        case partial = "partial"
+        case unpaid = "unpaid"
+        case overdue = "overdue"
+        var id: String { rawValue }
 
-    var showNewInvoice = false
-    var showEditInvoice: Invoice?
-    var showPreview: Invoice?
-    var showRecordPayment: Invoice?
-    var showDeleteConfirm: Invoice?
+        var displayName: String {
+            switch self {
+            case .all: return "All"
+            case .paid: return "Paid"
+            case .partial: return "Partial"
+            case .unpaid: return "Unpaid"
+            case .overdue: return "Overdue"
+            }
+        }
+    }
 
     // MARK: - Computed
 
-    var needsSetup: Bool {
-        guard let settings else { return true }
-        return (settings.firmName ?? "").trimmingCharacters(in: .whitespaces).isEmpty
-    }
+    var filteredInvoices: [Invoice] {
+        var result = invoices
 
-    var isIndia: Bool {
-        CountryConfig.usesExistingForms(code: settings?.businessCountry ?? "")
-    }
-
-    var currencyCode: String {
-        if let country = settings?.businessCountry,
-           let config = CountryConfig.config(for: country) {
-            return config.currency
+        if statusFilter != .all {
+            result = result.filter { ($0.paymentStatus ?? "").lowercased() == statusFilter.rawValue }
         }
-        return settings?.baseCurrency ?? "INR"
-    }
 
-    var hasMore: Bool {
-        invoices.count < totalCount
-    }
-
-    // MARK: - Private
-
-    private let invoiceRepo = InvoiceRepository()
-    private let settingsRepo = SettingsRepository()
-    private let logger = Logger(subsystem: "com.spentyai", category: "invoices")
-    private let pageSize = 20
-
-    // MARK: - Methods
-
-    @MainActor
-    func loadSettings() async {
-        do {
-            settings = try await settingsRepo.getSettings()
-        } catch {
-            logger.error("Failed to load settings: \(error.localizedDescription)")
+        if !searchText.isEmpty {
+            let query = searchText.lowercased()
+            result = result.filter { invoice in
+                (invoice.invoiceNumber ?? "").lowercased().contains(query)
+                    || (invoice.customerName ?? "").lowercased().contains(query)
+            }
         }
+
+        return result
     }
+
+    // MARK: - Dependencies
+
+    private let repository = InvoiceRepository()
+
+    // MARK: - Load Data
 
     @MainActor
     func loadInvoices() async {
-        guard !isLoading else { return }
         isLoading = true
         errorMessage = nil
-
         do {
-            let result = try await invoiceRepo.getInvoices(
-                status: statusFilter,
-                limit: pageSize,
-                skip: 0
-            )
-            invoices = result.items
-            totalCount = result.total
+            invoices = try await repository.fetchAll()
         } catch {
-            errorMessage = "Failed to load invoices."
-            logger.error("Load invoices error: \(error.localizedDescription)")
+            errorMessage = error.localizedDescription
         }
-
         isLoading = false
     }
 
     @MainActor
-    func loadMore() async {
-        guard !isLoadingMore, hasMore else { return }
-        isLoadingMore = true
-
+    func loadStats() async {
         do {
-            let result = try await invoiceRepo.getInvoices(
-                status: statusFilter,
-                limit: pageSize,
-                skip: invoices.count
-            )
-            invoices.append(contentsOf: result.items)
-            totalCount = result.total
+            stats = try await repository.fetchStats()
         } catch {
-            logger.error("Load more error: \(error.localizedDescription)")
+            errorMessage = error.localizedDescription
         }
-
-        isLoadingMore = false
     }
 
     @MainActor
-    func refresh() async {
-        isRefreshing = true
+    func loadDebtors() async {
         do {
-            let result = try await invoiceRepo.getInvoices(
-                status: statusFilter,
-                limit: pageSize,
-                skip: 0
-            )
-            invoices = result.items
-            totalCount = result.total
+            debtors = try await repository.fetchDebtors()
         } catch {
-            logger.error("Refresh error: \(error.localizedDescription)")
+            errorMessage = error.localizedDescription
         }
-        isRefreshing = false
     }
 
     @MainActor
-    func filterByStatus(_ status: String?) {
-        statusFilter = status
-        Task { await loadInvoices() }
-    }
-
-    @MainActor
-    func deleteInvoice(_ invoice: Invoice) async -> Bool {
+    func loadAging() async {
         do {
-            try await invoiceRepo.deleteInvoice(invoice.invoiceId)
-            invoices.removeAll { $0.invoiceId == invoice.invoiceId }
-            totalCount = max(0, totalCount - 1)
+            aging = try await repository.fetchAging()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    func loadSalesByCustomer() async {
+        do {
+            salesByCustomer = try await repository.fetchSalesByCustomer()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    func loadAll() async {
+        isLoading = true
+        errorMessage = nil
+        async let inv: () = loadInvoicesOnly()
+        async let st: () = loadStats()
+        async let dbt: () = loadDebtors()
+        async let ag: () = loadAging()
+        _ = await (inv, st, dbt, ag)
+        isLoading = false
+    }
+
+    @MainActor
+    private func loadInvoicesOnly() async {
+        do {
+            invoices = try await repository.fetchAll()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    // MARK: - CRUD
+
+    @MainActor
+    func createInvoice(_ payload: InvoicePayload) async -> Bool {
+        isLoading = true
+        errorMessage = nil
+        do {
+            let invoice = try await repository.create(payload)
+            invoices.insert(invoice, at: 0)
+            isLoading = false
             return true
         } catch {
-            errorMessage = "Failed to delete invoice."
-            logger.error("Delete error: \(error.localizedDescription)")
+            errorMessage = error.localizedDescription
+            isLoading = false
             return false
         }
     }
 
-    func statusType(for invoice: Invoice) -> StatusType {
-        switch invoice.paymentStatus?.lowercased() {
-        case "paid": return .paid
-        case "partial": return .partial
-        default: return .unpaid
+    @MainActor
+    func updateInvoice(id: String, _ payload: InvoicePayload) async -> Bool {
+        isLoading = true
+        errorMessage = nil
+        do {
+            let updated = try await repository.update(id: id, payload)
+            if let index = invoices.firstIndex(where: { $0.id == id }) {
+                invoices[index] = updated
+            }
+            isLoading = false
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            isLoading = false
+            return false
         }
+    }
+
+    @MainActor
+    func deleteInvoice(id: String) async {
+        errorMessage = nil
+        do {
+            try await repository.delete(id: id)
+            invoices.removeAll { $0.id == id }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    // MARK: - Actions
+
+    @MainActor
+    func recordPayment(id: String, _ payload: RecordPaymentPayload) async -> Bool {
+        errorMessage = nil
+        do {
+            let updated = try await repository.recordPayment(id: id, payload)
+            if let index = invoices.firstIndex(where: { $0.id == id }) {
+                invoices[index] = updated
+            }
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    @MainActor
+    func markPaid(id: String) async {
+        errorMessage = nil
+        do {
+            let updated = try await repository.markPaid(id: id)
+            if let index = invoices.firstIndex(where: { $0.id == id }) {
+                invoices[index] = updated
+            }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    func duplicateInvoice(id: String) async {
+        errorMessage = nil
+        do {
+            let duplicate = try await repository.duplicate(id: id)
+            invoices.insert(duplicate, at: 0)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    func getNextNumber() async {
+        do {
+            let response = try await repository.fetchNextNumber()
+            nextNumber = response.nextNumber ?? ""
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    // MARK: - PDF
+
+    func loadInvoicePDF(id: String) async throws -> Data {
+        try await repository.fetchPDF(id: id)
+    }
+
+    // MARK: - Supporting Data
+
+    @MainActor
+    func loadCustomers() async {
+        do {
+            customers = try await repository.fetchCustomers()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    func loadAccounts() async {
+        do {
+            accounts = try await repository.fetchAccounts()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    // MARK: - Helpers
+
+    func startCreate() {
+        editingInvoice = nil
+        showForm = true
+    }
+
+    func startEdit(_ invoice: Invoice) {
+        editingInvoice = invoice
+        showForm = true
     }
 }

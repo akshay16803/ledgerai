@@ -3,305 +3,373 @@ import Charts
 
 struct ReportsView: View {
 
-    @State private var viewModel = ReportsViewModel()
+    @State private var vm = ReportsViewModel()
+    @State private var expandedCategoryId: String?
 
-    private let statColumns = [
-        GridItem(.flexible(), spacing: SpentySpacing.md),
-        GridItem(.flexible(), spacing: SpentySpacing.md)
-    ]
-
-    private let categoryColors: [Color] = [
-        SpentyColors.brandPrimary,
-        SpentyColors.brandAccent,
-        SpentyColors.success,
-        SpentyColors.danger,
-        SpentyColors.warning,
-        SpentyColors.info
-    ]
+    // MARK: - Body
 
     var body: some View {
         NavigationStack {
-            ZStack {
-                SpentyColors.bgPrimary
-                    .ignoresSafeArea()
-
-                ScrollView {
-                    VStack(spacing: SpentySpacing.xl) {
-                        periodSelector
-                        summaryCards
-                        periodChart
-                        categoryBreakdown
+            ScrollView {
+                VStack(spacing: 20) {
+                    periodFilterSection
+                    if vm.activePreset == .custom {
+                        customDateSection
                     }
-                    .padding(.horizontal, SpentySpacing.lg)
-                    .padding(.vertical, SpentySpacing.md)
+                    summaryCardsSection
+                    PeriodChartView(periods: vm.periods)
+                    categorySection
+                    categoryTableSection
+                    exportSection
                 }
-                .refreshable {
-                    await viewModel.refresh()
-                }
-
-                if viewModel.isLoading {
-                    LoadingOverlay(isPresented: .constant(true))
-                }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 32)
             }
+            .background(Color.spentyBgPrimary.ignoresSafeArea())
             .navigationTitle("Reports")
-        }
-        .task {
-            await viewModel.loadAll()
-        }
-        .onChange(of: viewModel.selectedPeriod) { _, _ in
-            Task { await viewModel.loadAll() }
-        }
-        .onChange(of: viewModel.selectedType) { _, _ in
-            Task { await viewModel.loadCategoryReport() }
-        }
-        .onChange(of: viewModel.customStartDate) { _, _ in
-            guard viewModel.selectedPeriod == .custom else { return }
-            Task { await viewModel.loadAll() }
-        }
-        .onChange(of: viewModel.customEndDate) { _, _ in
-            guard viewModel.selectedPeriod == .custom else { return }
-            Task { await viewModel.loadAll() }
+            .refreshable {
+                await vm.loadData()
+            }
+            .task {
+                await vm.loadData()
+            }
+            .overlay {
+                if vm.isLoading && !vm.hasData {
+                    ProgressView()
+                        .tint(.spentyPrimary)
+                }
+            }
+            .alert("Error", isPresented: $vm.showError) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(vm.errorMessage)
+            }
+            .sheet(isPresented: $vm.showShareSheet) {
+                if let url = vm.exportedFileURL {
+                    ShareSheet(items: [url])
+                }
+            }
         }
     }
 
-    // MARK: - Period Selector
+    // MARK: - Period Filter Chips
 
-    private var periodSelector: some View {
-        VStack(spacing: SpentySpacing.sm) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: SpentySpacing.sm) {
-                    ForEach(ReportPeriod.allCases) { period in
-                        FilterChip(
-                            period.rawValue,
-                            isSelected: viewModel.selectedPeriod == period
-                        ) {
-                            viewModel.selectedPeriod = period
+    private var periodFilterSection: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(PeriodPreset.allCases) { preset in
+                    Button {
+                        vm.applyPreset(preset)
+                        if preset != .custom {
+                            Task { await vm.loadData() }
                         }
+                    } label: {
+                        Text(preset.rawValue)
+                            .font(SpentyFonts.footnote)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 8)
+                            .background(
+                                vm.activePreset == preset
+                                    ? Color.spentyPrimary
+                                    : Color.spentyCardBg
+                            )
+                            .foregroundColor(
+                                vm.activePreset == preset
+                                    ? .white
+                                    : .spentyTextPrimary
+                            )
+                            .cornerRadius(20)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 20)
+                                    .stroke(
+                                        vm.activePreset == preset
+                                            ? Color.clear
+                                            : Color.spentyBorder,
+                                        lineWidth: 1
+                                    )
+                            )
                     }
                 }
-                .padding(.horizontal, SpentySpacing.xs)
             }
-
-            if viewModel.selectedPeriod == .custom {
-                HStack(spacing: SpentySpacing.md) {
-                    VStack(alignment: .leading, spacing: SpentySpacing.xs) {
-                        Text("From")
-                            .font(SpentyFonts.caption)
-                            .foregroundStyle(SpentyColors.textSecondary)
-                        DatePicker(
-                            "",
-                            selection: $viewModel.customStartDate,
-                            displayedComponents: .date
-                        )
-                        .labelsHidden()
-                    }
-
-                    VStack(alignment: .leading, spacing: SpentySpacing.xs) {
-                        Text("To")
-                            .font(SpentyFonts.caption)
-                            .foregroundStyle(SpentyColors.textSecondary)
-                        DatePicker(
-                            "",
-                            selection: $viewModel.customEndDate,
-                            displayedComponents: .date
-                        )
-                        .labelsHidden()
-                    }
-                }
-                .padding(.horizontal, SpentySpacing.xs)
-            }
+            .padding(.vertical, 4)
         }
     }
 
-    // MARK: - Summary Stat Cards
+    // MARK: - Custom Date Picker
 
-    private var summaryCards: some View {
-        LazyVGrid(columns: statColumns, spacing: SpentySpacing.md) {
+    private var customDateSection: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("From")
+                    .font(SpentyFonts.caption1)
+                    .foregroundColor(.spentyTextSecondary)
+                DatePicker("", selection: $vm.startDate, displayedComponents: .date)
+                    .labelsHidden()
+                    .tint(.spentyPrimary)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("To")
+                    .font(SpentyFonts.caption1)
+                    .foregroundColor(.spentyTextSecondary)
+                DatePicker("", selection: $vm.endDate, displayedComponents: .date)
+                    .labelsHidden()
+                    .tint(.spentyPrimary)
+            }
+
+            Spacer()
+
+            Button {
+                Task { await vm.loadData() }
+            } label: {
+                Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(.white)
+                    .frame(width: 40, height: 40)
+                    .background(Color.spentyPrimary)
+                    .cornerRadius(10)
+            }
+        }
+        .cardStyle()
+    }
+
+    // MARK: - Summary Cards (2x2 Grid)
+
+    private var summaryCardsSection: some View {
+        LazyVGrid(columns: [
+            GridItem(.flexible(), spacing: 12),
+            GridItem(.flexible(), spacing: 12),
+        ], spacing: 12) {
             StatCard(
-                title: "Income",
-                value: formattedMoney(viewModel.summary?.totalIncome),
-                icon: "arrow.down.circle",
-                iconColor: SpentyColors.success
+                label: "Total Income",
+                value: formatCurrency(vm.totalIncome),
+                icon: "arrow.down.circle.fill",
+                color: .spentySuccess
             )
-
             StatCard(
-                title: "Expenses",
-                value: formattedMoney(viewModel.summary?.totalExpense),
-                icon: "arrow.up.circle",
-                iconColor: SpentyColors.danger
+                label: "Total Expense",
+                value: formatCurrency(abs(vm.totalExpense)),
+                icon: "arrow.up.circle.fill",
+                color: .spentyError
             )
-
             StatCard(
-                title: "Net Savings",
-                value: formattedMoney(viewModel.summary?.net),
-                icon: "chart.line.uptrend.xyaxis",
-                iconColor: (viewModel.summary?.net ?? 0) >= 0
-                    ? SpentyColors.success
-                    : SpentyColors.danger
+                label: "Net",
+                value: formatCurrency(vm.net),
+                icon: "equal.circle.fill",
+                color: vm.net >= 0 ? .spentySuccess : .spentyError
             )
-
             StatCard(
-                title: "Transactions",
-                value: "\(viewModel.summary?.transactionCount ?? 0)",
-                icon: "list.bullet.rectangle",
-                iconColor: SpentyColors.textPrimary
+                label: "Transactions",
+                value: "\(vm.transactionCount)",
+                icon: "list.bullet.rectangle.fill",
+                color: .spentyInfo
             )
         }
     }
 
-    // MARK: - Period Chart
+    // MARK: - Category Section (Toggle + Donut)
 
-    @ViewBuilder
-    private var periodChart: some View {
-        let periods = viewModel.periodReport?.periods ?? []
-
-        SpentyCard {
-            VStack(alignment: .leading, spacing: SpentySpacing.md) {
-                SectionHeader( "Income vs Expense")
-
-                if periods.isEmpty {
-                    EmptyState(
-                        icon: "chart.bar",
-                        title: "No period data",
-                        message: "Adjust your date range to see trends."
-                    )
-                } else {
-                    ReportChartView(periods: periods, height: 220)
-                }
-            }
-            .padding(SpentySpacing.lg)
-        }
-    }
-
-    // MARK: - Category Breakdown
-
-    private var categoryBreakdown: some View {
-        VStack(alignment: .leading, spacing: SpentySpacing.md) {
-            HStack {
-                SectionHeader( "By Category")
-                Spacer()
-            }
-
-            // Type toggle
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: SpentySpacing.sm) {
-                    ForEach(ReportTransactionType.allCases) { type in
-                        FilterChip(
-                            type.rawValue,
-                            isSelected: viewModel.selectedType == type
-                        ) {
-                            viewModel.selectedType = type
-                        }
+    private var categorySection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            // Toggle between Expense / Income
+            HStack(spacing: 0) {
+                ForEach(CategoryType.allCases) { type in
+                    Button {
+                        vm.catType = type
+                        Task { await vm.reloadCategories() }
+                    } label: {
+                        Text(type.rawValue)
+                            .font(SpentyFonts.footnote.weight(.medium))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                            .background(
+                                vm.catType == type
+                                    ? Color.spentyPrimary
+                                    : Color.clear
+                            )
+                            .foregroundColor(
+                                vm.catType == type ? .white : .spentyTextSecondary
+                            )
                     }
                 }
             }
+            .background(Color.spentyBgPrimary)
+            .cornerRadius(10)
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(Color.spentyBorder, lineWidth: 1)
+            )
 
-            let categories = viewModel.categoryReport?.categories ?? []
+            DonutChartView(
+                categories: vm.categories,
+                totalAmount: vm.totalCategoryAmount,
+                type: vm.catType
+            )
+        }
+    }
 
-            if categories.isEmpty {
-                SpentyCard {
-                    EmptyState(
-                        icon: "folder",
-                        title: "No categories",
-                        message: "No category data for the selected filters."
-                    )
-                    .padding(SpentySpacing.lg)
-                }
+    // MARK: - Category Table
+
+    private var categoryTableSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Category Details")
+                .font(SpentyFonts.headline)
+                .foregroundColor(.spentyTextPrimary)
+
+            if vm.categories.isEmpty {
+                Text("No categories to display")
+                    .font(SpentyFonts.footnote)
+                    .foregroundColor(.spentyTextSecondary)
+                    .padding(.vertical, 12)
             } else {
-                VStack(spacing: SpentySpacing.xs) {
-                    ForEach(Array(categories.enumerated()), id: \.element.id) { index, category in
-                        categoryRow(category: category, colorIndex: index)
-                    }
+                ForEach(vm.categories) { category in
+                    categoryRow(category)
                 }
             }
         }
+        .cardStyle()
     }
 
-    // MARK: - Category Row
-
-    private func categoryRow(category: CategoryBreakdown, colorIndex: Int) -> some View {
-        let color = categoryColors[colorIndex % categoryColors.count]
-        let isExpanded = viewModel.expandedCategories.contains(category.id)
-
-        return SpentyCard {
-            VStack(spacing: 0) {
-                Button {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        viewModel.toggleCategory(id: category.id)
+    private func categoryRow(_ category: ReportCategory) -> some View {
+        VStack(spacing: 0) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    if expandedCategoryId == category.id {
+                        expandedCategoryId = nil
+                    } else {
+                        expandedCategoryId = category.id
                     }
-                } label: {
-                    HStack(spacing: SpentySpacing.md) {
-                        Circle()
-                            .fill(color)
-                            .frame(width: 10, height: 10)
-
+                }
+            } label: {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
                         Text(category.name ?? "Unknown")
-                            .font(SpentyFonts.body)
-                            .foregroundStyle(SpentyColors.textPrimary)
-
-                        Spacer()
-
-                        VStack(alignment: .trailing, spacing: 2) {
-                            MoneyText( category.amount ?? 0)
-                            Text("\(formattedPercent(category.percentage))")
-                                .font(SpentyFonts.caption)
-                                .foregroundStyle(SpentyColors.textMuted)
-                        }
-
-                        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                            .font(.caption)
-                            .foregroundStyle(SpentyColors.textMuted)
+                            .font(SpentyFonts.subheadline)
+                            .foregroundColor(.spentyTextPrimary)
+                        Text("\(category.transactionCount ?? 0) transactions")
+                            .font(SpentyFonts.caption2)
+                            .foregroundColor(.spentyTextSecondary)
                     }
-                    .padding(SpentySpacing.lg)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
 
-                if isExpanded, let subcategories = category.subcategories, !subcategories.isEmpty {
-                    Divider()
-                        .background(SpentyColors.borderSubtle)
+                    Spacer()
 
-                    VStack(spacing: 0) {
-                        ForEach(subcategories) { sub in
-                            HStack(spacing: SpentySpacing.md) {
-                                Text(sub.name ?? "Unknown")
-                                    .font(SpentyFonts.caption)
-                                    .foregroundStyle(SpentyColors.textSecondary)
-
-                                Spacer()
-
-                                VStack(alignment: .trailing, spacing: 2) {
-                                    MoneyText( sub.amount ?? 0)
-                                    Text(formattedPercent(sub.percentage))
-                                        .font(SpentyFonts.caption)
-                                        .foregroundStyle(SpentyColors.textMuted)
-                                }
-                            }
-                            .padding(.horizontal, SpentySpacing.xl)
-                            .padding(.vertical, SpentySpacing.sm)
-                        }
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text(formatCurrency(abs(category.amount ?? 0)))
+                            .font(SpentyFonts.amountSmall)
+                            .foregroundColor(.spentyTextPrimary)
+                        Text(percentString(category))
+                            .font(SpentyFonts.caption2)
+                            .foregroundColor(.spentyTextSecondary)
                     }
-                    .padding(.leading, SpentySpacing.lg)
+
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12))
+                        .foregroundColor(.spentyTextSecondary)
+                        .rotationEffect(.degrees(expandedCategoryId == category.id ? 90 : 0))
                 }
+                .padding(.vertical, 10)
             }
+
+            // Progress bar
+            GeometryReader { geo in
+                let pct = percentValue(category)
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(Color.spentyBorder)
+                    .frame(height: 3)
+                    .overlay(alignment: .leading) {
+                        RoundedRectangle(cornerRadius: 2)
+                            .fill(Color.spentyPrimary)
+                            .frame(width: geo.size.width * pct, height: 3)
+                    }
+            }
+            .frame(height: 3)
+
+            Divider()
+                .padding(.top, 8)
         }
     }
 
-    // MARK: - Helpers
+    // MARK: - Export Section
 
-    private func formattedMoney(_ value: Double?) -> String {
-        guard let value else { return "$0.00" }
+    private var exportSection: some View {
+        HStack(spacing: 12) {
+            Button {
+                Task { await vm.exportCSV() }
+            } label: {
+                HStack {
+                    if vm.isExporting {
+                        ProgressView()
+                            .tint(.spentyPrimary)
+                            .scaleEffect(0.8)
+                    } else {
+                        Image(systemName: "tablecells")
+                    }
+                    Text("Export CSV")
+                }
+                .secondaryButtonStyle()
+            }
+            .disabled(vm.isExporting)
+
+            Button {
+                Task { await vm.exportPDF() }
+            } label: {
+                HStack {
+                    if vm.isExporting {
+                        ProgressView()
+                            .tint(.white)
+                            .scaleEffect(0.8)
+                    } else {
+                        Image(systemName: "doc.richtext")
+                    }
+                    Text("Export PDF")
+                }
+                .primaryButtonStyle()
+            }
+            .disabled(vm.isExporting)
+        }
+    }
+
+    // MARK: - Formatting Helpers
+
+    private func formatCurrency(_ value: Double) -> String {
         let formatter = NumberFormatter()
         formatter.numberStyle = .currency
-        formatter.currencyCode = "USD"
-        return formatter.string(from: NSNumber(value: value)) ?? "$0.00"
+        formatter.currencyCode = "INR"
+        formatter.maximumFractionDigits = 0
+        return formatter.string(from: NSNumber(value: value)) ?? "\(value)"
     }
 
-    private func formattedPercent(_ value: Double?) -> String {
-        guard let value else { return "0%" }
-        return String(format: "%.1f%%", value)
+    private func percentString(_ category: ReportCategory) -> String {
+        if let pct = category.percentage {
+            return String(format: "%.1f%%", pct)
+        }
+        guard vm.totalCategoryAmount > 0 else { return "0%" }
+        let pct = abs(category.amount ?? 0) / vm.totalCategoryAmount * 100
+        return String(format: "%.1f%%", pct)
+    }
+
+    private func percentValue(_ category: ReportCategory) -> Double {
+        if let pct = category.percentage {
+            return min(pct / 100.0, 1.0)
+        }
+        guard vm.totalCategoryAmount > 0 else { return 0 }
+        return min(abs(category.amount ?? 0) / vm.totalCategoryAmount, 1.0)
     }
 }
+
+// MARK: - ShareSheet (UIKit Bridge)
+
+struct ShareSheet: UIViewControllerRepresentable {
+    let items: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: items, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+}
+
+// MARK: - Preview
 
 #Preview {
     ReportsView()

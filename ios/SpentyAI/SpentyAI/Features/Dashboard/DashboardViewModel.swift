@@ -1,5 +1,4 @@
 import Foundation
-import os
 
 @Observable
 final class DashboardViewModel {
@@ -8,65 +7,91 @@ final class DashboardViewModel {
 
     var summary: DashboardSummary?
     var isLoading = false
-    var isRefreshing = false
-    var errorMessage: String?
+    var errorMessage = ""
+    var showError = false
 
-    // Sheet presentations
+    // MARK: - Sheet State
+
     var showNewTransaction = false
     var showAIChat = false
-    var showSalesInvoice = false
-    var showPurchaseBill = false
 
-    // MARK: - Private
+    // MARK: - Dependencies
 
-    private let logger = Logger(subsystem: "com.spentyai", category: "dashboard")
+    private let repository: DashboardRepository
 
-    // MARK: - Methods
+    // MARK: - Init
+
+    init(repository: DashboardRepository = .shared) {
+        self.repository = repository
+    }
+
+    // MARK: - Load
 
     @MainActor
-    func loadDashboard() async {
-        guard !isLoading else { return }
+    func loadSummary() async {
         isLoading = true
-        errorMessage = nil
+        showError = false
 
         do {
-            summary = try await DashboardRepository.getSummary()
-            logger.info("Dashboard summary loaded successfully")
-        } catch let error as APIError {
-            errorMessage = error.errorDescription
-            logger.error("Failed to load dashboard: \(error.localizedDescription)")
+            summary = try await repository.getSummary()
         } catch {
-            errorMessage = "Failed to load dashboard. Please try again."
-            logger.error("Unexpected error loading dashboard: \(error.localizedDescription)")
+            handleError(error)
         }
 
         isLoading = false
     }
 
+    // MARK: - Refresh (pull-to-refresh)
+
     @MainActor
     func refresh() async {
-        isRefreshing = true
-        errorMessage = nil
-
         do {
-            summary = try await DashboardRepository.getSummary()
-            logger.info("Dashboard refreshed successfully")
-        } catch let error as APIError {
-            errorMessage = error.errorDescription
-            logger.error("Failed to refresh dashboard: \(error.localizedDescription)")
+            summary = try await repository.getSummary()
         } catch {
-            errorMessage = "Failed to refresh. Please try again."
-            logger.error("Unexpected error refreshing dashboard: \(error.localizedDescription)")
+            handleError(error)
         }
-
-        isRefreshing = false
     }
-}
 
-// MARK: - Dashboard Repository
+    // MARK: - Helpers
 
-enum DashboardRepository {
-    static func getSummary() async throws -> DashboardSummary {
-        try await APIClient.shared.get(APIEndpoints.Dashboard.summary)
+    @MainActor
+    private func handleError(_ error: Error) {
+        if let apiError = error as? APIError {
+            errorMessage = apiError.localizedDescription
+        } else {
+            errorMessage = error.localizedDescription
+        }
+        showError = true
+    }
+
+    // MARK: - Computed
+
+    var netWorth: Double {
+        summary?.netWorth ?? 0
+    }
+
+    var incomeThisMonth: Double {
+        summary?.incomeThisMonth ?? 0
+    }
+
+    var expenseThisMonth: Double {
+        summary?.expenseThisMonth ?? 0
+    }
+
+    var pendingReview: Int {
+        summary?.pendingReview ?? 0
+    }
+
+    var accounts: [Account] {
+        summary?.accounts ?? []
+    }
+
+    var recentTransactions: [Transaction] {
+        let txns = summary?.recentTransactions ?? []
+        return Array(txns.prefix(10))
+    }
+
+    var hasData: Bool {
+        summary != nil
     }
 }

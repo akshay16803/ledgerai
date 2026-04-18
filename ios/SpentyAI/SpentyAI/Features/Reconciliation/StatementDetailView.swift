@@ -2,468 +2,649 @@ import SwiftUI
 
 struct StatementDetailView: View {
 
-    let statement: Statement
     @Bindable var viewModel: ReconciliationViewModel
-    let accounts: [Account]
+    let statementId: String
 
-    @State private var categories: [Category] = []
-    @State private var editingEntryIndex: Int?
-    @State private var selectedCategoryId: String?
-    @State private var selectedSubcategoryId: String?
-    @State private var selectedTransactionType: String?
+    @State private var showBulkCategoryPicker = false
+    @State private var selectedBulkCategoryId: String = ""
+    @State private var showApproveConfirm = false
+    @State private var showRejectConfirm = false
+
+    private static let dateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateStyle = .medium
+        f.timeStyle = .none
+        return f
+    }()
+
+    private static let currencyFormatter: NumberFormatter = {
+        let f = NumberFormatter()
+        f.numberStyle = .currency
+        f.currencySymbol = ""
+        f.minimumFractionDigits = 2
+        f.maximumFractionDigits = 2
+        return f
+    }()
 
     var body: some View {
         ZStack {
-            SpentyColors.bgPrimary
-                .ignoresSafeArea()
+            Color.spentyBgPrimary.ignoresSafeArea()
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: SpentySpacing.xl) {
-                    headerSection
-                    actionSection
-                    reconciliationResultSection
-                    entriesSection
+            if viewModel.isLoading && viewModel.activeStatement == nil {
+                LoadingView()
+            } else if let statement = viewModel.activeStatement {
+                ScrollView {
+                    VStack(spacing: 16) {
+                        headerCard(statement)
+                        actionButtons(statement)
+                        reconciliationResultsCard
+                        entriesSection
+                    }
+                    .padding(16)
                 }
-                .padding(.horizontal, SpentySpacing.lg)
-                .padding(.vertical, SpentySpacing.md)
             }
         }
         .navigationTitle("Statement Details")
         .navigationBarTitleDisplayMode(.inline)
-        .task {
-            await loadCategories()
+        .overlay {
+            if let error = viewModel.errorMessage {
+                ErrorBanner(message: error) {
+                    viewModel.errorMessage = nil
+                }
+            }
+            if let success = viewModel.successMessage {
+                successBanner(success)
+            }
         }
-        .sheet(item: editingEntryBinding) { wrapper in
-            entryCategorySheet(entryIndex: wrapper.index)
+        .sheet(isPresented: $viewModel.showUnlockSheet) {
+            unlockSheet
         }
+        .sheet(isPresented: $showBulkCategoryPicker) {
+            bulkCategorizeSheet
+        }
+        .confirmationDialog("Approve Statement", isPresented: $showApproveConfirm, titleVisibility: .visible) {
+            Button("Approve") {
+                Task { await viewModel.approveStatement(id: statementId) }
+            }
+        } message: {
+            Text("Mark this statement as approved?")
+        }
+        .confirmationDialog("Reject Statement", isPresented: $showRejectConfirm, titleVisibility: .visible) {
+            Button("Reject", role: .destructive) {
+                Task { await viewModel.rejectStatement(id: statementId) }
+            }
+        } message: {
+            Text("Mark this statement as rejected?")
+        }
+        .task { await viewModel.loadStatement(id: statementId) }
     }
 
-    // MARK: - Header
+    // MARK: - Header Card
 
-    private var headerSection: some View {
-        SpentyCard {
-            VStack(alignment: .leading, spacing: SpentySpacing.md) {
-                HStack(alignment: .top) {
-                    VStack(alignment: .leading, spacing: SpentySpacing.xs) {
-                        Text(currentStatement.filename ?? "Statement")
-                            .font(SpentyFonts.heading)
-                            .foregroundStyle(SpentyColors.textPrimary)
+    private func headerCard(_ statement: Statement) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Image(systemName: "doc.text.fill")
+                    .font(.system(size: 24))
+                    .foregroundColor(.spentyPrimary)
 
-                        if let accountName = accountName(for: currentStatement.accountId) {
-                            Text(accountName)
-                                .font(SpentyFonts.body)
-                                .foregroundStyle(SpentyColors.textSecondary)
-                        }
-                    }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(statement.filename ?? "Statement")
+                        .font(SpentyFonts.headline)
+                        .foregroundColor(.spentyTextPrimary)
 
+                    Text(statement.accountName ?? viewModel.accountName(for: statement.accountId))
+                        .font(SpentyFonts.caption1)
+                        .foregroundColor(.spentyTextSecondary)
+                }
+
+                Spacer()
+
+                if let status = statement.status {
+                    StatusBadge(status: status)
+                }
+            }
+
+            Divider()
+                .background(Color.spentyBorder)
+
+            detailRow(label: "Period", value: periodString(from: statement.periodFrom, to: statement.periodTo))
+            detailRow(label: "Entries", value: "\(statement.entryCount ?? viewModel.parsedEntries.count)")
+            detailRow(label: "Type", value: statement.statementType?.capitalized ?? "N/A")
+
+            if let auditStatus = statement.auditStatus {
+                HStack {
+                    Text("Audit Status")
+                        .font(SpentyFonts.caption1)
+                        .foregroundColor(.spentyTextSecondary)
                     Spacer()
+                    StatusBadge(status: auditStatus)
+                }
+            }
 
-                    statusBadge(for: currentStatement.status)
+            if let progress = statement.processingProgress, progress > 0 && progress < 1 {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("Processing")
+                            .font(SpentyFonts.caption1)
+                            .foregroundColor(.spentyTextSecondary)
+                        Spacer()
+                        Text("\(Int(progress * 100))%")
+                            .font(SpentyFonts.caption1)
+                            .foregroundColor(.spentyPrimary)
+                    }
+                    ProgressView(value: progress)
+                        .progressViewStyle(.linear)
+                        .tint(.spentyPrimary)
+
+                    if let label = statement.processingStageLabel {
+                        Text(label)
+                            .font(SpentyFonts.caption2)
+                            .foregroundColor(.spentyTextSecondary)
+                    }
+                }
+            }
+        }
+        .cardStyle()
+    }
+
+    private func detailRow(label: String, value: String) -> some View {
+        HStack {
+            Text(label)
+                .font(SpentyFonts.caption1)
+                .foregroundColor(.spentyTextSecondary)
+            Spacer()
+            Text(value)
+                .font(SpentyFonts.subheadline)
+                .foregroundColor(.spentyTextPrimary)
+        }
+    }
+
+    private func periodString(from: Date?, to: Date?) -> String {
+        guard let from, let to else { return "N/A" }
+        return "\(Self.dateFormatter.string(from: from)) - \(Self.dateFormatter.string(from: to))"
+    }
+
+    // MARK: - Action Buttons
+
+    private func actionButtons(_ statement: Statement) -> some View {
+        VStack(spacing: 10) {
+            // Primary actions row
+            HStack(spacing: 10) {
+                Button {
+                    Task { await viewModel.reconcile(statementId: statementId) }
+                } label: {
+                    HStack(spacing: 6) {
+                        if viewModel.isReconciling {
+                            ProgressView().tint(.white)
+                        }
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                        Text("Reconcile")
+                    }
+                    .font(SpentyFonts.footnote)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(Color.spentyPrimary)
+                    .cornerRadius(10)
+                }
+                .disabled(viewModel.isReconciling)
+
+                Button {
+                    showBulkCategoryPicker = true
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "tag.fill")
+                        Text("Bulk Categorize")
+                    }
+                    .font(SpentyFonts.footnote)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.spentyPrimary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(Color.spentyPrimary.opacity(0.1))
+                    .cornerRadius(10)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(Color.spentyPrimary, lineWidth: 1)
+                    )
+                }
+            }
+
+            // Secondary actions row
+            HStack(spacing: 10) {
+                if viewModel.reconciliationResult?.missing ?? 0 > 0 {
+                    Button {
+                        Task { await viewModel.addMissingToLedger(statementId: statementId) }
+                    } label: {
+                        actionLabel(icon: "plus.circle", text: "Add Missing", color: .spentyInfo)
+                    }
                 }
 
-                Divider()
-                    .overlay(SpentyColors.borderSubtle)
+                Button {
+                    Task { await viewModel.reaudit(statementId: statementId) }
+                } label: {
+                    actionLabel(icon: "arrow.clockwise", text: "Re-audit", color: .spentyWarning)
+                }
 
-                HStack(spacing: SpentySpacing.xl) {
-                    if let from = currentStatement.periodFrom, let to = currentStatement.periodTo {
-                        detailItem("Period", value: "\(from) - \(to)")
-                    }
+                Button {
+                    viewModel.showUnlockSheet = true
+                } label: {
+                    actionLabel(icon: "lock.open", text: "Unlock", color: .spentyTextSecondary)
+                }
+            }
 
-                    if let entries = currentStatement.parsedEntries {
-                        detailItem("Entries", value: "\(entries.count)")
+            // Approve / Reject row
+            HStack(spacing: 10) {
+                Button {
+                    showApproveConfirm = true
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "checkmark.circle.fill")
+                        Text("Approve")
                     }
+                    .font(SpentyFonts.footnote)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(Color.spentySuccess)
+                    .cornerRadius(10)
+                }
 
-                    if let type = currentStatement.statementType {
-                        detailItem("Type", value: type.capitalized)
+                Button {
+                    showRejectConfirm = true
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "xmark.circle.fill")
+                        Text("Reject")
                     }
+                    .font(SpentyFonts.footnote)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(Color.spentyError)
+                    .cornerRadius(10)
                 }
             }
         }
     }
 
-    // MARK: - Actions
+    private func actionLabel(icon: String, text: String, color: Color) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: icon)
+            Text(text)
+        }
+        .font(SpentyFonts.caption1)
+        .fontWeight(.medium)
+        .foregroundColor(color)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 10)
+        .background(color.opacity(0.1))
+        .cornerRadius(8)
+    }
+
+    // MARK: - Reconciliation Results
 
     @ViewBuilder
-    private var actionSection: some View {
-        if currentStatement.status == .ready {
-            VStack(spacing: SpentySpacing.md) {
-                PrimaryButton(
-                    "Reconcile",
-                    icon: "checkmark.circle",
-                    isLoading: viewModel.isReconciling,
-                    isFullWidth: true
-                ) {
-                    Task {
-                        await viewModel.reconcile(currentStatement.statementId)
-                    }
+    private var reconciliationResultsCard: some View {
+        if let result = viewModel.reconciliationResult {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Reconciliation Results")
+                    .font(SpentyFonts.headline)
+                    .foregroundColor(.spentyTextPrimary)
+
+                Divider().background(Color.spentyBorder)
+
+                LazyVGrid(columns: [
+                    GridItem(.flexible()),
+                    GridItem(.flexible())
+                ], spacing: 12) {
+                    resultStat(label: "Total Entries", value: "\(result.totalEntries ?? 0)", color: .spentyTextPrimary)
+                    resultStat(label: "Matched", value: "\(result.matched ?? 0)", color: .spentySuccess)
+                    resultStat(label: "Unmatched", value: "\(result.unmatched ?? 0)", color: .spentyWarning)
+                    resultStat(label: "Missing", value: "\(result.missing ?? 0)", color: .spentyError)
                 }
 
-                if hasUncategorizedEntries {
-                    SecondaryButton(
-                        "Bulk Categorize",
-                        icon: "tag.fill"
-                    ) {
-                        Task { await performBulkCategorize() }
-                    }
+                if let opening = result.openingBalance {
+                    detailRow(label: "Opening Balance", value: formatAmount(opening))
                 }
-            }
-        }
-    }
-
-    // MARK: - Reconciliation Result
-
-    @ViewBuilder
-    private var reconciliationResultSection: some View {
-        if currentStatement.status == .reconciled, let result = viewModel.lastReconciliationResult {
-            SpentyCard {
-                VStack(alignment: .leading, spacing: SpentySpacing.md) {
-                    SectionHeader("Reconciliation Results")
-
-                    HStack(spacing: SpentySpacing.lg) {
-                        StatCard(
-                            title: "Matched",
-                            value: "\(result.matchedCount ?? 0)",
-                            icon: "checkmark.circle.fill",
-                            iconColor: SpentyColors.success
-                        )
-
-                        StatCard(
-                            title: "Missing",
-                            value: "\(result.missingCount ?? 0)",
-                            icon: "questionmark.circle.fill",
-                            iconColor: SpentyColors.warning
-                        )
-
-                        StatCard(
-                            title: "Conflicts",
-                            value: "\(result.conflictCount ?? 0)",
-                            icon: "exclamationmark.triangle.fill",
-                            iconColor: SpentyColors.danger
-                        )
+                if let closing = result.closingBalance {
+                    detailRow(label: "Closing Balance", value: formatAmount(closing))
+                }
+                if let computed = result.computedClosing {
+                    detailRow(label: "Computed Closing", value: formatAmount(computed))
+                }
+                if let diff = result.difference, diff != 0 {
+                    HStack {
+                        Text("Difference")
+                            .font(SpentyFonts.caption1)
+                            .foregroundColor(.spentyTextSecondary)
+                        Spacer()
+                        Text(formatAmount(diff))
+                            .font(SpentyFonts.subheadline)
+                            .fontWeight(.semibold)
+                            .foregroundColor(diff == 0 ? .spentySuccess : .spentyError)
                     }
                 }
             }
+            .cardStyle()
         }
     }
 
-    // MARK: - Entries
+    private func resultStat(label: String, value: String, color: Color) -> some View {
+        VStack(spacing: 4) {
+            Text(value)
+                .font(SpentyFonts.title3)
+                .foregroundColor(color)
+            Text(label)
+                .font(SpentyFonts.caption2)
+                .foregroundColor(.spentyTextSecondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
+        .background(color.opacity(0.06))
+        .cornerRadius(8)
+    }
+
+    // MARK: - Entries Section
 
     private var entriesSection: some View {
-        VStack(alignment: .leading, spacing: SpentySpacing.md) {
-            SectionHeader("Parsed Entries")
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Parsed Entries")
+                    .font(SpentyFonts.headline)
+                    .foregroundColor(.spentyTextPrimary)
+                Spacer()
+                Text("\(viewModel.parsedEntries.count) entries")
+                    .font(SpentyFonts.caption1)
+                    .foregroundColor(.spentyTextSecondary)
+            }
 
-            if let entries = currentStatement.parsedEntries, !entries.isEmpty {
-                ParsedEntriesView(
-                    entries: entries,
-                    categories: categories,
-                    onEditEntry: { index in
-                        let entry = entries[index]
-                        selectedCategoryId = entry.categoryId
-                        selectedSubcategoryId = entry.subcategoryId
-                        selectedTransactionType = entry.transactionType
-                        editingEntryIndex = index
+            if viewModel.parsedEntries.isEmpty {
+                HStack {
+                    Spacer()
+                    VStack(spacing: 8) {
+                        Image(systemName: "tray")
+                            .font(.system(size: 32))
+                            .foregroundColor(.spentyTextSecondary.opacity(0.5))
+                        Text("No entries parsed yet")
+                            .font(SpentyFonts.footnote)
+                            .foregroundColor(.spentyTextSecondary)
                     }
-                )
+                    .padding(.vertical, 24)
+                    Spacer()
+                }
             } else {
-                SpentyCard {
-                    HStack {
-                        Spacer()
-                        VStack(spacing: SpentySpacing.sm) {
-                            Image(systemName: "doc.text")
-                                .font(.system(size: 32))
-                                .foregroundStyle(SpentyColors.textMuted)
-                            Text("No entries parsed yet")
-                                .font(SpentyFonts.body)
-                                .foregroundStyle(SpentyColors.textMuted)
-                        }
-                        .padding(.vertical, SpentySpacing.xl)
-                        Spacer()
+                LazyVStack(spacing: 8) {
+                    ForEach(Array(viewModel.parsedEntries.enumerated()), id: \.offset) { index, entry in
+                        entryRow(entry, index: index)
                     }
                 }
             }
         }
+        .cardStyle()
     }
 
-    // MARK: - Entry Category Sheet
+    private func entryRow(_ entry: ParsedEntry, index: Int) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                if let date = entry.date {
+                    Text(Self.dateFormatter.string(from: date))
+                        .font(SpentyFonts.caption1)
+                        .foregroundColor(.spentyTextSecondary)
+                }
 
-    private func entryCategorySheet(entryIndex: Int) -> some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: SpentySpacing.xl) {
-                    SheetHeader("Assign Category") {
-                        editingEntryIndex = nil
+                Spacer()
+
+                if let amount = entry.amount {
+                    Text(formatAmount(amount))
+                        .font(SpentyFonts.amountSmall)
+                        .foregroundColor(amount >= 0 ? .spentySuccess : .spentyError)
+                }
+            }
+
+            if let desc = entry.description {
+                Text(desc)
+                    .font(SpentyFonts.subheadline)
+                    .foregroundColor(.spentyTextPrimary)
+                    .lineLimit(2)
+            }
+
+            HStack(spacing: 8) {
+                // Category picker
+                categoryPicker(for: entry, index: index)
+
+                // Match indicator
+                if entry.matched == true {
+                    HStack(spacing: 4) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 10))
+                        Text("Matched")
+                            .font(SpentyFonts.caption2)
                     }
+                    .foregroundColor(.spentySuccess)
+                }
+            }
+        }
+        .padding(12)
+        .background(Color.spentyBgPrimary)
+        .cornerRadius(8)
+    }
 
-                    if let entries = currentStatement.parsedEntries,
-                       entryIndex < entries.count {
-                        let entry = entries[entryIndex]
-
-                        // Entry summary
-                        SpentyCard {
-                            VStack(alignment: .leading, spacing: SpentySpacing.sm) {
-                                if let desc = entry.description {
-                                    Text(desc)
-                                        .font(SpentyFonts.body)
-                                        .foregroundStyle(SpentyColors.textPrimary)
-                                }
-                                HStack {
-                                    if let date = entry.date {
-                                        Text(date)
-                                            .font(SpentyFonts.caption)
-                                            .foregroundStyle(SpentyColors.textMuted)
-                                    }
-                                    Spacer()
-                                    if let debit = entry.debit, debit > 0 {
-                                        MoneyText(-debit, showSign: true, size: SpentyFonts.subheading)
-                                    } else if let credit = entry.credit, credit > 0 {
-                                        MoneyText(credit, showSign: true, size: SpentyFonts.subheading)
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // Category picker
-                    VStack(alignment: .leading, spacing: SpentySpacing.sm) {
-                        Text("Category")
-                            .font(SpentyFonts.caption)
-                            .foregroundStyle(SpentyColors.textSecondary)
-
-                        Picker("Category", selection: $selectedCategoryId) {
-                            Text("None")
-                                .tag(String?.none)
-
-                            ForEach(categories) { category in
-                                Text(category.name)
-                                    .tag(Optional(category.categoryId))
-                            }
-                        }
-                        .pickerStyle(.menu)
-                        .tint(SpentyColors.textPrimary)
-                        .padding(SpentySpacing.md)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(SpentyColors.surface)
-                        .clipShape(RoundedRectangle(cornerRadius: SpentyRadius.md))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: SpentyRadius.md)
-                                .stroke(SpentyColors.borderSubtle, lineWidth: 1)
-                        )
-                    }
-
-                    // Subcategory picker
-                    if let parentId = selectedCategoryId {
-                        let subcategories = categories.filter { $0.parentId == parentId }
-                        if !subcategories.isEmpty {
-                            VStack(alignment: .leading, spacing: SpentySpacing.sm) {
-                                Text("Subcategory")
-                                    .font(SpentyFonts.caption)
-                                    .foregroundStyle(SpentyColors.textSecondary)
-
-                                Picker("Subcategory", selection: $selectedSubcategoryId) {
-                                    Text("None")
-                                        .tag(String?.none)
-
-                                    ForEach(subcategories) { sub in
-                                        Text(sub.name)
-                                            .tag(Optional(sub.categoryId))
-                                    }
-                                }
-                                .pickerStyle(.menu)
-                                .tint(SpentyColors.textPrimary)
-                                .padding(SpentySpacing.md)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(SpentyColors.surface)
-                                .clipShape(RoundedRectangle(cornerRadius: SpentyRadius.md))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: SpentyRadius.md)
-                                        .stroke(SpentyColors.borderSubtle, lineWidth: 1)
+    private func categoryPicker(for entry: ParsedEntry, index: Int) -> some View {
+        Menu {
+            ForEach(viewModel.categories) { category in
+                if let children = category.children, !children.isEmpty {
+                    Menu(category.name ?? "Unnamed") {
+                        Button(category.name ?? "Unnamed") {
+                            Task {
+                                await viewModel.updateEntryCategory(
+                                    statementId: statementId,
+                                    index: index,
+                                    categoryId: category.id,
+                                    categoryName: category.name
                                 )
                             }
                         }
-                    }
-
-                    // Transaction type picker
-                    VStack(alignment: .leading, spacing: SpentySpacing.sm) {
-                        Text("Transaction Type")
-                            .font(SpentyFonts.caption)
-                            .foregroundStyle(SpentyColors.textSecondary)
-
-                        Picker("Type", selection: $selectedTransactionType) {
-                            Text("Auto")
-                                .tag(String?.none)
-                            Text("Debit")
-                                .tag(Optional("debit"))
-                            Text("Credit")
-                                .tag(Optional("credit"))
+                        ForEach(children) { sub in
+                            Button(sub.name ?? "Unnamed") {
+                                Task {
+                                    await viewModel.updateEntryCategory(
+                                        statementId: statementId,
+                                        index: index,
+                                        categoryId: sub.id,
+                                        categoryName: sub.name
+                                    )
+                                }
+                            }
                         }
-                        .pickerStyle(.segmented)
                     }
-
-                    // Save button
-                    PrimaryButton(
-                        "Save",
-                        icon: "checkmark",
-                        isFullWidth: true
-                    ) {
+                } else {
+                    Button(category.name ?? "Unnamed") {
                         Task {
-                            await viewModel.updateEntry(
-                                statementId: currentStatement.statementId,
-                                entryIndex: entryIndex,
-                                categoryId: selectedCategoryId,
-                                subcategoryId: selectedSubcategoryId,
-                                transactionType: selectedTransactionType
+                            await viewModel.updateEntryCategory(
+                                statementId: statementId,
+                                index: index,
+                                categoryId: category.id,
+                                categoryName: category.name
                             )
-                            editingEntryIndex = nil
                         }
                     }
                 }
-                .padding(.horizontal, SpentySpacing.lg)
-                .padding(.vertical, SpentySpacing.md)
             }
-            .background(SpentyColors.bgPrimary)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Cancel") {
-                        editingEntryIndex = nil
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "tag")
+                    .font(.system(size: 10))
+                Text(entry.categoryName ?? viewModel.categoryName(for: entry.categoryId))
+                    .font(SpentyFonts.caption1)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8))
+            }
+            .foregroundColor(.spentyPrimary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Color.spentyPrimary.opacity(0.1))
+            .cornerRadius(6)
+        }
+    }
+
+    // MARK: - Unlock Sheet
+
+    private var unlockSheet: some View {
+        NavigationStack {
+            VStack(spacing: 20) {
+                Image(systemName: "lock.shield")
+                    .font(.system(size: 48))
+                    .foregroundColor(.spentyPrimary)
+
+                Text("Unlock PDF")
+                    .font(SpentyFonts.title2)
+                    .foregroundColor(.spentyTextPrimary)
+
+                Text("Enter the password to unlock this password-protected PDF statement.")
+                    .font(SpentyFonts.footnote)
+                    .foregroundColor(.spentyTextSecondary)
+                    .multilineTextAlignment(.center)
+
+                SecureField("PDF Password", text: $viewModel.unlockPassword)
+                    .inputStyle()
+
+                Button {
+                    Task { await viewModel.unlock(statementId: statementId) }
+                } label: {
+                    HStack(spacing: 8) {
+                        if viewModel.isProcessing {
+                            ProgressView().tint(.white)
+                        }
+                        Text(viewModel.isProcessing ? "Unlocking..." : "Unlock")
                     }
-                    .foregroundStyle(SpentyColors.brandAccent)
+                    .primaryButtonStyle()
+                }
+                .disabled(viewModel.unlockPassword.isEmpty || viewModel.isProcessing)
+
+                Spacer()
+            }
+            .padding(24)
+            .background(Color.spentyBgPrimary)
+            .navigationTitle("Unlock Statement")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        viewModel.showUnlockSheet = false
+                        viewModel.unlockPassword = ""
+                    }
+                    .foregroundColor(.spentyPrimary)
                 }
             }
         }
-        .presentationDetents([.medium, .large])
+        .presentationDetents([.medium])
+    }
+
+    // MARK: - Bulk Categorize Sheet
+
+    private var bulkCategorizeSheet: some View {
+        NavigationStack {
+            List {
+                ForEach(viewModel.categories) { category in
+                    if let children = category.children, !children.isEmpty {
+                        Section(category.name ?? "Unnamed") {
+                            Button {
+                                selectedBulkCategoryId = category.id
+                                performBulkCategorize()
+                            } label: {
+                                Text(category.name ?? "Unnamed")
+                                    .foregroundColor(.spentyTextPrimary)
+                            }
+                            ForEach(children) { sub in
+                                Button {
+                                    selectedBulkCategoryId = sub.id
+                                    performBulkCategorize()
+                                } label: {
+                                    Text(sub.name ?? "Unnamed")
+                                        .foregroundColor(.spentyTextPrimary)
+                                        .padding(.leading, 16)
+                                }
+                            }
+                        }
+                    } else {
+                        Button {
+                            selectedBulkCategoryId = category.id
+                            performBulkCategorize()
+                        } label: {
+                            Text(category.name ?? "Unnamed")
+                                .foregroundColor(.spentyTextPrimary)
+                        }
+                    }
+                }
+            }
+            .listStyle(.insetGrouped)
+            .navigationTitle("Select Category")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { showBulkCategoryPicker = false }
+                        .foregroundColor(.spentyPrimary)
+                }
+            }
+        }
+    }
+
+    private func performBulkCategorize() {
+        showBulkCategoryPicker = false
+        Task {
+            await viewModel.bulkCategorize(statementId: statementId, categoryId: selectedBulkCategoryId)
+        }
+    }
+
+    // MARK: - Success Banner
+
+    private func successBanner(_ message: String) -> some View {
+        VStack {
+            HStack(spacing: 8) {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundColor(.spentySuccess)
+                Text(message)
+                    .font(SpentyFonts.footnote)
+                    .foregroundColor(.spentyTextPrimary)
+                Spacer()
+                Button {
+                    viewModel.successMessage = nil
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 12))
+                        .foregroundColor(.spentyTextSecondary)
+                }
+            }
+            .padding(12)
+            .background(Color.spentySuccess.opacity(0.1))
+            .cornerRadius(10)
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+
+            Spacer()
+        }
+        .transition(.move(edge: .top).combined(with: .opacity))
+        .onAppear {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                withAnimation { viewModel.successMessage = nil }
+            }
+        }
     }
 
     // MARK: - Helpers
 
-    /// Return the freshest copy of the statement from the view model, falling back to the init value.
-    private var currentStatement: Statement {
-        viewModel.statements.first(where: { $0.statementId == statement.statementId })
-            ?? viewModel.selectedStatement
-            ?? statement
+    private func formatAmount(_ amount: Double) -> String {
+        Self.currencyFormatter.string(from: NSNumber(value: amount)) ?? String(format: "%.2f", amount)
     }
-
-    private var hasUncategorizedEntries: Bool {
-        guard let entries = currentStatement.parsedEntries else { return false }
-        return entries.contains(where: { $0.categoryId == nil })
-    }
-
-    private func performBulkCategorize() async {
-        // Send all uncategorized entries for bulk auto-categorization
-        guard let entries = currentStatement.parsedEntries else { return }
-        var bulkEntries: [BulkCategoryEntry] = []
-
-        for (index, entry) in entries.enumerated() {
-            if entry.categoryId == nil {
-                // Server will auto-assign categories
-                bulkEntries.append(BulkCategoryEntry(
-                    entryIndex: index,
-                    categoryId: "auto",
-                    subcategoryId: nil
-                ))
-            }
-        }
-
-        guard !bulkEntries.isEmpty else { return }
-        await viewModel.bulkCategorize(currentStatement.statementId, entries: bulkEntries)
-    }
-
-    private func accountName(for accountId: String?) -> String? {
-        guard let accountId else { return nil }
-        return accounts.first(where: { $0.accountId == accountId })?.name
-    }
-
-    private func statusBadge(for status: StatementStatus?) -> some View {
-        let (label, bgColor, fgColor) = statusInfo(status)
-
-        return Text(label)
-            .font(.system(size: 11, weight: .semibold))
-            .foregroundStyle(fgColor)
-            .padding(.horizontal, SpentySpacing.sm)
-            .padding(.vertical, SpentySpacing.xs)
-            .background(bgColor)
-            .clipShape(Capsule())
-    }
-
-    private func statusInfo(_ status: StatementStatus?) -> (String, Color, Color) {
-        switch status {
-        case .parsing:
-            return ("Parsing", SpentyColors.info.opacity(0.15), SpentyColors.info)
-        case .ready:
-            return ("Ready", SpentyColors.warning.opacity(0.15), SpentyColors.warning)
-        case .reconciled:
-            return ("Reconciled", SpentyColors.success.opacity(0.15), SpentyColors.success)
-        case .failed:
-            return ("Failed", SpentyColors.danger.opacity(0.15), SpentyColors.danger)
-        case .passwordNeeded:
-            return ("Locked", SpentyColors.warning.opacity(0.15), SpentyColors.warning)
-        case .none:
-            return ("Unknown", SpentyColors.textMuted.opacity(0.15), SpentyColors.textMuted)
-        }
-    }
-
-    private func detailItem(_ label: String, value: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(label)
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(SpentyColors.textMuted)
-                .textCase(.uppercase)
-            Text(value)
-                .font(SpentyFonts.caption)
-                .foregroundStyle(SpentyColors.textSecondary)
-        }
-    }
-
-    private func loadCategories() async {
-        do {
-            let repo = CategoryRepository()
-            categories = try await repo.getCategories()
-        } catch {
-            // Categories will be empty; category pickers won't populate
-        }
-    }
-
-    // MARK: - Entry Binding Wrapper
-
-    private var editingEntryBinding: Binding<EntryIndexWrapper?> {
-        Binding(
-            get: {
-                guard let index = editingEntryIndex else { return nil }
-                return EntryIndexWrapper(index: index)
-            },
-            set: { wrapper in
-                editingEntryIndex = wrapper?.index
-            }
-        )
-    }
-}
-
-/// Wrapper to make an entry index `Identifiable` for `.sheet(item:)`.
-struct EntryIndexWrapper: Identifiable {
-    let index: Int
-    var id: Int { index }
 }
 
 #Preview {
     NavigationStack {
-        StatementDetailView(
-            statement: Statement(
-                statementId: "preview-1",
-                userId: nil,
-                accountId: nil,
-                filename: "HDFC_March_2026.pdf",
-                statementType: "bank",
-                periodFrom: "2026-03-01",
-                periodTo: "2026-03-31",
-                status: .ready,
-                parsedEntries: [
-                    ParsedEntry(date: "2026-03-01", description: "ATM Withdrawal", debit: 5000, credit: nil),
-                    ParsedEntry(date: "2026-03-05", description: "Salary Credit", debit: nil, credit: 85000),
-                ],
-                createdAt: nil
-            ),
-            viewModel: ReconciliationViewModel(),
-            accounts: []
-        )
-        .environment(AppState())
+        StatementDetailView(viewModel: ReconciliationViewModel(), statementId: "preview-id")
     }
 }
