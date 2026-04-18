@@ -69,7 +69,7 @@ struct SupportView: View {
 
                         // Submit Button
                         PrimaryButton(
-                            title: "Submit Ticket",
+                            "Submit Ticket",
                             isLoading: viewModel.isSubmitting,
                             isDisabled: viewModel.subject.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                                 || viewModel.message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty

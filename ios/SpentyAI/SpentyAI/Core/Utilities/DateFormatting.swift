@@ -58,6 +58,12 @@ struct DateFormatting {
         return format(date, preset: .MMMddyyyyComma)
     }
 
+    /// Relative time description from an ISO date string (e.g. "2 hours ago")
+    static func relativeDate(from isoString: String) -> String {
+        guard let date = parseISO(isoString) else { return isoString }
+        return relativeString(from: date)
+    }
+
     private static func getFormatter(for format: String) -> DateFormatter {
         if let cached = formatterCache[format] {
             return cached

@@ -72,7 +72,7 @@ struct ReportsView: View {
                 HStack(spacing: SpentySpacing.sm) {
                     ForEach(ReportPeriod.allCases) { period in
                         FilterChip(
-                            title: period.rawValue,
+                            period.rawValue,
                             isSelected: viewModel.selectedPeriod == period
                         ) {
                             viewModel.selectedPeriod = period
@@ -120,19 +120,22 @@ struct ReportsView: View {
             StatCard(
                 title: "Income",
                 value: formattedMoney(viewModel.summary?.totalIncome),
-                valueColor: SpentyColors.success
+                icon: "arrow.down.circle",
+                iconColor: SpentyColors.success
             )
 
             StatCard(
                 title: "Expenses",
                 value: formattedMoney(viewModel.summary?.totalExpense),
-                valueColor: SpentyColors.danger
+                icon: "arrow.up.circle",
+                iconColor: SpentyColors.danger
             )
 
             StatCard(
                 title: "Net Savings",
                 value: formattedMoney(viewModel.summary?.net),
-                valueColor: (viewModel.summary?.net ?? 0) >= 0
+                icon: "chart.line.uptrend.xyaxis",
+                iconColor: (viewModel.summary?.net ?? 0) >= 0
                     ? SpentyColors.success
                     : SpentyColors.danger
             )
@@ -140,7 +143,8 @@ struct ReportsView: View {
             StatCard(
                 title: "Transactions",
                 value: "\(viewModel.summary?.transactionCount ?? 0)",
-                valueColor: SpentyColors.textPrimary
+                icon: "list.bullet.rectangle",
+                iconColor: SpentyColors.textPrimary
             )
         }
     }
@@ -182,7 +186,7 @@ struct ReportsView: View {
                 HStack(spacing: SpentySpacing.sm) {
                     ForEach(ReportTransactionType.allCases) { type in
                         FilterChip(
-                            title: type.rawValue,
+                            type.rawValue,
                             isSelected: viewModel.selectedType == type
                         ) {
                             viewModel.selectedType = type
@@ -236,7 +240,7 @@ struct ReportsView: View {
                         Spacer()
 
                         VStack(alignment: .trailing, spacing: 2) {
-                            MoneyText(amount: category.amount ?? 0)
+                            MoneyText( category.amount ?? 0)
                             Text("\(formattedPercent(category.percentage))")
                                 .font(SpentyFonts.caption)
                                 .foregroundStyle(SpentyColors.textMuted)
@@ -265,7 +269,7 @@ struct ReportsView: View {
                                 Spacer()
 
                                 VStack(alignment: .trailing, spacing: 2) {
-                                    MoneyText(amount: sub.amount ?? 0)
+                                    MoneyText( sub.amount ?? 0)
                                     Text(formattedPercent(sub.percentage))
                                         .font(SpentyFonts.caption)
                                         .foregroundStyle(SpentyColors.textMuted)
