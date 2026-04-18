@@ -178,7 +178,7 @@ struct FeatureRequestsView: View {
 
                     // Submit Button
                     PrimaryButton(
-                        title: "Submit",
+                        "Submit",
                         isLoading: viewModel.isSubmitting,
                         isDisabled: viewModel.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                     ) {

@@ -239,7 +239,7 @@ struct RecordsView: View {
 
                 // Parsed amount
                 if let parsed = receipt.parsedData {
-                    if let amount = parsed.totalAmount {
+                    if let amount = parsed.amount {
                         MoneyText(amount, currency: currency, size: SpentyFonts.body)
                     }
                     if let date = parsed.date {
