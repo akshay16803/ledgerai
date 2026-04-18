@@ -120,7 +120,7 @@ struct PaymentHistoryView: View {
                 amount: 1499,
                 currency: "INR",
                 status: "completed",
-                provider: "apple",
+                paymentProvider: "apple",
                 createdAt: "2026-03-15"
             ),
             PaymentOrder(
@@ -129,7 +129,7 @@ struct PaymentHistoryView: View {
                 amount: 199,
                 currency: "INR",
                 status: "refunded",
-                provider: "apple",
+                paymentProvider: "apple",
                 createdAt: "2026-02-10"
             ),
         ])

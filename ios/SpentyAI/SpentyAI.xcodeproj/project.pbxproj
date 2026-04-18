@@ -43,6 +43,7 @@
 		40B6738E646544E0DCE38C6B /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = BDAE17AA2771B15F3620A894 /* APIClient.swift */; };
 		D31B84F8F284AC64500A8FBF /* APIEndpoints.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32AB68385E464552BE4298B5 /* APIEndpoints.swift */; };
 		E9BBB7088EE38B776B6E5DFB /* APIError.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2BC5CD43F8C056C8C16CDA8 /* APIError.swift */; };
+		7A1E3F9B2C4D8E0A1B5F6D7C /* EmptyResponse.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D8A2E7F1C6B4A9D0E5F8B3A /* EmptyResponse.swift */; };
 		AF7FDFABBBD09A07063CF9B7 /* SpentyColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71A0682C019868CA4490C989 /* SpentyColors.swift */; };
 		43C39DF2997A346297658529 /* SpentyFonts.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C4F866EA23F6F090F330049 /* SpentyFonts.swift */; };
 		F9F50B95F7528C7D06CEBC52 /* SpentyStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9BE2CE14133D239D4251CDD /* SpentyStyle.swift */; };
@@ -193,6 +194,7 @@
 		BDAE17AA2771B15F3620A894 /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
 		32AB68385E464552BE4298B5 /* APIEndpoints.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIEndpoints.swift; sourceTree = "<group>"; };
 		A2BC5CD43F8C056C8C16CDA8 /* APIError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIError.swift; sourceTree = "<group>"; };
+		3D8A2E7F1C6B4A9D0E5F8B3A /* EmptyResponse.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmptyResponse.swift; sourceTree = "<group>"; };
 		71A0682C019868CA4490C989 /* SpentyColors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpentyColors.swift; sourceTree = "<group>"; };
 		1C4F866EA23F6F090F330049 /* SpentyFonts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpentyFonts.swift; sourceTree = "<group>"; };
 		D9BE2CE14133D239D4251CDD /* SpentyStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpentyStyle.swift; sourceTree = "<group>"; };
@@ -447,6 +449,7 @@
 				BDAE17AA2771B15F3620A894 /* APIClient.swift */,
 				32AB68385E464552BE4298B5 /* APIEndpoints.swift */,
 				A2BC5CD43F8C056C8C16CDA8 /* APIError.swift */,
+				3D8A2E7F1C6B4A9D0E5F8B3A /* EmptyResponse.swift */,
 			);
 			path = Networking;
 			sourceTree = "<group>";
@@ -858,6 +861,7 @@
 				40B6738E646544E0DCE38C6B /* APIClient.swift in Sources */,
 				D31B84F8F284AC64500A8FBF /* APIEndpoints.swift in Sources */,
 				E9BBB7088EE38B776B6E5DFB /* APIError.swift in Sources */,
+				7A1E3F9B2C4D8E0A1B5F6D7C /* EmptyResponse.swift in Sources */,
 				AF7FDFABBBD09A07063CF9B7 /* SpentyColors.swift in Sources */,
 				43C39DF2997A346297658529 /* SpentyFonts.swift in Sources */,
 				F9F50B95F7528C7D06CEBC52 /* SpentyStyle.swift in Sources */,

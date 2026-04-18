@@ -5,7 +5,7 @@ struct DonutChartView: View {
 
     let categories: [ReportCategory]
     let totalAmount: Double
-    let type: CategoryType
+    let type: ReportCategoryType
 
     @State private var selectedCategory: ReportCategory?
 
