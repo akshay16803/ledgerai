@@ -40,7 +40,7 @@ struct ReportsView: View {
                 }
 
                 if viewModel.isLoading {
-                    LoadingOverlay()
+                    LoadingOverlay(isPresented: .constant(true))
                 }
             }
             .navigationTitle("Reports")

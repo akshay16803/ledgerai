@@ -50,15 +50,15 @@ struct VendorsView: View {
                     fabButton
                 }
             }
-            .sheet(isPresented: $viewModel.showAddVendor) {
+            .sheet(isPresented: $viewModel.showAddVendor, onDismiss: {
                 Task { await viewModel.refresh() }
-            } content: {
+            }) {
                 VendorFormSheet(viewModel: viewModel, editing: nil)
             }
-            .sheet(item: $viewModel.showEditVendor) { vendor in
-                VendorFormSheet(viewModel: viewModel, editing: vendor)
-            } onDismiss: {
+            .sheet(item: $viewModel.showEditVendor, onDismiss: {
                 Task { await viewModel.refresh() }
+            }) { vendor in
+                VendorFormSheet(viewModel: viewModel, editing: vendor)
             }
             .alert("Delete Vendor", isPresented: .init(
                 get: { viewModel.showDeleteConfirm != nil },
@@ -546,7 +546,7 @@ struct VendorFormSheet: View {
             }
             .overlay {
                 if isSaving {
-                    LoadingOverlay()
+                    LoadingOverlay(isPresented: .constant(true))
                 }
             }
         }

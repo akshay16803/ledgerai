@@ -308,14 +308,14 @@ struct PastInsightsView: View {
                                 title: "Income",
                                 value: formatCurrency(totals.income),
                                 icon: "arrow.down.circle.fill",
-                                color: SpentyColors.success
+                                iconColor: SpentyColors.success
                             )
 
                             StatCard(
                                 title: "Expense",
                                 value: formatCurrency(totals.expense),
                                 icon: "arrow.up.circle.fill",
-                                color: SpentyColors.danger
+                                iconColor: SpentyColors.danger
                             )
                         }
 
@@ -323,7 +323,7 @@ struct PastInsightsView: View {
                             title: "Net",
                             value: formatCurrency(totals.net),
                             icon: "equal.circle.fill",
-                            color: SpentyColors.brandAccent
+                            iconColor: SpentyColors.brandAccent
                         )
                     }
 

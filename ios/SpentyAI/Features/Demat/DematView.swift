@@ -186,10 +186,13 @@ struct DematView: View {
                                 Spacer()
 
                                 if let status = statement.status {
-                                    StatusBadge(
-                                        text: status.capitalized,
-                                        color: statusColor(status)
-                                    )
+                                    Text(status.capitalized)
+                                        .font(.system(size: 11, weight: .semibold))
+                                        .foregroundStyle(statusColor(status))
+                                        .padding(.horizontal, SpentySpacing.sm)
+                                        .padding(.vertical, SpentySpacing.xs)
+                                        .background(statusColor(status).opacity(0.15))
+                                        .clipShape(Capsule())
                                 }
                             }
 

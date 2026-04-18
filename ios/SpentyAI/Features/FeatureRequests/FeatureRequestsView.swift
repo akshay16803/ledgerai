@@ -94,17 +94,23 @@ struct FeatureRequestsView: View {
 
                         HStack(spacing: SpentySpacing.sm) {
                             if let category = request.category {
-                                StatusBadge(
-                                    text: category.capitalized,
-                                    color: categoryColor(category)
-                                )
+                                Text(category.capitalized)
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundStyle(categoryColor(category))
+                                    .padding(.horizontal, SpentySpacing.sm)
+                                    .padding(.vertical, SpentySpacing.xs)
+                                    .background(categoryColor(category).opacity(0.15))
+                                    .clipShape(Capsule())
                             }
 
                             if let status = request.status {
-                                StatusBadge(
-                                    text: status.capitalized,
-                                    color: statusColor(status)
-                                )
+                                Text(status.capitalized)
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundStyle(statusColor(status))
+                                    .padding(.horizontal, SpentySpacing.sm)
+                                    .padding(.vertical, SpentySpacing.xs)
+                                    .background(statusColor(status).opacity(0.15))
+                                    .clipShape(Capsule())
                             }
 
                             Spacer()
@@ -132,20 +138,18 @@ struct FeatureRequestsView: View {
                     }
 
                     // Title
-                    FormField(label: "Title", isRequired: true) {
-                        TextField("What would you like to see?", text: $viewModel.title)
-                            .font(SpentyFonts.body)
-                            .padding(SpentySpacing.md)
-                            .background(SpentyColors.surface)
-                            .clipShape(RoundedRectangle(cornerRadius: SpentyRadius.md))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: SpentyRadius.md)
-                                    .stroke(SpentyColors.borderSubtle, lineWidth: 1)
-                            )
-                    }
+                    FormField(
+                        "Title",
+                        text: $viewModel.title,
+                        placeholder: "What would you like to see?",
+                        isRequired: true
+                    )
 
                     // Description
-                    FormField(label: "Description") {
+                    VStack(alignment: .leading, spacing: SpentySpacing.xs) {
+                        Text("Description")
+                            .font(SpentyFonts.caption)
+                            .foregroundStyle(SpentyColors.textSecondary)
                         TextEditor(text: $viewModel.description)
                             .font(SpentyFonts.body)
                             .frame(minHeight: 100)
@@ -160,7 +164,10 @@ struct FeatureRequestsView: View {
                     }
 
                     // Category Picker
-                    FormField(label: "Category") {
+                    VStack(alignment: .leading, spacing: SpentySpacing.xs) {
+                        Text("Category")
+                            .font(SpentyFonts.caption)
+                            .foregroundStyle(SpentyColors.textSecondary)
                         Picker("Category", selection: $viewModel.category) {
                             ForEach(FeatureRequestsViewModel.categories, id: \.self) { cat in
                                 Text(cat.capitalized).tag(cat)

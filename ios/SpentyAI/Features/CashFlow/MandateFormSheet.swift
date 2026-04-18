@@ -92,13 +92,10 @@ struct MandateFormSheet: View {
     private var merchantSection: some View {
         Section {
             FormField(
-                label: "Merchant",
+                "Merchant",
                 text: $merchant,
                 placeholder: "e.g. Netflix, SBI Insurance",
-                keyboardType: .default,
-                isRequired: true,
-                errorMessage: nil,
-                isSecure: false
+                isRequired: true
             )
         } header: {
             Text("Merchant")
@@ -111,13 +108,11 @@ struct MandateFormSheet: View {
     private var amountSection: some View {
         Section {
             FormField(
-                label: "Amount",
+                "Amount",
                 text: $amountText,
                 placeholder: "0.00",
                 keyboardType: .decimalPad,
-                isRequired: true,
-                errorMessage: nil,
-                isSecure: false
+                isRequired: true
             )
         } header: {
             Text("Amount")

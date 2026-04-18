@@ -23,7 +23,7 @@ struct EmailSyncView: View {
             }
             .overlay {
                 if viewModel.isLoading {
-                    LoadingOverlay()
+                    LoadingOverlay(isPresented: .constant(true))
                 }
             }
             .alert("Error", isPresented: .init(
@@ -89,7 +89,7 @@ struct EmailSyncView: View {
                         .foregroundStyle(SpentyColors.textPrimary)
                     Spacer()
                     if viewModel.gmailStatus?.connected == true {
-                        StatusBadge(text: "Connected", color: SpentyColors.success)
+                        StatusBadge(.active)
                     }
                 }
 
@@ -118,7 +118,7 @@ struct EmailSyncView: View {
                         .foregroundStyle(SpentyColors.textPrimary)
                     Spacer()
                     if viewModel.outlookStatus?.connected == true {
-                        StatusBadge(text: "Connected", color: SpentyColors.success)
+                        StatusBadge(.active)
                     }
                 }
 
@@ -191,25 +191,25 @@ struct EmailSyncView: View {
                 title: "Found",
                 value: "\(status.foundTransactions ?? 0)",
                 icon: "checkmark.circle",
-                color: SpentyColors.success
+                iconColor: SpentyColors.success
             )
             StatCard(
                 title: "Skipped",
                 value: "\(status.skippedCount ?? 0)",
                 icon: "forward.fill",
-                color: SpentyColors.textMuted
+                iconColor: SpentyColors.textMuted
             )
             StatCard(
                 title: "Pending",
                 value: "\(status.pendingCount ?? 0)",
                 icon: "clock",
-                color: SpentyColors.warning
+                iconColor: SpentyColors.warning
             )
             StatCard(
                 title: "Failed",
                 value: "\(status.failedCount ?? 0)",
                 icon: "xmark.circle",
-                color: SpentyColors.danger
+                iconColor: SpentyColors.danger
             )
         }
     }
@@ -272,7 +272,7 @@ struct EmailSyncView: View {
                 }
 
                 if let category = transaction.suggestedCategory {
-                    FilterChip(label: category, isSelected: true)
+                    FilterChip(category, isSelected: true, action: {})
                 }
 
                 HStack(spacing: SpentySpacing.md) {

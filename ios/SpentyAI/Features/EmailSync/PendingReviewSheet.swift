@@ -92,7 +92,10 @@ struct PendingReviewSheet: View {
                     // Editable Fields
                     SpentyCard {
                         VStack(spacing: SpentySpacing.lg) {
-                            FormField(label: "Amount") {
+                            VStack(alignment: .leading, spacing: SpentySpacing.xs) {
+                                Text("Amount")
+                                    .font(SpentyFonts.caption)
+                                    .foregroundStyle(SpentyColors.textSecondary)
                                 HStack {
                                     Text("$")
                                         .font(SpentyFonts.body)
@@ -110,7 +113,10 @@ struct PendingReviewSheet: View {
                                 )
                             }
 
-                            FormField(label: "Type") {
+                            VStack(alignment: .leading, spacing: SpentySpacing.xs) {
+                                Text("Type")
+                                    .font(SpentyFonts.caption)
+                                    .foregroundStyle(SpentyColors.textSecondary)
                                 Picker("Type", selection: $selectedType) {
                                     ForEach(TransactionType.allCases) { type in
                                         Text(type.displayName).tag(type)
@@ -119,7 +125,10 @@ struct PendingReviewSheet: View {
                                 .pickerStyle(.segmented)
                             }
 
-                            FormField(label: "Category") {
+                            VStack(alignment: .leading, spacing: SpentySpacing.xs) {
+                                Text("Category")
+                                    .font(SpentyFonts.caption)
+                                    .foregroundStyle(SpentyColors.textSecondary)
                                 Menu {
                                     ForEach(categories, id: \.self) { category in
                                         Button(category) {
@@ -150,7 +159,10 @@ struct PendingReviewSheet: View {
                                 }
                             }
 
-                            FormField(label: "Account") {
+                            VStack(alignment: .leading, spacing: SpentySpacing.xs) {
+                                Text("Account")
+                                    .font(SpentyFonts.caption)
+                                    .foregroundStyle(SpentyColors.textSecondary)
                                 Menu {
                                     ForEach(accounts, id: \.id) { account in
                                         Button(account.name) {
