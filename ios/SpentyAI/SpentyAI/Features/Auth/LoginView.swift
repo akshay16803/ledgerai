@@ -102,9 +102,9 @@ struct LoginView: View {
 
     private var legalLinks: some View {
         HStack(spacing: SpentySpacing.lg) {
-            Link("Privacy Policy", destination: URL(string: "https://accounts.niprasha.com/privacy")!)
+            Link("Privacy Policy", destination: URL(string: "https://spentyai.com/privacy")!)
             Text("·")
-            Link("Terms of Service", destination: URL(string: "https://accounts.niprasha.com/terms")!)
+            Link("Terms of Service", destination: URL(string: "https://spentyai.com/terms")!)
         }
         .font(SpentyFonts.caption)
         .foregroundStyle(.white.opacity(0.5))

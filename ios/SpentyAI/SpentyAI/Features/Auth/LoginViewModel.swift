@@ -9,7 +9,7 @@ final class LoginViewModel {
     var errorMessage: String?
 
     private let logger = Logger(subsystem: "com.spentyai", category: "auth")
-    private let baseURL = "https://accounts.niprasha.com"
+    private let baseURL = "https://spentyai.com"
     private let callbackScheme = "spentyai"
 
     // MARK: - Google OAuth

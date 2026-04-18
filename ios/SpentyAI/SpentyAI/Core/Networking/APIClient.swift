@@ -3,7 +3,7 @@ import Foundation
 actor APIClient {
     static let shared = APIClient()
 
-    private let baseURL = "https://accounts.niprasha.com"
+    private let baseURL = "https://spentyai.com"
     private let session: URLSession
     private let decoder: JSONDecoder
     private let encoder: JSONEncoder
