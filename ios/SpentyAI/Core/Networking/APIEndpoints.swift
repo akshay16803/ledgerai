@@ -167,9 +167,14 @@ enum APIEndpoints {
         static func delete(_ id: String) -> String { "/api/invoices/\(id)" }
         static func pdf(_ id: String) -> String { "/api/invoices/\(id)/pdf" }
         static func markPaid(_ id: String) -> String { "/api/invoices/\(id)/mark-paid" }
+        static func recordPayment(_ id: String) -> String { "/api/invoices/\(id)/record-payment" }
         static func duplicate(_ id: String) -> String { "/api/invoices/\(id)/duplicate" }
         static let nextNumber = "/api/invoices/next-number"
         static let stats = "/api/invoices/stats"
+        static let count = "/api/invoices/count"
+        static let debtors = "/api/invoices/debtors"
+        static let aging = "/api/invoices/aging"
+        static let salesByCustomer = "/api/invoices/sales-by-customer"
     }
 
     // MARK: - Customers
@@ -191,9 +196,15 @@ enum APIEndpoints {
         static func delete(_ id: String) -> String { "/api/bills/\(id)" }
         static func pdf(_ id: String) -> String { "/api/bills/\(id)/pdf" }
         static func markPaid(_ id: String) -> String { "/api/bills/\(id)/mark-paid" }
+        static func recordPayment(_ id: String) -> String { "/api/bills/\(id)/record-payment" }
         static func duplicate(_ id: String) -> String { "/api/bills/\(id)/duplicate" }
         static let nextNumber = "/api/bills/next-number"
         static let stats = "/api/bills/stats"
+        static let count = "/api/bills/count"
+        static let creditors = "/api/bills/creditors"
+        static let aging = "/api/bills/aging"
+        static let purchasesByVendor = "/api/bills/purchases-by-vendor"
+        static let parseUpload = "/api/bills/parse-upload"
     }
 
     // MARK: - Vendors
