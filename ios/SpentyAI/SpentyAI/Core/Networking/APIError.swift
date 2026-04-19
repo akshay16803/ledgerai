@@ -8,6 +8,7 @@ enum APIError: LocalizedError {
     case networkError(Error)
     case decodingError(Error)
     case unknown(Int, String?)
+    case cancelled
 
     var errorDescription: String? {
         switch self {
@@ -19,8 +20,14 @@ enum APIError: LocalizedError {
             return "The requested resource was not found."
         case .serverError(let message):
             return "Server error: \(message)"
+        case .cancelled:
+            return "Sign in was cancelled."
         case .networkError(let error):
-            return "Network error: \(error.localizedDescription)"
+            let nsError = error as NSError
+            if nsError.domain == NSURLErrorDomain {
+                return "No internet connection. Please check your network and try again."
+            }
+            return "Something went wrong. Please try again."
         case .decodingError(let error):
             return "Failed to process server response: \(error.localizedDescription)"
         case .unknown(let code, let message):

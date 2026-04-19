@@ -35,6 +35,8 @@ final class AuthViewModel {
             let idToken = try await GoogleSignInHelper.signIn()
             try await authManager.login(idToken: idToken)
             // AuthManager sets isAuthenticated → AppRouter navigates automatically.
+        } catch APIError.cancelled {
+            // User intentionally cancelled sign-in — no error to show.
         } catch let error as APIError {
             errorMessage = error.localizedDescription
             showError = true

@@ -1,4 +1,5 @@
 import AuthenticationServices
+import CryptoKit
 import Foundation
 
 final class GoogleSignInHelper: NSObject, ASWebAuthenticationPresentationContextProviding {
@@ -9,37 +10,62 @@ final class GoogleSignInHelper: NSObject, ASWebAuthenticationPresentationContext
               let id = dict["GOOGLE_CLIENT_ID"] as? String else { return "" }
         return id
     }()
-    private static let redirectURI = "com.spentyai.app:/oauth2callback"
-    private static let callbackScheme = "com.spentyai.app"
+
+    /// Google requires the reverse client ID as the callback scheme for iOS OAuth clients.
+    private static var callbackScheme: String {
+        "com.googleusercontent.apps." + clientID.components(separatedBy: ".apps.googleusercontent.com").first!
+    }
+
+    private static var redirectURI: String {
+        callbackScheme + ":/oauth2callback"
+    }
+
+    private static let tokenEndpoint = "https://oauth2.googleapis.com/token"
+
+    // MARK: - Public
 
     static func signIn() async throws -> String {
         let helper = GoogleSignInHelper()
         return try await helper._signIn()
     }
 
+    // MARK: - Private
+
     private func _signIn() async throws -> String {
+        // 1. Generate PKCE code verifier and challenge
+        let codeVerifier = Self.generateCodeVerifier()
+        let codeChallenge = Self.generateCodeChallenge(from: codeVerifier)
         let nonce = UUID().uuidString
+
+        // 2. Build authorization URL with code flow + PKCE
         var components = URLComponents(string: "https://accounts.google.com/o/oauth2/v2/auth")!
         components.queryItems = [
             URLQueryItem(name: "client_id", value: Self.clientID),
             URLQueryItem(name: "redirect_uri", value: Self.redirectURI),
-            URLQueryItem(name: "response_type", value: "id_token"),
+            URLQueryItem(name: "response_type", value: "code"),
             URLQueryItem(name: "scope", value: "openid email profile"),
             URLQueryItem(name: "nonce", value: nonce),
-            URLQueryItem(name: "response_mode", value: "fragment")
+            URLQueryItem(name: "code_challenge", value: codeChallenge),
+            URLQueryItem(name: "code_challenge_method", value: "S256")
         ]
 
         guard let authURL = components.url else {
             throw APIError.badRequest("Failed to construct Google sign-in URL")
         }
 
+        // 3. Present ASWebAuthenticationSession and get the auth code
         let callbackURL: URL = try await withCheckedThrowingContinuation { continuation in
             let session = ASWebAuthenticationSession(
                 url: authURL,
                 callbackURLScheme: Self.callbackScheme
             ) { url, error in
                 if let error {
-                    continuation.resume(throwing: APIError.networkError(error))
+                    if let authError = error as? ASWebAuthenticationSessionError,
+                       authError.code == .canceledLogin {
+                        continuation.resume(throwing: APIError.cancelled)
+                    } else {
+                        continuation.resume(throwing: APIError.networkError(error))
+                    }
                 } else if let url {
                     continuation.resume(returning: url)
                 } else {
@@ -51,22 +77,78 @@ final class GoogleSignInHelper: NSObject, ASWebAuthenticationPresentationContext
             session.start()
         }
 
-        guard let fragment = callbackURL.fragment else {
-            throw APIError.badRequest("No fragment in Google callback URL")
+        // 4. Extract the authorization code from the callback URL
+        guard let queryItems = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false)?.queryItems,
+              let code = queryItems.first(where: { $0.name == "code" })?.value else {
+            throw APIError.badRequest("No authorization code in Google callback")
         }
 
-        let params = fragment.split(separator: "&").reduce(into: [String: String]()) { dict, pair in
-            let parts = pair.split(separator: "=", maxSplits: 1)
-            if parts.count == 2 {
-                dict[String(parts[0])] = String(parts[1])
-            }
+        // 5. Exchange the authorization code for tokens
+        let idToken = try await exchangeCodeForToken(code: code, codeVerifier: codeVerifier)
+        return idToken
+    }
+
+    // MARK: - Token Exchange
+
+    private func exchangeCodeForToken(code: String, codeVerifier: String) async throws -> String {
+        var request = URLRequest(url: URL(string: Self.tokenEndpoint)!)
+        request.httpMethod = "POST"
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+
+        let params = [
+            "client_id": Self.clientID,
+            "code": code,
+            "code_verifier": codeVerifier,
+            "grant_type": "authorization_code",
+            "redirect_uri": Self.redirectURI
+        ]
+
+        request.httpBody = params
+            .map { "\($0.key)=\($0.value.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? $0.value)" }
+            .joined(separator: "&")
+            .data(using: .utf8)
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw APIError.unknown(0, "Invalid response from Google token endpoint")
         }
 
-        guard let idToken = params["id_token"], !idToken.isEmpty else {
-            throw APIError.badRequest("No id_token in Google callback")
+        guard httpResponse.statusCode == 200 else {
+            let body = String(data: data, encoding: .utf8) ?? "No response body"
+            throw APIError.serverError("Token exchange failed (\(httpResponse.statusCode)): \(body)")
+        }
+
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let idToken = json["id_token"] as? String, !idToken.isEmpty else {
+            throw APIError.badRequest("No id_token in Google token response")
         }
 
         return idToken
+    }
+
+    // MARK: - PKCE Helpers
+
+    /// Generates a cryptographically random 43-character code verifier (RFC 7636).
+    private static func generateCodeVerifier() -> String {
+        var bytes = [UInt8](repeating: 0, count: 32)
+        _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+        return Data(bytes)
+            .base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+    }
+
+    /// Generates a S256 code challenge from the code verifier (RFC 7636).
+    private static func generateCodeChallenge(from verifier: String) -> String {
+        let data = Data(verifier.utf8)
+        let hash = SHA256.hash(data: data)
+        return Data(hash)
+            .base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
     }
 
     // MARK: - ASWebAuthenticationPresentationContextProviding
