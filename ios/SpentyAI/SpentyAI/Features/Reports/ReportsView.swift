@@ -55,7 +55,7 @@ struct ReportsView: View {
                     drillDown: drillDown,
                     startDate: vm.startDate,
                     endDate: vm.endDate,
-                    transactionType: vm.catType.rawValue.lowercased()
+                    transactionType: drillDown.transactionTypeOverride ?? vm.catType.rawValue.lowercased()
                 )
             }
         }
@@ -149,30 +149,69 @@ struct ReportsView: View {
             GridItem(.flexible(), spacing: 12),
             GridItem(.flexible(), spacing: 12),
         ], spacing: 12) {
-            StatCard(
-                label: "Total Income",
-                value: formatCurrency(vm.totalIncome),
-                icon: "arrow.down.circle.fill",
-                color: .spentySuccess
-            )
-            StatCard(
-                label: "Total Expense",
-                value: formatCurrency(abs(vm.totalExpense)),
-                icon: "arrow.up.circle.fill",
-                color: .spentyError
-            )
-            StatCard(
-                label: "Net",
-                value: formatCurrency(vm.net),
-                icon: "equal.circle.fill",
-                color: vm.net >= 0 ? .spentySuccess : .spentyError
-            )
-            StatCard(
-                label: "Transactions",
-                value: "\(vm.transactionCount)",
-                icon: "list.bullet.rectangle.fill",
-                color: .spentyInfo
-            )
+            Button {
+                selectedDrillDown = ReportDrillDown(
+                    categoryId: nil, categoryName: "Income",
+                    subcategoryId: nil, subcategoryName: nil,
+                    transactionTypeOverride: "income"
+                )
+            } label: {
+                StatCard(
+                    label: "Total Income",
+                    value: formatCurrency(vm.totalIncome),
+                    icon: "arrow.down.circle.fill",
+                    color: .spentySuccess
+                )
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                selectedDrillDown = ReportDrillDown(
+                    categoryId: nil, categoryName: "Expense",
+                    subcategoryId: nil, subcategoryName: nil,
+                    transactionTypeOverride: "expense"
+                )
+            } label: {
+                StatCard(
+                    label: "Total Expense",
+                    value: formatCurrency(abs(vm.totalExpense)),
+                    icon: "arrow.up.circle.fill",
+                    color: .spentyError
+                )
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                selectedDrillDown = ReportDrillDown(
+                    categoryId: nil, categoryName: "All",
+                    subcategoryId: nil, subcategoryName: nil,
+                    transactionTypeOverride: "all"
+                )
+            } label: {
+                StatCard(
+                    label: "Net",
+                    value: formatCurrency(vm.net),
+                    icon: "equal.circle.fill",
+                    color: vm.net >= 0 ? .spentySuccess : .spentyError
+                )
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                selectedDrillDown = ReportDrillDown(
+                    categoryId: nil, categoryName: "All",
+                    subcategoryId: nil, subcategoryName: nil,
+                    transactionTypeOverride: "all"
+                )
+            } label: {
+                StatCard(
+                    label: "Transactions",
+                    value: "\(vm.transactionCount)",
+                    icon: "list.bullet.rectangle.fill",
+                    color: .spentyInfo
+                )
+            }
+            .buttonStyle(.plain)
         }
     }
 
@@ -483,8 +522,24 @@ struct ReportDrillDown: Identifiable {
     let categoryName: String
     let subcategoryId: String?
     let subcategoryName: String?
+    let transactionTypeOverride: String?
+
+    init(categoryId: String?, categoryName: String, subcategoryId: String?, subcategoryName: String?, transactionTypeOverride: String? = nil) {
+        self.categoryId = categoryId
+        self.categoryName = categoryName
+        self.subcategoryId = subcategoryId
+        self.subcategoryName = subcategoryName
+        self.transactionTypeOverride = transactionTypeOverride
+    }
 
     var title: String {
+        if let override = transactionTypeOverride {
+            switch override {
+            case "income": return "Income Transactions"
+            case "expense": return "Expense Transactions"
+            default: return "All Transactions"
+            }
+        }
         if let sub = subcategoryName {
             return sub
         }
@@ -613,7 +668,21 @@ struct ReportTransactionsView: View {
 
     private var dateFilterBar: some View {
         VStack(spacing: 0) {
-            if drillDown.subcategoryId == nil {
+            if drillDown.transactionTypeOverride != nil {
+                // Tile drill-down breadcrumb
+                HStack {
+                    Image(systemName: "chart.bar.fill")
+                        .font(.system(size: 12))
+                        .foregroundColor(.spentyPrimary)
+                    Text(drillDown.title)
+                        .font(SpentyFonts.caption1.weight(.medium))
+                        .foregroundColor(.spentyTextPrimary)
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(Color.spentyPrimary.opacity(0.08))
+            } else if drillDown.subcategoryId == nil {
                 // Show breadcrumb: Category name
                 HStack {
                     Image(systemName: "folder.fill")
@@ -729,10 +798,11 @@ struct ReportTransactionsView: View {
         do {
             let fromStr = Self.queryDateFormatter.string(from: filterDateFrom)
             let toStr = Self.queryDateFormatter.string(from: filterDateTo)
+            let typeParam: String? = transactionType == "all" ? nil : transactionType
             let response = try await repository.fetchTransactions(
                 page: 1,
                 limit: 500,
-                type: transactionType,
+                type: typeParam,
                 categoryId: drillDown.categoryId,
                 subcategoryId: drillDown.subcategoryId,
                 dateFrom: fromStr,
