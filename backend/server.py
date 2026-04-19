@@ -1563,27 +1563,29 @@ async def enrich_transactions_with_names(user_id: str, transactions: list) -> li
 
     # Collect all unique IDs
     category_ids = set()
+    subcategory_ids = set()
     account_ids = set()
     for txn in transactions:
         if txn.get("category_id"):
             category_ids.add(txn["category_id"])
+        if txn.get("subcategory_id"):
+            subcategory_ids.add(txn["subcategory_id"])
         if txn.get("account_id"):
             account_ids.add(txn["account_id"])
         if txn.get("to_account_id"):
             account_ids.add(txn["to_account_id"])
 
-    # Batch-fetch categories and accounts
+    # Batch-fetch categories (parent + subcategories are all in the same collection)
+    # Subcategories are separate documents with parent_id set, using category_id as their ID
+    all_cat_ids = category_ids | subcategory_ids
     cat_map = {}
-    subcat_map = {}
-    if category_ids:
+    if all_cat_ids:
         cats = await db.categories.find(
-            {"category_id": {"$in": list(category_ids)}, "user_id": user_id},
-            {"_id": 0, "category_id": 1, "name": 1, "subcategories": 1},
+            {"category_id": {"$in": list(all_cat_ids)}, "user_id": user_id},
+            {"_id": 0, "category_id": 1, "name": 1},
         ).to_list(None)
         for cat in cats:
             cat_map[cat["category_id"]] = cat["name"]
-            for sub in cat.get("subcategories", []):
-                subcat_map[(cat["category_id"], sub["subcategory_id"])] = sub["name"]
 
     acc_map = {}
     if account_ids:
@@ -1597,9 +1599,7 @@ async def enrich_transactions_with_names(user_id: str, transactions: list) -> li
     # Enrich each transaction
     for txn in transactions:
         txn["category_name"] = cat_map.get(txn.get("category_id"))
-        txn["subcategory_name"] = subcat_map.get(
-            (txn.get("category_id"), txn.get("subcategory_id"))
-        )
+        txn["subcategory_name"] = cat_map.get(txn.get("subcategory_id"))
         txn["account_name"] = acc_map.get(txn.get("account_id"))
         txn["to_account_name"] = acc_map.get(txn.get("to_account_id"))
 
