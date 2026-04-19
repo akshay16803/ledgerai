@@ -57,6 +57,8 @@ function StatusBadge({ status }) {
     parsing: { bg: 'rgba(74,110,125,0.12)', color: 'var(--info)', label: 'Parsing...' },
     parsed: { bg: 'rgba(194,140,60,0.12)', color: 'var(--warning)', label: 'Ready to Reconcile' },
     reconciled: { bg: 'rgba(58,92,74,0.12)', color: 'var(--success)', label: 'Reconciled' },
+    approved: { bg: 'rgba(58,92,74,0.12)', color: 'var(--success)', label: 'Approved' },
+    rejected: { bg: 'rgba(150,69,58,0.12)', color: 'var(--error)', label: 'Rejected' },
     parse_failed: { bg: 'rgba(150,69,58,0.12)', color: 'var(--error)', label: 'Parse Failed' },
     password_required: { bg: 'rgba(194,140,60,0.12)', color: 'var(--warning)', label: 'Password Needed' },
   };
@@ -189,6 +191,9 @@ export default function Reconciliation() {
   // to create, so that once the modal succeeds we can auto-assign the new
   // id back onto that exact row.
   const [quickCat, setQuickCat] = useState(null); // { mode, entryIndex, categoryType, parentId?, parentName? }
+  const [approving, setApproving] = useState(false);
+  const [rejecting, setRejecting] = useState(false);
+  const [entriesCollapsed, setEntriesCollapsed] = useState(false);
 
   const SUB_TYPE_OPTIONS = [
     { value: 'savings', label: 'Savings', statementType: 'bank' },
@@ -407,6 +412,32 @@ export default function Reconciliation() {
       setActiveStmt(stmt);
       loadData();
     } catch (err) { setError(err.message); } finally { setAddingMissing(false); }
+  };
+
+  const handleApprove = async () => {
+    if (!activeStmt) return;
+    if (!confirm('Approve this statement? This will create transactions for all entries.')) return;
+    setApproving(true);
+    setError('');
+    try {
+      await api.post(`/api/statements/${activeStmt.statement_id}/approve`);
+      const stmt = await api.get(`/api/statements/${activeStmt.statement_id}`, { bypassCache: true });
+      setActiveStmt(stmt);
+      loadData();
+    } catch (err) { setError(err.message); } finally { setApproving(false); }
+  };
+
+  const handleReject = async () => {
+    if (!activeStmt) return;
+    if (!confirm('Reject this statement? This will dismiss the statement without creating transactions.')) return;
+    setRejecting(true);
+    setError('');
+    try {
+      await api.post(`/api/statements/${activeStmt.statement_id}/reject`);
+      const stmt = await api.get(`/api/statements/${activeStmt.statement_id}`, { bypassCache: true });
+      setActiveStmt(stmt);
+      loadData();
+    } catch (err) { setError(err.message); } finally { setRejecting(false); }
   };
 
   const handleDelete = async (stmtId) => {
@@ -756,6 +787,63 @@ export default function Reconciliation() {
       {/* Active Statement Detail */}
       {activeStmt && (
         <div data-testid="statement-detail">
+          {/* Workflow Stepper */}
+          {(() => {
+            const status = activeStmt.status;
+            const steps = [
+              { label: 'Uploaded', done: true },
+              { label: 'Parsed', done: status !== 'parsing' },
+              { label: 'Reviewed', done: ['reconciled', 'approved', 'rejected'].includes(status) },
+              { label: 'Reconciled', done: ['reconciled', 'approved', 'rejected'].includes(status) },
+              { label: 'Completed', done: ['approved', 'rejected'].includes(status) },
+            ];
+            // Current step = first not-done, or last if all done
+            const currentIdx = steps.findIndex(s => !s.done);
+            return (
+              <div data-testid="workflow-stepper" style={{
+                display: 'flex', alignItems: 'center', gap: 0,
+                background: '#fff', border: '1px solid var(--border-subtle)', borderRadius: 2,
+                padding: '14px 24px', marginBottom: 16, overflowX: 'auto',
+              }}>
+                {steps.map((step, i) => {
+                  const isActive = currentIdx === i;
+                  const isDone = step.done;
+                  return (
+                    <Fragment key={step.label}>
+                      {i > 0 && (
+                        <div style={{
+                          flex: '1 1 0', height: 2, minWidth: 20,
+                          background: isDone ? 'var(--success)' : 'var(--border-subtle)',
+                          margin: '0 4px',
+                        }} />
+                      )}
+                      <div style={{
+                        display: 'flex', alignItems: 'center', gap: 6,
+                        whiteSpace: 'nowrap',
+                      }}>
+                        <div style={{
+                          width: 24, height: 24, borderRadius: '50%',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          fontSize: 11, fontWeight: 700,
+                          background: isDone ? 'var(--success)' : isActive ? 'var(--brand-primary)' : 'var(--bg-secondary)',
+                          color: isDone || isActive ? '#fff' : 'var(--text-muted)',
+                          border: isDone || isActive ? 'none' : '1px solid var(--border-strong)',
+                          flexShrink: 0,
+                        }}>
+                          {isDone ? '\u2713' : i + 1}
+                        </div>
+                        <span style={{
+                          fontSize: 12, fontWeight: isActive ? 700 : isDone ? 600 : 400,
+                          color: isDone ? 'var(--success)' : isActive ? 'var(--text-primary)' : 'var(--text-muted)',
+                        }}>{step.label}</span>
+                      </div>
+                    </Fragment>
+                  );
+                })}
+              </div>
+            );
+          })()}
+
           {/* Parsed Entries */}
           <div style={{
             background: '#fff', border: '1px solid var(--border-subtle)', borderRadius: 2,
@@ -777,7 +865,7 @@ export default function Reconciliation() {
                   )}
                 </span>
               </div>
-              {activeStmt.status === 'parsed' && (
+              {(activeStmt.status === 'parsed' || activeStmt.status === 'reconciled') && (
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                   <button
                     data-testid="reaudit-btn"
@@ -803,7 +891,7 @@ export default function Reconciliation() {
                       display: 'flex', alignItems: 'center', gap: 6,
                       opacity: reconciling ? 0.6 : 1
                     }}>
-                    <Scales size={16} weight="bold" /> {reconciling ? 'Reconciling...' : 'Reconcile with Ledger'}
+                    <Scales size={16} weight="bold" /> {reconciling ? 'Reconciling...' : activeStmt.status === 'reconciled' ? 'Re-Reconcile' : 'Reconcile with Ledger'}
                   </button>
                 </div>
               )}
@@ -811,7 +899,7 @@ export default function Reconciliation() {
 
             {/* Audit completeness check — sits above the first row so users
                 can see at a glance whether the whole statement was parsed. */}
-            {activeStmt.audit_status && activeStmt.audit_status !== 'skipped' && activeStmt.parsed_entries?.length > 0 && !recon && (() => {
+            {activeStmt.audit_status && activeStmt.audit_status !== 'skipped' && activeStmt.parsed_entries?.length > 0 && (() => {
               const ok = activeStmt.audit_status === 'verified' || activeStmt.audit_status === 'corrected';
               const parsedN = activeStmt.audit_parsed_count ?? activeStmt.parsed_entries.length;
               const expectedN = activeStmt.audit_expected_count;
@@ -861,7 +949,23 @@ export default function Reconciliation() {
               );
             })()}
 
-            {activeStmt.parsed_entries?.length > 0 && !recon && (
+            {activeStmt.parsed_entries?.length > 0 && (
+              <>
+              {recon && (
+                <div
+                  onClick={() => setEntriesCollapsed(prev => !prev)}
+                  style={{
+                    padding: '10px 24px', borderBottom: '1px solid var(--border-subtle)',
+                    background: 'var(--bg-secondary)', cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', gap: 8, userSelect: 'none',
+                  }}>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', transform: entriesCollapsed ? 'rotate(-90deg)' : 'rotate(0)', transition: 'transform 150ms' }}>&#9660;</span>
+                  <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-secondary)' }}>
+                    Parsed Entries ({activeStmt.parsed_entries.length})
+                  </span>
+                </div>
+              )}
+              {!entriesCollapsed && (
               // table-layout:fixed + percentage column widths so long IMPS
               // descriptions wrap into the Description cell instead of pushing
               // Amount / Balance off the right edge of the viewport.
@@ -1022,6 +1126,8 @@ export default function Reconciliation() {
                   ))}
                 </tbody>
               </table>
+              )}
+              </>
             )}
           </div>
 
@@ -1081,7 +1187,20 @@ export default function Reconciliation() {
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 650 }}>
                     <thead>
                       <tr style={{ borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-secondary)' }}>
-                        <th style={{ ...thStyle, width: 40 }}></th>
+                        <th style={{ ...thStyle, width: 40, textAlign: 'center' }}>
+                          <input type="checkbox"
+                            data-testid="select-all-missing"
+                            checked={recon.missing_from_ledger.length > 0 && selectedMissing.length === recon.missing_from_ledger.length}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setSelectedMissing(recon.missing_from_ledger.map((_, i) => i));
+                              } else {
+                                setSelectedMissing([]);
+                              }
+                            }}
+                            style={{ cursor: 'pointer', width: 16, height: 16 }}
+                          />
+                        </th>
                         <th style={thStyle}>Date</th>
                         <th style={thStyle}>Type</th>
                         <th style={thStyle}>Description</th>
@@ -1196,6 +1315,44 @@ export default function Reconciliation() {
                   <p className="mono" style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
                     Your ledger is fully reconciled with this statement.
                   </p>
+                </div>
+              )}
+
+              {/* Approve / Reject — only when status is reconciled */}
+              {activeStmt.status === 'reconciled' && (
+                <div data-testid="approve-reject-actions" style={{
+                  display: 'flex', gap: 12, justifyContent: 'flex-end', alignItems: 'center',
+                  padding: '16px 0', marginBottom: 24,
+                }}>
+                  <button
+                    data-testid="reject-btn"
+                    onClick={handleReject}
+                    disabled={rejecting || approving}
+                    style={{
+                      background: '#fff', color: 'var(--error)',
+                      border: '1px solid var(--error)',
+                      padding: '10px 24px', borderRadius: 2, fontSize: 13, fontWeight: 600,
+                      cursor: (rejecting || approving) ? 'not-allowed' : 'pointer',
+                      fontFamily: 'var(--font-body)',
+                      display: 'flex', alignItems: 'center', gap: 6,
+                      opacity: (rejecting || approving) ? 0.6 : 1,
+                    }}>
+                    <XCircle size={16} weight="bold" /> {rejecting ? 'Rejecting...' : 'Reject'}
+                  </button>
+                  <button
+                    data-testid="approve-btn"
+                    onClick={handleApprove}
+                    disabled={approving || rejecting}
+                    style={{
+                      background: 'var(--success)', color: '#fff', border: 'none',
+                      padding: '10px 24px', borderRadius: 2, fontSize: 13, fontWeight: 600,
+                      cursor: (approving || rejecting) ? 'not-allowed' : 'pointer',
+                      fontFamily: 'var(--font-body)',
+                      display: 'flex', alignItems: 'center', gap: 6,
+                      opacity: (approving || rejecting) ? 0.6 : 1,
+                    }}>
+                    <CheckCircle size={16} weight="bold" /> {approving ? 'Approving...' : 'Approve'}
+                  </button>
                 </div>
               )}
             </div>

@@ -9,6 +9,7 @@ struct StatementDetailView: View {
     @State private var selectedBulkCategoryId: String = ""
     @State private var showApproveConfirm = false
     @State private var showRejectConfirm = false
+    @State private var selectedMissingIndices: Set<Int> = []
 
     private static let dateFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -26,6 +27,41 @@ struct StatementDetailView: View {
         return f
     }()
 
+    // MARK: - Computed Status Helpers
+
+    private var statementStatus: String {
+        viewModel.activeStatement?.status?.lowercased() ?? ""
+    }
+
+    private var isTerminal: Bool {
+        statementStatus == "approved" || statementStatus == "rejected"
+    }
+
+    private var canReconcile: Bool {
+        statementStatus == "parsed" || statementStatus == "reconciled"
+    }
+
+    private var canApproveReject: Bool {
+        statementStatus == "reconciled"
+    }
+
+    private var canAddMissing: Bool {
+        statementStatus == "reconciled" && (viewModel.reconciliationResult?.missingFromLedgerCount ?? 0) > 0
+    }
+
+    // MARK: - Workflow Step
+
+    private var currentStep: Int {
+        switch statementStatus {
+        case "uploaded": return 0
+        case "parsing": return 1
+        case "parsed": return 2
+        case "reconciled": return 3
+        case "approved", "rejected": return 4
+        default: return 0
+        }
+    }
+
     var body: some View {
         ZStack {
             Color.spentyBgPrimary.ignoresSafeArea()
@@ -35,8 +71,12 @@ struct StatementDetailView: View {
             } else if let statement = viewModel.activeStatement {
                 ScrollView {
                     VStack(spacing: 16) {
+                        workflowStepper
+                        terminalBanner
                         headerCard(statement)
-                        actionButtons(statement)
+                        if !isTerminal {
+                            actionButtons(statement)
+                        }
                         reconciliationResultsCard
                         entriesSection
                     }
@@ -77,6 +117,93 @@ struct StatementDetailView: View {
             Text("Mark this statement as rejected?")
         }
         .task { await viewModel.loadStatement(id: statementId) }
+        .onDisappear { viewModel.stopParsePolling() }
+    }
+
+    // MARK: - Workflow Stepper
+
+    private var workflowStepper: some View {
+        let steps = ["Upload", "Parse", "Review", "Reconcile", "Done"]
+        return HStack(spacing: 0) {
+            ForEach(Array(steps.enumerated()), id: \.offset) { index, label in
+                VStack(spacing: 6) {
+                    ZStack {
+                        Circle()
+                            .fill(stepColor(for: index))
+                            .frame(width: 28, height: 28)
+                        if index < currentStep {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundColor(.white)
+                        } else if index == currentStep {
+                            Circle()
+                                .fill(Color.white)
+                                .frame(width: 10, height: 10)
+                        } else {
+                            Text("\(index + 1)")
+                                .font(SpentyFonts.caption2)
+                                .fontWeight(.semibold)
+                                .foregroundColor(.spentyTextSecondary)
+                        }
+                    }
+                    Text(label)
+                        .font(SpentyFonts.caption2)
+                        .foregroundColor(index <= currentStep ? .spentyPrimary : .spentyTextSecondary)
+                }
+                .frame(maxWidth: .infinity)
+
+                if index < steps.count - 1 {
+                    Rectangle()
+                        .fill(index < currentStep ? Color.spentyPrimary : Color.spentyBorder)
+                        .frame(height: 2)
+                        .frame(maxWidth: .infinity)
+                        .padding(.bottom, 20)
+                }
+            }
+        }
+        .padding(.vertical, 8)
+        .cardStyle()
+    }
+
+    private func stepColor(for index: Int) -> Color {
+        if index < currentStep {
+            return .spentySuccess
+        } else if index == currentStep {
+            return .spentyPrimary
+        } else {
+            return .spentyBorder
+        }
+    }
+
+    // MARK: - Terminal Banner
+
+    @ViewBuilder
+    private var terminalBanner: some View {
+        if statementStatus == "approved" {
+            HStack(spacing: 8) {
+                Image(systemName: "checkmark.seal.fill")
+                    .foregroundColor(.spentySuccess)
+                Text("Statement Approved")
+                    .font(SpentyFonts.headline)
+                    .foregroundColor(.spentySuccess)
+                Spacer()
+            }
+            .padding(14)
+            .background(Color.spentySuccess.opacity(0.1))
+            .cornerRadius(12)
+        } else if statementStatus == "rejected" {
+            HStack(spacing: 8) {
+                Image(systemName: "xmark.seal.fill")
+                    .foregroundColor(.spentyError)
+                Text("Statement Rejected")
+                    .font(SpentyFonts.headline)
+                    .foregroundColor(.spentyError)
+                Spacer()
+            }
+            .padding(14)
+            .background(Color.spentyError.opacity(0.1))
+            .cornerRadius(12)
+        }
     }
 
     // MARK: - Header Card
@@ -171,25 +298,27 @@ struct StatementDetailView: View {
         VStack(spacing: 10) {
             // Primary actions row
             HStack(spacing: 10) {
-                Button {
-                    Task { await viewModel.reconcile(statementId: statementId) }
-                } label: {
-                    HStack(spacing: 6) {
-                        if viewModel.isReconciling {
-                            ProgressView().tint(.white)
+                if canReconcile {
+                    Button {
+                        Task { await viewModel.reconcile(statementId: statementId) }
+                    } label: {
+                        HStack(spacing: 6) {
+                            if viewModel.isReconciling {
+                                ProgressView().tint(.white)
+                            }
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                            Text("Reconcile")
                         }
-                        Image(systemName: "arrow.triangle.2.circlepath")
-                        Text("Reconcile")
+                        .font(SpentyFonts.footnote)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(Color.spentyPrimary)
+                        .cornerRadius(10)
                     }
-                    .font(SpentyFonts.footnote)
-                    .fontWeight(.semibold)
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-                    .background(Color.spentyPrimary)
-                    .cornerRadius(10)
+                    .disabled(viewModel.isReconciling)
                 }
-                .disabled(viewModel.isReconciling)
 
                 Button {
                     showBulkCategoryPicker = true
@@ -214,11 +343,18 @@ struct StatementDetailView: View {
 
             // Secondary actions row
             HStack(spacing: 10) {
-                if viewModel.reconciliationResult?.missing ?? 0 > 0 {
+                if canAddMissing {
                     Button {
-                        Task { await viewModel.addMissingToLedger(statementId: statementId) }
+                        let indices = selectedMissingIndices.isEmpty
+                            ? nil
+                            : Array(selectedMissingIndices).sorted()
+                        Task { await viewModel.addMissingToLedger(statementId: statementId, entryIndices: indices) }
                     } label: {
-                        actionLabel(icon: "plus.circle", text: "Add Missing", color: .spentyInfo)
+                        actionLabel(
+                            icon: "plus.circle",
+                            text: selectedMissingIndices.isEmpty ? "Add All Missing" : "Add Selected (\(selectedMissingIndices.count))",
+                            color: .spentyInfo
+                        )
                     }
                 }
 
@@ -236,37 +372,39 @@ struct StatementDetailView: View {
             }
 
             // Approve / Reject row
-            HStack(spacing: 10) {
-                Button {
-                    showApproveConfirm = true
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "checkmark.circle.fill")
-                        Text("Approve")
+            if canApproveReject {
+                HStack(spacing: 10) {
+                    Button {
+                        showApproveConfirm = true
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "checkmark.circle.fill")
+                            Text("Approve")
+                        }
+                        .font(SpentyFonts.footnote)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(Color.spentySuccess)
+                        .cornerRadius(10)
                     }
-                    .font(SpentyFonts.footnote)
-                    .fontWeight(.semibold)
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-                    .background(Color.spentySuccess)
-                    .cornerRadius(10)
-                }
 
-                Button {
-                    showRejectConfirm = true
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "xmark.circle.fill")
-                        Text("Reject")
+                    Button {
+                        showRejectConfirm = true
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "xmark.circle.fill")
+                            Text("Reject")
+                        }
+                        .font(SpentyFonts.footnote)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(Color.spentyError)
+                        .cornerRadius(10)
                     }
-                    .font(SpentyFonts.footnote)
-                    .fontWeight(.semibold)
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-                    .background(Color.spentyError)
-                    .cornerRadius(10)
                 }
             }
         }
@@ -298,16 +436,19 @@ struct StatementDetailView: View {
 
                 Divider().background(Color.spentyBorder)
 
+                // Summary grid
                 LazyVGrid(columns: [
                     GridItem(.flexible()),
                     GridItem(.flexible())
                 ], spacing: 12) {
-                    resultStat(label: "Total Entries", value: "\(result.totalEntries ?? 0)", color: .spentyTextPrimary)
-                    resultStat(label: "Matched", value: "\(result.matched ?? 0)", color: .spentySuccess)
-                    resultStat(label: "Unmatched", value: "\(result.unmatched ?? 0)", color: .spentyWarning)
-                    resultStat(label: "Missing", value: "\(result.missing ?? 0)", color: .spentyError)
+                    resultStat(label: "Total Entries", value: "\(result.totalCount)", color: .spentyTextPrimary)
+                    resultStat(label: "Matched", value: "\(result.matchedCount)", color: .spentySuccess)
+                    resultStat(label: "Missing (Ledger)", value: "\(result.missingFromLedgerCount)", color: .spentyError)
+                    resultStat(label: "Missing (Statement)", value: "\(result.missingFromStatementCount)", color: .spentyWarning)
+                    resultStat(label: "Conflicts", value: "\(result.conflictsCount)", color: .spentyError)
                 }
 
+                // Balance info
                 if let opening = result.openingBalance {
                     detailRow(label: "Opening Balance", value: formatAmount(opening))
                 }
@@ -331,7 +472,304 @@ struct StatementDetailView: View {
                 }
             }
             .cardStyle()
+
+            // Expandable detail sections
+            matchedSection(result)
+            missingFromLedgerSection(result)
+            missingFromStatementSection(result)
+            conflictsSection(result)
         }
+    }
+
+    // MARK: - Matched Section
+
+    @ViewBuilder
+    private func matchedSection(_ result: ReconciliationResult) -> some View {
+        if let entries = result.matched, !entries.isEmpty {
+            VStack(alignment: .leading, spacing: 0) {
+                DisclosureGroup {
+                    LazyVStack(spacing: 8) {
+                        ForEach(entries) { entry in
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack {
+                                    Text(entry.statementEntry?.date ?? "N/A")
+                                        .font(SpentyFonts.caption1)
+                                        .foregroundColor(.spentyTextSecondary)
+                                    Spacer()
+                                    if let amount = entry.statementEntry?.amount {
+                                        Text(formatAmount(amount))
+                                            .font(SpentyFonts.amountSmall)
+                                            .foregroundColor(amount >= 0 ? .spentySuccess : .spentyError)
+                                    }
+                                }
+                                if let desc = entry.statementEntry?.description {
+                                    Text(desc)
+                                        .font(SpentyFonts.subheadline)
+                                        .foregroundColor(.spentyTextPrimary)
+                                        .lineLimit(2)
+                                }
+                                if let score = entry.matchScore {
+                                    HStack(spacing: 4) {
+                                        Image(systemName: "checkmark.circle.fill")
+                                            .font(.system(size: 10))
+                                        Text("Match: \(Int(score * 100))%")
+                                            .font(SpentyFonts.caption2)
+                                    }
+                                    .foregroundColor(.spentySuccess)
+                                }
+                            }
+                            .padding(10)
+                            .background(Color.spentyBgPrimary)
+                            .cornerRadius(8)
+                        }
+                    }
+                    .padding(.top, 8)
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundColor(.spentySuccess)
+                        Text("Matched")
+                            .font(SpentyFonts.headline)
+                            .foregroundColor(.spentyTextPrimary)
+                        Spacer()
+                        Text("\(entries.count)")
+                            .font(SpentyFonts.subheadline)
+                            .foregroundColor(.spentySuccess)
+                    }
+                }
+                .tint(.spentyTextSecondary)
+            }
+            .cardStyle()
+        }
+    }
+
+    // MARK: - Missing from Ledger Section (with checkboxes)
+
+    @ViewBuilder
+    private func missingFromLedgerSection(_ result: ReconciliationResult) -> some View {
+        if let entries = result.missingFromLedger, !entries.isEmpty {
+            VStack(alignment: .leading, spacing: 0) {
+                DisclosureGroup {
+                    LazyVStack(spacing: 8) {
+                        // Select/Deselect all
+                        HStack {
+                            Button {
+                                if selectedMissingIndices.count == entries.count {
+                                    selectedMissingIndices.removeAll()
+                                } else {
+                                    selectedMissingIndices = Set(0..<entries.count)
+                                }
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Image(systemName: selectedMissingIndices.count == entries.count ? "checkmark.square.fill" : "square")
+                                        .font(.system(size: 14))
+                                    Text(selectedMissingIndices.count == entries.count ? "Deselect All" : "Select All")
+                                        .font(SpentyFonts.caption1)
+                                }
+                                .foregroundColor(.spentyPrimary)
+                            }
+                            Spacer()
+                        }
+                        .padding(.top, 4)
+
+                        ForEach(Array(entries.enumerated()), id: \.offset) { index, entry in
+                            HStack(spacing: 10) {
+                                Button {
+                                    if selectedMissingIndices.contains(index) {
+                                        selectedMissingIndices.remove(index)
+                                    } else {
+                                        selectedMissingIndices.insert(index)
+                                    }
+                                } label: {
+                                    Image(systemName: selectedMissingIndices.contains(index) ? "checkmark.square.fill" : "square")
+                                        .font(.system(size: 18))
+                                        .foregroundColor(selectedMissingIndices.contains(index) ? .spentyPrimary : .spentyTextSecondary)
+                                }
+
+                                VStack(alignment: .leading, spacing: 4) {
+                                    HStack {
+                                        Text(entry.date ?? "N/A")
+                                            .font(SpentyFonts.caption1)
+                                            .foregroundColor(.spentyTextSecondary)
+                                        Spacer()
+                                        if let amount = entry.amount {
+                                            Text(formatAmount(amount))
+                                                .font(SpentyFonts.amountSmall)
+                                                .foregroundColor(amount >= 0 ? .spentySuccess : .spentyError)
+                                        }
+                                    }
+                                    if let desc = entry.description {
+                                        Text(desc)
+                                            .font(SpentyFonts.subheadline)
+                                            .foregroundColor(.spentyTextPrimary)
+                                            .lineLimit(2)
+                                    }
+                                }
+                            }
+                            .padding(10)
+                            .background(selectedMissingIndices.contains(index) ? Color.spentyPrimary.opacity(0.06) : Color.spentyBgPrimary)
+                            .cornerRadius(8)
+                        }
+                    }
+                    .padding(.top, 8)
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundColor(.spentyError)
+                        Text("Missing from Ledger")
+                            .font(SpentyFonts.headline)
+                            .foregroundColor(.spentyTextPrimary)
+                        Spacer()
+                        Text("\(entries.count)")
+                            .font(SpentyFonts.subheadline)
+                            .foregroundColor(.spentyError)
+                    }
+                }
+                .tint(.spentyTextSecondary)
+            }
+            .cardStyle()
+        }
+    }
+
+    // MARK: - Missing from Statement Section
+
+    @ViewBuilder
+    private func missingFromStatementSection(_ result: ReconciliationResult) -> some View {
+        if let entries = result.missingFromStatement, !entries.isEmpty {
+            VStack(alignment: .leading, spacing: 0) {
+                DisclosureGroup {
+                    LazyVStack(spacing: 8) {
+                        ForEach(Array(entries.enumerated()), id: \.offset) { _, entry in
+                            reconciliationEntryRow(entry)
+                        }
+                    }
+                    .padding(.top, 8)
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "doc.questionmark.fill")
+                            .foregroundColor(.spentyWarning)
+                        Text("Missing from Statement")
+                            .font(SpentyFonts.headline)
+                            .foregroundColor(.spentyTextPrimary)
+                        Spacer()
+                        Text("\(entries.count)")
+                            .font(SpentyFonts.subheadline)
+                            .foregroundColor(.spentyWarning)
+                    }
+                }
+                .tint(.spentyTextSecondary)
+            }
+            .cardStyle()
+        }
+    }
+
+    // MARK: - Conflicts Section
+
+    @ViewBuilder
+    private func conflictsSection(_ result: ReconciliationResult) -> some View {
+        if let entries = result.conflicts, !entries.isEmpty {
+            VStack(alignment: .leading, spacing: 0) {
+                DisclosureGroup {
+                    LazyVStack(spacing: 8) {
+                        ForEach(entries) { conflict in
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack {
+                                    Text(conflict.statementEntry?.date ?? "N/A")
+                                        .font(SpentyFonts.caption1)
+                                        .foregroundColor(.spentyTextSecondary)
+                                    Spacer()
+                                }
+                                if let desc = conflict.statementEntry?.description {
+                                    Text(desc)
+                                        .font(SpentyFonts.subheadline)
+                                        .foregroundColor(.spentyTextPrimary)
+                                        .lineLimit(2)
+                                }
+                                HStack(spacing: 16) {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Statement")
+                                            .font(SpentyFonts.caption2)
+                                            .foregroundColor(.spentyTextSecondary)
+                                        if let amt = conflict.statementEntry?.amount {
+                                            Text(formatAmount(amt))
+                                                .font(SpentyFonts.subheadline)
+                                                .foregroundColor(.spentyTextPrimary)
+                                        }
+                                    }
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Ledger")
+                                            .font(SpentyFonts.caption2)
+                                            .foregroundColor(.spentyTextSecondary)
+                                        if let amt = conflict.ledgerTransaction?.amount {
+                                            Text(formatAmount(amt))
+                                                .font(SpentyFonts.subheadline)
+                                                .foregroundColor(.spentyTextPrimary)
+                                        }
+                                    }
+                                    Spacer()
+                                    if let diff = conflict.amountDifference {
+                                        VStack(alignment: .trailing, spacing: 2) {
+                                            Text("Difference")
+                                                .font(SpentyFonts.caption2)
+                                                .foregroundColor(.spentyTextSecondary)
+                                            Text(formatAmount(diff))
+                                                .font(SpentyFonts.subheadline)
+                                                .fontWeight(.semibold)
+                                                .foregroundColor(.spentyError)
+                                        }
+                                    }
+                                }
+                            }
+                            .padding(10)
+                            .background(Color.spentyError.opacity(0.04))
+                            .cornerRadius(8)
+                        }
+                    }
+                    .padding(.top, 8)
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "bolt.trianglebadge.exclamationmark.fill")
+                            .foregroundColor(.spentyError)
+                        Text("Conflicts")
+                            .font(SpentyFonts.headline)
+                            .foregroundColor(.spentyTextPrimary)
+                        Spacer()
+                        Text("\(entries.count)")
+                            .font(SpentyFonts.subheadline)
+                            .foregroundColor(.spentyError)
+                    }
+                }
+                .tint(.spentyTextSecondary)
+            }
+            .cardStyle()
+        }
+    }
+
+    // MARK: - Shared Entry Row
+
+    private func reconciliationEntryRow(_ entry: ReconciliationEntry) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(entry.date ?? "N/A")
+                    .font(SpentyFonts.caption1)
+                    .foregroundColor(.spentyTextSecondary)
+                Spacer()
+                if let amount = entry.amount {
+                    Text(formatAmount(amount))
+                        .font(SpentyFonts.amountSmall)
+                        .foregroundColor(amount >= 0 ? .spentySuccess : .spentyError)
+                }
+            }
+            if let desc = entry.description {
+                Text(desc)
+                    .font(SpentyFonts.subheadline)
+                    .foregroundColor(.spentyTextPrimary)
+                    .lineLimit(2)
+            }
+        }
+        .padding(10)
+        .background(Color.spentyBgPrimary)
+        .cornerRadius(8)
     }
 
     private func resultStat(label: String, value: String, color: Color) -> some View {

@@ -116,9 +116,97 @@ struct ParsedEntry: Codable, Identifiable {
     }
 }
 
-struct ReconciliationResult: Codable {
-    var totalEntries: Int?
+struct ReconciliationSummary: Codable {
+    var totalStatementEntries: Int?
     var matched: Int?
+    var missingFromLedger: Int?
+    var missingFromStatement: Int?
+    var conflicts: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case totalStatementEntries
+        case matched
+        case missingFromLedger
+        case missingFromStatement
+        case conflicts
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.totalStatementEntries = try? container.decodeIfPresent(Int.self, forKey: .totalStatementEntries)
+        self.matched = try? container.decodeIfPresent(Int.self, forKey: .matched)
+        self.missingFromLedger = try? container.decodeIfPresent(Int.self, forKey: .missingFromLedger)
+        self.missingFromStatement = try? container.decodeIfPresent(Int.self, forKey: .missingFromStatement)
+        self.conflicts = try? container.decodeIfPresent(Int.self, forKey: .conflicts)
+    }
+}
+
+struct MatchedEntry: Codable, Identifiable {
+    var id: String { "\(statementEntry?.description ?? "")-\(statementEntry?.amount ?? 0)-\(matchScore ?? 0)" }
+    var statementEntry: ReconciliationEntry?
+    var ledgerTransaction: ReconciliationEntry?
+    var matchScore: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case statementEntry
+        case ledgerTransaction
+        case matchScore
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.statementEntry = try? container.decodeIfPresent(ReconciliationEntry.self, forKey: .statementEntry)
+        self.ledgerTransaction = try? container.decodeIfPresent(ReconciliationEntry.self, forKey: .ledgerTransaction)
+        self.matchScore = try? container.decodeIfPresent(Double.self, forKey: .matchScore)
+    }
+}
+
+struct ReconciliationEntry: Codable, Identifiable {
+    var id: String { "\(date ?? "")-\(description ?? "")-\(amount ?? 0)" }
+    var date: String?
+    var description: String?
+    var amount: Double?
+    var transactionType: String?
+
+    enum CodingKeys: String, CodingKey {
+        case date
+        case description
+        case amount
+        case transactionType
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.date = try? container.decodeIfPresent(String.self, forKey: .date)
+        self.description = try? container.decodeIfPresent(String.self, forKey: .description)
+        self.amount = try? container.decodeIfPresent(Double.self, forKey: .amount)
+        self.transactionType = try? container.decodeIfPresent(String.self, forKey: .transactionType)
+    }
+}
+
+struct ConflictEntry: Codable, Identifiable {
+    var id: String { "\(statementEntry?.description ?? "")-\(amountDifference ?? 0)" }
+    var statementEntry: ReconciliationEntry?
+    var ledgerTransaction: ReconciliationEntry?
+    var amountDifference: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case statementEntry
+        case ledgerTransaction
+        case amountDifference
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.statementEntry = try? container.decodeIfPresent(ReconciliationEntry.self, forKey: .statementEntry)
+        self.ledgerTransaction = try? container.decodeIfPresent(ReconciliationEntry.self, forKey: .ledgerTransaction)
+        self.amountDifference = try? container.decodeIfPresent(Double.self, forKey: .amountDifference)
+    }
+}
+
+struct ReconciliationResult: Codable {
+    // Legacy fields (kept for backward compatibility)
+    var totalEntries: Int?
     var unmatched: Int?
     var missing: Int?
     var openingBalance: Double?
@@ -126,26 +214,48 @@ struct ReconciliationResult: Codable {
     var computedClosing: Double?
     var difference: Double?
 
+    // New detailed fields from backend
+    var summary: ReconciliationSummary?
+    var matched: [MatchedEntry]?
+    var missingFromLedger: [ReconciliationEntry]?
+    var missingFromStatement: [ReconciliationEntry]?
+    var conflicts: [ConflictEntry]?
+
+    // Computed counts that prefer new summary, fall back to legacy
+    var matchedCount: Int { summary?.matched ?? matched?.count ?? 0 }
+    var missingFromLedgerCount: Int { summary?.missingFromLedger ?? missingFromLedger?.count ?? missing ?? 0 }
+    var missingFromStatementCount: Int { summary?.missingFromStatement ?? missingFromStatement?.count ?? 0 }
+    var conflictsCount: Int { summary?.conflicts ?? conflicts?.count ?? unmatched ?? 0 }
+    var totalCount: Int { summary?.totalStatementEntries ?? totalEntries ?? 0 }
+
     enum CodingKeys: String, CodingKey {
         case totalEntries
-        case matched
         case unmatched
         case missing
         case openingBalance
         case closingBalance
         case computedClosing
         case difference
+        case summary
+        case matched
+        case missingFromLedger
+        case missingFromStatement
+        case conflicts
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.totalEntries = try? container.decodeIfPresent(Int.self, forKey: .totalEntries)
-        self.matched = try? container.decodeIfPresent(Int.self, forKey: .matched)
         self.unmatched = try? container.decodeIfPresent(Int.self, forKey: .unmatched)
         self.missing = try? container.decodeIfPresent(Int.self, forKey: .missing)
         self.openingBalance = try? container.decodeIfPresent(Double.self, forKey: .openingBalance)
         self.closingBalance = try? container.decodeIfPresent(Double.self, forKey: .closingBalance)
         self.computedClosing = try? container.decodeIfPresent(Double.self, forKey: .computedClosing)
         self.difference = try? container.decodeIfPresent(Double.self, forKey: .difference)
+        self.summary = try? container.decodeIfPresent(ReconciliationSummary.self, forKey: .summary)
+        self.matched = try? container.decodeIfPresent([MatchedEntry].self, forKey: .matched)
+        self.missingFromLedger = try? container.decodeIfPresent([ReconciliationEntry].self, forKey: .missingFromLedger)
+        self.missingFromStatement = try? container.decodeIfPresent([ReconciliationEntry].self, forKey: .missingFromStatement)
+        self.conflicts = try? container.decodeIfPresent([ConflictEntry].self, forKey: .conflicts)
     }
 }

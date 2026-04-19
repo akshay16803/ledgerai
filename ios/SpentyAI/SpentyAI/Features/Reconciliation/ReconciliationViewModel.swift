@@ -34,6 +34,43 @@ final class ReconciliationViewModel {
     var errorMessage: String?
     var successMessage: String?
 
+    // MARK: - Polling
+
+    private var parsePollingTimer: Timer?
+
+    func startParsePollingIfNeeded(statementId: String) {
+        guard activeStatement?.status?.lowercased() == "parsing" else { return }
+        stopParsePolling()
+        parsePollingTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            Task { @MainActor in
+                await self.pollStatement(id: statementId)
+            }
+        }
+    }
+
+    func stopParsePolling() {
+        parsePollingTimer?.invalidate()
+        parsePollingTimer = nil
+    }
+
+    @MainActor
+    private func pollStatement(id: String) async {
+        do {
+            let updated = try await repository.fetchStatement(id: id)
+            activeStatement = updated
+            reconciliationResult = updated.reconciliation
+            if updated.status?.lowercased() != "parsing" {
+                stopParsePolling()
+                // Refresh entries now that parsing is done
+                parsedEntries = try await repository.fetchEntries(statementId: id)
+                updateStatementInList(updated)
+            }
+        } catch {
+            // Polling errors are non-fatal; stop polling on repeated failures
+        }
+    }
+
     // MARK: - Private
 
     private let repository = ReconciliationRepository.shared
@@ -159,6 +196,9 @@ final class ReconciliationViewModel {
         }
 
         isLoading = false
+
+        // Start polling if the statement is currently being parsed
+        startParsePollingIfNeeded(statementId: id)
     }
 
     // MARK: - Reconcile

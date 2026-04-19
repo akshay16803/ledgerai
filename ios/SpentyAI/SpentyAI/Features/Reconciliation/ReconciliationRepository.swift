@@ -20,6 +20,10 @@ struct ReconcileResponse: Codable {
     let matched: Int?
     let unmatched: Int?
     let missing: Int?
+    let summary: ReconciliationSummary?
+    let missingFromLedger: [ReconciliationEntry]?
+    let missingFromStatement: [ReconciliationEntry]?
+    let conflicts: [ConflictEntry]?
 }
 
 struct ReauditResponse: Codable {
