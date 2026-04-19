@@ -5,8 +5,8 @@
     <key>API_BASE_URL</key>
     <string>https://api.spentyai.com</string>
     <key>GOOGLE_CLIENT_ID</key>
-    <string>975238186836-3dvrgng67mqei4d7quede9fil6rnq2v7.apps.googleusercontent.com</string>
+    <string>519685265917-uop14njfocs96tmlapprtu60h6b2uvl3.apps.googleusercontent.com</string>
     <key>GOOGLE_IOS_CLIENT_ID</key>
-    <string>975238186836-3dvrgng67mqei4d7quede9fil6rnq2v7.apps.googleusercontent.com</string>
+    <string>519685265917-uop14njfocs96tmlapprtu60h6b2uvl3.apps.googleusercontent.com</string>
 </dict>
 </plist>
