@@ -31,6 +31,11 @@ struct RecordPaymentPayload: Codable {
     let note: String?
 }
 
+private struct InvoiceListResponse: Codable {
+    let items: [Invoice]
+    let total: Int?
+}
+
 struct InvoiceRepository {
 
     private let api = APIClient.shared
@@ -38,7 +43,8 @@ struct InvoiceRepository {
     // MARK: - CRUD
 
     func fetchAll() async throws -> [Invoice] {
-        try await api.get(APIEndpoints.invoices)
+        let response: InvoiceListResponse = try await api.get(APIEndpoints.invoices)
+        return response.items
     }
 
     func fetch(id: String) async throws -> Invoice {

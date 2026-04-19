@@ -157,9 +157,9 @@ struct SMSSyncView: View {
                 }
 
                 if let upload = viewModel.lastUploadResult {
-                    resultRow(icon: "arrow.up.circle.fill", label: "Stored", value: "\(upload.stored)", color: .spentyPrimary)
-                    if upload.skipped > 0 {
-                        resultRow(icon: "doc.on.doc", label: "Duplicates skipped", value: "\(upload.skipped)", color: .spentyWarning)
+                    resultRow(icon: "arrow.up.circle.fill", label: "Stored", value: "\(upload.stored ?? 0)", color: .spentyPrimary)
+                    if (upload.skipped ?? 0) > 0 {
+                        resultRow(icon: "doc.on.doc", label: "Duplicates skipped", value: "\(upload.skipped ?? 0)", color: .spentyWarning)
                     }
                 }
 
@@ -215,17 +215,17 @@ struct SMSSyncView: View {
                     GridItem(.flexible(), spacing: 12),
                     GridItem(.flexible(), spacing: 12)
                 ], spacing: 12) {
-                    StatCard(label: "Total Synced", value: "\(stats.totalSynced)", icon: "envelope.fill", color: .spentyPrimary)
-                    StatCard(label: "Transactions", value: "\(stats.transactionsCreated)", icon: "banknote.fill", color: .spentySuccess)
-                    StatCard(label: "Pending Review", value: "\(stats.pendingReview)", icon: "clock.fill", color: .spentyWarning)
-                    StatCard(label: "Failed", value: "\(stats.aiFailed)", icon: "xmark.circle.fill", color: .spentyError)
+                    StatCard(label: "Total Synced", value: "\(stats.totalSynced ?? 0)", icon: "envelope.fill", color: .spentyPrimary)
+                    StatCard(label: "Transactions", value: "\(stats.transactionsCreated ?? 0)", icon: "banknote.fill", color: .spentySuccess)
+                    StatCard(label: "Pending Review", value: "\(stats.pendingReview ?? 0)", icon: "clock.fill", color: .spentyWarning)
+                    StatCard(label: "Failed", value: "\(stats.aiFailed ?? 0)", icon: "xmark.circle.fill", color: .spentyError)
                 }
 
-                if stats.processedByAi > 0 {
+                if (stats.processedByAi ?? 0) > 0 {
                     HStack(spacing: 4) {
                         Image(systemName: "cpu")
                             .font(.system(size: 11))
-                        Text("\(stats.processedByAi) processed by AI")
+                        Text("\(stats.processedByAi ?? 0) processed by AI")
                             .font(SpentyFonts.caption1)
                     }
                     .foregroundColor(.spentyTextSecondary)
@@ -241,7 +241,7 @@ struct SMSSyncView: View {
     private var actionsSection: some View {
         if viewModel.hasStats {
             VStack(spacing: 12) {
-                if let stats = viewModel.syncStats, stats.pendingReview > 0 || stats.aiFailed > 0 {
+                if let stats = viewModel.syncStats, (stats.pendingReview ?? 0) > 0 || (stats.aiFailed ?? 0) > 0 {
                     Button {
                         Task { await viewModel.retryPending() }
                     } label: {
@@ -295,7 +295,7 @@ struct SMSSyncView: View {
                         Image(systemName: "checkmark.circle")
                             .font(.system(size: 11))
                             .foregroundColor(.spentySuccess)
-                        Text("\(mandate.total) recurring mandate\(mandate.total == 1 ? "" : "s") detected")
+                        Text("\(mandate.total ?? 0) recurring mandate\((mandate.total ?? 0) == 1 ? "" : "s") detected")
                             .font(SpentyFonts.caption1)
                             .foregroundColor(.spentyTextSecondary)
                     }

@@ -102,11 +102,14 @@ struct TransactionListView: View {
         VStack(spacing: 8) {
             FilterBar(
                 filters: ["All", "Income", "Expense", "Transfer"],
-                selected: $viewModel.filterType
+                selected: Binding(
+                    get: { viewModel.filterType },
+                    set: { newValue in
+                        viewModel.filterType = newValue
+                        Task { await viewModel.refresh() }
+                    }
+                )
             )
-            .onChange(of: viewModel.filterType) { _, _ in
-                Task { await viewModel.refresh() }
-            }
 
             HStack(spacing: 8) {
                 accountPicker

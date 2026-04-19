@@ -38,7 +38,7 @@ final class ReportsRepository {
 
     // MARK: - Income vs Expense
 
-    func getIncomeExpense(from: Date, to: Date) async throws -> [ReportPeriod] {
+    func getIncomeExpense(from: Date, to: Date) async throws -> IncomeExpenseResponse {
         let query = dateQuery(from: from, to: to)
         return try await APIClient.shared.get(APIEndpoints.reportsIncomeExpense + query)
     }

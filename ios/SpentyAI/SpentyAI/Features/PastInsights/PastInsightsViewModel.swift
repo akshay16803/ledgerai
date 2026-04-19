@@ -274,7 +274,7 @@ final class PastInsightsViewModel {
 
     func startEditTransaction(_ txn: TaxSummaryTransaction) {
         editingTransaction = txn
-        txnDate = txn.date ?? Date()
+        txnDate = txn.dateAsDate ?? Date()
         txnDescription = txn.description ?? ""
         txnAmount = txn.amount.map { String(format: "%.2f", $0) } ?? ""
         txnType = txn.transactionType ?? "expense"

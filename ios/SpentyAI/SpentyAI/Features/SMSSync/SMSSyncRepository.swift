@@ -66,8 +66,8 @@ struct SMSParseRequest: Encodable {
 // MARK: - Response Models
 
 struct SMSUploadResponse: Decodable {
-    let stored: Int
-    let skipped: Int
+    let stored: Int?
+    let skipped: Int?
     let message: String?
 }
 
@@ -105,16 +105,16 @@ struct SMSMandateDetected: Decodable {
 }
 
 struct SMSMandateResponse: Decodable {
-    let detected: [SMSMandateDetected]
-    let total: Int
+    let detected: [SMSMandateDetected]?
+    let total: Int?
 }
 
 struct SMSSyncStats: Decodable {
-    let totalSynced: Int
-    let processedByAi: Int
+    let totalSynced: Int?
+    let processedByAi: Int?
     let noTransaction: Int?
     let aiPending: Int?
-    let aiFailed: Int
-    let transactionsCreated: Int
-    let pendingReview: Int
+    let aiFailed: Int?
+    let transactionsCreated: Int?
+    let pendingReview: Int?
 }

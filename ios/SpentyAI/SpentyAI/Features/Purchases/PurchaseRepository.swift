@@ -61,7 +61,8 @@ struct CreditorSummary: Codable, Identifiable {
 }
 
 struct AgingBucket: Codable, Identifiable {
-    var id: String { bucket ?? UUID().uuidString }
+    var id: String { label ?? bucket ?? UUID().uuidString }
+    let label: String?
     let bucket: String?
     let amount: Double?
     let count: Int?
@@ -105,6 +106,15 @@ struct AgingBucketListResponse: Codable {
 struct AgingBucketDetail: Codable {
     let amount: Double?
     let count: Int?
+}
+
+struct VendorPurchaseListResponse: Codable {
+    let items: [VendorPurchaseSummary]
+    let total: Int?
+}
+
+struct AccountListResponse: Codable {
+    let accounts: [Account]
 }
 
 // MARK: - Repository
@@ -173,17 +183,12 @@ final class PurchaseRepository {
     }
 
     func fetchAging() async throws -> [AgingBucket] {
-        let response: AgingBucketListResponse = try await api.get(APIEndpoints.billsAging)
-        if let items = response.items { return items }
-        // Convert from buckets dict format
-        guard let buckets = response.buckets else { return [] }
-        return buckets.map { key, value in
-            AgingBucket(bucket: key, amount: value.amount, count: value.count)
-        }
+        try await api.get(APIEndpoints.billsAging)
     }
 
     func fetchPurchasesByVendor() async throws -> [VendorPurchaseSummary] {
-        try await api.get(APIEndpoints.billsPurchasesByVendor)
+        let response: VendorPurchaseListResponse = try await api.get(APIEndpoints.billsPurchasesByVendor)
+        return response.items
     }
 
     // MARK: - PDF
@@ -211,6 +216,7 @@ final class PurchaseRepository {
     }
 
     func fetchAccounts() async throws -> [Account] {
-        try await api.get(APIEndpoints.accounts)
+        let response: AccountListResponse = try await api.get(APIEndpoints.accounts)
+        return response.accounts
     }
 }

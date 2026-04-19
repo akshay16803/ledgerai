@@ -489,8 +489,8 @@ struct EmailSyncView: View {
                     }
 
                     HStack(spacing: 16) {
-                        Label("\(stats.totalSynced) messages", systemImage: "envelope.fill")
-                        Label("\(stats.transactionsCreated) transactions", systemImage: "banknote.fill")
+                        Label("\(stats.totalSynced ?? 0) messages", systemImage: "envelope.fill")
+                        Label("\(stats.transactionsCreated ?? 0) transactions", systemImage: "banknote.fill")
                     }
                     .font(SpentyFonts.caption1)
                     .foregroundColor(.spentyTextSecondary)

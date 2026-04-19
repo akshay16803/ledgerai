@@ -3,11 +3,22 @@ import Foundation
 struct ReportSummary: Codable {
     var totalIncome: Double?
     var totalExpense: Double?
+    var totalTransfers: Double?
     var net: Double?
     var transactionCount: Int?
     var topCategories: [ReportCategory]?
-    var dateFrom: Date?
-    var dateTo: Date?
+    var startDate: String?
+    var endDate: String?
+}
+
+struct IncomeExpenseResponse: Codable {
+    var totalIncome: Double?
+    var totalExpense: Double?
+    var net: Double?
+    var incomeByCategory: [ReportCategory]?
+    var expenseByCategory: [ReportCategory]?
+    var startDate: String?
+    var endDate: String?
 }
 
 struct ReportPeriod: Codable, Identifiable {

@@ -16,12 +16,30 @@ final class APIClient: Sendable {
         d.dateDecodingStrategy = .custom { decoder in
             let container = try decoder.singleValueContainer()
             let string = try container.decode(String.self)
-            if let date = ISO8601DateFormatter().date(from: string) {
-                return date
+
+            // Empty / whitespace-only strings cannot be dates
+            if string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                throw DecodingError.dataCorruptedError(in: container, debugDescription: "Empty date string")
             }
+
+            // ISO 8601 with fractional seconds (e.g. backend datetimes with microseconds)
+            let isoFrac = ISO8601DateFormatter()
+            isoFrac.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            if let date = isoFrac.date(from: string) { return date }
+
+            // ISO 8601 without fractional seconds
+            let iso = ISO8601DateFormatter()
+            if let date = iso.date(from: string) { return date }
+
             let formatter = DateFormatter()
             formatter.locale = Locale(identifier: "en_US_POSIX")
-            for fmt in ["yyyy-MM-dd'T'HH:mm:ss.SSSZ", "yyyy-MM-dd'T'HH:mm:ssZ", "yyyy-MM-dd"] {
+            for fmt in [
+                "yyyy-MM-dd'T'HH:mm:ss.SSSSSSZZZZZ",   // 2024-01-15T10:30:00.123456+00:00
+                "yyyy-MM-dd'T'HH:mm:ssZZZZZ",           // 2024-01-15T10:30:00+00:00
+                "yyyy-MM-dd'T'HH:mm:ss.SSSZ",           // 2024-01-15T10:30:00.123+0000
+                "yyyy-MM-dd'T'HH:mm:ssZ",               // 2024-01-15T10:30:00+0000
+                "yyyy-MM-dd",                            // 2024-01-15
+            ] {
                 formatter.dateFormat = fmt
                 if let date = formatter.date(from: string) {
                     return date

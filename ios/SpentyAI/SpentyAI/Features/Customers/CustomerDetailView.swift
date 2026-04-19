@@ -143,8 +143,8 @@ struct CustomerDetailView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(invoice.invoiceNumber ?? "Invoice")
                     .font(.subheadline.weight(.semibold))
-                if let date = invoice.date {
-                    Text(date, style: .date)
+                if let date = invoice.invoiceDate, !date.isEmpty {
+                    Text(formatDateString(date))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -153,9 +153,9 @@ struct CustomerDetailView: View {
             Spacer()
 
             VStack(alignment: .trailing, spacing: 4) {
-                Text(formatCurrency(invoice.total ?? 0))
+                Text(formatCurrency(invoice.grandTotal ?? 0))
                     .font(.subheadline.weight(.semibold))
-                if let status = invoice.status {
+                if let status = invoice.paymentStatus {
                     statusBadge(status)
                 }
             }
@@ -204,6 +204,19 @@ struct CustomerDetailView: View {
         formatter.maximumFractionDigits = 2
         formatter.minimumFractionDigits = 0
         return formatter.string(from: NSNumber(value: value)) ?? "\u{20B9}0"
+    }
+
+    private func formatDateString(_ dateString: String) -> String {
+        let parser = DateFormatter()
+        parser.locale = Locale(identifier: "en_US_POSIX")
+        parser.dateFormat = "yyyy-MM-dd"
+        if let date = parser.date(from: dateString) {
+            let display = DateFormatter()
+            display.dateStyle = .medium
+            display.timeStyle = .none
+            return display.string(from: date)
+        }
+        return dateString
     }
 }
 

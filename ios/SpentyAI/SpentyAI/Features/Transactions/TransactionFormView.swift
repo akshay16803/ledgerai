@@ -402,7 +402,7 @@ struct TransactionFormView: View {
             subcategoryId: subcategoryId.isEmpty ? nil : subcategoryId,
             description: descriptionText.isEmpty ? nil : descriptionText,
             paymentMethod: paymentMethod.isEmpty ? nil : paymentMethod,
-            status: transaction?.status,
+            status: transaction?.status ?? "approved",
             isRecurring: isRecurring,
             recurringFrequency: isRecurring ? recurringFrequency : nil,
             source: transaction?.source ?? "manual",

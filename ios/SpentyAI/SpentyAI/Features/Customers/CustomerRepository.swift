@@ -5,20 +5,20 @@ import Foundation
 struct CustomerInvoice: Codable, Identifiable {
     let id: String
     let invoiceNumber: String?
-    let date: Date?
-    let dueDate: Date?
-    let total: Double?
+    let invoiceDate: String?
+    let dueDate: String?
+    let grandTotal: Double?
     let amountPaid: Double?
-    let status: String?
+    let paymentStatus: String?
 
     enum CodingKeys: String, CodingKey {
         case id = "invoiceId"
         case invoiceNumber
-        case date
+        case invoiceDate
         case dueDate
-        case total
+        case grandTotal
         case amountPaid
-        case status
+        case paymentStatus
     }
 }
 
