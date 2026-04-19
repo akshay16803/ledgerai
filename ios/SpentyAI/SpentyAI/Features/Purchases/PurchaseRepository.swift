@@ -113,10 +113,6 @@ struct VendorPurchaseListResponse: Codable {
     let total: Int?
 }
 
-struct AccountListResponse: Codable {
-    let accounts: [Account]
-}
-
 // MARK: - Repository
 
 final class PurchaseRepository {
