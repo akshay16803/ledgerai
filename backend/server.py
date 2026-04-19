@@ -20,6 +20,7 @@ import logging
 import secrets
 import hashlib
 import pdfplumber
+from fpdf import FPDF
 from cryptography.fernet import Fernet, InvalidToken
 from urllib.parse import urlencode, quote
 from email.utils import parsedate_to_datetime
@@ -3233,12 +3234,17 @@ async def export_report_csv(
     txns = await db.transactions.find(query, {"_id": 0}).sort("date", -1).to_list(10000)
     accounts = await db.accounts.find({"user_id": user_id}, {"_id": 0}).to_list(100)
     categories = await db.categories.find({"user_id": user_id}, {"_id": 0}).to_list(500)
-    acc_map = {a["account_id"]: a["name"] for a in accounts}
-    cat_map = {c["category_id"]: c["name"] for c in categories}
+    acc_map = {a["account_id"]: a.get("name", "") for a in accounts}
+    cat_map = {c["category_id"]: c.get("name", "") for c in categories}
 
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["Date", "Type", "Amount", "Account", "To Account", "Category", "Description", "Payment Method", "Source"])
+    writer.writerow([
+        "Date", "Type", "Amount", "Account", "To Account",
+        "Category", "Subcategory", "Description", "Payment Method",
+        "Recurring", "Frequency", "Status", "Source",
+        "Original Currency", "Original Amount", "Exchange Rate",
+    ])
     for t in txns:
         writer.writerow([
             t.get("date", ""),
@@ -3247,9 +3253,16 @@ async def export_report_csv(
             acc_map.get(t.get("account_id"), ""),
             acc_map.get(t.get("to_account_id"), "") if t.get("to_account_id") else "",
             cat_map.get(t.get("category_id"), ""),
+            cat_map.get(t.get("subcategory_id"), "") if t.get("subcategory_id") else "",
             t.get("description", ""),
             t.get("payment_method", ""),
+            "Yes" if t.get("is_recurring") else "No",
+            t.get("recurring_frequency", "") if t.get("is_recurring") else "",
+            t.get("status", ""),
             t.get("source", "manual"),
+            t.get("original_currency", ""),
+            t.get("original_amount", "") if t.get("original_amount") else "",
+            t.get("exchange_rate", "") if t.get("exchange_rate") else "",
         ])
 
     csv_bytes = output.getvalue().encode("utf-8-sig")
@@ -3263,48 +3276,98 @@ async def export_report_csv(
 @app.get("/api/reports/export/pdf")
 async def export_report_pdf(
     start_date: str = None, end_date: str = None,
+    transaction_type: str = None,
     user: dict = Depends(get_current_user),
 ):
-    """Return report data for client-side PDF generation."""
+    """Generate and return a proper PDF report."""
     user_id = user["user_id"]
     query = {"user_id": user_id, "status": "approved"}
     if start_date:
         query.setdefault("date", {})["$gte"] = start_date
     if end_date:
         query.setdefault("date", {})["$lte"] = end_date
+    if transaction_type:
+        query["transaction_type"] = transaction_type
 
     txns = await db.transactions.find(query, {"_id": 0}).sort("date", -1).to_list(10000)
     accounts = await db.accounts.find({"user_id": user_id}, {"_id": 0}).to_list(100)
     categories = await db.categories.find({"user_id": user_id}, {"_id": 0}).to_list(500)
     settings = await db.user_settings.find_one({"user_id": user_id}, {"_id": 0}) or {}
 
-    acc_map = {a["account_id"]: a["name"] for a in accounts}
-    cat_map = {c["category_id"]: c for c in categories}
+    acc_map = {a["account_id"]: a.get("name", "") for a in accounts}
+    cat_map = {c["category_id"]: c.get("name", "") for c in categories}
 
     total_income = sum(t["amount"] for t in txns if t["transaction_type"] == "income")
     total_expense = sum(t["amount"] for t in txns if t["transaction_type"] == "expense")
+    currency = settings.get("base_currency", "INR")
+    firm_name = settings.get("firm_name", "SpentyAI Report")
 
-    return {
-        "report": {
-            "start_date": start_date,
-            "end_date": end_date,
-            "total_income": round(total_income, 2),
-            "total_expense": round(total_expense, 2),
-            "net": round(total_income - total_expense, 2),
-            "transaction_count": len(txns),
-            "transactions": txns[:500],  # Limit for PDF
-            "income_by_category": _aggregate_by_category(
-                [t for t in txns if t["transaction_type"] == "income"], cat_map
-            ),
-            "expense_by_category": _aggregate_by_category(
-                [t for t in txns if t["transaction_type"] == "expense"], cat_map
-            ),
-        },
-        "settings": {
-            "firm_name": settings.get("firm_name", ""),
-            "base_currency": settings.get("base_currency", "INR"),
-        },
-    }
+    # Build PDF with fpdf2
+    pdf = FPDF(orientation="L", unit="mm", format="A4")
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.add_page()
+
+    # Title
+    pdf.set_font("Helvetica", "B", 16)
+    pdf.cell(0, 10, firm_name, ln=True, align="C")
+    pdf.set_font("Helvetica", "", 11)
+    period_label = f"Period: {start_date or 'All'} to {end_date or 'All'}"
+    pdf.cell(0, 7, period_label, ln=True, align="C")
+    pdf.ln(4)
+
+    # Summary row
+    pdf.set_font("Helvetica", "B", 10)
+    pdf.set_fill_color(240, 240, 240)
+    pdf.cell(70, 8, f"Total Income: {currency} {total_income:,.2f}", border=1, fill=True)
+    pdf.cell(70, 8, f"Total Expense: {currency} {total_expense:,.2f}", border=1, fill=True)
+    net = total_income - total_expense
+    pdf.cell(70, 8, f"Net: {currency} {net:,.2f}", border=1, fill=True)
+    pdf.cell(67, 8, f"Transactions: {len(txns)}", border=1, fill=True, ln=True)
+    pdf.ln(4)
+
+    # Table header
+    col_widths = [22, 18, 24, 36, 36, 30, 30, 50, 31]
+    headers = ["Date", "Type", "Amount", "Account", "To Account", "Category", "Subcategory", "Description", "Payment Method"]
+    pdf.set_font("Helvetica", "B", 8)
+    pdf.set_fill_color(50, 50, 50)
+    pdf.set_text_color(255, 255, 255)
+    for i, h in enumerate(headers):
+        pdf.cell(col_widths[i], 7, h, border=1, fill=True, align="C")
+    pdf.ln()
+
+    # Table rows
+    pdf.set_font("Helvetica", "", 7)
+    pdf.set_text_color(0, 0, 0)
+    fill = False
+    for t in txns[:500]:
+        if fill:
+            pdf.set_fill_color(248, 248, 248)
+        else:
+            pdf.set_fill_color(255, 255, 255)
+
+        row = [
+            str(t.get("date", ""))[:10],
+            str(t.get("transaction_type", "")),
+            f"{t.get('amount', 0):,.2f}",
+            str(acc_map.get(t.get("account_id"), ""))[:20],
+            str(acc_map.get(t.get("to_account_id"), ""))[:20] if t.get("to_account_id") else "",
+            str(cat_map.get(t.get("category_id"), ""))[:18],
+            str(cat_map.get(t.get("subcategory_id"), ""))[:18] if t.get("subcategory_id") else "",
+            str(t.get("description", ""))[:32],
+            str(t.get("payment_method", "")),
+        ]
+        for i, val in enumerate(row):
+            pdf.cell(col_widths[i], 6, val, border=1, fill=True)
+        pdf.ln()
+        fill = not fill
+
+    # Output PDF bytes
+    pdf_bytes = pdf.output()
+    return Response(
+        content=bytes(pdf_bytes),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="report_{start_date or "all"}_{end_date or "all"}.pdf"'},
+    )
 
 
 # =====================================================================
