@@ -1,12 +1,30 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="./vite.svg" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>ledgerai</title>
-    <script type="module" crossorigin src="./assets/index-CwYMm1eP.js"></script>
-    <link rel="stylesheet" crossorigin href="./assets/index-DsHRwKS-.css">
+    <title>SpentyAI — Autonomous Accounting</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Manrope:wght@300;400;500;600;700&family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
+    <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+    <!-- GitHub Pages SPA redirect: restore route after 404.html redirect -->
+    <script>
+      (function() {
+        var redirect = sessionStorage.getItem('spa-redirect');
+        if (redirect) {
+          sessionStorage.removeItem('spa-redirect');
+          try {
+            var r = JSON.parse(redirect);
+            var url = '/' + r.path + (r.search || '') + (r.hash || '');
+            history.replaceState(null, '', url);
+          } catch(e) {}
+        }
+      })();
+    </script>
+    <script type="module" crossorigin src="/assets/index-25TMl6A_.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-B0R21g_4.css">
   </head>
   <body>
     <div id="root"></div>
