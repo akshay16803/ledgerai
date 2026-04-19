@@ -38,6 +38,22 @@ struct EmailAccount: Codable, Identifiable {
         self.needsReconnect = try container.decodeIfPresent(Bool.self, forKey: .needsReconnect)
         self.stats = try container.decodeIfPresent(SyncStats.self, forKey: .stats)
     }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        // Map email back to the provider-specific key
+        if provider == "outlook" {
+            try container.encodeIfPresent(email, forKey: .outlookEmail)
+        } else {
+            try container.encodeIfPresent(email, forKey: .gmailEmail)
+        }
+        try container.encodeIfPresent(provider, forKey: .provider)
+        try container.encodeIfPresent(connectedAt, forKey: .connectedAt)
+        try container.encodeIfPresent(syncFromDate, forKey: .syncFromDate)
+        try container.encodeIfPresent(syncing, forKey: .syncing)
+        try container.encodeIfPresent(needsReconnect, forKey: .needsReconnect)
+        try container.encodeIfPresent(stats, forKey: .stats)
+    }
 }
 
 struct SyncStats: Codable {
