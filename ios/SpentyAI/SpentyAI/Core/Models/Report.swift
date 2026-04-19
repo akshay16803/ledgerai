@@ -59,6 +59,15 @@ struct ReportPeriod: Codable, Identifiable {
     /// Convenience alias so views can still use `transactionCount`
     var transactionCount: Int? { count }
 
+    init(month: String? = nil, income: Double? = nil, expense: Double? = nil, net: Double? = nil, count: Int? = nil, transfer: Double? = nil) {
+        self.month = month
+        self.income = income
+        self.expense = expense
+        self.net = net
+        self.count = count
+        self.transfer = transfer
+    }
+
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         month = try? c.decodeIfPresent(String.self, forKey: .month)
@@ -88,6 +97,16 @@ struct ReportCategory: Codable, Identifiable {
     var transactionCount: Int? { count }
     /// Backend does not send percentage; views compute it from totalCategoryAmount
     var percentage: Double? { nil }
+
+    init(categoryId: String? = nil, categoryName: String? = nil, total: Double? = nil, income: Double? = nil, expense: Double? = nil, count: Int? = nil, subcategories: [ReportSubcategory]? = nil) {
+        self.categoryId = categoryId
+        self.categoryName = categoryName
+        self.total = total
+        self.income = income
+        self.expense = expense
+        self.count = count
+        self.subcategories = subcategories
+    }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)

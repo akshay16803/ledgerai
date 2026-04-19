@@ -435,8 +435,8 @@ private struct InsightShareSheet: UIViewControllerRepresentable {
             summary: TaxSummary(
                 id: "1",
                 name: "FY 2024-25",
-                dateFrom: Calendar.current.date(byAdding: .year, value: -1, to: Date()),
-                dateTo: Date(),
+                dateFrom: "2025-04-19",
+                dateTo: "2026-04-19",
                 status: "completed",
                 totalIncome: 850000,
                 totalExpenses: 620000,
