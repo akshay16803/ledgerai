@@ -466,17 +466,45 @@ export default function EmailSync() {
   };
 
   const handleApprove = async (txnId) => {
+    const prevTxns = pendingTxns;
+    const prevTotal = pendingTotal;
+    setPendingTxns(prev => prev.filter(t => t.transaction_id !== txnId));
+    setPendingTotal(prev => prev - 1);
     try {
       await api.post(`/api/transactions/${txnId}/approve`);
-      loadStatus();
-    } catch (err) { alert(err.message); }
+      const [review, accs] = await Promise.all([
+        api.get('/api/email/pending-review', { bypassCache: true }),
+        api.get('/api/accounts'),
+      ]);
+      setPendingTxns(review.transactions);
+      setPendingTotal(review.total);
+      setAccounts(accs);
+    } catch (err) {
+      setPendingTxns(prevTxns);
+      setPendingTotal(prevTotal);
+      alert(err.message);
+    }
   };
 
   const handleReject = async (txnId) => {
+    const prevTxns = pendingTxns;
+    const prevTotal = pendingTotal;
+    setPendingTxns(prev => prev.filter(t => t.transaction_id !== txnId));
+    setPendingTotal(prev => prev - 1);
     try {
       await api.post(`/api/transactions/${txnId}/reject`);
-      loadStatus();
-    } catch (err) { alert(err.message); }
+      const [review, accs] = await Promise.all([
+        api.get('/api/email/pending-review', { bypassCache: true }),
+        api.get('/api/accounts'),
+      ]);
+      setPendingTxns(review.transactions);
+      setPendingTotal(review.total);
+      setAccounts(accs);
+    } catch (err) {
+      setPendingTxns(prevTxns);
+      setPendingTotal(prevTotal);
+      alert(err.message);
+    }
   };
 
   const getAccountName = (id) => accounts.find(a => a.account_id === id)?.name || 'Unknown';

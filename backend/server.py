@@ -1708,21 +1708,31 @@ async def apply_transaction_to_balances(user_id: str, txn: dict):
                 {"$inc": {"balance": -amount}}
             )
     elif t_type == "transfer":
-        if await should_apply(txn["account_id"]):
-            # Overdraft source: withdrawal INCREASES outstanding
-            od_src = await is_od(txn["account_id"])
-            await db.accounts.update_one(
-                {"account_id": txn["account_id"], "user_id": user_id},
-                {"$inc": {"balance": amount if od_src else -amount}}
+        # Batch all read queries in parallel for transfers
+        src_id = txn["account_id"]
+        dst_id = txn.get("to_account_id")
+        if dst_id:
+            src_apply, src_od, dst_apply, dst_od = await asyncio.gather(
+                should_apply(src_id), is_od(src_id),
+                should_apply(dst_id), is_od(dst_id),
             )
-        if txn.get("to_account_id"):
-            if await should_apply(txn["to_account_id"]):
-                # Overdraft destination: repayment DECREASES outstanding
-                od_dst = await is_od(txn["to_account_id"])
-                await db.accounts.update_one(
-                    {"account_id": txn["to_account_id"], "user_id": user_id},
-                    {"$inc": {"balance": -amount if od_dst else amount}}
-                )
+        else:
+            src_apply, src_od = await asyncio.gather(
+                should_apply(src_id), is_od(src_id),
+            )
+
+        if src_apply:
+            # Overdraft source: withdrawal INCREASES outstanding
+            await db.accounts.update_one(
+                {"account_id": src_id, "user_id": user_id},
+                {"$inc": {"balance": amount if src_od else -amount}}
+            )
+        if dst_id and dst_apply:
+            # Overdraft destination: repayment DECREASES outstanding
+            await db.accounts.update_one(
+                {"account_id": dst_id, "user_id": user_id},
+                {"$inc": {"balance": -amount if dst_od else amount}}
+            )
 
 
 async def reverse_transaction_balances(user_id: str, txn: dict):
@@ -1845,8 +1855,8 @@ async def approve_transaction(transaction_id: str, user: dict = Depends(get_curr
     if existing.get("source") == "email" and existing.get("source_email_id"):
         asyncio.create_task(archive_email_for_transaction(user["user_id"], existing))
 
-    updated = await db.transactions.find_one({"transaction_id": transaction_id}, {"_id": 0})
-    return updated
+    existing["approved_at"] = datetime.now(timezone.utc)
+    return existing
 
 
 @app.post("/api/transactions/{transaction_id}/reject")
@@ -1884,18 +1894,14 @@ async def bulk_approve_transactions(request: Request, user: dict = Depends(get_c
     if not transaction_ids:
         raise HTTPException(status_code=400, detail="transaction_ids is required")
 
-    approved = 0
-    errors = []
-    for tid in transaction_ids:
+    async def _approve_one(tid: str):
         txn = await db.transactions.find_one(
             {"transaction_id": tid, "user_id": user["user_id"]}, {"_id": 0}
         )
         if not txn:
-            errors.append({"transaction_id": tid, "error": "Not found"})
-            continue
+            return {"transaction_id": tid, "error": "Not found"}
         if txn["status"] == "approved":
-            errors.append({"transaction_id": tid, "error": "Already approved"})
-            continue
+            return {"transaction_id": tid, "error": "Already approved"}
 
         await db.transactions.update_one(
             {"transaction_id": tid},
@@ -1906,7 +1912,11 @@ async def bulk_approve_transactions(request: Request, user: dict = Depends(get_c
         if txn.get("source") == "email" and txn.get("source_email_id"):
             asyncio.create_task(archive_email_for_transaction(user["user_id"], txn))
 
-        approved += 1
+        return None
+
+    results = await asyncio.gather(*[_approve_one(tid) for tid in transaction_ids])
+    errors = [r for r in results if r is not None]
+    approved = len(results) - len(errors)
 
     return {"approved": approved, "errors": errors, "total": len(transaction_ids)}
 

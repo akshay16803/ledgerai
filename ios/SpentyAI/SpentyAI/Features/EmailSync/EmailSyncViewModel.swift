@@ -264,7 +264,7 @@ final class EmailSyncViewModel {
             _ = try await repository.approveTransaction(id)
             pendingTransactions.removeAll { $0.id == id }
             selectedTransactionIds.remove(id)
-            await loadSyncStats()
+            Task { await loadSyncStats() }
         } catch {
             handleError(error)
         }
@@ -276,7 +276,7 @@ final class EmailSyncViewModel {
             _ = try await repository.rejectTransaction(id)
             pendingTransactions.removeAll { $0.id == id }
             selectedTransactionIds.remove(id)
-            await loadSyncStats()
+            Task { await loadSyncStats() }
         } catch {
             handleError(error)
         }
@@ -292,7 +292,7 @@ final class EmailSyncViewModel {
             pendingTransactions.removeAll { ids.contains($0.id) }
             selectedTransactionIds.removeAll()
             showSuccessMessage("Approved \(ids.count) transaction\(ids.count == 1 ? "" : "s")")
-            await loadSyncStats()
+            Task { await loadSyncStats() }
         } catch {
             handleError(error)
         }
@@ -308,7 +308,7 @@ final class EmailSyncViewModel {
             pendingTransactions.removeAll { ids.contains($0.id) }
             selectedTransactionIds.removeAll()
             showSuccessMessage("Rejected \(ids.count) transaction\(ids.count == 1 ? "" : "s")")
-            await loadSyncStats()
+            Task { await loadSyncStats() }
         } catch {
             handleError(error)
         }
@@ -339,7 +339,17 @@ final class EmailSyncViewModel {
             _ = try await repository.updateTransaction(txn.id, body: update)
             showEditSheet = false
             editingTransaction = nil
-            await loadPendingReview()
+
+            // Update the local array in-place instead of refetching the entire list
+            if let index = pendingTransactions.firstIndex(where: { $0.id == txn.id }) {
+                var updated = pendingTransactions[index]
+                if let desc = update.description { updated.description = desc }
+                if let amt = update.amount { updated.amount = amt }
+                if let acct = update.accountId { updated.accountId = acct }
+                if let cat = update.categoryId { updated.categoryId = cat }
+                pendingTransactions[index] = updated
+            }
+
             showSuccessMessage("Transaction updated")
         } catch {
             handleError(error)

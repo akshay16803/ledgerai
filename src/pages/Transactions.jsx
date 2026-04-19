@@ -77,12 +77,28 @@ export default function Transactions() {
   useEffect(() => { loadData(); }, [loadData]); // eslint-disable-line react-hooks/set-state-in-effect
 
   const handleApprove = async (id) => {
-    try { await api.post(`/api/transactions/${id}/approve`); loadData(); }
-    catch (err) { alert(err.message); }
+    const prevTransactions = transactions;
+    setTransactions(prev => prev.map(t =>
+      t.transaction_id === id ? { ...t, status: 'approved' } : t
+    ));
+    try {
+      await api.post(`/api/transactions/${id}/approve`);
+    } catch (err) {
+      setTransactions(prevTransactions);
+      alert(err.message);
+    }
   };
   const handleReject = async (id) => {
-    try { await api.post(`/api/transactions/${id}/reject`); loadData(); }
-    catch (err) { alert(err.message); }
+    const prevTransactions = transactions;
+    setTransactions(prev => prev.filter(t => t.transaction_id !== id));
+    setTotal(prev => prev - 1);
+    try {
+      await api.post(`/api/transactions/${id}/reject`);
+    } catch (err) {
+      setTransactions(prevTransactions);
+      setTotal(prev => prev + 1);
+      alert(err.message);
+    }
   };
   const handleDelete = async (id) => {
     if (!confirm('Delete this transaction?')) return;
