@@ -6,6 +6,11 @@ struct DashboardView: View {
     @State private var isAccountsExpanded = false
     @State private var isTransactionsExpanded = false
     @State private var isPendingExpanded = false
+    @State private var selectedPendingTxn: PendingTransaction?
+    @State private var showAllAccounts = false
+    @State private var showIncomeList = false
+    @State private var showExpenseList = false
+    @State private var showAllPending = false
 
     var body: some View {
         NavigationStack {
@@ -51,6 +56,42 @@ struct DashboardView: View {
                 Task { await viewModel.refresh() }
             }) {
                 AIChatView()
+            }
+            .sheet(item: $selectedPendingTxn, onDismiss: {
+                Task { await viewModel.refresh() }
+            }) { txn in
+                PendingTransactionDetailSheet(
+                    transaction: txn,
+                    viewModel: viewModel
+                )
+            }
+            .sheet(isPresented: $showAllAccounts) {
+                DashboardAccountsListView(accounts: viewModel.accounts)
+            }
+            .sheet(isPresented: $showIncomeList) {
+                DashboardFilteredTransactionsView(
+                    title: "Income This Month",
+                    transactions: viewModel.recentTransactions.filter { $0.transactionType?.lowercased() == "income" },
+                    emptyMessage: "No income transactions this month"
+                )
+            }
+            .sheet(isPresented: $showExpenseList) {
+                DashboardFilteredTransactionsView(
+                    title: "Expenses This Month",
+                    transactions: viewModel.recentTransactions.filter { $0.transactionType?.lowercased() == "expense" },
+                    emptyMessage: "No expense transactions this month"
+                )
+            }
+            .sheet(isPresented: $showAllPending) {
+                DashboardAllPendingView(
+                    viewModel: viewModel,
+                    onTap: { txn in
+                        showAllPending = false
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                            selectedPendingTxn = txn
+                        }
+                    }
+                )
             }
         }
     }
@@ -110,33 +151,45 @@ struct DashboardView: View {
             ],
             spacing: 12
         ) {
-            StatCard(
-                label: "Net Worth",
-                value: formatCurrency(viewModel.netWorth),
-                icon: "banknote.fill",
-                color: viewModel.netWorth >= 0 ? .spentySuccess : .spentyError
-            )
+            Button { showAllAccounts = true } label: {
+                StatCard(
+                    label: "Net Worth",
+                    value: formatCurrency(viewModel.netWorth),
+                    icon: "banknote.fill",
+                    color: viewModel.netWorth >= 0 ? .spentySuccess : .spentyError
+                )
+            }
+            .buttonStyle(.plain)
 
-            StatCard(
-                label: "Income This Month",
-                value: formatCurrency(viewModel.incomeThisMonth),
-                icon: "arrow.down.circle.fill",
-                color: .spentySuccess
-            )
+            Button { showIncomeList = true } label: {
+                StatCard(
+                    label: "Income This Month",
+                    value: formatCurrency(viewModel.incomeThisMonth),
+                    icon: "arrow.down.circle.fill",
+                    color: .spentySuccess
+                )
+            }
+            .buttonStyle(.plain)
 
-            StatCard(
-                label: "Expenses This Month",
-                value: formatCurrency(viewModel.expenseThisMonth),
-                icon: "arrow.up.circle.fill",
-                color: .spentyAccent1
-            )
+            Button { showExpenseList = true } label: {
+                StatCard(
+                    label: "Expenses This Month",
+                    value: formatCurrency(viewModel.expenseThisMonth),
+                    icon: "arrow.up.circle.fill",
+                    color: .spentyAccent1
+                )
+            }
+            .buttonStyle(.plain)
 
-            StatCard(
-                label: "Pending Review",
-                value: "\(viewModel.pendingReview)",
-                icon: "clock.fill",
-                color: .spentyWarning
-            )
+            Button { showAllPending = true } label: {
+                StatCard(
+                    label: "Pending Review",
+                    value: "\(viewModel.pendingReview)",
+                    icon: "clock.fill",
+                    color: .spentyWarning
+                )
+            }
+            .buttonStyle(.plain)
         }
     }
 
@@ -352,7 +405,9 @@ struct DashboardView: View {
     }
 
     private func pendingRow(_ txn: PendingTransaction) -> some View {
-        VStack(spacing: 8) {
+        Button {
+            selectedPendingTxn = txn
+        } label: {
             HStack(spacing: 12) {
                 Circle()
                     .fill(Color.spentyWarning.opacity(0.12))
@@ -383,52 +438,15 @@ struct DashboardView: View {
                     font: SpentyFonts.amountSmall,
                     color: txn.transactionType == "income" ? .spentySuccess : .spentyAccent1
                 )
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.spentyTextSecondary.opacity(0.5))
             }
-
-            // Approve / Reject buttons
-            HStack(spacing: 12) {
-                Spacer()
-
-                Button {
-                    Task { await viewModel.rejectPendingTransaction(txn.id) }
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 11, weight: .semibold))
-                        Text("Reject")
-                            .font(SpentyFonts.caption1)
-                    }
-                    .foregroundColor(.spentyError)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6)
-                            .stroke(Color.spentyError.opacity(0.3), lineWidth: 1)
-                    )
-                }
-                .buttonStyle(.plain)
-
-                Button {
-                    Task { await viewModel.approvePendingTransaction(txn.id) }
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "checkmark")
-                            .font(.system(size: 11, weight: .semibold))
-                        Text("Approve")
-                            .font(SpentyFonts.caption1)
-                    }
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(Color.spentySuccess)
-                    )
-                }
-                .buttonStyle(.plain)
-            }
+            .padding(.vertical, 10)
+            .contentShape(Rectangle())
         }
-        .padding(.vertical, 10)
+        .buttonStyle(.plain)
     }
 
     // MARK: - Collapsible Section Header
@@ -508,6 +526,399 @@ struct DashboardView: View {
         case "expense": return .spentyAccent1
         case "transfer": return .spentyInfo
         default: return .spentyTextSecondary
+        }
+    }
+}
+
+// MARK: - Pending Transaction Detail Sheet
+
+struct PendingTransactionDetailSheet: View {
+
+    let transaction: PendingTransaction
+    @Bindable var viewModel: DashboardViewModel
+
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var editDescription: String = ""
+    @State private var editAmount: String = ""
+    @State private var editDate: Date = Date()
+    @State private var editType: String = "expense"
+    @State private var editCategory: String = ""
+    @State private var isProcessing = false
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                Color.spentyBgPrimary.ignoresSafeArea()
+
+                ScrollView {
+                    VStack(spacing: 20) {
+
+                        // Source badge
+                        HStack {
+                            Label(
+                                transaction.source == "sms" ? "From SMS" : "From Email",
+                                systemImage: transaction.source == "sms" ? "message.fill" : "envelope.fill"
+                            )
+                            .font(SpentyFonts.caption1)
+                            .foregroundColor(.spentyWarning)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background(Color.spentyWarning.opacity(0.1), in: Capsule())
+
+                            Spacer()
+                        }
+
+                        // Edit fields
+                        VStack(spacing: 16) {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("Description")
+                                    .font(SpentyFonts.caption1)
+                                    .foregroundColor(.spentyTextSecondary)
+                                TextField("Description", text: $editDescription)
+                                    .font(SpentyFonts.body)
+                                    .padding(12)
+                                    .background(Color.spentyBgSecondary, in: RoundedRectangle(cornerRadius: 10))
+                            }
+
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("Amount")
+                                    .font(SpentyFonts.caption1)
+                                    .foregroundColor(.spentyTextSecondary)
+                                TextField("Amount", text: $editAmount)
+                                    .font(SpentyFonts.body)
+                                    .keyboardType(.decimalPad)
+                                    .padding(12)
+                                    .background(Color.spentyBgSecondary, in: RoundedRectangle(cornerRadius: 10))
+                            }
+
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("Date")
+                                    .font(SpentyFonts.caption1)
+                                    .foregroundColor(.spentyTextSecondary)
+                                DatePicker("", selection: $editDate, displayedComponents: .date)
+                                    .datePickerStyle(.compact)
+                                    .labelsHidden()
+                                    .tint(.spentyPrimary)
+                            }
+
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("Type")
+                                    .font(SpentyFonts.caption1)
+                                    .foregroundColor(.spentyTextSecondary)
+                                Picker("Type", selection: $editType) {
+                                    Text("Income").tag("income")
+                                    Text("Expense").tag("expense")
+                                }
+                                .pickerStyle(.segmented)
+                            }
+
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("Category")
+                                    .font(SpentyFonts.caption1)
+                                    .foregroundColor(.spentyTextSecondary)
+                                TextField("Category (optional)", text: $editCategory)
+                                    .font(SpentyFonts.body)
+                                    .padding(12)
+                                    .background(Color.spentyBgSecondary, in: RoundedRectangle(cornerRadius: 10))
+                            }
+                        }
+                        .padding()
+                        .background(Color.white, in: RoundedRectangle(cornerRadius: 14))
+                        .shadow(color: .black.opacity(0.04), radius: 8, y: 2)
+
+                        // Action buttons
+                        VStack(spacing: 12) {
+                            // Approve button (primary)
+                            Button {
+                                Task { await approveTransaction() }
+                            } label: {
+                                HStack {
+                                    if isProcessing {
+                                        ProgressView()
+                                            .tint(.white)
+                                    } else {
+                                        Image(systemName: "checkmark.circle.fill")
+                                        Text("Approve Transaction")
+                                            .fontWeight(.semibold)
+                                    }
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 14)
+                                .foregroundColor(.white)
+                                .background(Color.spentySuccess, in: RoundedRectangle(cornerRadius: 12))
+                            }
+                            .disabled(isProcessing)
+
+                            // Reject button (secondary)
+                            Button {
+                                Task { await rejectTransaction() }
+                            } label: {
+                                HStack {
+                                    Image(systemName: "xmark.circle.fill")
+                                    Text("Reject Transaction")
+                                        .fontWeight(.medium)
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 14)
+                                .foregroundColor(.spentyError)
+                                .background(Color.spentyError.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
+                            }
+                            .disabled(isProcessing)
+                        }
+                    }
+                    .padding()
+                }
+            }
+            .navigationTitle("Review Transaction")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                        .tint(.spentyPrimary)
+                }
+            }
+            .onAppear {
+                editDescription = transaction.description ?? ""
+                editAmount = transaction.amount.map { String(format: "%.2f", $0) } ?? ""
+                editDate = transaction.date ?? Date()
+                editType = transaction.transactionType ?? "expense"
+                editCategory = transaction.categoryName ?? ""
+            }
+        }
+        .presentationDetents([.large])
+    }
+
+    private func approveTransaction() async {
+        isProcessing = true
+
+        // Save edits first if changed
+        let update = PendingTransactionUpdate(
+            description: editDescription.isEmpty ? nil : editDescription,
+            amount: Double(editAmount),
+            date: editDate
+        )
+        do {
+            _ = try await EmailSyncRepository.shared.updateTransaction(transaction.id, body: update)
+        } catch {
+            // Continue to approve even if update fails
+        }
+
+        await viewModel.approvePendingTransaction(transaction.id)
+        isProcessing = false
+        dismiss()
+    }
+
+    private func rejectTransaction() async {
+        isProcessing = true
+        await viewModel.rejectPendingTransaction(transaction.id)
+        isProcessing = false
+        dismiss()
+    }
+}
+
+// MARK: - Dashboard Accounts List View
+
+struct DashboardAccountsListView: View {
+
+    let accounts: [Account]
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                Color.spentyBgPrimary.ignoresSafeArea()
+
+                if accounts.isEmpty {
+                    ContentUnavailableView("No Accounts", systemImage: "building.columns", description: Text("No accounts found"))
+                } else {
+                    List(accounts) { account in
+                        HStack(spacing: 12) {
+                            Circle()
+                                .fill(Color.spentyPrimary.opacity(0.1))
+                                .frame(width: 40, height: 40)
+                                .overlay(
+                                    Image(systemName: "building.columns.fill")
+                                        .font(.system(size: 16, weight: .semibold))
+                                        .foregroundColor(.spentyPrimary)
+                                )
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(account.name ?? "Unnamed")
+                                    .font(SpentyFonts.subheadline)
+                                if let type = account.accountType {
+                                    Text(type.capitalized)
+                                        .font(SpentyFonts.caption1)
+                                        .foregroundColor(.spentyTextSecondary)
+                                }
+                            }
+
+                            Spacer()
+
+                            CurrencyText(
+                                amount: account.balance ?? 0,
+                                font: SpentyFonts.amountSmall,
+                                color: (account.balance ?? 0) >= 0 ? .spentySuccess : .spentyError
+                            )
+                        }
+                        .listRowBackground(Color.white)
+                    }
+                    .scrollContentBackground(.hidden)
+                }
+            }
+            .navigationTitle("All Accounts")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { dismiss() }
+                        .tint(.spentyPrimary)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Dashboard Filtered Transactions View
+
+struct DashboardFilteredTransactionsView: View {
+
+    let title: String
+    let transactions: [Transaction]
+    let emptyMessage: String
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                Color.spentyBgPrimary.ignoresSafeArea()
+
+                if transactions.isEmpty {
+                    ContentUnavailableView(emptyMessage, systemImage: "tray", description: nil)
+                } else {
+                    List(transactions) { txn in
+                        HStack(spacing: 12) {
+                            Circle()
+                                .fill(colorForType(txn.transactionType).opacity(0.12))
+                                .frame(width: 40, height: 40)
+                                .overlay(
+                                    Image(systemName: txn.transactionType?.lowercased() == "income" ? "arrow.down.circle.fill" : "arrow.up.circle.fill")
+                                        .font(.system(size: 16, weight: .semibold))
+                                        .foregroundColor(colorForType(txn.transactionType))
+                                )
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(txn.description ?? "Transaction")
+                                    .font(SpentyFonts.subheadline)
+                                    .lineLimit(1)
+                                if let date = txn.date {
+                                    Text(date, style: .date)
+                                        .font(SpentyFonts.caption1)
+                                        .foregroundColor(.spentyTextSecondary)
+                                }
+                            }
+
+                            Spacer()
+
+                            CurrencyText(
+                                amount: txn.amount ?? 0,
+                                font: SpentyFonts.amountSmall,
+                                color: colorForType(txn.transactionType)
+                            )
+                        }
+                        .listRowBackground(Color.white)
+                    }
+                    .scrollContentBackground(.hidden)
+                }
+            }
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { dismiss() }
+                        .tint(.spentyPrimary)
+                }
+            }
+        }
+    }
+
+    private func colorForType(_ type: String?) -> Color {
+        switch type?.lowercased() {
+        case "income": return .spentySuccess
+        case "expense": return .spentyAccent1
+        default: return .spentyTextSecondary
+        }
+    }
+}
+
+// MARK: - Dashboard All Pending View
+
+struct DashboardAllPendingView: View {
+
+    @Bindable var viewModel: DashboardViewModel
+    let onTap: (PendingTransaction) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                Color.spentyBgPrimary.ignoresSafeArea()
+
+                if viewModel.pendingTransactions.isEmpty {
+                    ContentUnavailableView("All Caught Up", systemImage: "checkmark.circle", description: Text("No pending transactions"))
+                } else {
+                    List(viewModel.pendingTransactions) { txn in
+                        Button {
+                            onTap(txn)
+                        } label: {
+                            HStack(spacing: 12) {
+                                Circle()
+                                    .fill(Color.spentyWarning.opacity(0.12))
+                                    .frame(width: 40, height: 40)
+                                    .overlay(
+                                        Image(systemName: txn.source == "sms" ? "message.fill" : "envelope.fill")
+                                            .font(.system(size: 16, weight: .semibold))
+                                            .foregroundColor(.spentyWarning)
+                                    )
+
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(txn.description ?? "Transaction")
+                                        .font(SpentyFonts.subheadline)
+                                        .foregroundColor(.spentyTextPrimary)
+                                        .lineLimit(1)
+                                    if let date = txn.date {
+                                        Text(date, style: .date)
+                                            .font(SpentyFonts.caption1)
+                                            .foregroundColor(.spentyTextSecondary)
+                                    }
+                                }
+
+                                Spacer()
+
+                                CurrencyText(
+                                    amount: txn.amount ?? 0,
+                                    font: SpentyFonts.amountSmall,
+                                    color: txn.transactionType == "income" ? .spentySuccess : .spentyAccent1
+                                )
+
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundColor(.spentyTextSecondary.opacity(0.5))
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .listRowBackground(Color.white)
+                    }
+                    .scrollContentBackground(.hidden)
+                }
+            }
+            .navigationTitle("Pending Approval")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { dismiss() }
+                        .tint(.spentyPrimary)
+                }
+            }
         }
     }
 }
