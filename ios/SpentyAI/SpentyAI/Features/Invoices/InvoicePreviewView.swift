@@ -3,14 +3,6 @@ import PDFKit
 
 struct InvoicePreviewView: View {
 
-    // MARK: - Brand
-
-    private enum Brand {
-        static let primary = Color(red: 0x3A / 255, green: 0x5C / 255, blue: 0x4A / 255)
-        static let background = Color(red: 0xF8 / 255, green: 0xF6 / 255, blue: 0xF3 / 255)
-        static let error = Color(red: 0x96 / 255, green: 0x45 / 255, blue: 0x3A / 255)
-    }
-
     // MARK: - State
 
     @Bindable var viewModel: InvoicesViewModel
@@ -25,13 +17,13 @@ struct InvoicePreviewView: View {
 
     var body: some View {
         ZStack {
-            Brand.background.ignoresSafeArea()
+            Color.spentyBgPrimary.ignoresSafeArea()
 
             Group {
                 if isLoadingPDF {
                     VStack(spacing: 12) {
                         ProgressView()
-                            .tint(Brand.primary)
+                            .tint(Color.spentyPrimary)
                         Text("Loading invoice PDF...")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
@@ -55,7 +47,7 @@ struct InvoicePreviewView: View {
                         showShareSheet = true
                     } label: {
                         Image(systemName: "square.and.arrow.up")
-                            .foregroundStyle(Brand.primary)
+                            .foregroundStyle(Color.spentyPrimary)
                     }
 
                     if UIPrintInteractionController.isPrintingAvailable {
@@ -63,7 +55,7 @@ struct InvoicePreviewView: View {
                             printPDF()
                         } label: {
                             Image(systemName: "printer")
-                                .foregroundStyle(Brand.primary)
+                                .foregroundStyle(Color.spentyPrimary)
                         }
                     }
                 }
@@ -124,7 +116,7 @@ struct InvoicePreviewView: View {
                     Spacer()
                     Text(formatCurrency(invoice.grandTotal ?? 0))
                         .font(.title3.weight(.bold))
-                        .foregroundStyle(Brand.primary)
+                        .foregroundStyle(Color.spentyPrimary)
                 }
             } header: {
                 Text("Totals")
@@ -158,7 +150,7 @@ struct InvoicePreviewView: View {
         VStack(spacing: 16) {
             Image(systemName: "exclamationmark.triangle")
                 .font(.largeTitle)
-                .foregroundStyle(Brand.error.opacity(0.6))
+                .foregroundStyle(Color.spentyError.opacity(0.6))
 
             Text("Could not load PDF")
                 .font(.headline)
@@ -172,7 +164,7 @@ struct InvoicePreviewView: View {
                 Task { await loadPDF() }
             }
             .buttonStyle(.borderedProminent)
-            .tint(Brand.primary)
+            .tint(Color.spentyPrimary)
         }
         .padding(32)
     }
@@ -239,7 +231,7 @@ struct PDFKitView: UIViewRepresentable {
         view.displayMode = .singlePageContinuous
         view.displayDirection = .vertical
         view.document = document
-        view.backgroundColor = UIColor(Color(red: 0xF8 / 255, green: 0xF6 / 255, blue: 0xF3 / 255))
+        view.backgroundColor = UIColor(Color.spentyBgPrimary)
         return view
     }
 
@@ -266,7 +258,11 @@ private struct InvoiceShareSheet: UIViewControllerRepresentable {
     NavigationStack {
         InvoicePreviewView(
             viewModel: InvoicesViewModel(),
-            invoice: Invoice(id: "1", invoiceNumber: "INV-001", customerName: "Test")
+            invoice: {
+                let json = #"{"invoiceId":"1","invoiceNumber":"INV-001","customerName":"Test"}"#
+                let decoder = JSONDecoder()
+                return try! decoder.decode(Invoice.self, from: Data(json.utf8))
+            }()
         )
     }
 }

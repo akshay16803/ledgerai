@@ -2,15 +2,6 @@ import SwiftUI
 
 struct RecordPaymentView: View {
 
-    // MARK: - Brand
-
-    private enum Brand {
-        static let primary = Color(red: 0x3A / 255, green: 0x5C / 255, blue: 0x4A / 255)
-        static let background = Color(red: 0xF8 / 255, green: 0xF6 / 255, blue: 0xF3 / 255)
-        static let error = Color(red: 0x96 / 255, green: 0x45 / 255, blue: 0x3A / 255)
-        static let warning = Color(red: 0xC2 / 255, green: 0x8C / 255, blue: 0x3C / 255)
-    }
-
     // MARK: - Payment methods
 
     private let paymentMethods = ["Cash", "Bank Transfer", "UPI", "Cheque", "Card", "Other"]
@@ -52,7 +43,7 @@ struct RecordPaymentView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Brand.background.ignoresSafeArea()
+                Color.spentyBgPrimary.ignoresSafeArea()
 
                 Form {
                     invoiceSummarySection
@@ -73,7 +64,7 @@ struct RecordPaymentView: View {
                         Task { await save() }
                     }
                     .fontWeight(.semibold)
-                    .foregroundStyle(Brand.primary)
+                    .foregroundStyle(Color.spentyPrimary)
                     .disabled(isSaving)
                 }
             }
@@ -113,7 +104,7 @@ struct RecordPaymentView: View {
                 Spacer()
                 Text(formatCurrency(balanceDue))
                     .font(.title3.weight(.bold))
-                    .foregroundStyle(balanceDue > 0 ? Brand.error : .green)
+                    .foregroundStyle(balanceDue > 0 ? Color.spentyError : .green)
             }
         } header: {
             Text("Invoice Summary")
@@ -146,11 +137,11 @@ struct RecordPaymentView: View {
                 if amount <= 0 {
                     Text("Amount must be greater than zero.")
                         .font(.caption)
-                        .foregroundStyle(Brand.error)
+                        .foregroundStyle(Color.spentyError)
                 } else if amount > balanceDue {
                     Text("Amount cannot exceed balance due (\(formatCurrency(balanceDue))).")
                         .font(.caption)
-                        .foregroundStyle(Brand.error)
+                        .foregroundStyle(Color.spentyError)
                 }
             }
 
@@ -237,6 +228,10 @@ struct RecordPaymentView: View {
 #Preview {
     RecordPaymentView(
         viewModel: InvoicesViewModel(),
-        invoice: Invoice(id: "1", invoiceNumber: "INV-001", customerName: "Test", grandTotal: 10000, amountPaid: 3000)
+        invoice: {
+            let json = #"{"invoiceId":"1","invoiceNumber":"INV-001","customerName":"Test","grandTotal":10000,"amountPaid":3000}"#
+            let decoder = JSONDecoder()
+            return try! decoder.decode(Invoice.self, from: Data(json.utf8))
+        }()
     )
 }
