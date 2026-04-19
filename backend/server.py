@@ -1909,7 +1909,8 @@ async def update_transaction(transaction_id: str, data: TransactionUpdate, user:
     if updated["status"] == "approved":
         await apply_transaction_to_balances(user["user_id"], updated)
 
-    return updated
+    enriched = await enrich_transactions_with_names(user["user_id"], [updated])
+    return enriched[0]
 
 
 @app.delete("/api/transactions/{transaction_id}")
@@ -1951,7 +1952,8 @@ async def approve_transaction(transaction_id: str, user: dict = Depends(get_curr
         asyncio.create_task(archive_email_for_transaction(user["user_id"], existing))
 
     existing["approved_at"] = datetime.now(timezone.utc)
-    return existing
+    enriched = await enrich_transactions_with_names(user["user_id"], [existing])
+    return enriched[0]
 
 
 @app.post("/api/transactions/{transaction_id}/reject")
@@ -2116,6 +2118,7 @@ async def list_pending_transactions(
     query = {"user_id": user["user_id"], "status": "pending_review"}
     txns = await db.transactions.find(query, {"_id": 0}).sort("date", -1).skip(skip).limit(limit).to_list(limit)
     total = await db.transactions.count_documents(query)
+    txns = await enrich_transactions_with_names(user["user_id"], txns)
     return {"items": txns, "total": total}
 
 
@@ -2143,6 +2146,7 @@ async def search_transactions(
 
     txns = await db.transactions.find(query, {"_id": 0}).sort("date", -1).skip(skip).limit(limit).to_list(limit)
     total = await db.transactions.count_documents(query)
+    txns = await enrich_transactions_with_names(user["user_id"], txns)
     return {"items": txns, "total": total}
 
 
@@ -2154,6 +2158,7 @@ async def list_recurring(user: dict = Depends(get_current_user)):
         {"user_id": user["user_id"], "is_recurring": True, "status": "approved"},
         {"_id": 0}
     ).sort("date", -1).to_list(200)
+    txns = await enrich_transactions_with_names(user["user_id"], txns)
     return {"transactions": txns, "total": len(txns)}
 
 

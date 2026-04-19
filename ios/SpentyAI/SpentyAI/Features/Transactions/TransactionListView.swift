@@ -385,14 +385,14 @@ struct TransactionListView: View {
                     .lineLimit(1)
 
                 HStack(spacing: 6) {
-                    Text(viewModel.categoryName(for: txn.categoryId))
+                    Text(txn.categoryName ?? viewModel.categoryName(for: txn.categoryId))
                         .font(SpentyFonts.caption1)
                         .foregroundColor(.spentyTextSecondary)
 
                     Text("·")
                         .foregroundColor(.spentyTextSecondary)
 
-                    Text(viewModel.accountName(for: txn.accountId))
+                    Text(txn.accountName ?? viewModel.accountName(for: txn.accountId))
                         .font(SpentyFonts.caption1)
                         .foregroundColor(.spentyTextSecondary)
                 }

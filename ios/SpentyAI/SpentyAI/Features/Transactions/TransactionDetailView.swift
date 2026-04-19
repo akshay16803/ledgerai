@@ -190,19 +190,19 @@ struct TransactionDetailView: View {
                 detailRow(label: "Description", value: desc)
                 divider
             }
-            if let name = transaction.categoryName ?? transaction.categoryId, !name.isEmpty {
+            if let name = transaction.categoryName, !name.isEmpty {
                 detailRow(label: "Category", value: name)
                 divider
             }
-            if let name = transaction.subcategoryName ?? transaction.subcategoryId, !name.isEmpty {
+            if let name = transaction.subcategoryName, !name.isEmpty {
                 detailRow(label: "Subcategory", value: name)
                 divider
             }
-            if let name = transaction.accountName ?? transaction.accountId, !name.isEmpty {
+            if let name = transaction.accountName, !name.isEmpty {
                 detailRow(label: "Account", value: name)
                 divider
             }
-            if isTransfer, let name = transaction.toAccountName ?? transaction.toAccountId, !name.isEmpty {
+            if isTransfer, let name = transaction.toAccountName, !name.isEmpty {
                 detailRow(label: "To Account", value: name)
                 divider
             }
