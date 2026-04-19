@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>SpentyAI — Autonomous Accounting</title>
+    <script>
+      // GitHub Pages SPA redirect:
+      // When GitHub Pages serves this 404 page for any route (e.g. /transactions),
+      // we redirect to the root index.html with the original path stored in
+      // sessionStorage so the React app can restore the correct route.
+      var pathSegmentsToKeep = 0; // 0 for custom domain, 1 for github.io/repo
+      var l = window.location;
+      var path = l.pathname.slice(1);
+      var search = l.search;
+      var hash = l.hash;
+      sessionStorage.setItem('spa-redirect', JSON.stringify({ path: path, search: search, hash: hash }));
+      l.replace(
+        l.protocol + '//' + l.hostname + (l.port ? ':' + l.port : '') +
+        l.pathname.split('/').slice(0, 1 + pathSegmentsToKeep).join('/') + '/' +
+        '?spa-redirect'
+      );
+    </script>
+  </head>
+  <body></body>
+</html>
