@@ -1552,6 +1552,7 @@ async def list_transactions(
     to_date: Optional[str] = None,
     account_id: Optional[str] = None,
     category_id: Optional[str] = None,
+    subcategory_id: Optional[str] = None,
     min_amount: Optional[float] = None,
     max_amount: Optional[float] = None,
     search: Optional[str] = None,
@@ -1567,6 +1568,8 @@ async def list_transactions(
         query["$or"] = [{"account_id": account_id}, {"to_account_id": account_id}]
     if category_id:
         query["category_id"] = category_id
+    if subcategory_id:
+        query["subcategory_id"] = subcategory_id
     if from_date:
         query.setdefault("date", {})["$gte"] = from_date
     if to_date:

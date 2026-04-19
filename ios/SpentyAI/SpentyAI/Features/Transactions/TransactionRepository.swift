@@ -97,6 +97,8 @@ final class TransactionRepository: Sendable {
         limit: Int = 30,
         type: String? = nil,
         accountId: String? = nil,
+        categoryId: String? = nil,
+        subcategoryId: String? = nil,
         dateFrom: String? = nil,
         dateTo: String? = nil,
         status: String? = nil
@@ -105,6 +107,8 @@ final class TransactionRepository: Sendable {
         var query: [String] = ["skip=\(skip)", "limit=\(limit)"]
         if let type, !type.isEmpty { query.append("transaction_type=\(type)") }
         if let accountId, !accountId.isEmpty { query.append("account_id=\(accountId)") }
+        if let categoryId, !categoryId.isEmpty { query.append("category_id=\(categoryId)") }
+        if let subcategoryId, !subcategoryId.isEmpty { query.append("subcategory_id=\(subcategoryId)") }
         if let dateFrom, !dateFrom.isEmpty { query.append("from_date=\(dateFrom)") }
         if let dateTo, !dateTo.isEmpty { query.append("to_date=\(dateTo)") }
         if let status, !status.isEmpty { query.append("status=\(status)") }

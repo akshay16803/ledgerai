@@ -3,7 +3,7 @@ import { api } from '../lib/api';
 import { getCached, setCache } from '../lib/cache';
 import {
   TrendUp, TrendDown, ArrowsLeftRight, FunnelSimple,
-  CurrencyInr, ChartBar, ChartPie, CaretDown, CaretRight
+  CurrencyInr, ChartBar, ChartPie, CaretDown, CaretRight, X, ArrowRight
 } from '@phosphor-icons/react';
 
 function formatCurrency(amount) {
@@ -175,6 +175,161 @@ function DonutChart({ data, total, typeLabel }) {
   );
 }
 
+/* ── Transaction Drill-Down Panel ────────────────────────────────── */
+
+function TransactionDrillDown({ drillDown, onClose, startDate, endDate, catType }) {
+  const [transactions, setTransactions] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [filterFrom, setFilterFrom] = useState(startDate || '');
+  const [filterTo, setFilterTo] = useState(endDate || '');
+
+  const loadTxns = useCallback(async (fd, td) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const params = new URLSearchParams();
+      params.set('status', 'approved');
+      params.set('limit', '500');
+      if (catType) params.set('transaction_type', catType);
+      if (drillDown.categoryId) params.set('category_id', drillDown.categoryId);
+      if (drillDown.subcategoryId) params.set('subcategory_id', drillDown.subcategoryId);
+      if (fd) params.set('from_date', fd);
+      if (td) params.set('to_date', td);
+      const res = await api.get(`/api/transactions?${params}`);
+      setTransactions(res.transactions || []);
+    } catch (e) {
+      setError(e.message || 'Failed to load transactions');
+    }
+    setLoading(false);
+  }, [catType, drillDown]);
+
+  useEffect(() => {
+    loadTxns(filterFrom, filterTo);
+  }, [loadTxns, filterFrom, filterTo]);
+
+  const totalAmount = transactions.reduce((s, t) => s + Math.abs(t.amount || 0), 0);
+
+  return (
+    <div style={{
+      position: 'fixed', top: 0, right: 0, bottom: 0, width: '100%', maxWidth: 560,
+      background: '#fff', boxShadow: '-4px 0 24px rgba(0,0,0,0.12)', zIndex: 1000,
+      display: 'flex', flexDirection: 'column',
+    }}>
+      {/* Header */}
+      <div style={{
+        padding: '16px 20px', borderBottom: '1px solid var(--border-subtle)',
+        display: 'flex', alignItems: 'center', gap: 12,
+        background: 'var(--bg-secondary)',
+      }}>
+        <button onClick={onClose} style={{
+          padding: 4, background: 'none', border: 'none', cursor: 'pointer',
+          color: 'var(--text-muted)', display: 'flex', alignItems: 'center',
+        }}>
+          <X size={20} />
+        </button>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 14, fontWeight: 600 }}>
+            {drillDown.subcategoryName || drillDown.categoryName}
+          </div>
+          {drillDown.subcategoryName && (
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4, marginTop: 2 }}>
+              {drillDown.categoryName}
+              <ArrowRight size={10} />
+              {drillDown.subcategoryName}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Date filter */}
+      <div style={{
+        padding: '10px 20px', display: 'flex', gap: 10, alignItems: 'center',
+        borderBottom: '1px solid var(--border-subtle)', background: '#fafafa',
+      }}>
+        <FunnelSimple size={14} style={{ color: 'var(--text-muted)' }} />
+        <input type="date" value={filterFrom}
+          onChange={e => setFilterFrom(e.target.value)}
+          style={{ padding: '4px 8px', border: '1px solid var(--border-strong)', borderRadius: 2, fontSize: 12, fontFamily: 'var(--font-body)' }}
+        />
+        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>to</span>
+        <input type="date" value={filterTo}
+          onChange={e => setFilterTo(e.target.value)}
+          style={{ padding: '4px 8px', border: '1px solid var(--border-strong)', borderRadius: 2, fontSize: 12, fontFamily: 'var(--font-body)' }}
+        />
+      </div>
+
+      {/* Summary */}
+      {!loading && !error && (
+        <div style={{ padding: '10px 20px', borderBottom: '1px solid var(--border-subtle)', display: 'flex', justifyContent: 'space-between' }}>
+          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+            {transactions.length} transaction{transactions.length !== 1 ? 's' : ''}
+          </span>
+          <span className="mono" style={{ fontSize: 13, fontWeight: 600 }}>
+            Total: {formatCurrency(totalAmount)}
+          </span>
+        </div>
+      )}
+
+      {/* Content */}
+      <div style={{ flex: 1, overflowY: 'auto' }}>
+        {loading ? (
+          <div className="mono" style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
+            Loading transactions...
+          </div>
+        ) : error ? (
+          <div style={{ padding: 40, textAlign: 'center', color: 'var(--error)', fontSize: 13 }}>{error}</div>
+        ) : transactions.length === 0 ? (
+          <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
+            No transactions found for this filter.
+          </div>
+        ) : (
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+            <thead>
+              <tr style={{ borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-secondary)' }}>
+                <th style={{ ...thStyle, fontSize: 10 }}>Date</th>
+                <th style={{ ...thStyle, fontSize: 10 }}>Description</th>
+                <th style={{ ...thStyle, fontSize: 10, textAlign: 'right' }}>Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              {transactions.map(txn => (
+                <tr key={txn.transaction_id} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                  <td className="mono" style={{ ...tdStyle, fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                    {txn.date ? txn.date.slice(0, 10) : '—'}
+                  </td>
+                  <td style={{ ...tdStyle, maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {txn.description || 'No description'}
+                  </td>
+                  <td className="mono" style={{
+                    ...tdStyle, textAlign: 'right', fontWeight: 600,
+                    color: txn.transaction_type === 'income' ? 'var(--success)' : 'var(--error)',
+                  }}>
+                    {formatCurrency(Math.abs(txn.amount || 0))}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ── Overlay Backdrop ──────────────────────────────────────────── */
+
+function Overlay({ onClick }) {
+  return (
+    <div onClick={onClick} style={{
+      position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+      background: 'rgba(0,0,0,0.3)', zIndex: 999,
+    }} />
+  );
+}
+
+/* ── Main Reports Page ──────────────────────────────────────────── */
+
 export default function Reports() {
   const cached = getCached('reports');
   const [summary, setSummary] = useState(cached?.summary || null);
@@ -186,6 +341,7 @@ export default function Reports() {
   const [endDate, setEndDate] = useState('');
   const [catType, setCatType] = useState('expense');
   const [expandedCat, setExpandedCat] = useState(null);
+  const [drillDown, setDrillDown] = useState(null);
 
   const loadData = useCallback(async (sd, ed) => {
     try {
@@ -223,6 +379,40 @@ export default function Reports() {
     const range = PERIOD_PRESETS[idx].getRange();
     setStartDate(range.start);
     setEndDate(range.end);
+  };
+
+  const handleCategoryClick = (cat) => {
+    const hasSubs = cat.subcategories?.length > 0;
+    if (hasSubs) {
+      // Toggle expand to show subcategories
+      setExpandedCat(expandedCat === cat.category_id ? null : cat.category_id);
+    } else {
+      // No subcategories — drill down into transactions directly
+      setDrillDown({
+        categoryId: cat.category_id,
+        categoryName: cat.category_name,
+        subcategoryId: null,
+        subcategoryName: null,
+      });
+    }
+  };
+
+  const handleSubcategoryClick = (cat, sub) => {
+    setDrillDown({
+      categoryId: cat.category_id,
+      categoryName: cat.category_name,
+      subcategoryId: sub.subcategory_id,
+      subcategoryName: sub.subcategory_name,
+    });
+  };
+
+  const handleViewAllInCategory = (cat) => {
+    setDrillDown({
+      categoryId: cat.category_id,
+      categoryName: cat.category_name,
+      subcategoryId: null,
+      subcategoryName: null,
+    });
   };
 
   const catData = categories?.[catType] || [];
@@ -357,16 +547,18 @@ export default function Reports() {
                   return (
                     <Fragment key={cat.category_id}>
                       <tr data-testid={`cat-row-${cat.category_id}`}
-                        onClick={() => hasSubs && setExpandedCat(isExpanded ? null : cat.category_id)}
+                        onClick={() => handleCategoryClick(cat)}
                         style={{
                           borderBottom: '1px solid var(--border-subtle)',
-                          cursor: hasSubs ? 'pointer' : 'default',
+                          cursor: 'pointer',
                           background: isExpanded ? 'rgba(194,109,92,0.04)' : '#fff'
                         }}>
                         <td style={{ ...tdStyle, width: 30 }}>
-                          {hasSubs && (isExpanded ?
+                          {hasSubs ? (isExpanded ?
                             <CaretDown size={14} style={{ color: 'var(--text-muted)' }} /> :
                             <CaretRight size={14} style={{ color: 'var(--text-muted)' }} />
+                          ) : (
+                            <ArrowRight size={14} style={{ color: 'var(--text-muted)' }} />
                           )}
                         </td>
                         <td style={tdStyle}>
@@ -385,28 +577,50 @@ export default function Reports() {
                           {cat.count}
                         </td>
                       </tr>
-                      {isExpanded && (cat.subcategories || []).map(sub => {
-                        const subVal = catType === 'expense' ? sub.expense : sub.income;
-                        const subPct = catTotal > 0 ? ((subVal / catTotal) * 100).toFixed(1) : 0;
-                        return (
-                          <tr key={sub.subcategory_id} data-testid={`sub-row-${sub.subcategory_id}`}
-                            style={{ borderBottom: '1px solid var(--border-subtle)', background: 'rgba(194,109,92,0.02)' }}>
-                            <td style={tdStyle}></td>
-                            <td style={{ ...tdStyle, paddingLeft: 48, fontSize: 12, color: 'var(--text-secondary)' }}>
-                              {sub.subcategory_name}
-                            </td>
-                            <td className="mono" style={{ ...tdStyle, textAlign: 'right', fontSize: 12 }}>
-                              {formatCurrency(subVal)}
-                            </td>
-                            <td className="mono" style={{ ...tdStyle, textAlign: 'right', fontSize: 11, color: 'var(--text-muted)' }}>
-                              {subPct}%
-                            </td>
-                            <td className="mono" style={{ ...tdStyle, textAlign: 'center', fontSize: 12, color: 'var(--text-muted)' }}>
-                              {sub.count}
+                      {isExpanded && (
+                        <>
+                          {(cat.subcategories || []).map(sub => {
+                            const subVal = catType === 'expense' ? sub.expense : sub.income;
+                            const subPct = catTotal > 0 ? ((subVal / catTotal) * 100).toFixed(1) : 0;
+                            return (
+                              <tr key={sub.subcategory_id} data-testid={`sub-row-${sub.subcategory_id}`}
+                                onClick={() => handleSubcategoryClick(cat, sub)}
+                                style={{
+                                  borderBottom: '1px solid var(--border-subtle)',
+                                  background: 'rgba(194,109,92,0.02)',
+                                  cursor: 'pointer',
+                                }}>
+                                <td style={tdStyle}>
+                                  <ArrowRight size={10} style={{ color: 'var(--text-muted)', marginLeft: 8 }} />
+                                </td>
+                                <td style={{ ...tdStyle, paddingLeft: 48, fontSize: 12, color: 'var(--text-secondary)' }}>
+                                  {sub.subcategory_name}
+                                </td>
+                                <td className="mono" style={{ ...tdStyle, textAlign: 'right', fontSize: 12 }}>
+                                  {formatCurrency(subVal)}
+                                </td>
+                                <td className="mono" style={{ ...tdStyle, textAlign: 'right', fontSize: 11, color: 'var(--text-muted)' }}>
+                                  {subPct}%
+                                </td>
+                                <td className="mono" style={{ ...tdStyle, textAlign: 'center', fontSize: 12, color: 'var(--text-muted)' }}>
+                                  {sub.count}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                          {/* View all in category link */}
+                          <tr onClick={() => handleViewAllInCategory(cat)}
+                            style={{
+                              borderBottom: '1px solid var(--border-subtle)',
+                              background: 'rgba(194,109,92,0.02)',
+                              cursor: 'pointer',
+                            }}>
+                            <td colSpan={5} style={{ padding: '8px 16px 8px 48px', fontSize: 12, color: 'var(--brand-primary)', fontWeight: 600 }}>
+                              View all transactions in {cat.category_name} →
                             </td>
                           </tr>
-                        );
-                      })}
+                        </>
+                      )}
                     </Fragment>
                   );
                 })}
@@ -461,6 +675,20 @@ export default function Reports() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {/* Drill-Down Slide Panel */}
+      {drillDown && (
+        <>
+          <Overlay onClick={() => setDrillDown(null)} />
+          <TransactionDrillDown
+            drillDown={drillDown}
+            onClose={() => setDrillDown(null)}
+            startDate={startDate}
+            endDate={endDate}
+            catType={catType}
+          />
+        </>
       )}
     </div>
   );

@@ -5,6 +5,7 @@ struct ReportsView: View {
 
     @State private var vm = ReportsViewModel()
     @State private var expandedCategoryId: String?
+    @State private var selectedDrillDown: ReportDrillDown?
 
     // MARK: - Body
 
@@ -48,6 +49,14 @@ struct ReportsView: View {
                 if let url = vm.exportedFileURL {
                     ShareSheet(items: [url])
                 }
+            }
+            .sheet(item: $selectedDrillDown) { drillDown in
+                ReportTransactionsView(
+                    drillDown: drillDown,
+                    startDate: vm.startDate,
+                    endDate: vm.endDate,
+                    transactionType: vm.catType.rawValue.lowercased()
+                )
             }
         }
     }
@@ -232,6 +241,7 @@ struct ReportsView: View {
 
     private func categoryRow(_ category: ReportCategory) -> some View {
         VStack(spacing: 0) {
+            // Category header row
             Button {
                 withAnimation(.easeInOut(duration: 0.2)) {
                     if expandedCategoryId == category.id {
@@ -284,9 +294,117 @@ struct ReportsView: View {
             }
             .frame(height: 3)
 
+            // Subcategory rows (when expanded)
+            if expandedCategoryId == category.id {
+                let subs = category.subcategories ?? []
+                if subs.isEmpty {
+                    // No subcategories — tapping category shows all transactions in that category
+                    Button {
+                        selectedDrillDown = ReportDrillDown(
+                            categoryId: category.categoryId,
+                            categoryName: category.name ?? "Unknown",
+                            subcategoryId: nil,
+                            subcategoryName: nil
+                        )
+                    } label: {
+                        HStack {
+                            Image(systemName: "doc.text.magnifyingglass")
+                                .font(.system(size: 12))
+                                .foregroundColor(.spentyPrimary)
+                            Text("View all transactions")
+                                .font(SpentyFonts.footnote)
+                                .foregroundColor(.spentyPrimary)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 10))
+                                .foregroundColor(.spentyTextSecondary)
+                        }
+                        .padding(.vertical, 8)
+                        .padding(.leading, 16)
+                    }
+                } else {
+                    VStack(spacing: 0) {
+                        ForEach(subs) { sub in
+                            Button {
+                                selectedDrillDown = ReportDrillDown(
+                                    categoryId: category.categoryId,
+                                    categoryName: category.name ?? "Unknown",
+                                    subcategoryId: sub.subcategoryId,
+                                    subcategoryName: sub.subcategoryName
+                                )
+                            } label: {
+                                subcategoryRow(sub, categoryTotal: abs(category.amount ?? 0))
+                            }
+                        }
+                        // "View all" row at bottom
+                        Button {
+                            selectedDrillDown = ReportDrillDown(
+                                categoryId: category.categoryId,
+                                categoryName: category.name ?? "Unknown",
+                                subcategoryId: nil,
+                                subcategoryName: nil
+                            )
+                        } label: {
+                            HStack {
+                                Image(systemName: "doc.text.magnifyingglass")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(.spentyPrimary)
+                                Text("View all in \(category.name ?? "category")")
+                                    .font(SpentyFonts.caption1)
+                                    .foregroundColor(.spentyPrimary)
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 10))
+                                    .foregroundColor(.spentyTextSecondary)
+                            }
+                            .padding(.vertical, 8)
+                            .padding(.leading, 16)
+                        }
+                    }
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+            }
+
             Divider()
                 .padding(.top, 8)
         }
+    }
+
+    private func subcategoryRow(_ sub: ReportSubcategory, categoryTotal: Double) -> some View {
+        HStack {
+            Circle()
+                .fill(Color.spentyPrimary.opacity(0.3))
+                .frame(width: 6, height: 6)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(sub.subcategoryName ?? "Unknown")
+                    .font(SpentyFonts.footnote)
+                    .foregroundColor(.spentyTextPrimary)
+                Text("\(sub.count ?? 0) transactions")
+                    .font(SpentyFonts.caption2)
+                    .foregroundColor(.spentyTextSecondary)
+            }
+
+            Spacer()
+
+            VStack(alignment: .trailing, spacing: 1) {
+                Text(formatCurrency(abs(sub.total ?? 0)))
+                    .font(SpentyFonts.footnote.weight(.medium))
+                    .foregroundColor(.spentyTextPrimary)
+                if categoryTotal > 0 {
+                    let pct = abs(sub.total ?? 0) / categoryTotal * 100
+                    Text(String(format: "%.1f%%", pct))
+                        .font(SpentyFonts.caption2)
+                        .foregroundColor(.spentyTextSecondary)
+                }
+            }
+
+            Image(systemName: "chevron.right")
+                .font(.system(size: 10))
+                .foregroundColor(.spentyTextSecondary)
+        }
+        .padding(.vertical, 6)
+        .padding(.leading, 16)
     }
 
     // MARK: - Export Section
@@ -354,6 +472,276 @@ struct ReportsView: View {
         }
         guard vm.totalCategoryAmount > 0 else { return 0 }
         return min(abs(category.amount ?? 0) / vm.totalCategoryAmount, 1.0)
+    }
+}
+
+// MARK: - Drill-Down Data Model
+
+struct ReportDrillDown: Identifiable {
+    let id = UUID()
+    let categoryId: String?
+    let categoryName: String
+    let subcategoryId: String?
+    let subcategoryName: String?
+
+    var title: String {
+        if let sub = subcategoryName {
+            return sub
+        }
+        return categoryName
+    }
+}
+
+// MARK: - Transaction Drill-Down View
+
+struct ReportTransactionsView: View {
+    let drillDown: ReportDrillDown
+    let startDate: Date
+    let endDate: Date
+    let transactionType: String
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var transactions: [Transaction] = []
+    @State private var isLoading = true
+    @State private var errorMessage: String?
+    @State private var filterDateFrom: Date
+    @State private var filterDateTo: Date
+    @State private var showDateFilter = false
+
+    private let repository = TransactionRepository.shared
+    private static let queryDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        return f
+    }()
+
+    init(drillDown: ReportDrillDown, startDate: Date, endDate: Date, transactionType: String) {
+        self.drillDown = drillDown
+        self.startDate = startDate
+        self.endDate = endDate
+        self.transactionType = transactionType
+        self._filterDateFrom = State(initialValue: startDate)
+        self._filterDateTo = State(initialValue: endDate)
+    }
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                // Date filter bar
+                dateFilterBar
+
+                if isLoading {
+                    Spacer()
+                    ProgressView()
+                        .tint(Color.spentyPrimary)
+                    Spacer()
+                } else if let error = errorMessage {
+                    Spacer()
+                    VStack(spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle")
+                            .font(.system(size: 32))
+                            .foregroundColor(.spentyWarning)
+                        Text(error)
+                            .font(SpentyFonts.footnote)
+                            .foregroundColor(.spentyTextSecondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding()
+                    Spacer()
+                } else if transactions.isEmpty {
+                    Spacer()
+                    VStack(spacing: 8) {
+                        Image(systemName: "tray")
+                            .font(.system(size: 32))
+                            .foregroundColor(.spentyTextSecondary)
+                        Text("No transactions found")
+                            .font(SpentyFonts.footnote)
+                            .foregroundColor(.spentyTextSecondary)
+                    }
+                    Spacer()
+                } else {
+                    // Summary header
+                    summaryHeader
+
+                    // Transactions list
+                    List {
+                        ForEach(transactions) { txn in
+                            transactionRow(txn)
+                                .listRowBackground(Color.spentyCardBg)
+                        }
+                    }
+                    .listStyle(.plain)
+                }
+            }
+            .background(Color.spentyBgPrimary.ignoresSafeArea())
+            .navigationTitle(drillDown.title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Close") { dismiss() }
+                        .foregroundColor(.spentyPrimary)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        withAnimation { showDateFilter.toggle() }
+                    } label: {
+                        Image(systemName: "line.3.horizontal.decrease.circle")
+                            .foregroundColor(.spentyPrimary)
+                    }
+                }
+            }
+            .task {
+                await loadTransactions()
+            }
+        }
+    }
+
+    private var dateFilterBar: some View {
+        VStack(spacing: 0) {
+            if drillDown.subcategoryId == nil {
+                // Show breadcrumb: Category name
+                HStack {
+                    Image(systemName: "folder.fill")
+                        .font(.system(size: 12))
+                        .foregroundColor(.spentyPrimary)
+                    Text("All transactions in \(drillDown.categoryName)")
+                        .font(SpentyFonts.caption1)
+                        .foregroundColor(.spentyTextSecondary)
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(Color.spentyPrimary.opacity(0.08))
+            } else {
+                // Show breadcrumb: Category > Subcategory
+                HStack {
+                    Image(systemName: "folder.fill")
+                        .font(.system(size: 12))
+                        .foregroundColor(.spentyPrimary)
+                    Text(drillDown.categoryName)
+                        .font(SpentyFonts.caption1)
+                        .foregroundColor(.spentyTextSecondary)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 8))
+                        .foregroundColor(.spentyTextSecondary)
+                    Text(drillDown.subcategoryName ?? "")
+                        .font(SpentyFonts.caption1.weight(.medium))
+                        .foregroundColor(.spentyTextPrimary)
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(Color.spentyPrimary.opacity(0.08))
+            }
+
+            if showDateFilter {
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("From")
+                            .font(SpentyFonts.caption2)
+                            .foregroundColor(.spentyTextSecondary)
+                        DatePicker("", selection: $filterDateFrom, displayedComponents: .date)
+                            .labelsHidden()
+                            .tint(Color.spentyPrimary)
+                    }
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("To")
+                            .font(SpentyFonts.caption2)
+                            .foregroundColor(.spentyTextSecondary)
+                        DatePicker("", selection: $filterDateTo, displayedComponents: .date)
+                            .labelsHidden()
+                            .tint(Color.spentyPrimary)
+                    }
+                    Button {
+                        Task { await loadTransactions() }
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.white)
+                            .frame(width: 36, height: 36)
+                            .background(Color.spentyPrimary)
+                            .cornerRadius(8)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+    }
+
+    private var summaryHeader: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(transactions.count) transactions")
+                    .font(SpentyFonts.footnote.weight(.medium))
+                    .foregroundColor(.spentyTextPrimary)
+                let total = transactions.reduce(0.0) { $0 + abs($1.amount ?? 0) }
+                Text("Total: \(formatCurrency(total))")
+                    .font(SpentyFonts.caption1)
+                    .foregroundColor(.spentyTextSecondary)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+    }
+
+    private func transactionRow(_ txn: Transaction) -> some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(txn.description ?? "No description")
+                    .font(SpentyFonts.subheadline)
+                    .foregroundColor(.spentyTextPrimary)
+                    .lineLimit(1)
+                if let date = txn.date {
+                    Text(date, style: .date)
+                        .font(SpentyFonts.caption2)
+                        .foregroundColor(.spentyTextSecondary)
+                }
+            }
+            Spacer()
+            Text(formatCurrency(abs(txn.amount ?? 0)))
+                .font(SpentyFonts.amountSmall)
+                .foregroundColor(txn.transactionType == "income" ? .spentySuccess : .spentyError)
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func loadTransactions() async {
+        isLoading = true
+        errorMessage = nil
+        do {
+            let fromStr = Self.queryDateFormatter.string(from: filterDateFrom)
+            let toStr = Self.queryDateFormatter.string(from: filterDateTo)
+            let response = try await repository.fetchTransactions(
+                page: 1,
+                limit: 500,
+                type: transactionType,
+                categoryId: drillDown.categoryId,
+                subcategoryId: drillDown.subcategoryId,
+                dateFrom: fromStr,
+                dateTo: toStr,
+                status: "approved"
+            )
+            transactions = response.transactions
+        } catch {
+            if let apiError = error as? APIError {
+                errorMessage = apiError.localizedDescription
+            } else {
+                errorMessage = error.localizedDescription
+            }
+        }
+        isLoading = false
+    }
+
+    private func formatCurrency(_ value: Double) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .currency
+        formatter.currencyCode = "INR"
+        formatter.maximumFractionDigits = 0
+        return formatter.string(from: NSNumber(value: value)) ?? "\(value)"
     }
 }
 
