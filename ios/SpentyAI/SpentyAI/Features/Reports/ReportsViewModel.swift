@@ -93,23 +93,21 @@ final class ReportsViewModel {
         showError = false
 
         // Run each call independently so one failure does not cancel the others.
-        async let summaryResult = Result { try await repository.getSummary(from: startDate, to: endDate) }
-        async let periodsResult = Result { try await repository.getPeriods(from: startDate, to: endDate) }
-        async let categoriesResult = Result { try await repository.getCategories(
-            from: startDate, to: endDate, type: catType.rawValue.lowercased()
+        let summaryTask = Task { try await self.repository.getSummary(from: self.startDate, to: self.endDate) }
+        let periodsTask = Task { try await self.repository.getPeriods(from: self.startDate, to: self.endDate) }
+        let categoriesTask = Task { try await self.repository.getCategories(
+            from: self.startDate, to: self.endDate, type: self.catType.rawValue.lowercased()
         ) }
 
-        let (sRes, pRes, cRes) = await (summaryResult, periodsResult, categoriesResult)
-
-        switch sRes {
+        switch await summaryTask.result {
         case .success(let s): summary = s
         case .failure(let e): handleError(e)
         }
-        switch pRes {
+        switch await periodsTask.result {
         case .success(let p): periods = p
         case .failure(let e): handleError(e)
         }
-        switch cRes {
+        switch await categoriesTask.result {
         case .success(let c): categories = c
         case .failure(let e): handleError(e)
         }
