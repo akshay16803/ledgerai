@@ -2844,7 +2844,7 @@ async def dashboard_summary(user: dict = Depends(get_current_user)):
             expense_this_month += t["amount"]
 
     pending_review = await db.transactions.count_documents(
-        {"user_id": user_id, "status": "pending_review"}
+        {"user_id": user_id, "status": "pending_review", "source": {"$in": ["email", "sms", "statement"]}}
     )
 
     recent_txns = await db.transactions.find(
