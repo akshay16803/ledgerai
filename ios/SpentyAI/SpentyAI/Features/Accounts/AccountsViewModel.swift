@@ -148,6 +148,32 @@ final class AccountsViewModel {
     }
 
     @MainActor
+    func updateOpeningBalance(_ accountId: String, amount: Double, asOfDate: Date) async -> Bool {
+        isSaving = true
+        errorMessage = nil
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyy-MM-dd"
+        dateFormatter.locale = Locale(identifier: "en_US_POSIX")
+        let payload: [String: Any] = [
+            "openingBalance": amount,
+            "balanceAsOfDate": dateFormatter.string(from: asOfDate)
+        ]
+        do {
+            let updated = try await repository.updateAccount(accountId, payload)
+            if let idx = accounts.firstIndex(where: { $0.id == accountId }) {
+                accounts[idx] = updated
+            }
+            selectedAccount = updated
+            isSaving = false
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            isSaving = false
+            return false
+        }
+    }
+
+    @MainActor
     func deleteAccount(_ id: String) async {
         do {
             try await repository.deleteAccount(id)

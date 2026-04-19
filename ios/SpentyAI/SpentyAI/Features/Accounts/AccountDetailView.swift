@@ -9,6 +9,10 @@ struct AccountDetailView: View {
     @State private var showEditSheet = false
     @State private var selectedTab = 0
     @State private var selectedTransaction: Transaction?
+    @State private var isEditingOpeningBalance = false
+    @State private var editOpeningBalance = ""
+    @State private var editAsOfDate = Date()
+    @State private var isSavingBalance = false
 
     private var account: Account? { viewModel.selectedAccount }
     private var isLoan: Bool { account?.accountType?.lowercased() == "liability" }
@@ -130,10 +134,147 @@ struct AccountDetailView: View {
             .frame(maxWidth: .infinity)
             .padding(.vertical, 8)
 
+            // Opening Balance Editor
+            openingBalanceSection(account)
+
             // Detail grid
             detailGrid(account)
         }
         .cardStyle()
+    }
+
+    private func openingBalanceSection(_ account: Account) -> some View {
+        VStack(spacing: 0) {
+            Divider()
+                .padding(.bottom, 12)
+
+            if isEditingOpeningBalance {
+                // Editing mode
+                VStack(spacing: 12) {
+                    HStack {
+                        Text("Set Opening Balance")
+                            .font(SpentyFonts.subheadline.weight(.semibold))
+                            .foregroundColor(.spentyTextPrimary)
+                        Spacer()
+                        Button {
+                            withAnimation { isEditingOpeningBalance = false }
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 20))
+                                .foregroundColor(.spentyTextSecondary)
+                        }
+                    }
+
+                    HStack(spacing: 12) {
+                        Image(systemName: "indianrupeesign.circle")
+                            .font(.system(size: 16))
+                            .foregroundColor(.spentyPrimary)
+                            .frame(width: 24)
+                        Text("Amount")
+                            .font(SpentyFonts.body)
+                            .foregroundColor(.spentyTextPrimary)
+                        Spacer()
+                        TextField("0.00", text: $editOpeningBalance)
+                            .keyboardType(.decimalPad)
+                            .font(SpentyFonts.amountSmall)
+                            .foregroundColor(.spentyTextPrimary)
+                            .multilineTextAlignment(.trailing)
+                            .frame(maxWidth: 150)
+                    }
+                    .padding(.vertical, 8)
+
+                    Divider().padding(.leading, 48)
+
+                    HStack(spacing: 12) {
+                        Image(systemName: "calendar")
+                            .font(.system(size: 16))
+                            .foregroundColor(.spentyPrimary)
+                            .frame(width: 24)
+                        Text("As-of Date")
+                            .font(SpentyFonts.body)
+                            .foregroundColor(.spentyTextPrimary)
+                        Spacer()
+                        DatePicker("", selection: $editAsOfDate, displayedComponents: .date)
+                            .labelsHidden()
+                            .tint(Color.spentyPrimary)
+                    }
+                    .padding(.vertical, 4)
+
+                    Text("Balance will be recalculated: opening balance + income − expenses ± transfers from this date onward.")
+                        .font(SpentyFonts.caption2)
+                        .foregroundColor(.spentyTextSecondary)
+                        .padding(.top, 4)
+
+                    Button {
+                        Task { await saveOpeningBalance() }
+                    } label: {
+                        HStack {
+                            if isSavingBalance {
+                                ProgressView()
+                                    .tint(.white)
+                                    .scaleEffect(0.8)
+                            }
+                            Text(isSavingBalance ? "Saving..." : "Save & Recalculate")
+                        }
+                        .primaryButtonStyle()
+                    }
+                    .disabled(isSavingBalance || editOpeningBalance.isEmpty)
+                    .padding(.top, 4)
+                }
+                .padding(12)
+                .background(Color.spentyBgPrimary)
+                .cornerRadius(12)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            } else {
+                // Display mode — tappable row
+                Button {
+                    editOpeningBalance = account.openingBalance.map { String(format: "%.2f", $0) } ?? ""
+                    editAsOfDate = account.balanceAsOfDate ?? Date()
+                    withAnimation { isEditingOpeningBalance = true }
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "banknote")
+                            .font(.system(size: 16))
+                            .foregroundColor(.spentyPrimary)
+                            .frame(width: 24)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Opening Balance")
+                                .font(SpentyFonts.caption1)
+                                .foregroundColor(.spentyTextSecondary)
+                            if let opening = account.openingBalance {
+                                Text(formatCurrency(opening, account.currency))
+                                    .font(SpentyFonts.subheadline.weight(.medium))
+                                    .foregroundColor(.spentyTextPrimary)
+                            } else {
+                                Text("Not set — tap to add")
+                                    .font(SpentyFonts.subheadline)
+                                    .foregroundColor(.spentyTextSecondary)
+                            }
+                        }
+                        Spacer()
+                        if let asOfDate = account.balanceAsOfDate {
+                            Text("as-of \(asOfDate, style: .date)")
+                                .font(SpentyFonts.caption2)
+                                .foregroundColor(.spentyTextSecondary)
+                        }
+                        Image(systemName: "pencil.circle")
+                            .font(.system(size: 18))
+                            .foregroundColor(.spentyPrimary)
+                    }
+                    .padding(.vertical, 8)
+                }
+            }
+        }
+    }
+
+    private func saveOpeningBalance() async {
+        guard let amount = Double(editOpeningBalance) else { return }
+        isSavingBalance = true
+        let success = await viewModel.updateOpeningBalance(accountId, amount: amount, asOfDate: editAsOfDate)
+        isSavingBalance = false
+        if success {
+            withAnimation { isEditingOpeningBalance = false }
+        }
     }
 
     private func detailGrid(_ account: Account) -> some View {
@@ -145,12 +286,7 @@ struct AccountDetailView: View {
             if let currency = account.currency {
                 list.append(("Currency", currency))
             }
-            if let opening = account.openingBalance {
-                list.append(("Opening Balance", formatCurrency(opening, account.currency)))
-            }
-            if let date = account.balanceAsOfDate {
-                list.append(("Balance As-Of", formatDate(date)))
-            }
+            // Opening Balance is shown in the dedicated section above
             if isLoan {
                 if let rate = account.loanInterestRate { list.append(("Interest Rate", "\(rate)%")) }
                 if let tenure = account.loanTenureMonths { list.append(("Tenure", "\(tenure) months")) }
