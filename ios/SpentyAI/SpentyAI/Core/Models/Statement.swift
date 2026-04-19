@@ -34,6 +34,25 @@ struct Statement: Codable, Identifiable {
         case processingProgress
         case processingStageLabel
     }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try container.decode(String.self, forKey: .id)
+        self.filename = try? container.decodeIfPresent(String.self, forKey: .filename)
+        self.accountId = try? container.decodeIfPresent(String.self, forKey: .accountId)
+        self.accountName = try? container.decodeIfPresent(String.self, forKey: .accountName)
+        self.statementType = try? container.decodeIfPresent(String.self, forKey: .statementType)
+        self.status = try? container.decodeIfPresent(String.self, forKey: .status)
+        self.entryCount = try? container.decodeIfPresent(Int.self, forKey: .entryCount)
+        self.periodFrom = try? container.decodeIfPresent(Date.self, forKey: .periodFrom)
+        self.periodTo = try? container.decodeIfPresent(Date.self, forKey: .periodTo)
+        self.uploadedAt = try? container.decodeIfPresent(Date.self, forKey: .uploadedAt)
+        self.parsedEntries = try? container.decodeIfPresent([ParsedEntry].self, forKey: .parsedEntries)
+        self.reconciliation = try? container.decodeIfPresent(ReconciliationResult.self, forKey: .reconciliation)
+        self.auditStatus = try? container.decodeIfPresent(String.self, forKey: .auditStatus)
+        self.processingProgress = try? container.decodeIfPresent(Double.self, forKey: .processingProgress)
+        self.processingStageLabel = try? container.decodeIfPresent(String.self, forKey: .processingStageLabel)
+    }
 }
 
 struct ParsedEntry: Codable, Identifiable {
@@ -59,6 +78,19 @@ struct ParsedEntry: Codable, Identifiable {
         case matched
         case matchedTransactionId
     }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.date = try? container.decodeIfPresent(Date.self, forKey: .date)
+        self.description = try? container.decodeIfPresent(String.self, forKey: .description)
+        self.amount = try? container.decodeIfPresent(Double.self, forKey: .amount)
+        self.type = try? container.decodeIfPresent(String.self, forKey: .type)
+        self.balance = try? container.decodeIfPresent(Double.self, forKey: .balance)
+        self.categoryId = try? container.decodeIfPresent(String.self, forKey: .categoryId)
+        self.categoryName = try? container.decodeIfPresent(String.self, forKey: .categoryName)
+        self.matched = try? container.decodeIfPresent(Bool.self, forKey: .matched)
+        self.matchedTransactionId = try? container.decodeIfPresent(String.self, forKey: .matchedTransactionId)
+    }
 }
 
 struct ReconciliationResult: Codable {
@@ -70,4 +102,27 @@ struct ReconciliationResult: Codable {
     var closingBalance: Double?
     var computedClosing: Double?
     var difference: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case totalEntries
+        case matched
+        case unmatched
+        case missing
+        case openingBalance
+        case closingBalance
+        case computedClosing
+        case difference
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.totalEntries = try? container.decodeIfPresent(Int.self, forKey: .totalEntries)
+        self.matched = try? container.decodeIfPresent(Int.self, forKey: .matched)
+        self.unmatched = try? container.decodeIfPresent(Int.self, forKey: .unmatched)
+        self.missing = try? container.decodeIfPresent(Int.self, forKey: .missing)
+        self.openingBalance = try? container.decodeIfPresent(Double.self, forKey: .openingBalance)
+        self.closingBalance = try? container.decodeIfPresent(Double.self, forKey: .closingBalance)
+        self.computedClosing = try? container.decodeIfPresent(Double.self, forKey: .computedClosing)
+        self.difference = try? container.decodeIfPresent(Double.self, forKey: .difference)
+    }
 }

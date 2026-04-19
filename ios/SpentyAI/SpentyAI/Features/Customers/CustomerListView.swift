@@ -2,14 +2,6 @@ import SwiftUI
 
 struct CustomerListView: View {
 
-    // MARK: - Brand
-
-    private enum Brand {
-        static let primary = Color(red: 0x3A / 255, green: 0x5C / 255, blue: 0x4A / 255)
-        static let background = Color(red: 0xF8 / 255, green: 0xF6 / 255, blue: 0xF3 / 255)
-        static let error = Color(red: 0x96 / 255, green: 0x45 / 255, blue: 0x3A / 255)
-    }
-
     // MARK: - State
 
     @State private var viewModel = CustomersViewModel()
@@ -19,12 +11,11 @@ struct CustomerListView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Brand.background.ignoresSafeArea()
+                Color.spentyBgPrimary.ignoresSafeArea()
 
                 Group {
                     if viewModel.isLoading && viewModel.customers.isEmpty {
-                        ProgressView()
-                            .tint(Brand.primary)
+                        LoadingView(message: "Loading customers...")
                     } else if viewModel.filteredCustomers.isEmpty {
                         emptyState
                     } else {
@@ -41,7 +32,7 @@ struct CustomerListView: View {
                     } label: {
                         Image(systemName: "plus")
                             .fontWeight(.semibold)
-                            .foregroundStyle(Brand.primary)
+                            .foregroundStyle(Color.spentyPrimary)
                     }
                 }
             }
@@ -75,7 +66,7 @@ struct CustomerListView: View {
                 } label: {
                     customerRow(customer)
                 }
-                .listRowBackground(Color.white)
+                .listRowBackground(Color.spentyCardBg)
             }
             .onDelete(perform: deleteCustomers)
         }
@@ -86,15 +77,15 @@ struct CustomerListView: View {
     private func customerRow(_ customer: Customer) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(customer.name ?? "Unnamed")
-                .font(.body.weight(.semibold))
-                .foregroundStyle(.primary)
+                .font(SpentyFonts.body.weight(.semibold))
+                .foregroundStyle(Color.spentyTextPrimary)
 
             HStack(spacing: 16) {
                 financialLabel("Invoiced", amount: customer.totalInvoiced)
                 financialLabel("Paid", amount: customer.totalPaid)
                 financialLabel("Due", amount: customer.outstanding, highlight: true)
             }
-            .font(.caption)
+            .font(SpentyFonts.caption1)
         }
         .padding(.vertical, 4)
     }
@@ -102,46 +93,24 @@ struct CustomerListView: View {
     private func financialLabel(_ title: String, amount: Double?, highlight: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.spentyTextSecondary)
             Text(formatCurrency(amount ?? 0))
-                .foregroundStyle(highlight && (amount ?? 0) > 0 ? Brand.error : .primary)
+                .foregroundStyle(highlight && (amount ?? 0) > 0 ? Color.spentyError : Color.spentyTextPrimary)
                 .fontWeight(highlight ? .semibold : .regular)
         }
     }
 
     private var emptyState: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "person.2.slash")
-                .resizable()
-                .scaledToFit()
-                .frame(width: 64, height: 64)
-                .foregroundStyle(Brand.primary.opacity(0.4))
-
-            Text("No Customers Yet")
-                .font(.title3.weight(.semibold))
-                .foregroundStyle(.primary)
-
-            Text(viewModel.searchText.isEmpty
-                 ? "Tap the + button to add your first customer."
-                 : "No customers match your search.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-
-            if viewModel.searchText.isEmpty {
-                Button {
-                    viewModel.startCreate()
-                } label: {
-                    Label("Add Customer", systemImage: "plus")
-                        .font(.body.weight(.semibold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 24)
-                        .padding(.vertical, 12)
-                        .background(Brand.primary, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                }
-            }
+        EmptyStateView(
+            icon: "person.2.slash",
+            title: "No Customers Yet",
+            subtitle: viewModel.searchText.isEmpty
+                ? "Tap the + button to add your first customer."
+                : "No customers match your search.",
+            buttonTitle: viewModel.searchText.isEmpty ? "Add Customer" : nil
+        ) {
+            viewModel.startCreate()
         }
-        .padding(32)
     }
 
     // MARK: - Helpers
@@ -156,10 +125,11 @@ struct CustomerListView: View {
     private func formatCurrency(_ value: Double) -> String {
         let formatter = NumberFormatter()
         formatter.numberStyle = .currency
-        formatter.currencySymbol = "\u{20B9}"
+        formatter.locale = Locale(identifier: "en_IN")
+        formatter.currencySymbol = "₹"
         formatter.maximumFractionDigits = 2
         formatter.minimumFractionDigits = 0
-        return formatter.string(from: NSNumber(value: value)) ?? "\u{20B9}0"
+        return formatter.string(from: NSNumber(value: value)) ?? "₹0"
     }
 }
 

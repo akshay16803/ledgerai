@@ -2,13 +2,6 @@ import SwiftUI
 
 struct CategoryListView: View {
 
-    // MARK: - Constants
-
-    private enum Brand {
-        static let primary    = Color(red: 0x3A / 255, green: 0x5C / 255, blue: 0x4A / 255)
-        static let background = Color(red: 0xF8 / 255, green: 0xF6 / 255, blue: 0xF3 / 255)
-    }
-
     // MARK: - State
 
     @State private var viewModel = CategoriesViewModel()
@@ -18,20 +11,19 @@ struct CategoryListView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Brand.background.ignoresSafeArea()
+                Color.spentyBgPrimary.ignoresSafeArea()
 
                 VStack(spacing: 0) {
-                    // ── Segmented Control ────────────────────────
+                    // -- Segmented Control --
                     segmentedControl
                         .padding(.horizontal, 16)
                         .padding(.top, 8)
                         .padding(.bottom, 4)
 
-                    // ── Content ──────────────────────────────────
+                    // -- Content --
                     if viewModel.isLoading && viewModel.categories.isEmpty {
                         Spacer()
-                        ProgressView()
-                            .tint(Brand.primary)
+                        LoadingView(message: "Loading categories...")
                         Spacer()
                     } else if viewModel.categoryTree.isEmpty {
                         emptyState
@@ -49,7 +41,7 @@ struct CategoryListView: View {
                         Image(systemName: "plus")
                             .fontWeight(.semibold)
                     }
-                    .tint(Brand.primary)
+                    .tint(Color.spentyPrimary)
                 }
             }
             .sheet(isPresented: $viewModel.showForm) {
@@ -106,38 +98,17 @@ struct CategoryListView: View {
     // MARK: - Empty State
 
     private var emptyState: some View {
-        VStack(spacing: 16) {
-            Spacer()
-
-            Image(systemName: viewModel.activeTab == .expense
-                  ? "arrow.up.circle"
-                  : "arrow.down.circle")
-                .resizable()
-                .scaledToFit()
-                .frame(width: 56, height: 56)
-                .foregroundStyle(Brand.primary.opacity(0.4))
-
-            Text("No \(viewModel.activeTab.rawValue) categories yet")
-                .font(.headline)
-                .foregroundStyle(.secondary)
-
-            Text("Tap + to create your first category.")
-                .font(.subheadline)
-                .foregroundStyle(.tertiary)
-
-            Spacer()
-        }
-        .padding(.horizontal, 32)
+        EmptyStateView(
+            icon: viewModel.activeTab == .expense ? "arrow.up.circle" : "arrow.down.circle",
+            title: "No \(viewModel.activeTab.rawValue) categories yet",
+            subtitle: "Tap + to create your first category."
+        )
     }
 }
 
 // MARK: - Tree Row
 
 private struct CategoryTreeRow: View {
-
-    private enum Brand {
-        static let primary = Color(red: 0x3A / 255, green: 0x5C / 255, blue: 0x4A / 255)
-    }
 
     let category: Category
     let onAddChild: () -> Void
@@ -177,7 +148,7 @@ private struct CategoryTreeRow: View {
                         addChildButton
                     }
             }
-            .tint(Brand.primary)
+            .tint(Color.spentyPrimary)
         }
     }
 
@@ -186,21 +157,21 @@ private struct CategoryTreeRow: View {
     private func parentRow(_ cat: Category) -> some View {
         HStack {
             Image(systemName: "folder.fill")
-                .foregroundStyle(Brand.primary)
+                .foregroundStyle(Color.spentyPrimary)
                 .frame(width: 24)
 
             Text(cat.name ?? "Unnamed")
-                .font(.body.weight(.medium))
+                .font(SpentyFonts.body.weight(.medium))
 
             Spacer()
 
             if let kids = cat.children, !kids.isEmpty {
                 Text("\(kids.count)")
-                    .font(.caption2.weight(.bold))
+                    .font(SpentyFonts.caption2.weight(.bold))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 7)
                     .padding(.vertical, 2)
-                    .background(Brand.primary.opacity(0.7), in: Capsule())
+                    .background(Color.spentyPrimary.opacity(0.7), in: Capsule())
             }
         }
         .contentShape(Rectangle())
@@ -209,11 +180,11 @@ private struct CategoryTreeRow: View {
     private func childRow(_ cat: Category) -> some View {
         HStack {
             Image(systemName: "tag.fill")
-                .foregroundStyle(Brand.primary.opacity(0.6))
+                .foregroundStyle(Color.spentyPrimary.opacity(0.6))
                 .frame(width: 24)
 
             Text(cat.name ?? "Unnamed")
-                .font(.subheadline)
+                .font(SpentyFonts.subheadline)
         }
         .padding(.leading, 4)
     }
@@ -234,7 +205,7 @@ private struct CategoryTreeRow: View {
         } label: {
             Label("Edit", systemImage: "pencil")
         }
-        .tint(.orange)
+        .tint(Color.spentyWarning)
     }
 
     private var addChildButton: some View {
@@ -243,7 +214,7 @@ private struct CategoryTreeRow: View {
         } label: {
             Label("Add Sub", systemImage: "plus.circle")
         }
-        .tint(Brand.primary)
+        .tint(Color.spentyPrimary)
     }
 }
 

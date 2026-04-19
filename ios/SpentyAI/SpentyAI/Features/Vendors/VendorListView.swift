@@ -2,13 +2,6 @@ import SwiftUI
 
 struct VendorListView: View {
 
-    // MARK: - Constants
-
-    private enum Brand {
-        static let primary    = Color(red: 0x3A / 255, green: 0x5C / 255, blue: 0x4A / 255)
-        static let background = Color(red: 0xF8 / 255, green: 0xF6 / 255, blue: 0xF3 / 255)
-    }
-
     // MARK: - State
 
     @State private var viewModel = VendorsViewModel()
@@ -18,11 +11,11 @@ struct VendorListView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Brand.background.ignoresSafeArea()
+                Color.spentyBgPrimary.ignoresSafeArea()
 
                 Group {
                     if viewModel.isLoading && viewModel.vendors.isEmpty {
-                        loadingView
+                        LoadingView(message: "Loading vendors...")
                     } else if viewModel.filteredVendors.isEmpty && !viewModel.isLoading {
                         emptyState
                     } else {
@@ -40,7 +33,7 @@ struct VendorListView: View {
                         Image(systemName: "plus")
                             .fontWeight(.semibold)
                     }
-                    .tint(Brand.primary)
+                    .tint(Color.spentyPrimary)
                 }
             }
             .sheet(isPresented: $viewModel.showForm) {
@@ -59,39 +52,16 @@ struct VendorListView: View {
 
     // MARK: - Sub-views
 
-    private var loadingView: some View {
-        VStack(spacing: 12) {
-            ProgressView()
-                .tint(Brand.primary)
-            Text("Loading vendors...")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-        }
-    }
-
     private var emptyState: some View {
-        ContentUnavailableView {
-            Label("No Vendors", systemImage: "building.2")
-                .foregroundStyle(Brand.primary)
-        } description: {
-            if viewModel.searchText.isEmpty {
-                Text("Add your first vendor to get started.")
-            } else {
-                Text("No vendors matching \"\(viewModel.searchText)\".")
-            }
-        } actions: {
-            if viewModel.searchText.isEmpty {
-                Button {
-                    viewModel.startCreate()
-                } label: {
-                    Text("Add Vendor")
-                        .fontWeight(.semibold)
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 24)
-                        .padding(.vertical, 10)
-                        .background(Brand.primary, in: Capsule())
-                }
-            }
+        EmptyStateView(
+            icon: "building.2",
+            title: "No Vendors",
+            subtitle: viewModel.searchText.isEmpty
+                ? "Add your first vendor to get started."
+                : "No vendors matching \"\(viewModel.searchText)\".",
+            buttonTitle: viewModel.searchText.isEmpty ? "Add Vendor" : nil
+        ) {
+            viewModel.startCreate()
         }
     }
 
@@ -103,7 +73,7 @@ struct VendorListView: View {
                 } label: {
                     vendorRow(vendor)
                 }
-                .listRowBackground(Color.white)
+                .listRowBackground(Color.spentyCardBg)
             }
             .onDelete { offsets in
                 Task { await viewModel.deleteVendor(at: offsets) }
@@ -119,13 +89,13 @@ struct VendorListView: View {
     private func vendorRow(_ vendor: Vendor) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(vendor.name ?? "Unnamed")
-                .font(.body.weight(.semibold))
-                .foregroundStyle(.primary)
+                .font(SpentyFonts.body.weight(.semibold))
+                .foregroundStyle(Color.spentyTextPrimary)
 
             HStack(spacing: 16) {
-                financialPill(label: "Billed", value: vendor.totalBilled, color: Brand.primary)
-                financialPill(label: "Paid", value: vendor.totalPaid, color: .green)
-                financialPill(label: "Due", value: vendor.outstanding, color: .orange)
+                financialPill(label: "Billed", value: vendor.totalBilled, color: .spentyPrimary)
+                financialPill(label: "Paid", value: vendor.totalPaid, color: .spentySuccess)
+                financialPill(label: "Due", value: vendor.outstanding, color: .spentyWarning)
             }
         }
         .padding(.vertical, 4)
@@ -134,10 +104,10 @@ struct VendorListView: View {
     private func financialPill(label: String, value: Double?, color: Color) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(label)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+                .font(SpentyFonts.caption2)
+                .foregroundStyle(Color.spentyTextSecondary)
             Text(formatCurrency(value ?? 0))
-                .font(.caption.weight(.medium).monospacedDigit())
+                .font(SpentyFonts.caption1.weight(.medium).monospacedDigit())
                 .foregroundStyle(color)
         }
     }

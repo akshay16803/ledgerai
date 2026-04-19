@@ -8,6 +8,7 @@ struct AccountDetailView: View {
 
     @State private var showEditSheet = false
     @State private var selectedTab = 0
+    @State private var selectedTransaction: Transaction?
 
     private var account: Account? { viewModel.selectedAccount }
     private var isLoan: Bool { account?.accountType?.lowercased() == "liability" }
@@ -55,6 +56,14 @@ struct AccountDetailView: View {
         }
         .sheet(isPresented: $showEditSheet) {
             AccountFormView(viewModel: viewModel, account: account)
+        }
+        .sheet(item: $selectedTransaction) { txn in
+            TransactionDetailView(
+                transaction: txn,
+                onTransactionUpdated: {
+                    Task { await viewModel.loadAccountDetail(accountId) }
+                }
+            )
         }
         .task {
             await viewModel.loadAccountDetail(accountId)
@@ -444,7 +453,12 @@ struct AccountDetailView: View {
             } else {
                 LazyVStack(spacing: 0) {
                     ForEach(viewModel.accountTransactions) { txn in
-                        transactionRow(txn)
+                        Button {
+                            selectedTransaction = txn
+                        } label: {
+                            transactionRow(txn)
+                        }
+                        .buttonStyle(.plain)
                         if txn.id != viewModel.accountTransactions.last?.id {
                             Divider().padding(.leading, 48)
                         }

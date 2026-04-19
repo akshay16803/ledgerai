@@ -2,14 +2,6 @@ import SwiftUI
 
 struct SupportView: View {
 
-    // MARK: - Constants
-
-    private enum Brand {
-        static let primary    = Color(red: 0x3A / 255, green: 0x5C / 255, blue: 0x4A / 255) // #3A5C4A
-        static let background = Color(red: 0xF8 / 255, green: 0xF6 / 255, blue: 0xF3 / 255) // #F8F6F3
-        static let primaryDark = Color(red: 0x2C / 255, green: 0x46 / 255, blue: 0x38 / 255)
-    }
-
     // MARK: - State
 
     @State private var viewModel = SupportViewModel()
@@ -19,7 +11,7 @@ struct SupportView: View {
 
     var body: some View {
         ZStack {
-            Brand.background
+            Color.spentyBgPrimary
                 .ignoresSafeArea()
 
             ScrollView {
@@ -58,23 +50,23 @@ struct SupportView: View {
         VStack(spacing: 8) {
             ZStack {
                 Circle()
-                    .fill(Brand.primary.opacity(0.12))
+                    .fill(Color.spentyPrimary.opacity(0.12))
                     .frame(width: 64, height: 64)
 
                 Image(systemName: "headphones.circle.fill")
                     .resizable()
                     .scaledToFit()
                     .frame(width: 36, height: 36)
-                    .foregroundStyle(Brand.primary)
+                    .foregroundStyle(Color.spentyPrimary)
             }
 
             Text("How can we help?")
-                .font(.title2.weight(.bold))
-                .foregroundStyle(Brand.primaryDark)
+                .font(SpentyFonts.title2)
+                .foregroundColor(.spentyTextPrimary)
 
             Text("Submit a ticket or browse our FAQ below.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .font(SpentyFonts.subheadline)
+                .foregroundColor(.spentyTextSecondary)
                 .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)
@@ -90,25 +82,21 @@ struct SupportView: View {
             // Subject
             VStack(alignment: .leading, spacing: 6) {
                 Text("Subject")
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(Brand.primaryDark)
+                    .font(SpentyFonts.subheadline)
+                    .fontWeight(.medium)
+                    .foregroundColor(.spentyTextPrimary)
 
                 TextField("Brief description of your issue", text: $viewModel.subject)
                     .textFieldStyle(.plain)
-                    .padding(12)
-                    .background(Color.white)
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .strokeBorder(Color(.systemGray4), lineWidth: 1)
-                    )
+                    .inputStyle()
             }
 
             // Category Picker
             VStack(alignment: .leading, spacing: 6) {
                 Text("Category")
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(Brand.primaryDark)
+                    .font(SpentyFonts.subheadline)
+                    .fontWeight(.medium)
+                    .foregroundColor(.spentyTextPrimary)
 
                 Menu {
                     ForEach(TicketCategory.allCases) { cat in
@@ -121,18 +109,18 @@ struct SupportView: View {
                 } label: {
                     HStack {
                         Label(viewModel.category.displayName, systemImage: viewModel.category.icon)
-                            .foregroundStyle(Brand.primaryDark)
+                            .foregroundColor(.spentyTextPrimary)
                         Spacer()
                         Image(systemName: "chevron.up.chevron.down")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .font(SpentyFonts.caption1)
+                            .foregroundColor(.spentyTextSecondary)
                     }
                     .padding(12)
-                    .background(Color.white)
+                    .background(Color.spentyBgPrimary)
                     .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                     .overlay(
                         RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .strokeBorder(Color(.systemGray4), lineWidth: 1)
+                            .strokeBorder(Color.spentyBorder, lineWidth: 1)
                     )
                 }
             }
@@ -140,8 +128,9 @@ struct SupportView: View {
             // Priority Picker
             VStack(alignment: .leading, spacing: 6) {
                 Text("Priority")
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(Brand.primaryDark)
+                    .font(SpentyFonts.subheadline)
+                    .fontWeight(.medium)
+                    .foregroundColor(.spentyTextPrimary)
 
                 HStack(spacing: 10) {
                     ForEach(TicketPriority.allCases) { p in
@@ -149,19 +138,20 @@ struct SupportView: View {
                             viewModel.priority = p
                         } label: {
                             Text(p.displayName)
-                                .font(.subheadline.weight(.medium))
+                                .font(SpentyFonts.subheadline)
+                                .fontWeight(.medium)
                                 .frame(maxWidth: .infinity, minHeight: 40)
-                                .foregroundStyle(viewModel.priority == p ? .white : Brand.primaryDark)
+                                .foregroundStyle(viewModel.priority == p ? .white : Color.spentyTextPrimary)
                                 .background(
                                     viewModel.priority == p
-                                        ? AnyShapeStyle(Brand.primary)
-                                        : AnyShapeStyle(Color.white)
+                                        ? AnyShapeStyle(Color.spentyPrimary)
+                                        : AnyShapeStyle(Color.spentyCardBg)
                                 )
                                 .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                                 .overlay(
                                     RoundedRectangle(cornerRadius: 10, style: .continuous)
                                         .strokeBorder(
-                                            viewModel.priority == p ? Brand.primary : Color(.systemGray4),
+                                            viewModel.priority == p ? Color.spentyPrimary : Color.spentyBorder,
                                             lineWidth: 1
                                         )
                                 )
@@ -174,18 +164,19 @@ struct SupportView: View {
             // Message
             VStack(alignment: .leading, spacing: 6) {
                 Text("Message")
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(Brand.primaryDark)
+                    .font(SpentyFonts.subheadline)
+                    .fontWeight(.medium)
+                    .foregroundColor(.spentyTextPrimary)
 
                 TextEditor(text: $viewModel.message)
                     .scrollContentBackground(.hidden)
                     .padding(8)
                     .frame(minHeight: 120)
-                    .background(Color.white)
+                    .background(Color.spentyBgPrimary)
                     .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                     .overlay(
                         RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .strokeBorder(Color(.systemGray4), lineWidth: 1)
+                            .strokeBorder(Color.spentyBorder, lineWidth: 1)
                     )
                     .overlay(alignment: .topLeading) {
                         if viewModel.message.isEmpty {
@@ -208,22 +199,18 @@ struct SupportView: View {
                             .tint(.white)
                     }
                     Text(viewModel.isSubmitting ? "Submitting..." : "Submit Ticket")
-                        .font(.body.weight(.semibold))
                 }
-                .frame(maxWidth: .infinity, minHeight: 50)
-                .foregroundStyle(.white)
-                .background(viewModel.isFormValid ? Brand.primary : Brand.primary.opacity(0.4))
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .shadow(color: Brand.primary.opacity(0.25), radius: 8, y: 4)
+                .primaryButtonStyle()
             }
             .disabled(!viewModel.isFormValid || viewModel.isSubmitting)
+            .opacity(viewModel.isFormValid ? 1.0 : 0.4)
             .animation(.easeInOut(duration: 0.2), value: viewModel.isFormValid)
             .animation(.easeInOut(duration: 0.2), value: viewModel.isSubmitting)
         }
         .padding(20)
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Brand.background)
+                .fill(Color.spentyBgPrimary)
                 .shadow(color: .black.opacity(0.06), radius: 12, y: 4)
         )
     }
@@ -238,14 +225,14 @@ struct SupportView: View {
                 HStack {
                     Spacer()
                     ProgressView()
-                        .tint(Brand.primary)
+                        .tint(.spentyPrimary)
                     Spacer()
                 }
                 .padding(.vertical, 20)
             } else if viewModel.faqItems.isEmpty {
                 Text("No FAQ items available.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .font(SpentyFonts.subheadline)
+                    .foregroundColor(.spentyTextSecondary)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 20)
             } else {
@@ -261,12 +248,12 @@ struct SupportView: View {
                 }
                 .background(
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(Color.white)
+                        .fill(Color.spentyCardBg)
                 )
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .strokeBorder(Color(.systemGray5), lineWidth: 1)
+                        .strokeBorder(Color.spentyBgSecondary, lineWidth: 1)
                 )
             }
         }
@@ -286,15 +273,17 @@ struct SupportView: View {
             } label: {
                 HStack {
                     Text(item.question ?? "")
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(Brand.primaryDark)
+                        .font(SpentyFonts.subheadline)
+                        .fontWeight(.medium)
+                        .foregroundColor(.spentyTextPrimary)
                         .multilineTextAlignment(.leading)
 
                     Spacer()
 
                     Image(systemName: "chevron.down")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                        .font(SpentyFonts.caption1)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.spentyTextSecondary)
                         .rotationEffect(.degrees(isExpanded ? 180 : 0))
                 }
                 .padding(16)
@@ -304,8 +293,8 @@ struct SupportView: View {
 
             if isExpanded {
                 Text(item.answer ?? "")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .font(SpentyFonts.subheadline)
+                    .foregroundColor(.spentyTextSecondary)
                     .padding(.horizontal, 16)
                     .padding(.bottom, 16)
                     .transition(.opacity.combined(with: .move(edge: .top)))
@@ -317,8 +306,8 @@ struct SupportView: View {
 
     private func sectionLabel(_ title: String, icon: String) -> some View {
         Label(title, systemImage: icon)
-            .font(.headline.weight(.semibold))
-            .foregroundStyle(Brand.primary)
+            .font(SpentyFonts.headline)
+            .foregroundColor(.spentyPrimary)
     }
 }
 

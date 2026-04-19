@@ -2,13 +2,6 @@ import SwiftUI
 
 struct FeatureRequestFormView: View {
 
-    // MARK: - Constants
-
-    private enum Brand {
-        static let primary = Color(red: 0x3A / 255, green: 0x5C / 255, blue: 0x4A / 255)
-        static let background = Color(red: 0xF8 / 255, green: 0xF6 / 255, blue: 0xF3 / 255)
-    }
-
     // MARK: - State
 
     @Environment(\.dismiss) private var dismiss
@@ -25,12 +18,13 @@ struct FeatureRequestFormView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Brand.background
+                Color.spentyBgPrimary
                     .ignoresSafeArea()
 
                 Form {
                     Section {
                         TextField("Title", text: $title)
+                            .inputStyle()
                     } header: {
                         Text("Title")
                     } footer: {
@@ -40,12 +34,20 @@ struct FeatureRequestFormView: View {
                     Section("Description") {
                         TextEditor(text: $description)
                             .frame(minHeight: 120)
+                            .scrollContentBackground(.hidden)
+                            .padding(8)
+                            .background(Color.spentyBgPrimary)
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .strokeBorder(Color.spentyBorder, lineWidth: 1)
+                            )
                             .overlay(alignment: .topLeading) {
                                 if description.isEmpty {
                                     Text("Describe what you'd like to see...")
                                         .foregroundStyle(.tertiary)
-                                        .padding(.top, 8)
-                                        .padding(.leading, 4)
+                                        .padding(.top, 16)
+                                        .padding(.leading, 12)
                                         .allowsHitTesting(false)
                                 }
                             }
@@ -58,7 +60,7 @@ struct FeatureRequestFormView: View {
                             }
                         }
                         .pickerStyle(.menu)
-                        .tint(Brand.primary)
+                        .tint(.spentyPrimary)
                     }
                 }
                 .scrollContentBackground(.hidden)
@@ -82,13 +84,13 @@ struct FeatureRequestFormView: View {
                     } label: {
                         if isSubmitting {
                             ProgressView()
-                                .tint(Brand.primary)
+                                .tint(.spentyPrimary)
                         } else {
                             Text("Submit")
                                 .fontWeight(.semibold)
                         }
                     }
-                    .tint(Brand.primary)
+                    .tint(.spentyPrimary)
                     .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSubmitting)
                 }
             }

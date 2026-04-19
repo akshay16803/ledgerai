@@ -2,14 +2,6 @@ import SwiftUI
 
 struct PastInsightDetailView: View {
 
-    // MARK: - Constants
-
-    private enum Brand {
-        static let primary    = Color(red: 0x3A / 255, green: 0x5C / 255, blue: 0x4A / 255)
-        static let primaryDark = Color(red: 0x2C / 255, green: 0x46 / 255, blue: 0x38 / 255)
-        static let background = Color(red: 0xF8 / 255, green: 0xF6 / 255, blue: 0xF3 / 255)
-    }
-
     // MARK: - State
 
     @Bindable var viewModel: PastInsightsViewModel
@@ -25,7 +17,7 @@ struct PastInsightDetailView: View {
 
     var body: some View {
         ZStack {
-            Brand.background.ignoresSafeArea()
+            Color.spentyBgPrimary.ignoresSafeArea()
 
             ScrollView {
                 VStack(spacing: 20) {
@@ -37,7 +29,7 @@ struct PastInsightDetailView: View {
                 .padding()
             }
         }
-        .navigationTitle(displaySummary.name ?? "Tax Summary")
+        .navigationTitle(displaySummary.name ?? "Past Insight Summary")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
@@ -47,7 +39,7 @@ struct PastInsightDetailView: View {
                     Image(systemName: "plus")
                         .fontWeight(.semibold)
                 }
-                .tint(Brand.primary)
+                .tint(Color.spentyPrimary)
             }
         }
         .sheet(isPresented: $viewModel.showAddTransaction) {
@@ -71,20 +63,18 @@ struct PastInsightDetailView: View {
 
             if let from = displaySummary.dateFrom, let to = displaySummary.dateTo {
                 Text("\(formatDate(from)) - \(formatDate(to))")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .font(SpentyFonts.subheadline)
+                    .foregroundStyle(Color.spentyTextSecondary)
             }
 
             if let email = displaySummary.emailAddress, !email.isEmpty {
                 Label(email, systemImage: "envelope.fill")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(SpentyFonts.caption1)
+                    .foregroundStyle(Color.spentyTextSecondary)
             }
         }
         .frame(maxWidth: .infinity)
-        .padding()
-        .background(.white, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .shadow(color: .black.opacity(0.04), radius: 8, y: 2)
+        .cardStyle()
     }
 
     // MARK: - Stats Cards
@@ -92,7 +82,7 @@ struct PastInsightDetailView: View {
     private var statsCards: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Summary")
-                .font(.headline)
+                .font(SpentyFonts.headline)
                 .padding(.horizontal, 4)
 
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
@@ -100,25 +90,25 @@ struct PastInsightDetailView: View {
                     title: "Total Income",
                     value: formatCurrency(displaySummary.totalIncome ?? 0),
                     icon: "arrow.down.circle.fill",
-                    color: .green
+                    color: .spentySuccess
                 )
                 statCard(
                     title: "Total Expense",
                     value: formatCurrency(displaySummary.totalExpense ?? 0),
                     icon: "arrow.up.circle.fill",
-                    color: .red
+                    color: .spentyError
                 )
                 statCard(
                     title: "Net",
                     value: formatCurrency(displaySummary.net ?? 0),
                     icon: "equal.circle.fill",
-                    color: Brand.primary
+                    color: .spentyPrimary
                 )
                 statCard(
                     title: "Transactions",
                     value: "\(displaySummary.transactionCount ?? viewModel.detailTransactions.count)",
                     icon: "list.bullet.rectangle.fill",
-                    color: .blue
+                    color: .spentyInfo
                 )
             }
         }
@@ -127,20 +117,20 @@ struct PastInsightDetailView: View {
     private func statCard(title: String, value: String, icon: String, color: Color) -> some View {
         VStack(spacing: 8) {
             Image(systemName: icon)
-                .font(.title2)
+                .font(SpentyFonts.title2)
                 .foregroundStyle(color)
 
             Text(value)
-                .font(.subheadline.weight(.semibold).monospacedDigit())
-                .foregroundStyle(.primary)
+                .font(SpentyFonts.subheadline.weight(.semibold).monospacedDigit())
+                .foregroundStyle(Color.spentyTextPrimary)
 
             Text(title)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+                .font(SpentyFonts.caption2)
+                .foregroundStyle(Color.spentyTextSecondary)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 16)
-        .background(.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(Color.spentyCardBg, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .shadow(color: .black.opacity(0.04), radius: 6, y: 2)
     }
 
@@ -152,22 +142,22 @@ struct PastInsightDetailView: View {
                 Task { await viewModel.exportCSV() }
             } label: {
                 Label("Export CSV", systemImage: "tablecells")
-                    .font(.subheadline.weight(.medium))
+                    .font(SpentyFonts.subheadline.weight(.medium))
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
-                    .foregroundStyle(Brand.primary)
-                    .background(Brand.primary.opacity(0.1), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .foregroundStyle(Color.spentyPrimary)
+                    .background(Color.spentyPrimary.opacity(0.1), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
 
             Button {
                 Task { await viewModel.downloadCSV() }
             } label: {
                 Label("Download CSV", systemImage: "arrow.down.doc.fill")
-                    .font(.subheadline.weight(.medium))
+                    .font(SpentyFonts.subheadline.weight(.medium))
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
                     .foregroundStyle(.white)
-                    .background(Brand.primary, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .background(Color.spentyPrimary, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
         }
     }
@@ -178,13 +168,13 @@ struct PastInsightDetailView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text("Transactions")
-                    .font(.headline)
+                    .font(SpentyFonts.headline)
 
                 Spacer()
 
                 Text("\(viewModel.detailTransactions.count)")
-                    .font(.subheadline.weight(.medium).monospacedDigit())
-                    .foregroundStyle(.secondary)
+                    .font(SpentyFonts.subheadline.weight(.medium).monospacedDigit())
+                    .foregroundStyle(Color.spentyTextSecondary)
             }
             .padding(.horizontal, 4)
 
@@ -192,7 +182,7 @@ struct PastInsightDetailView: View {
                 HStack {
                     Spacer()
                     ProgressView()
-                        .tint(Brand.primary)
+                        .tint(Color.spentyPrimary)
                     Spacer()
                 }
                 .padding(.vertical, 24)
@@ -202,15 +192,15 @@ struct PastInsightDetailView: View {
                     VStack(spacing: 8) {
                         Image(systemName: "tray")
                             .font(.largeTitle)
-                            .foregroundStyle(Brand.primary.opacity(0.4))
+                            .foregroundStyle(Color.spentyPrimary.opacity(0.4))
                         Text("No transactions found")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
+                            .font(SpentyFonts.subheadline)
+                            .foregroundStyle(Color.spentyTextSecondary)
                     }
                     Spacer()
                 }
                 .padding(.vertical, 24)
-                .background(.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .background(Color.spentyCardBg, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .shadow(color: .black.opacity(0.04), radius: 6, y: 2)
             } else {
                 VStack(spacing: 0) {
@@ -222,7 +212,7 @@ struct PastInsightDetailView: View {
                         }
                     }
                 }
-                .background(.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .background(Color.spentyCardBg, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .shadow(color: .black.opacity(0.04), radius: 6, y: 2)
             }
         }
@@ -232,23 +222,23 @@ struct PastInsightDetailView: View {
         HStack {
             VStack(alignment: .leading, spacing: 4) {
                 Text(txn.description ?? "Transaction")
-                    .font(.subheadline.weight(.medium))
+                    .font(SpentyFonts.subheadline.weight(.medium))
                     .lineLimit(2)
 
                 HStack(spacing: 8) {
                     if let date = txn.date {
                         Text(formatDate(date))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .font(SpentyFonts.caption1)
+                            .foregroundStyle(Color.spentyTextSecondary)
                     }
 
                     if let category = txn.categoryName, !category.isEmpty {
                         Text(category)
-                            .font(.caption2.weight(.medium))
+                            .font(SpentyFonts.caption2.weight(.medium))
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
-                            .foregroundStyle(Brand.primary)
-                            .background(Brand.primary.opacity(0.1), in: Capsule())
+                            .foregroundStyle(Color.spentyPrimary)
+                            .background(Color.spentyPrimary.opacity(0.1), in: Capsule())
                     }
                 }
             }
@@ -257,12 +247,12 @@ struct PastInsightDetailView: View {
 
             VStack(alignment: .trailing, spacing: 4) {
                 Text(formatCurrency(txn.amount ?? 0))
-                    .font(.subheadline.weight(.semibold).monospacedDigit())
+                    .font(SpentyFonts.subheadline.weight(.semibold).monospacedDigit())
                     .foregroundStyle(transactionColor(txn.transactionType))
 
                 if let type = txn.transactionType {
                     Text(type.capitalized)
-                        .font(.caption2)
+                        .font(SpentyFonts.caption2)
                         .foregroundStyle(transactionColor(type))
                 }
             }
@@ -294,15 +284,15 @@ struct PastInsightDetailView: View {
             } label: {
                 Label("Edit", systemImage: "pencil")
             }
-            .tint(Brand.primary)
+            .tint(Color.spentyPrimary)
         }
     }
 
     private func transactionColor(_ type: String?) -> Color {
         switch type?.lowercased() {
-        case "income":  .green
-        case "expense": .red
-        default:        .primary
+        case "income":  .spentySuccess
+        case "expense": .spentyError
+        default:        .spentyTextPrimary
         }
     }
 
@@ -311,7 +301,7 @@ struct PastInsightDetailView: View {
     private var transactionFormSheet: some View {
         NavigationStack {
             ZStack {
-                Brand.background.ignoresSafeArea()
+                Color.spentyBgPrimary.ignoresSafeArea()
 
                 Form {
                     Section("Transaction Details") {
@@ -321,7 +311,7 @@ struct PastInsightDetailView: View {
                             .keyboardType(.decimalPad)
 
                         DatePicker("Date", selection: $viewModel.txnDate, displayedComponents: .date)
-                            .tint(Brand.primary)
+                            .tint(Color.spentyPrimary)
 
                         Picker("Type", selection: $viewModel.txnType) {
                             Text("Income").tag("income")
@@ -353,7 +343,7 @@ struct PastInsightDetailView: View {
                             .padding(.vertical, 4)
                             .foregroundStyle(.white)
                         }
-                        .listRowBackground(Brand.primary)
+                        .listRowBackground(Color.spentyPrimary)
                     }
                 }
                 .scrollContentBackground(.hidden)
@@ -366,7 +356,7 @@ struct PastInsightDetailView: View {
                         viewModel.editingTransaction = nil
                         viewModel.showAddTransaction = false
                     }
-                    .tint(Brand.primary)
+                    .tint(Color.spentyPrimary)
                 }
             }
         }
@@ -377,14 +367,14 @@ struct PastInsightDetailView: View {
 
     private func statusBadge(_ status: String) -> some View {
         let color: Color = switch status.lowercased() {
-        case "completed":  .green
-        case "processing": .orange
-        case "failed":     .red
-        default:           .secondary
+        case "completed":  .spentySuccess
+        case "processing": .spentyWarning
+        case "failed":     .spentyError
+        default:           .spentyTextSecondary
         }
 
         return Text(status.capitalized)
-            .font(.caption.weight(.semibold))
+            .font(SpentyFonts.caption1.weight(.semibold))
             .padding(.horizontal, 10)
             .padding(.vertical, 4)
             .foregroundStyle(color)

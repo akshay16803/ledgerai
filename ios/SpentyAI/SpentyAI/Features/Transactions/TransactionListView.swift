@@ -6,6 +6,7 @@ struct TransactionListView: View {
     @State private var showDateFilter = false
     @State private var showDeleteConfirm = false
     @State private var deleteTargetId: String?
+    @State private var selectedTransaction: Transaction?
 
     // MARK: - Date Formatting
 
@@ -36,6 +37,14 @@ struct TransactionListView: View {
                 TransactionFormView(
                     viewModel: viewModel,
                     transaction: viewModel.editingTransaction
+                )
+            }
+            .sheet(item: $selectedTransaction) { txn in
+                TransactionDetailView(
+                    transaction: txn,
+                    onTransactionUpdated: {
+                        Task { await viewModel.refresh() }
+                    }
                 )
             }
             .confirmationDialog(
@@ -330,6 +339,8 @@ struct TransactionListView: View {
                     .onTapGesture {
                         if viewModel.isSelecting {
                             viewModel.toggleSelection(txn.id)
+                        } else {
+                            selectedTransaction = txn
                         }
                     }
                     .onLongPressGesture {

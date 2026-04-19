@@ -13,7 +13,6 @@ struct EmailSyncView: View {
                 gmailSection
                 outlookSection
                 syncActionsSection
-                smsStatsCard
                 pendingReviewCard
             }
             .padding(16)
@@ -182,13 +181,13 @@ struct EmailSyncView: View {
                     if viewModel.isConnecting {
                         ProgressView()
                             .controlSize(.small)
-                            .tint(Color.spentyPrimary)
+                            .tint(.white)
                     } else {
                         Image(systemName: "plus.circle.fill")
                     }
                     Text("Connect Gmail")
                 }
-                .secondaryButtonStyle()
+                .primaryButtonStyle()
             }
             .disabled(viewModel.isConnecting)
             .opacity(viewModel.isConnecting ? 0.6 : 1.0)
@@ -235,13 +234,13 @@ struct EmailSyncView: View {
                     if viewModel.isConnecting {
                         ProgressView()
                             .controlSize(.small)
-                            .tint(Color.spentyPrimary)
+                            .tint(.white)
                     } else {
                         Image(systemName: "plus.circle.fill")
                     }
                     Text("Connect Outlook")
                 }
-                .secondaryButtonStyle()
+                .primaryButtonStyle()
             }
             .disabled(viewModel.isConnecting)
             .opacity(viewModel.isConnecting ? 0.6 : 1.0)
@@ -447,57 +446,19 @@ struct EmailSyncView: View {
                             if viewModel.isRetrying {
                                 ProgressView()
                                     .controlSize(.small)
-                                    .tint(Color.spentyPrimary)
+                                    .tint(.white)
                             } else {
                                 Image(systemName: "arrow.clockwise")
                             }
                             Text(viewModel.isRetrying ? "Retrying..." : "Retry Failed Emails")
                         }
-                        .secondaryButtonStyle()
+                        .primaryButtonStyle()
                     }
                     .disabled(viewModel.isRetrying)
                     .opacity(viewModel.isRetrying ? 0.6 : 1.0)
                 }
             }
             .cardStyle()
-        }
-    }
-
-    // MARK: - SMS Stats Card
-
-    @ViewBuilder
-    private var smsStatsCard: some View {
-        if let stats = viewModel.smsStats {
-            NavigationLink {
-                SMSSyncView()
-            } label: {
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack(spacing: 10) {
-                        Image(systemName: "message.fill")
-                            .font(.system(size: 18))
-                            .foregroundColor(.spentyPrimary)
-
-                        Text("SMS Sync")
-                            .font(SpentyFonts.headline)
-                            .foregroundColor(.spentyTextPrimary)
-
-                        Spacer()
-
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(.spentyTextSecondary)
-                    }
-
-                    HStack(spacing: 16) {
-                        Label("\(stats.totalSynced ?? 0) messages", systemImage: "envelope.fill")
-                        Label("\(stats.transactionsCreated ?? 0) transactions", systemImage: "banknote.fill")
-                    }
-                    .font(SpentyFonts.caption1)
-                    .foregroundColor(.spentyTextSecondary)
-                }
-                .cardStyle()
-            }
-            .buttonStyle(.plain)
         }
     }
 

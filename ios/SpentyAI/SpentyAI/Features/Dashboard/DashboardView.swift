@@ -11,6 +11,7 @@ struct DashboardView: View {
     @State private var showIncomeList = false
     @State private var showExpenseList = false
     @State private var showAllPending = false
+    @State private var selectedTransaction: Transaction?
 
     var body: some View {
         NavigationStack {
@@ -90,6 +91,14 @@ struct DashboardView: View {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
                             selectedPendingTxn = txn
                         }
+                    }
+                )
+            }
+            .sheet(item: $selectedTransaction) { txn in
+                TransactionDetailView(
+                    transaction: txn,
+                    onTransactionUpdated: {
+                        Task { await viewModel.refresh() }
                     }
                 )
             }
@@ -276,7 +285,12 @@ struct DashboardView: View {
             if isTransactionsExpanded {
                 VStack(spacing: 0) {
                     ForEach(viewModel.recentTransactions) { txn in
-                        transactionRow(txn)
+                        Button {
+                            selectedTransaction = txn
+                        } label: {
+                            transactionRow(txn)
+                        }
+                        .buttonStyle(.plain)
 
                         if txn.id != viewModel.recentTransactions.last?.id {
                             Divider()
@@ -624,7 +638,7 @@ struct PendingTransactionDetailSheet: View {
                             }
                         }
                         .padding()
-                        .background(Color.white, in: RoundedRectangle(cornerRadius: 14))
+                        .background(Color.spentyCardBg, in: RoundedRectangle(cornerRadius: 14))
                         .shadow(color: .black.opacity(0.04), radius: 8, y: 2)
 
                         // Action buttons
@@ -761,7 +775,7 @@ struct DashboardAccountsListView: View {
                                 color: (account.balance ?? 0) >= 0 ? .spentySuccess : .spentyError
                             )
                         }
-                        .listRowBackground(Color.white)
+                        .listRowBackground(Color.spentyCardBg)
                     }
                     .scrollContentBackground(.hidden)
                 }
@@ -786,6 +800,7 @@ struct DashboardFilteredTransactionsView: View {
     let transactions: [Transaction]
     let emptyMessage: String
     @Environment(\.dismiss) private var dismiss
+    @State private var selectedTransaction: Transaction?
 
     var body: some View {
         NavigationStack {
@@ -796,36 +811,42 @@ struct DashboardFilteredTransactionsView: View {
                     ContentUnavailableView(emptyMessage, systemImage: "tray", description: nil)
                 } else {
                     List(transactions) { txn in
-                        HStack(spacing: 12) {
-                            Circle()
-                                .fill(colorForType(txn.transactionType).opacity(0.12))
-                                .frame(width: 40, height: 40)
-                                .overlay(
-                                    Image(systemName: txn.transactionType?.lowercased() == "income" ? "arrow.down.circle.fill" : "arrow.up.circle.fill")
-                                        .font(.system(size: 16, weight: .semibold))
-                                        .foregroundColor(colorForType(txn.transactionType))
-                                )
+                        Button {
+                            selectedTransaction = txn
+                        } label: {
+                            HStack(spacing: 12) {
+                                Circle()
+                                    .fill(colorForType(txn.transactionType).opacity(0.12))
+                                    .frame(width: 40, height: 40)
+                                    .overlay(
+                                        Image(systemName: txn.transactionType?.lowercased() == "income" ? "arrow.down.circle.fill" : "arrow.up.circle.fill")
+                                            .font(.system(size: 16, weight: .semibold))
+                                            .foregroundColor(colorForType(txn.transactionType))
+                                    )
 
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(txn.description ?? "Transaction")
-                                    .font(SpentyFonts.subheadline)
-                                    .lineLimit(1)
-                                if let date = txn.date {
-                                    Text(date, style: .date)
-                                        .font(SpentyFonts.caption1)
-                                        .foregroundColor(.spentyTextSecondary)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(txn.description ?? "Transaction")
+                                        .font(SpentyFonts.subheadline)
+                                        .foregroundColor(.spentyTextPrimary)
+                                        .lineLimit(1)
+                                    if let date = txn.date {
+                                        Text(date, style: .date)
+                                            .font(SpentyFonts.caption1)
+                                            .foregroundColor(.spentyTextSecondary)
+                                    }
                                 }
+
+                                Spacer()
+
+                                CurrencyText(
+                                    amount: txn.amount ?? 0,
+                                    font: SpentyFonts.amountSmall,
+                                    color: colorForType(txn.transactionType)
+                                )
                             }
-
-                            Spacer()
-
-                            CurrencyText(
-                                amount: txn.amount ?? 0,
-                                font: SpentyFonts.amountSmall,
-                                color: colorForType(txn.transactionType)
-                            )
                         }
-                        .listRowBackground(Color.white)
+                        .buttonStyle(.plain)
+                        .listRowBackground(Color.spentyCardBg)
                     }
                     .scrollContentBackground(.hidden)
                 }
@@ -837,6 +858,9 @@ struct DashboardFilteredTransactionsView: View {
                     Button("Done") { dismiss() }
                         .tint(.spentyPrimary)
                 }
+            }
+            .sheet(item: $selectedTransaction) { txn in
+                TransactionDetailView(transaction: txn)
             }
         }
     }
@@ -906,7 +930,7 @@ struct DashboardAllPendingView: View {
                             }
                         }
                         .buttonStyle(.plain)
-                        .listRowBackground(Color.white)
+                        .listRowBackground(Color.spentyCardBg)
                     }
                     .scrollContentBackground(.hidden)
                 }

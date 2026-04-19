@@ -2,13 +2,6 @@ import SwiftUI
 
 struct PastInsightsView: View {
 
-    // MARK: - Constants
-
-    private enum Brand {
-        static let primary    = Color(red: 0x3A / 255, green: 0x5C / 255, blue: 0x4A / 255)
-        static let background = Color(red: 0xF8 / 255, green: 0xF6 / 255, blue: 0xF3 / 255)
-    }
-
     // MARK: - State
 
     @State private var viewModel = PastInsightsViewModel()
@@ -18,11 +11,11 @@ struct PastInsightsView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Brand.background.ignoresSafeArea()
+                Color.spentyBgPrimary.ignoresSafeArea()
 
                 Group {
                     if viewModel.isLoading && viewModel.summaries.isEmpty {
-                        loadingView
+                        LoadingView(message: "Loading past insight summaries...")
                     } else if viewModel.summaries.isEmpty && !viewModel.isLoading {
                         emptyState
                     } else {
@@ -40,7 +33,7 @@ struct PastInsightsView: View {
                         Image(systemName: "plus")
                             .fontWeight(.semibold)
                     }
-                    .tint(Brand.primary)
+                    .tint(Color.spentyPrimary)
                 }
             }
             .sheet(isPresented: $viewModel.showCreateForm) {
@@ -57,38 +50,17 @@ struct PastInsightsView: View {
         }
     }
 
-    // MARK: - Loading
-
-    private var loadingView: some View {
-        VStack(spacing: 12) {
-            ProgressView()
-                .tint(Brand.primary)
-            Text("Loading tax summaries...")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-        }
-    }
-
     // MARK: - Empty State
 
     private var emptyState: some View {
-        ContentUnavailableView {
-            Label("No Tax Summaries", systemImage: "doc.text.magnifyingglass")
-                .foregroundStyle(Brand.primary)
-        } description: {
-            Text("Create a tax summary to analyze your income and expenses over a date range.")
-        } actions: {
-            Button {
-                viewModel.startCreate()
-                Task { await viewModel.loadAvailableEmails() }
-            } label: {
-                Text("Create Summary")
-                    .fontWeight(.semibold)
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 24)
-                    .padding(.vertical, 10)
-                    .background(Brand.primary, in: Capsule())
-            }
+        EmptyStateView(
+            icon: "doc.text.magnifyingglass",
+            title: "No Past Insight Summaries",
+            subtitle: "Create a past insight summary to analyze your income and expenses over a date range.",
+            buttonTitle: "Create Summary"
+        ) {
+            viewModel.startCreate()
+            Task { await viewModel.loadAvailableEmails() }
         }
     }
 
@@ -102,7 +74,7 @@ struct PastInsightsView: View {
                 } label: {
                     summaryRow(summary)
                 }
-                .listRowBackground(Color.white)
+                .listRowBackground(Color.spentyCardBg)
             }
             .onDelete { offsets in
                 Task { await viewModel.deleteSummary(at: offsets) }
@@ -119,8 +91,8 @@ struct PastInsightsView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text(summary.name ?? "Untitled")
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(.primary)
+                    .font(SpentyFonts.body.weight(.semibold))
+                    .foregroundStyle(Color.spentyTextPrimary)
                     .lineLimit(1)
 
                 Spacer()
@@ -130,14 +102,14 @@ struct PastInsightsView: View {
 
             if let from = summary.dateFrom, let to = summary.dateTo {
                 Text("\(formatDate(from)) - \(formatDate(to))")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(SpentyFonts.caption1)
+                    .foregroundStyle(Color.spentyTextSecondary)
             }
 
             HStack(spacing: 16) {
-                financialPill(label: "Income", value: summary.totalIncome, color: .green)
-                financialPill(label: "Expense", value: summary.totalExpense, color: .red)
-                financialPill(label: "Net", value: summary.net, color: Brand.primary)
+                financialPill(label: "Income", value: summary.totalIncome, color: .spentySuccess)
+                financialPill(label: "Expense", value: summary.totalExpense, color: .spentyError)
+                financialPill(label: "Net", value: summary.net, color: .spentyPrimary)
             }
         }
         .padding(.vertical, 4)
@@ -145,14 +117,14 @@ struct PastInsightsView: View {
 
     private func statusBadge(_ status: String) -> some View {
         let color: Color = switch status.lowercased() {
-        case "completed": .green
-        case "processing": .orange
-        case "failed": .red
-        default: .secondary
+        case "completed": .spentySuccess
+        case "processing": .spentyWarning
+        case "failed": .spentyError
+        default: .spentyTextSecondary
         }
 
         return Text(status.capitalized)
-            .font(.caption2.weight(.semibold))
+            .font(SpentyFonts.caption2.weight(.semibold))
             .padding(.horizontal, 8)
             .padding(.vertical, 3)
             .foregroundStyle(color)
@@ -162,10 +134,10 @@ struct PastInsightsView: View {
     private func financialPill(label: String, value: Double?, color: Color) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(label)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+                .font(SpentyFonts.caption2)
+                .foregroundStyle(Color.spentyTextSecondary)
             Text(formatCurrency(value ?? 0))
-                .font(.caption.weight(.medium).monospacedDigit())
+                .font(SpentyFonts.caption1.weight(.medium).monospacedDigit())
                 .foregroundStyle(color)
         }
     }
@@ -175,27 +147,27 @@ struct PastInsightsView: View {
     private var createFormSheet: some View {
         NavigationStack {
             ZStack {
-                Brand.background.ignoresSafeArea()
+                Color.spentyBgPrimary.ignoresSafeArea()
 
                 Form {
                     Section("Summary Details") {
                         TextField("Name", text: $viewModel.createName)
 
                         DatePicker("From", selection: $viewModel.createDateFrom, displayedComponents: .date)
-                            .tint(Brand.primary)
+                            .tint(Color.spentyPrimary)
 
                         DatePicker("To", selection: $viewModel.createDateTo, displayedComponents: .date)
-                            .tint(Brand.primary)
+                            .tint(Color.spentyPrimary)
                     }
 
                     Section("Email Account") {
                         if viewModel.availableEmails.isEmpty {
                             HStack {
                                 ProgressView()
-                                    .tint(Brand.primary)
+                                    .tint(Color.spentyPrimary)
                                 Text("Loading email accounts...")
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
+                                    .font(SpentyFonts.subheadline)
+                                    .foregroundStyle(Color.spentyTextSecondary)
                             }
                         } else {
                             Picker("Email", selection: $viewModel.createSelectedEmail) {
@@ -217,7 +189,7 @@ struct PastInsightsView: View {
                                     ProgressView()
                                         .tint(.white)
                                 } else {
-                                    Text("Generate Tax Summary")
+                                    Text("Generate Past Insight Summary")
                                         .fontWeight(.semibold)
                                 }
                                 Spacer()
@@ -226,21 +198,21 @@ struct PastInsightsView: View {
                             .foregroundStyle(.white)
                         }
                         .listRowBackground(
-                            Brand.primary.opacity(viewModel.isCreating ? 0.6 : 1)
+                            Color.spentyPrimary.opacity(viewModel.isCreating ? 0.6 : 1)
                         )
                         .disabled(viewModel.isCreating)
                     }
                 }
                 .scrollContentBackground(.hidden)
             }
-            .navigationTitle("New Tax Summary")
+            .navigationTitle("New Past Insight Summary")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
                         viewModel.showCreateForm = false
                     }
-                    .tint(Brand.primary)
+                    .tint(Color.spentyPrimary)
                 }
             }
         }

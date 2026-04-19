@@ -3,13 +3,6 @@ import PhotosUI
 
 struct SettingsView: View {
 
-    // MARK: - Constants
-
-    private enum Brand {
-        static let primary = Color(red: 0x3A / 255, green: 0x5C / 255, blue: 0x4A / 255)
-        static let background = Color(red: 0xF8 / 255, green: 0xF6 / 255, blue: 0xF3 / 255)
-    }
-
     // MARK: - State
 
     @Environment(AuthManager.self) private var authManager
@@ -24,12 +17,11 @@ struct SettingsView: View {
 
     var body: some View {
         ZStack {
-            Brand.background
+            Color.spentyBgPrimary
                 .ignoresSafeArea()
 
             if viewModel.isLoading && viewModel.settings.firmName == nil {
-                ProgressView("Loading settings...")
-                    .tint(Brand.primary)
+                LoadingView(message: "Loading settings...")
             } else {
                 settingsForm
             }
@@ -82,15 +74,15 @@ struct SettingsView: View {
                 BusinessProfileView(viewModel: viewModel)
             } label: {
                 HStack(spacing: 14) {
-                    sectionIcon("building.2.fill", color: Brand.primary)
+                    sectionIcon("building.2.fill", color: .spentyPrimary)
 
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Business Profile")
-                            .font(.body.weight(.medium))
-                            .foregroundStyle(.primary)
+                            .font(SpentyFonts.body)
+                            .foregroundColor(.spentyTextPrimary)
                         Text(viewModel.settings.firmName ?? "Set up your business details")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .font(SpentyFonts.caption1)
+                            .foregroundColor(.spentyTextSecondary)
                             .lineLimit(1)
                     }
                 }
@@ -98,8 +90,9 @@ struct SettingsView: View {
             }
         } header: {
             Label("Business", systemImage: "briefcase.fill")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(Brand.primary)
+                .font(SpentyFonts.caption1)
+                .fontWeight(.semibold)
+                .foregroundColor(.spentyPrimary)
                 .textCase(nil)
         }
     }
@@ -112,15 +105,15 @@ struct SettingsView: View {
                 CurrencySettingsView(viewModel: viewModel)
             } label: {
                 HStack(spacing: 14) {
-                    sectionIcon("coloncurrencysign.circle.fill", color: .orange)
+                    sectionIcon("coloncurrencysign.circle.fill", color: .spentyWarning)
 
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Currency & Locale")
-                            .font(.body.weight(.medium))
-                            .foregroundStyle(.primary)
+                            .font(SpentyFonts.body)
+                            .foregroundColor(.spentyTextPrimary)
                         Text(currencySubtitle)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .font(SpentyFonts.caption1)
+                            .foregroundColor(.spentyTextSecondary)
                             .lineLimit(1)
                     }
                 }
@@ -128,8 +121,9 @@ struct SettingsView: View {
             }
         } header: {
             Label("Regional", systemImage: "globe")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(Brand.primary)
+                .font(SpentyFonts.caption1)
+                .fontWeight(.semibold)
+                .foregroundColor(.spentyPrimary)
                 .textCase(nil)
         }
     }
@@ -146,7 +140,8 @@ struct SettingsView: View {
             // Logo upload
             VStack(alignment: .leading, spacing: 10) {
                 Label("Business Logo", systemImage: "photo.badge.plus")
-                    .font(.subheadline.weight(.medium))
+                    .font(SpentyFonts.subheadline)
+                    .fontWeight(.medium)
 
                 if let logoUrl = viewModel.settings.logoUrl, !logoUrl.isEmpty {
                     logoPreview(url: logoUrl)
@@ -159,7 +154,8 @@ struct SettingsView: View {
             // Signature upload
             VStack(alignment: .leading, spacing: 10) {
                 Label("Signature", systemImage: "signature")
-                    .font(.subheadline.weight(.medium))
+                    .font(SpentyFonts.subheadline)
+                    .fontWeight(.medium)
 
                 if let sigUrl = viewModel.settings.signatureUrl, !sigUrl.isEmpty {
                     signaturePreview(url: sigUrl)
@@ -170,8 +166,9 @@ struct SettingsView: View {
             .padding(.vertical, 4)
         } header: {
             Label("Invoice Customization", systemImage: "doc.richtext")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(Brand.primary)
+                .font(SpentyFonts.caption1)
+                .fontWeight(.semibold)
+                .foregroundColor(.spentyPrimary)
                 .textCase(nil)
         }
     }
@@ -201,15 +198,17 @@ struct SettingsView: View {
             HStack(spacing: 12) {
                 PhotosPicker(selection: $logoPickerItem, matching: .images) {
                     Label("Replace", systemImage: "arrow.triangle.2.circlepath")
-                        .font(.caption.weight(.medium))
+                        .font(SpentyFonts.caption1)
+                        .fontWeight(.medium)
                 }
-                .tint(Brand.primary)
+                .tint(.spentyPrimary)
 
                 Button(role: .destructive) {
                     Task { await viewModel.deleteLogo() }
                 } label: {
                     Label("Remove", systemImage: "trash")
-                        .font(.caption.weight(.medium))
+                        .font(SpentyFonts.caption1)
+                        .fontWeight(.medium)
                 }
                 .disabled(viewModel.isDeletingLogo)
 
@@ -229,10 +228,10 @@ struct SettingsView: View {
             HStack(spacing: 10) {
                 Image(systemName: "plus.circle.fill")
                     .font(.title3)
-                    .foregroundStyle(Brand.primary)
+                    .foregroundStyle(Color.spentyPrimary)
                 Text("Upload Logo")
-                    .font(.subheadline)
-                    .foregroundStyle(Brand.primary)
+                    .font(SpentyFonts.subheadline)
+                    .foregroundStyle(Color.spentyPrimary)
 
                 if viewModel.isUploadingLogo {
                     ProgressView()
@@ -240,7 +239,7 @@ struct SettingsView: View {
                 }
             }
             .frame(maxWidth: .infinity, minHeight: 56)
-            .background(Brand.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .background(Color.spentyPrimary.opacity(0.06), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
         .onChange(of: logoPickerItem) { _, newItem in
             handleLogoPick(newItem)
@@ -272,15 +271,17 @@ struct SettingsView: View {
             HStack(spacing: 12) {
                 PhotosPicker(selection: $signaturePickerItem, matching: .images) {
                     Label("Replace", systemImage: "arrow.triangle.2.circlepath")
-                        .font(.caption.weight(.medium))
+                        .font(SpentyFonts.caption1)
+                        .fontWeight(.medium)
                 }
-                .tint(Brand.primary)
+                .tint(.spentyPrimary)
 
                 Button(role: .destructive) {
                     Task { await viewModel.deleteSignature() }
                 } label: {
                     Label("Remove", systemImage: "trash")
-                        .font(.caption.weight(.medium))
+                        .font(SpentyFonts.caption1)
+                        .fontWeight(.medium)
                 }
                 .disabled(viewModel.isDeletingSignature)
 
@@ -300,10 +301,10 @@ struct SettingsView: View {
             HStack(spacing: 10) {
                 Image(systemName: "plus.circle.fill")
                     .font(.title3)
-                    .foregroundStyle(Brand.primary)
+                    .foregroundStyle(Color.spentyPrimary)
                 Text("Upload Signature")
-                    .font(.subheadline)
-                    .foregroundStyle(Brand.primary)
+                    .font(SpentyFonts.subheadline)
+                    .foregroundStyle(Color.spentyPrimary)
 
                 if viewModel.isUploadingSignature {
                     ProgressView()
@@ -311,7 +312,7 @@ struct SettingsView: View {
                 }
             }
             .frame(maxWidth: .infinity, minHeight: 56)
-            .background(Brand.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .background(Color.spentyPrimary.opacity(0.06), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
         .onChange(of: signaturePickerItem) { _, newItem in
             handleSignaturePick(newItem)
@@ -326,11 +327,11 @@ struct SettingsView: View {
                 Task { await authManager.logout() }
             } label: {
                 HStack(spacing: 14) {
-                    sectionIcon("rectangle.portrait.and.arrow.right", color: .orange)
+                    sectionIcon("rectangle.portrait.and.arrow.right", color: .spentyWarning)
 
                     Text("Sign Out")
-                        .font(.body.weight(.medium))
-                        .foregroundStyle(.primary)
+                        .font(SpentyFonts.body)
+                        .foregroundColor(.spentyTextPrimary)
                 }
                 .padding(.vertical, 4)
             }
@@ -339,23 +340,24 @@ struct SettingsView: View {
                 viewModel.showDeleteConfirm = true
             } label: {
                 HStack(spacing: 14) {
-                    sectionIcon("person.crop.circle.badge.xmark", color: .red)
+                    sectionIcon("person.crop.circle.badge.xmark", color: .spentyError)
 
                     Text("Delete Account")
-                        .font(.body.weight(.medium))
-                        .foregroundStyle(.red)
+                        .font(SpentyFonts.body)
+                        .foregroundColor(.spentyError)
                 }
                 .padding(.vertical, 4)
             }
         } header: {
             Label("Account", systemImage: "person.circle")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(Brand.primary)
+                .font(SpentyFonts.caption1)
+                .fontWeight(.semibold)
+                .foregroundColor(.spentyPrimary)
                 .textCase(nil)
         } footer: {
             Text("Permanently deletes your account and all associated data.")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+                .font(SpentyFonts.caption2)
+                .foregroundColor(.spentyTextSecondary)
         }
     }
 
@@ -363,7 +365,7 @@ struct SettingsView: View {
 
     private func sectionIcon(_ systemName: String, color: Color) -> some View {
         Image(systemName: systemName)
-            .font(.body)
+            .font(SpentyFonts.body)
             .foregroundStyle(.white)
             .frame(width: 32, height: 32)
             .background(color, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
@@ -375,7 +377,7 @@ struct SettingsView: View {
             .frame(height: 60)
             .overlay {
                 Image(systemName: icon)
-                    .foregroundStyle(.secondary)
+                    .foregroundColor(.spentyTextSecondary)
             }
     }
 

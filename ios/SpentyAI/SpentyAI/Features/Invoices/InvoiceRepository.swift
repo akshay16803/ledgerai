@@ -32,8 +32,27 @@ struct RecordPaymentPayload: Codable {
 }
 
 private struct InvoiceListResponse: Codable {
-    let items: [Invoice]
+    let invoices: [Invoice]
     let total: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case invoices
+        case items
+        case total
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        // Backend may send "invoices" or "items" key
+        if let invoices = try? container.decode([Invoice].self, forKey: .invoices) {
+            self.invoices = invoices
+        } else if let items = try? container.decode([Invoice].self, forKey: .items) {
+            self.invoices = items
+        } else {
+            self.invoices = []
+        }
+        self.total = try? container.decodeIfPresent(Int.self, forKey: .total)
+    }
 }
 
 struct InvoiceRepository {
@@ -44,7 +63,7 @@ struct InvoiceRepository {
 
     func fetchAll() async throws -> [Invoice] {
         let response: InvoiceListResponse = try await api.get(APIEndpoints.invoices)
-        return response.items
+        return response.invoices
     }
 
     func fetch(id: String) async throws -> Invoice {

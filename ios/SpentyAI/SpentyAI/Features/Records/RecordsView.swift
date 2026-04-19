@@ -26,59 +26,57 @@ struct RecordsView: View {
     }()
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                Color.spentyBgPrimary.ignoresSafeArea()
+        ZStack {
+            Color.spentyBgPrimary.ignoresSafeArea()
 
-                VStack(spacing: 0) {
-                    tabBar
-                    switch viewModel.activeTab {
-                    case .emails:
-                        emailsContent
-                    case .receipts:
-                        receiptsContent
-                    }
+            VStack(spacing: 0) {
+                tabBar
+                switch viewModel.activeTab {
+                case .emails:
+                    emailsContent
+                case .receipts:
+                    receiptsContent
                 }
             }
-            .navigationTitle("Records")
-            .navigationBarTitleDisplayMode(.large)
-            .toolbar { toolbarContent }
-            .sheet(item: $viewModel.shareItem) { item in
-                RecordsShareSheet(activityItems: [item.url])
-            }
-            .sheet(isPresented: $showUploadSheet) {
-                ReceiptUploadView(viewModel: viewModel, isPresented: $showUploadSheet)
-            }
-            .confirmationDialog(
-                "Delete Record",
-                isPresented: $showDeleteConfirm,
-                titleVisibility: .visible
-            ) {
-                Button("Delete", role: .destructive) {
-                    if let id = deleteTargetId {
-                        Task { await viewModel.deleteRecord(id: id) }
-                    }
+        }
+        .navigationTitle("Records")
+        .navigationBarTitleDisplayMode(.large)
+        .toolbar { toolbarContent }
+        .sheet(item: $viewModel.shareItem) { item in
+            RecordsShareSheet(activityItems: [item.url])
+        }
+        .sheet(isPresented: $showUploadSheet) {
+            ReceiptUploadView(viewModel: viewModel, isPresented: $showUploadSheet)
+        }
+        .confirmationDialog(
+            "Delete Record",
+            isPresented: $showDeleteConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                if let id = deleteTargetId {
+                    Task { await viewModel.deleteRecord(id: id) }
                 }
-            } message: {
-                Text("This action cannot be undone.")
             }
-            .confirmationDialog(
-                "Delete Receipt",
-                isPresented: $showDeleteReceiptConfirm,
-                titleVisibility: .visible
-            ) {
-                Button("Delete", role: .destructive) {
-                    if let id = deleteReceiptId {
-                        Task { await viewModel.deleteReceipt(id: id) }
-                    }
+        } message: {
+            Text("This action cannot be undone.")
+        }
+        .confirmationDialog(
+            "Delete Receipt",
+            isPresented: $showDeleteReceiptConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                if let id = deleteReceiptId {
+                    Task { await viewModel.deleteReceipt(id: id) }
                 }
-            } message: {
-                Text("This receipt will be permanently removed.")
             }
-            .task {
-                await viewModel.loadRecords()
-                await viewModel.loadReceipts()
-            }
+        } message: {
+            Text("This receipt will be permanently removed.")
+        }
+        .task {
+            await viewModel.loadRecords()
+            await viewModel.loadReceipts()
         }
     }
 

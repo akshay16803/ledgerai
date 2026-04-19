@@ -507,6 +507,7 @@ struct ReportTransactionsView: View {
     @State private var filterDateFrom: Date
     @State private var filterDateTo: Date
     @State private var showDateFilter = false
+    @State private var selectedTransaction: Transaction?
 
     private let repository = TransactionRepository.shared
     private static let queryDateFormatter: DateFormatter = {
@@ -567,8 +568,13 @@ struct ReportTransactionsView: View {
                     // Transactions list
                     List {
                         ForEach(transactions) { txn in
-                            transactionRow(txn)
-                                .listRowBackground(Color.spentyCardBg)
+                            Button {
+                                selectedTransaction = txn
+                            } label: {
+                                transactionRow(txn)
+                            }
+                            .buttonStyle(.plain)
+                            .listRowBackground(Color.spentyCardBg)
                         }
                     }
                     .listStyle(.plain)
@@ -593,6 +599,14 @@ struct ReportTransactionsView: View {
             }
             .task {
                 await loadTransactions()
+            }
+            .sheet(item: $selectedTransaction) { txn in
+                TransactionDetailView(
+                    transaction: txn,
+                    onTransactionUpdated: {
+                        Task { await loadTransactions() }
+                    }
+                )
             }
         }
     }

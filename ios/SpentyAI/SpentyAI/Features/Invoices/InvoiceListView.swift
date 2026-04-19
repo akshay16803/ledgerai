@@ -2,15 +2,6 @@ import SwiftUI
 
 struct InvoiceListView: View {
 
-    // MARK: - Brand
-
-    private enum Brand {
-        static let primary = Color(red: 0x3A / 255, green: 0x5C / 255, blue: 0x4A / 255)
-        static let background = Color(red: 0xF8 / 255, green: 0xF6 / 255, blue: 0xF3 / 255)
-        static let error = Color(red: 0x96 / 255, green: 0x45 / 255, blue: 0x3A / 255)
-        static let warning = Color(red: 0xC2 / 255, green: 0x8C / 255, blue: 0x3C / 255)
-    }
-
     // MARK: - State
 
     @State private var viewModel = InvoicesViewModel()
@@ -24,12 +15,11 @@ struct InvoiceListView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Brand.background.ignoresSafeArea()
+                Color.spentyBgPrimary.ignoresSafeArea()
 
                 Group {
                     if viewModel.isLoading && viewModel.invoices.isEmpty {
-                        ProgressView()
-                            .tint(Brand.primary)
+                        LoadingView(message: "Loading invoices...")
                     } else if viewModel.filteredInvoices.isEmpty && viewModel.invoices.isEmpty {
                         emptyState
                     } else {
@@ -46,7 +36,7 @@ struct InvoiceListView: View {
                     } label: {
                         Image(systemName: "plus")
                             .fontWeight(.semibold)
-                            .foregroundStyle(Brand.primary)
+                            .foregroundStyle(Color.spentyPrimary)
                     }
                 }
             }
@@ -114,10 +104,10 @@ struct InvoiceListView: View {
                 GridItem(.flexible()),
                 GridItem(.flexible())
             ], spacing: 12) {
-                statCard(title: "Total Invoiced", amount: stats.totalInvoiced ?? 0, color: Brand.primary)
-                statCard(title: "Paid", amount: stats.totalPaid ?? 0, color: .green)
-                statCard(title: "Outstanding", amount: stats.totalOutstanding ?? 0, color: Brand.warning)
-                statCard(title: "Overdue", amount: stats.totalOverdue ?? 0, color: Brand.error)
+                statCard(title: "Total Invoiced", amount: stats.totalInvoiced ?? 0, color: .spentyPrimary)
+                statCard(title: "Paid", amount: stats.totalPaid ?? 0, color: .spentySuccess)
+                statCard(title: "Outstanding", amount: stats.totalOutstanding ?? 0, color: .spentyWarning)
+                statCard(title: "Overdue", amount: stats.totalOverdue ?? 0, color: .spentyError)
             }
             .padding(.vertical, 4)
         }
@@ -128,15 +118,15 @@ struct InvoiceListView: View {
     private func statCard(title: String, amount: Double, color: Color) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .font(SpentyFonts.caption1)
+                .foregroundStyle(Color.spentyTextSecondary)
             Text(formatCurrency(amount))
-                .font(.subheadline.weight(.bold))
+                .font(SpentyFonts.subheadline.weight(.bold))
                 .foregroundStyle(color)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
-        .background(Color.white, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .background(Color.spentyCardBg, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
     // MARK: - Filter
@@ -152,19 +142,19 @@ struct InvoiceListView: View {
                             }
                         } label: {
                             Text(filter.displayName)
-                                .font(.subheadline.weight(.medium))
+                                .font(SpentyFonts.subheadline.weight(.medium))
                                 .padding(.horizontal, 14)
                                 .padding(.vertical, 7)
                                 .background(
                                     viewModel.statusFilter == filter
-                                        ? Brand.primary
-                                        : Color(.systemGray5),
+                                        ? Color.spentyPrimary
+                                        : Color.spentyBgSecondary,
                                     in: Capsule()
                                 )
                                 .foregroundStyle(
                                     viewModel.statusFilter == filter
                                         ? .white
-                                        : .primary
+                                        : Color.spentyTextPrimary
                                 )
                         }
                         .buttonStyle(.plain)
@@ -183,8 +173,8 @@ struct InvoiceListView: View {
         Section {
             if viewModel.filteredInvoices.isEmpty {
                 Text("No invoices match your filters.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .font(SpentyFonts.subheadline)
+                    .foregroundStyle(Color.spentyTextSecondary)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 24)
             } else {
@@ -206,7 +196,7 @@ struct InvoiceListView: View {
                         } label: {
                             Label("Edit", systemImage: "pencil")
                         }
-                        .tint(Brand.primary)
+                        .tint(Color.spentyPrimary)
                     }
                     .swipeActions(edge: .leading, allowsFullSwipe: false) {
                         if (invoice.paymentStatus ?? "").lowercased() != "paid" {
@@ -215,7 +205,7 @@ struct InvoiceListView: View {
                             } label: {
                                 Label("Mark Paid", systemImage: "checkmark.circle")
                             }
-                            .tint(.green)
+                            .tint(Color.spentySuccess)
                         }
 
                         Button {
@@ -223,9 +213,9 @@ struct InvoiceListView: View {
                         } label: {
                             Label("Duplicate", systemImage: "doc.on.doc")
                         }
-                        .tint(Brand.warning)
+                        .tint(Color.spentyWarning)
                     }
-                    .listRowBackground(Color.white)
+                    .listRowBackground(Color.spentyCardBg)
                 }
             }
         } header: {
@@ -237,40 +227,40 @@ struct InvoiceListView: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text(invoice.invoiceNumber ?? "—")
-                    .font(.body.weight(.semibold))
+                    .font(SpentyFonts.body.weight(.semibold))
                 Spacer()
                 statusBadge(invoice.paymentStatus)
             }
 
             Text(invoice.customerName ?? "Unknown Customer")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .font(SpentyFonts.subheadline)
+                .foregroundStyle(Color.spentyTextSecondary)
 
             HStack {
                 Label(formatDate(invoice.date), systemImage: "calendar")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(SpentyFonts.caption1)
+                    .foregroundStyle(Color.spentyTextSecondary)
 
                 Spacer()
 
                 if let dueDate = invoice.dueDate {
                     Label("Due: \(formatDate(dueDate))", systemImage: "clock")
-                        .font(.caption)
-                        .foregroundStyle(isOverdue(invoice) ? Brand.error : .secondary)
+                        .font(SpentyFonts.caption1)
+                        .foregroundStyle(isOverdue(invoice) ? Color.spentyError : Color.spentyTextSecondary)
                 }
             }
 
             HStack {
                 Text(formatCurrency(invoice.grandTotal ?? 0))
-                    .font(.subheadline.weight(.bold))
-                    .foregroundStyle(Brand.primary)
+                    .font(SpentyFonts.subheadline.weight(.bold))
+                    .foregroundStyle(Color.spentyPrimary)
 
                 Spacer()
 
                 if let paid = invoice.amountPaid, paid > 0, paid < (invoice.grandTotal ?? 0) {
                     Text("Paid: \(formatCurrency(paid))")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(SpentyFonts.caption1)
+                        .foregroundStyle(Color.spentyTextSecondary)
                 }
 
                 if (invoice.paymentStatus ?? "").lowercased() != "paid" {
@@ -279,8 +269,8 @@ struct InvoiceListView: View {
                         showPaymentSheet = true
                     } label: {
                         Label("Record Payment", systemImage: "indianrupeesign.circle")
-                            .font(.caption2.weight(.medium))
-                            .foregroundStyle(Brand.primary)
+                            .font(SpentyFonts.caption2.weight(.medium))
+                            .foregroundStyle(Color.spentyPrimary)
                     }
                     .buttonStyle(.plain)
                 }
@@ -295,18 +285,18 @@ struct InvoiceListView: View {
         let (text, bg, fg): (String, Color, Color) = {
             switch st {
             case "paid":
-                return ("Paid", Color.green.opacity(0.15), .green)
+                return ("Paid", Color.spentySuccess.opacity(0.15), .spentySuccess)
             case "partial":
-                return ("Partial", Brand.warning.opacity(0.15), Brand.warning)
+                return ("Partial", Color.spentyWarning.opacity(0.15), .spentyWarning)
             case "overdue":
-                return ("Overdue", Brand.error.opacity(0.15), Brand.error)
+                return ("Overdue", Color.spentyError.opacity(0.15), .spentyError)
             default:
-                return ("Unpaid", Brand.error.opacity(0.1), Brand.error)
+                return ("Unpaid", Color.spentyError.opacity(0.1), .spentyError)
             }
         }()
 
         Text(text)
-            .font(.caption2.weight(st == "overdue" ? .bold : .semibold))
+            .font(SpentyFonts.caption2.weight(st == "overdue" ? .bold : .semibold))
             .padding(.horizontal, 8)
             .padding(.vertical, 3)
             .background(bg, in: Capsule())
@@ -321,17 +311,17 @@ struct InvoiceListView: View {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(debtor.customerName ?? "—")
-                            .font(.subheadline.weight(.medium))
+                            .font(SpentyFonts.subheadline.weight(.medium))
                         Text("\(debtor.invoiceCount ?? 0) invoices")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .font(SpentyFonts.caption1)
+                            .foregroundStyle(Color.spentyTextSecondary)
                     }
                     Spacer()
                     Text(formatCurrency(debtor.totalOutstanding ?? 0))
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(Brand.error)
+                        .font(SpentyFonts.subheadline.weight(.semibold))
+                        .foregroundStyle(Color.spentyError)
                 }
-                .listRowBackground(Color.white)
+                .listRowBackground(Color.spentyCardBg)
             }
         } header: {
             Button {
@@ -341,9 +331,9 @@ struct InvoiceListView: View {
                     Text("Debtors Summary")
                     Spacer()
                     Image(systemName: debtorsExpanded ? "chevron.up" : "chevron.down")
-                        .font(.caption)
+                        .font(SpentyFonts.caption1)
                 }
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.spentyTextSecondary)
             }
         }
     }
@@ -356,17 +346,17 @@ struct InvoiceListView: View {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(bucket.label ?? "—")
-                            .font(.subheadline.weight(.medium))
+                            .font(SpentyFonts.subheadline.weight(.medium))
                         Text("\(bucket.count ?? 0) invoices")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .font(SpentyFonts.caption1)
+                            .foregroundStyle(Color.spentyTextSecondary)
                     }
                     Spacer()
                     Text(formatCurrency(bucket.amount ?? 0))
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(Brand.warning)
+                        .font(SpentyFonts.subheadline.weight(.semibold))
+                        .foregroundStyle(Color.spentyWarning)
                 }
-                .listRowBackground(Color.white)
+                .listRowBackground(Color.spentyCardBg)
             }
         } header: {
             Button {
@@ -376,9 +366,9 @@ struct InvoiceListView: View {
                     Text("Aging Analysis")
                     Spacer()
                     Image(systemName: agingExpanded ? "chevron.up" : "chevron.down")
-                        .font(.caption)
+                        .font(SpentyFonts.caption1)
                 }
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.spentyTextSecondary)
             }
         }
     }
@@ -386,34 +376,14 @@ struct InvoiceListView: View {
     // MARK: - Empty State
 
     private var emptyState: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "doc.text.magnifyingglass")
-                .resizable()
-                .scaledToFit()
-                .frame(width: 64, height: 64)
-                .foregroundStyle(Brand.primary.opacity(0.4))
-
-            Text("No Invoices Yet")
-                .font(.title3.weight(.semibold))
-                .foregroundStyle(.primary)
-
-            Text("Tap the + button to create your first invoice.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-
-            Button {
-                viewModel.startCreate()
-            } label: {
-                Label("Create Invoice", systemImage: "plus")
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 24)
-                    .padding(.vertical, 12)
-                    .background(Brand.primary, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            }
+        EmptyStateView(
+            icon: "doc.text.magnifyingglass",
+            title: "No Invoices Yet",
+            subtitle: "Tap the + button to create your first invoice.",
+            buttonTitle: "Create Invoice"
+        ) {
+            viewModel.startCreate()
         }
-        .padding(32)
     }
 
     // MARK: - Helpers
@@ -427,10 +397,11 @@ struct InvoiceListView: View {
     private func formatCurrency(_ value: Double) -> String {
         let formatter = NumberFormatter()
         formatter.numberStyle = .currency
-        formatter.currencySymbol = "\u{20B9}"
+        formatter.locale = Locale(identifier: "en_IN")
+        formatter.currencySymbol = "₹"
         formatter.maximumFractionDigits = 2
         formatter.minimumFractionDigits = 0
-        return formatter.string(from: NSNumber(value: value)) ?? "\u{20B9}0"
+        return formatter.string(from: NSNumber(value: value)) ?? "₹0"
     }
 
     private func formatDate(_ date: Date?) -> String {

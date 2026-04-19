@@ -2,13 +2,6 @@ import SwiftUI
 
 struct FeatureRequestsView: View {
 
-    // MARK: - Constants
-
-    private enum Brand {
-        static let primary = Color(red: 0x3A / 255, green: 0x5C / 255, blue: 0x4A / 255)
-        static let background = Color(red: 0xF8 / 255, green: 0xF6 / 255, blue: 0xF3 / 255)
-    }
-
     // MARK: - State
 
     @State private var viewModel = FeatureRequestsViewModel()
@@ -17,13 +10,12 @@ struct FeatureRequestsView: View {
 
     var body: some View {
         ZStack {
-            Brand.background
+            Color.spentyBgPrimary
                 .ignoresSafeArea()
 
             Group {
                 if viewModel.isLoading && viewModel.requests.isEmpty {
-                    ProgressView("Loading requests...")
-                        .tint(Brand.primary)
+                    LoadingView(message: "Loading requests...")
                 } else if viewModel.requests.isEmpty {
                     emptyState
                 } else {
@@ -40,7 +32,7 @@ struct FeatureRequestsView: View {
                     Image(systemName: "plus")
                         .fontWeight(.semibold)
                 }
-                .tint(Brand.primary)
+                .tint(.spentyPrimary)
             }
         }
         .sheet(isPresented: $viewModel.showForm) {
@@ -68,17 +60,13 @@ struct FeatureRequestsView: View {
     // MARK: - Sub-views
 
     private var emptyState: some View {
-        ContentUnavailableView {
-            Label("No Requests Yet", systemImage: "lightbulb")
-                .foregroundStyle(Brand.primary)
-        } description: {
-            Text("Be the first to suggest a feature!")
-        } actions: {
-            Button("Submit a Request") {
-                viewModel.showForm = true
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(Brand.primary)
+        EmptyStateView(
+            icon: "lightbulb",
+            title: "No Requests Yet",
+            subtitle: "Be the first to suggest a feature!",
+            buttonTitle: "Submit a Request"
+        ) {
+            viewModel.showForm = true
         }
     }
 
@@ -86,7 +74,7 @@ struct FeatureRequestsView: View {
         List {
             ForEach(viewModel.requests) { request in
                 requestRow(request)
-                    .listRowBackground(Color.white)
+                    .listRowBackground(Color.spentyCardBg)
             }
         }
         .listStyle(.insetGrouped)
@@ -104,13 +92,14 @@ struct FeatureRequestsView: View {
             // Content
             VStack(alignment: .leading, spacing: 6) {
                 Text(request.title ?? "Untitled")
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(.primary)
+                    .font(SpentyFonts.body)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.spentyTextPrimary)
 
                 if let description = request.description, !description.isEmpty {
                     Text(description)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(SpentyFonts.caption1)
+                        .foregroundColor(.spentyTextSecondary)
                         .lineLimit(2)
                 }
 
@@ -133,14 +122,16 @@ struct FeatureRequestsView: View {
         } label: {
             VStack(spacing: 2) {
                 Image(systemName: "arrow.up")
-                    .font(.caption.weight(.bold))
+                    .font(SpentyFonts.caption1)
+                    .fontWeight(.bold)
                 Text("\(request.votes ?? 0)")
-                    .font(.caption2.weight(.semibold))
+                    .font(SpentyFonts.caption2)
+                    .fontWeight(.semibold)
                     .monospacedDigit()
             }
-            .foregroundStyle(Brand.primary)
+            .foregroundStyle(Color.spentyPrimary)
             .frame(width: 44, height: 48)
-            .background(Brand.primary.opacity(0.1))
+            .background(Color.spentyPrimary.opacity(0.1))
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
         .buttonStyle(.plain)
@@ -148,17 +139,19 @@ struct FeatureRequestsView: View {
 
     private func categoryBadge(_ category: FeatureRequestCategory) -> some View {
         Text(category.rawValue)
-            .font(.caption2.weight(.medium))
-            .foregroundStyle(Brand.primary)
+            .font(SpentyFonts.caption2)
+            .fontWeight(.medium)
+            .foregroundStyle(Color.spentyPrimary)
             .padding(.horizontal, 8)
             .padding(.vertical, 3)
-            .background(Brand.primary.opacity(0.1))
+            .background(Color.spentyPrimary.opacity(0.1))
             .clipShape(Capsule())
     }
 
     private func statusBadge(_ status: FeatureRequestStatus) -> some View {
         Text(status.displayName)
-            .font(.caption2.weight(.medium))
+            .font(SpentyFonts.caption2)
+            .fontWeight(.medium)
             .foregroundStyle(status.color)
             .padding(.horizontal, 8)
             .padding(.vertical, 3)
@@ -181,10 +174,10 @@ extension FeatureRequestStatus {
 
     var color: Color {
         switch self {
-        case .submitted:  return .orange
-        case .pending:    return .yellow.opacity(0.9)
-        case .inProgress: return .blue
-        case .completed:  return .green
+        case .submitted:  return .spentyWarning
+        case .pending:    return .spentyWarning.opacity(0.9)
+        case .inProgress: return .spentyInfo
+        case .completed:  return .spentySuccess
         }
     }
 }
