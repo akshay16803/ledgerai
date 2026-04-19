@@ -288,11 +288,30 @@ struct CashFlowView: View {
 
 // MARK: - Drill-Down Sheet
 
+// MARK: - Detail Item Types for non-transaction sheets
+
+enum DrillDownDetailItem: Identifiable {
+    case mandate(MandateItem)
+    case emi(EMIItem)
+    case odInterest(ODInterestItem)
+
+    var id: String {
+        switch self {
+        case .mandate(let item): return "mandate-\(item.id)"
+        case .emi(let item): return "emi-\(item.id)"
+        case .odInterest(let item): return "od-\(item.id)"
+        }
+    }
+}
+
 struct CashFlowDrillDownSheet: View {
 
     let drillDown: CashFlowDrillDown
     let viewModel: CashFlowViewModel
     @Environment(\.dismiss) private var dismiss
+    @State private var selectedTransaction: Transaction?
+    @State private var isLoadingTransaction = false
+    @State private var selectedDetailItem: DrillDownDetailItem?
 
     var body: some View {
         NavigationStack {
@@ -328,6 +347,32 @@ struct CashFlowDrillDownSheet: View {
                         .foregroundColor(.spentyPrimary)
                 }
             }
+            .overlay {
+                if isLoadingTransaction {
+                    ZStack {
+                        Color.black.opacity(0.3).ignoresSafeArea()
+                        VStack(spacing: 12) {
+                            ProgressView()
+                                .progressViewStyle(CircularProgressViewStyle(tint: .spentyPrimary))
+                                .scaleEffect(1.2)
+                            Text("Loading transaction...")
+                                .font(SpentyFonts.caption1)
+                                .foregroundColor(.spentyTextSecondary)
+                        }
+                        .padding(24)
+                        .background(Color.spentyCardBg)
+                        .cornerRadius(16)
+                    }
+                }
+            }
+            .sheet(item: $selectedTransaction) { transaction in
+                NavigationStack {
+                    TransactionDetailView(transaction: transaction)
+                }
+            }
+            .sheet(item: $selectedDetailItem) { detailItem in
+                detailSheet(for: detailItem)
+            }
         }
     }
 
@@ -339,7 +384,7 @@ struct CashFlowDrillDownSheet: View {
                 emptyState(icon: "arrow.down.circle", message: "No recurring income items found")
             } else {
                 ForEach(viewModel.incomeItems) { item in
-                    recurringItemRow(item, color: .spentySuccess)
+                    recurringItemButton(item, color: .spentySuccess)
                 }
             }
         }
@@ -353,7 +398,7 @@ struct CashFlowDrillDownSheet: View {
                 emptyState(icon: "arrow.up.circle", message: "No recurring expense items found")
             } else {
                 ForEach(viewModel.expenseItems) { item in
-                    recurringItemRow(item, color: .spentyError)
+                    recurringItemButton(item, color: .spentyError)
                 }
             }
         }
@@ -367,47 +412,57 @@ struct CashFlowDrillDownSheet: View {
                 emptyState(icon: "doc.text", message: "No active mandates")
             } else {
                 ForEach(viewModel.mandateItemsList) { item in
-                    HStack {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(item.merchant ?? "Unknown Merchant")
-                                .font(SpentyFonts.subheadline)
-                                .fontWeight(.medium)
-                                .foregroundColor(.spentyTextPrimary)
+                    Button {
+                        selectedDetailItem = .mandate(item)
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(item.merchant ?? "Unknown Merchant")
+                                    .font(SpentyFonts.subheadline)
+                                    .fontWeight(.medium)
+                                    .foregroundColor(.spentyTextPrimary)
 
-                            HStack(spacing: 6) {
-                                if let type = item.mandateType, !type.isEmpty {
-                                    Text(type.capitalized)
-                                        .font(SpentyFonts.caption1)
-                                        .foregroundColor(.spentyTextSecondary)
+                                HStack(spacing: 6) {
+                                    if let type = item.mandateType, !type.isEmpty {
+                                        Text(type.capitalized)
+                                            .font(SpentyFonts.caption1)
+                                            .foregroundColor(.spentyTextSecondary)
+                                    }
+                                    if let freq = item.frequency, !freq.isEmpty {
+                                        Text("·")
+                                            .foregroundColor(.spentyTextSecondary)
+                                        Text(freq.capitalized)
+                                            .font(SpentyFonts.caption1)
+                                            .foregroundColor(.spentyTextSecondary)
+                                    }
                                 }
-                                if let freq = item.frequency, !freq.isEmpty {
-                                    Text("·")
-                                        .foregroundColor(.spentyTextSecondary)
-                                    Text(freq.capitalized)
-                                        .font(SpentyFonts.caption1)
+                            }
+
+                            Spacer()
+
+                            VStack(alignment: .trailing, spacing: 2) {
+                                CurrencyText(
+                                    amount: item.amount ?? 0,
+                                    font: SpentyFonts.amountSmall,
+                                    color: .spentyWarning
+                                )
+                                if let monthly = item.monthlyEquivalent, monthly != item.amount {
+                                    Text("\(formatCurrency(monthly))/mo")
+                                        .font(SpentyFonts.caption2)
                                         .foregroundColor(.spentyTextSecondary)
                                 }
                             }
-                        }
 
-                        Spacer()
-
-                        VStack(alignment: .trailing, spacing: 2) {
-                            CurrencyText(
-                                amount: item.amount ?? 0,
-                                font: SpentyFonts.amountSmall,
-                                color: .spentyWarning
-                            )
-                            if let monthly = item.monthlyEquivalent, monthly != item.amount {
-                                Text("\(formatCurrency(monthly))/mo")
-                                    .font(SpentyFonts.caption2)
-                                    .foregroundColor(.spentyTextSecondary)
-                            }
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(.spentyTextSecondary.opacity(0.5))
+                                .padding(.leading, 4)
                         }
+                        .padding(12)
+                        .background(Color.spentyCardBg)
+                        .cornerRadius(12)
                     }
-                    .padding(12)
-                    .background(Color.spentyCardBg)
-                    .cornerRadius(12)
+                    .buttonStyle(.plain)
                 }
             }
         }
@@ -421,37 +476,47 @@ struct CashFlowDrillDownSheet: View {
                 emptyState(icon: "percent", message: "No overdraft interest charges")
             } else {
                 ForEach(viewModel.odInterestItemsList) { item in
-                    HStack {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(item.accountName ?? "OD Account")
-                                .font(SpentyFonts.subheadline)
-                                .fontWeight(.medium)
-                                .foregroundColor(.spentyTextPrimary)
+                    Button {
+                        selectedDetailItem = .odInterest(item)
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(item.accountName ?? "OD Account")
+                                    .font(SpentyFonts.subheadline)
+                                    .fontWeight(.medium)
+                                    .foregroundColor(.spentyTextPrimary)
 
-                            if let rate = item.rate {
-                                Text("Rate: \(String(format: "%.2f", rate))%")
-                                    .font(SpentyFonts.caption1)
-                                    .foregroundColor(.spentyTextSecondary)
+                                if let rate = item.rate {
+                                    Text("Rate: \(String(format: "%.2f", rate))%")
+                                        .font(SpentyFonts.caption1)
+                                        .foregroundColor(.spentyTextSecondary)
+                                }
+
+                                if let balance = item.balance {
+                                    Text("Balance: \(formatCurrency(balance))")
+                                        .font(SpentyFonts.caption1)
+                                        .foregroundColor(.spentyTextSecondary)
+                                }
                             }
 
-                            if let balance = item.balance {
-                                Text("Balance: \(formatCurrency(balance))")
-                                    .font(SpentyFonts.caption1)
-                                    .foregroundColor(.spentyTextSecondary)
-                            }
+                            Spacer()
+
+                            CurrencyText(
+                                amount: item.monthlyInterest ?? 0,
+                                font: SpentyFonts.amountSmall,
+                                color: .spentyError
+                            )
+
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(.spentyTextSecondary.opacity(0.5))
+                                .padding(.leading, 4)
                         }
-
-                        Spacer()
-
-                        CurrencyText(
-                            amount: item.monthlyInterest ?? 0,
-                            font: SpentyFonts.amountSmall,
-                            color: .spentyError
-                        )
+                        .padding(12)
+                        .background(Color.spentyCardBg)
+                        .cornerRadius(12)
                     }
-                    .padding(12)
-                    .background(Color.spentyCardBg)
-                    .cornerRadius(12)
+                    .buttonStyle(.plain)
                 }
             }
         }
@@ -465,48 +530,58 @@ struct CashFlowDrillDownSheet: View {
                 emptyState(icon: "creditcard", message: "No active EMIs")
             } else {
                 ForEach(viewModel.emiItemsList) { item in
-                    HStack {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(item.accountName ?? "Loan Account")
-                                .font(SpentyFonts.subheadline)
-                                .fontWeight(.medium)
-                                .foregroundColor(.spentyTextPrimary)
+                    Button {
+                        selectedDetailItem = .emi(item)
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(item.accountName ?? "Loan Account")
+                                    .font(SpentyFonts.subheadline)
+                                    .fontWeight(.medium)
+                                    .foregroundColor(.spentyTextPrimary)
 
-                            HStack(spacing: 6) {
-                                if let day = item.emiDay {
-                                    Text("Due: \(ordinal(day)) of month")
-                                        .font(SpentyFonts.caption1)
-                                        .foregroundColor(.spentyTextSecondary)
+                                HStack(spacing: 6) {
+                                    if let day = item.emiDay {
+                                        Text("Due: \(ordinal(day)) of month")
+                                            .font(SpentyFonts.caption1)
+                                            .foregroundColor(.spentyTextSecondary)
+                                    }
+                                }
+
+                                HStack(spacing: 6) {
+                                    if let rate = item.loanInterestRate {
+                                        Text("\(String(format: "%.1f", rate))% p.a.")
+                                            .font(SpentyFonts.caption1)
+                                            .foregroundColor(.spentyTextSecondary)
+                                    }
+                                    if let tenure = item.loanTenureMonths {
+                                        Text("·")
+                                            .foregroundColor(.spentyTextSecondary)
+                                        Text("\(tenure) months")
+                                            .font(SpentyFonts.caption1)
+                                            .foregroundColor(.spentyTextSecondary)
+                                    }
                                 }
                             }
 
-                            HStack(spacing: 6) {
-                                if let rate = item.loanInterestRate {
-                                    Text("\(String(format: "%.1f", rate))% p.a.")
-                                        .font(SpentyFonts.caption1)
-                                        .foregroundColor(.spentyTextSecondary)
-                                }
-                                if let tenure = item.loanTenureMonths {
-                                    Text("·")
-                                        .foregroundColor(.spentyTextSecondary)
-                                    Text("\(tenure) months")
-                                        .font(SpentyFonts.caption1)
-                                        .foregroundColor(.spentyTextSecondary)
-                                }
-                            }
+                            Spacer()
+
+                            CurrencyText(
+                                amount: item.emiAmount ?? 0,
+                                font: SpentyFonts.amountSmall,
+                                color: .spentyAccent3
+                            )
+
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(.spentyTextSecondary.opacity(0.5))
+                                .padding(.leading, 4)
                         }
-
-                        Spacer()
-
-                        CurrencyText(
-                            amount: item.emiAmount ?? 0,
-                            font: SpentyFonts.amountSmall,
-                            color: .spentyAccent3
-                        )
+                        .padding(12)
+                        .background(Color.spentyCardBg)
+                        .cornerRadius(12)
                     }
-                    .padding(12)
-                    .background(Color.spentyCardBg)
-                    .cornerRadius(12)
+                    .buttonStyle(.plain)
                 }
 
                 // Total row
@@ -557,6 +632,31 @@ struct CashFlowDrillDownSheet: View {
 
     // MARK: - Helpers
 
+    private func recurringItemButton(_ item: RecurringItem, color: Color) -> some View {
+        Button {
+            guard let transactionId = item.transactionId, !transactionId.isEmpty else { return }
+            isLoadingTransaction = true
+            Task {
+                do {
+                    let transaction = try await TransactionRepository.shared.fetchTransaction(id: transactionId)
+                    await MainActor.run {
+                        isLoadingTransaction = false
+                        selectedTransaction = transaction
+                    }
+                } catch {
+                    await MainActor.run {
+                        isLoadingTransaction = false
+                    }
+                }
+            }
+        } label: {
+            recurringItemRow(item, color: color)
+        }
+        .buttonStyle(.plain)
+        .disabled(item.transactionId == nil || (item.transactionId?.isEmpty ?? true))
+        .opacity(item.transactionId != nil && !(item.transactionId?.isEmpty ?? true) ? 1.0 : 0.7)
+    }
+
     private func recurringItemRow(_ item: RecurringItem, color: Color) -> some View {
         HStack {
             VStack(alignment: .leading, spacing: 4) {
@@ -585,6 +685,13 @@ struct CashFlowDrillDownSheet: View {
                         .font(SpentyFonts.caption2)
                         .foregroundColor(.spentyTextSecondary)
                 }
+            }
+
+            if item.transactionId != nil && !(item.transactionId?.isEmpty ?? true) {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.spentyTextSecondary.opacity(0.5))
+                    .padding(.leading, 4)
             }
         }
         .padding(12)
@@ -619,6 +726,269 @@ struct CashFlowDrillDownSheet: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 40)
+    }
+
+    // MARK: - Detail Sheets
+
+    @ViewBuilder
+    private func detailSheet(for item: DrillDownDetailItem) -> some View {
+        NavigationStack {
+            ZStack {
+                Color.spentyBgPrimary.ignoresSafeArea()
+
+                ScrollView {
+                    switch item {
+                    case .mandate(let mandate):
+                        mandateDetailContent(mandate)
+                    case .emi(let emi):
+                        emiDetailContent(emi)
+                    case .odInterest(let od):
+                        odDetailContent(od)
+                    }
+                }
+            }
+            .navigationTitle(detailSheetTitle(for: item))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { selectedDetailItem = nil }
+                        .font(SpentyFonts.headline)
+                        .foregroundColor(.spentyPrimary)
+                }
+            }
+        }
+    }
+
+    private func detailSheetTitle(for item: DrillDownDetailItem) -> String {
+        switch item {
+        case .mandate: return "Mandate Details"
+        case .emi: return "EMI Details"
+        case .odInterest: return "OD Interest Details"
+        }
+    }
+
+    private func mandateDetailContent(_ item: MandateItem) -> some View {
+        VStack(spacing: 16) {
+            // Header card
+            VStack(spacing: 12) {
+                Image(systemName: "doc.text.fill")
+                    .font(.system(size: 36))
+                    .foregroundColor(.spentyWarning)
+
+                Text(item.merchant ?? "Unknown Merchant")
+                    .font(SpentyFonts.headline)
+                    .foregroundColor(.spentyTextPrimary)
+
+                CurrencyText(
+                    amount: item.amount ?? 0,
+                    font: SpentyFonts.amountLarge,
+                    color: .spentyWarning
+                )
+
+                if let monthly = item.monthlyEquivalent, monthly != item.amount {
+                    Text("\(formatCurrency(monthly))/mo equivalent")
+                        .font(SpentyFonts.caption1)
+                        .foregroundColor(.spentyTextSecondary)
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .padding(20)
+            .background(Color.spentyCardBg)
+            .cornerRadius(12)
+
+            // Info rows
+            VStack(spacing: 0) {
+                if let type = item.mandateType, !type.isEmpty {
+                    detailInfoRow(label: "Type", value: type.capitalized, icon: "tag.fill")
+                    Divider().padding(.leading, 44)
+                }
+
+                if let freq = item.frequency, !freq.isEmpty {
+                    detailInfoRow(label: "Frequency", value: freq.capitalized, icon: "calendar.badge.clock")
+                    Divider().padding(.leading, 44)
+                }
+
+                if let source = item.source, !source.isEmpty {
+                    detailInfoRow(label: "Source", value: source, icon: "building.columns.fill")
+                    Divider().padding(.leading, 44)
+                }
+
+                if let mandateId = item.mandateId, !mandateId.isEmpty {
+                    detailInfoRow(label: "Mandate ID", value: mandateId, icon: "number")
+                }
+            }
+            .background(Color.spentyCardBg)
+            .cornerRadius(12)
+
+            // View Latest Transaction button
+            if let merchant = item.merchant, !merchant.isEmpty {
+                Button {
+                    selectedDetailItem = nil
+                    isLoadingTransaction = true
+                    Task {
+                        do {
+                            let result = try await TransactionRepository.shared.search(
+                                query: merchant,
+                                page: 1,
+                                limit: 1
+                            )
+                            await MainActor.run {
+                                isLoadingTransaction = false
+                                if let first = result.transactions.first {
+                                    selectedTransaction = first
+                                }
+                            }
+                        } catch {
+                            await MainActor.run {
+                                isLoadingTransaction = false
+                            }
+                        }
+                    }
+                } label: {
+                    HStack {
+                        Image(systemName: "doc.text.image")
+                            .font(.system(size: 14, weight: .medium))
+                        Text("View Latest Transaction")
+                            .font(SpentyFonts.subheadline)
+                            .fontWeight(.medium)
+                    }
+                    .foregroundColor(.spentyPrimary)
+                    .frame(maxWidth: .infinity)
+                    .padding(14)
+                    .background(Color.spentyPrimary.opacity(0.1))
+                    .cornerRadius(12)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(16)
+    }
+
+    private func emiDetailContent(_ item: EMIItem) -> some View {
+        VStack(spacing: 16) {
+            // Header card
+            VStack(spacing: 12) {
+                Image(systemName: "creditcard.fill")
+                    .font(.system(size: 36))
+                    .foregroundColor(.spentyAccent3)
+
+                Text(item.accountName ?? "Loan Account")
+                    .font(SpentyFonts.headline)
+                    .foregroundColor(.spentyTextPrimary)
+
+                CurrencyText(
+                    amount: item.emiAmount ?? 0,
+                    font: SpentyFonts.amountLarge,
+                    color: .spentyAccent3
+                )
+
+                Text("Monthly EMI")
+                    .font(SpentyFonts.caption1)
+                    .foregroundColor(.spentyTextSecondary)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(20)
+            .background(Color.spentyCardBg)
+            .cornerRadius(12)
+
+            // Info rows
+            VStack(spacing: 0) {
+                if let day = item.emiDay {
+                    detailInfoRow(label: "Due Date", value: "\(ordinal(day)) of every month", icon: "calendar")
+                    Divider().padding(.leading, 44)
+                }
+
+                if let rate = item.loanInterestRate {
+                    detailInfoRow(label: "Interest Rate", value: "\(String(format: "%.2f", rate))% p.a.", icon: "percent")
+                    Divider().padding(.leading, 44)
+                }
+
+                if let tenure = item.loanTenureMonths {
+                    detailInfoRow(label: "Loan Tenure", value: "\(tenure) months", icon: "clock.fill")
+                    Divider().padding(.leading, 44)
+                }
+
+                if let accountId = item.accountId, !accountId.isEmpty {
+                    detailInfoRow(label: "Account ID", value: accountId, icon: "number")
+                }
+            }
+            .background(Color.spentyCardBg)
+            .cornerRadius(12)
+        }
+        .padding(16)
+    }
+
+    private func odDetailContent(_ item: ODInterestItem) -> some View {
+        VStack(spacing: 16) {
+            // Header card
+            VStack(spacing: 12) {
+                Image(systemName: "percent")
+                    .font(.system(size: 36))
+                    .foregroundColor(.spentyError)
+
+                Text(item.accountName ?? "OD Account")
+                    .font(SpentyFonts.headline)
+                    .foregroundColor(.spentyTextPrimary)
+
+                CurrencyText(
+                    amount: item.monthlyInterest ?? 0,
+                    font: SpentyFonts.amountLarge,
+                    color: .spentyError
+                )
+
+                Text("Monthly Interest Charge")
+                    .font(SpentyFonts.caption1)
+                    .foregroundColor(.spentyTextSecondary)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(20)
+            .background(Color.spentyCardBg)
+            .cornerRadius(12)
+
+            // Info rows
+            VStack(spacing: 0) {
+                if let rate = item.rate {
+                    detailInfoRow(label: "Interest Rate", value: "\(String(format: "%.2f", rate))%", icon: "percent")
+                    Divider().padding(.leading, 44)
+                }
+
+                if let balance = item.balance {
+                    detailInfoRow(label: "Outstanding Balance", value: formatCurrency(balance), icon: "indianrupeesign.circle.fill")
+                    Divider().padding(.leading, 44)
+                }
+
+                if let accountId = item.accountId, !accountId.isEmpty {
+                    detailInfoRow(label: "Account ID", value: accountId, icon: "number")
+                }
+            }
+            .background(Color.spentyCardBg)
+            .cornerRadius(12)
+        }
+        .padding(16)
+    }
+
+    private func detailInfoRow(label: String, value: String, icon: String) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 14))
+                .foregroundColor(.spentyPrimary)
+                .frame(width: 24)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(label)
+                    .font(SpentyFonts.caption1)
+                    .foregroundColor(.spentyTextSecondary)
+                Text(value)
+                    .font(SpentyFonts.subheadline)
+                    .foregroundColor(.spentyTextPrimary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
     }
 
     private func formatCurrency(_ value: Double) -> String {

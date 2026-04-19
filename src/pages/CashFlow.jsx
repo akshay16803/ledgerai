@@ -3,8 +3,12 @@ import { api } from '../lib/api';
 import { getCached, setCache } from '../lib/cache';
 import {
   TrendUp, TrendDown, Repeat, ArrowRight,
-  CurrencyInr, CalendarBlank, Check, X, CaretDown, Receipt, Pause, Play, Trash
+  CurrencyInr, CalendarBlank, Check, X, CaretDown, Receipt, Pause, Play, Trash,
+  CaretUp, Eye
 } from '@phosphor-icons/react';
+import { EditTransactionModal } from '../components/EditTransactionModal.jsx';
+
+const API = import.meta.env.REACT_APP_BACKEND_URL || '';
 
 function formatCurrency(amount) {
   if (amount == null) return '—';
@@ -20,14 +24,20 @@ const FREQ_OPTIONS = [
   { value: 'yearly', label: 'Yearly' },
 ];
 
-function SummaryCard({ label, value, color, sub }) {
+function SummaryCard({ label, value, color, sub, onClick, active }) {
   return (
-    <div style={{
+    <div onClick={onClick} style={{
       flex: 1, minWidth: 180, padding: '24px', background: '#fff',
-      border: '1px solid var(--border-subtle)', borderRadius: 2
+      border: active ? '2px solid var(--brand-primary)' : '1px solid var(--border-subtle)', borderRadius: 2,
+      cursor: onClick ? 'pointer' : 'default',
+      transition: 'border-color 0.15s, box-shadow 0.15s',
+      boxShadow: active ? '0 2px 8px rgba(0,0,0,0.08)' : 'none',
     }}>
-      <div className="mono" style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 8 }}>
-        {label}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div className="mono" style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 8 }}>
+          {label}
+        </div>
+        {onClick && (active ? <CaretUp size={14} style={{ color: 'var(--brand-primary)' }} /> : <CaretDown size={14} style={{ color: 'var(--text-muted)' }} />)}
       </div>
       <div className="mono" style={{ fontSize: 26, fontWeight: 700, color, letterSpacing: '-0.02em' }}>
         {formatCurrency(value)}
@@ -105,6 +115,10 @@ export default function CashFlow() {
   const [showAddRecurring, setShowAddRecurring] = useState(false);
   const [mandates, setMandates] = useState(cached?.mandates || []);
   const [mandateBusyId, setMandateBusyId] = useState('');
+  const [expandedTile, setExpandedTile] = useState(null);
+  const [editTxn, setEditTxn] = useState(null);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [loadingTxnId, setLoadingTxnId] = useState(null);
 
   const loadData = useCallback(async () => {
     try {
@@ -129,6 +143,40 @@ export default function CashFlow() {
     }
     setLoading(false);
   }, []);
+
+  const toggleTile = (tile) => {
+    setExpandedTile(prev => prev === tile ? null : tile);
+  };
+
+  const handleRecurringItemClick = async (item) => {
+    if (!item.transaction_id) return;
+    setLoadingTxnId(item.transaction_id);
+    try {
+      const txn = await api.get(`/api/transactions/${item.transaction_id}`);
+      setEditTxn(txn);
+      setShowEditModal(true);
+    } catch (err) {
+      alert('Could not load transaction: ' + err.message);
+    } finally {
+      setLoadingTxnId(null);
+    }
+  };
+
+  const handleEditModalSave = () => {
+    setShowEditModal(false);
+    setEditTxn(null);
+    loadData();
+  };
+
+  const handleEditModalClose = () => {
+    setShowEditModal(false);
+    setEditTxn(null);
+  };
+
+  const openReceipt = (receiptId, e) => {
+    e.stopPropagation();
+    window.open(`${API}/api/receipts/${receiptId}/download`, '_blank');
+  };
 
   const toggleMandateStatus = async (mandateId, currentStatus) => {
     const next = currentStatus === 'active' ? 'paused' : 'active';
@@ -212,21 +260,259 @@ export default function CashFlow() {
       </div>
 
       {/* Summary Cards */}
-      <div data-testid="cashflow-summary" style={{ display: 'flex', gap: 16, marginBottom: 32, flexWrap: 'wrap' }}>
+      <div data-testid="cashflow-summary" style={{ display: 'flex', gap: 16, marginBottom: 16, flexWrap: 'wrap' }}>
         <SummaryCard label="Monthly Income" value={proj.monthly_recurring_income} color="var(--success)"
-          sub={`${recurringItems.filter(r => r.transaction_type === 'income').length} sources`} />
+          sub={`${recurringItems.filter(r => r.transaction_type === 'income').length} sources`}
+          onClick={() => toggleTile('income')} active={expandedTile === 'income'} />
         <SummaryCard label="Monthly Expense" value={proj.monthly_recurring_expense} color="var(--error)"
-          sub={`${recurringItems.filter(r => r.transaction_type === 'expense').length} sources`} />
+          sub={`${recurringItems.filter(r => r.transaction_type === 'expense').length} sources`}
+          onClick={() => toggleTile('expense')} active={expandedTile === 'expense'} />
         <SummaryCard label="Monthly Mandates" value={proj.monthly_mandate_expense || 0} color="var(--error)"
-          sub={`${(mandates || []).filter(m => m.status === 'active').length} active`} />
+          sub={`${(mandates || []).filter(m => m.status === 'active').length} active`}
+          onClick={() => toggleTile('mandates')} active={expandedTile === 'mandates'} />
         {(proj.monthly_od_interest || 0) > 0 && (
           <SummaryCard label="OD Interest" value={proj.monthly_od_interest} color="var(--error)"
-            sub={`${(proj.od_interest_items || []).length} OD account${(proj.od_interest_items || []).length !== 1 ? 's' : ''}`} />
+            sub={`${(proj.od_interest_items || []).length} OD account${(proj.od_interest_items || []).length !== 1 ? 's' : ''}`}
+            onClick={() => toggleTile('odInterest')} active={expandedTile === 'odInterest'} />
         )}
         <SummaryCard label="Monthly Net" value={proj.monthly_net}
           color={proj.monthly_net >= 0 ? 'var(--success)' : 'var(--error)'}
-          sub="Projected savings" />
+          sub="Projected savings"
+          onClick={() => toggleTile('net')} active={expandedTile === 'net'} />
       </div>
+
+      {/* Drill-Down Section */}
+      {expandedTile && (
+        <div data-testid={`drilldown-${expandedTile}`} style={{
+          background: '#fff', border: '1px solid var(--border-subtle)', borderRadius: 2,
+          marginBottom: 32, overflow: 'hidden',
+        }}>
+          {/* Income drill-down */}
+          {expandedTile === 'income' && (() => {
+            const incomeItems = recurringItems.filter(r => r.transaction_type === 'income');
+            return incomeItems.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: 32, color: 'var(--text-muted)', fontSize: 13 }}>
+                No recurring income sources found.
+              </div>
+            ) : (
+              <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div className="mono" style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.1em', padding: '0 8px 8px' }}>
+                  {incomeItems.length} recurring income source{incomeItems.length !== 1 ? 's' : ''}
+                </div>
+                {incomeItems.map(item => (
+                  <div key={item.transaction_id}
+                    onClick={() => handleRecurringItemClick(item)}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 16, padding: '12px 16px',
+                      border: '1px solid var(--border-subtle)', borderRadius: 2, cursor: 'pointer',
+                      background: 'var(--bg-primary)', transition: 'background 0.1s',
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-secondary)'}
+                    onMouseLeave={e => e.currentTarget.style.background = 'var(--bg-primary)'}
+                  >
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 2 }}>
+                        {item.description || '—'}
+                        {loadingTxnId === item.transaction_id && <span className="mono" style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 8 }}>Loading...</span>}
+                      </div>
+                      <div className="mono" style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                        {item.frequency || 'monthly'} {item.recurrence_date ? `on day ${item.recurrence_date}` : ''}
+                        {getAccountName(item.account_id) ? ` \u00b7 ${getAccountName(item.account_id)}` : ''}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                      {item.receipt_id && (
+                        <button onClick={(e) => openReceipt(item.receipt_id, e)} title="View receipt"
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--accent-1)', padding: 4 }}>
+                          <Receipt size={18} weight="duotone" />
+                        </button>
+                      )}
+                      <div className="mono" style={{ fontSize: 16, fontWeight: 700, color: 'var(--success)', whiteSpace: 'nowrap' }}>
+                        {formatCurrency(item.monthly_amount || item.amount)}<span style={{ fontSize: 11, fontWeight: 400, color: 'var(--text-muted)' }}>/mo</span>
+                      </div>
+                      <ArrowRight size={14} style={{ color: 'var(--text-muted)' }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
+
+          {/* Expense drill-down */}
+          {expandedTile === 'expense' && (() => {
+            const expenseItems = recurringItems.filter(r => r.transaction_type === 'expense');
+            return expenseItems.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: 32, color: 'var(--text-muted)', fontSize: 13 }}>
+                No recurring expense sources found.
+              </div>
+            ) : (
+              <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div className="mono" style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.1em', padding: '0 8px 8px' }}>
+                  {expenseItems.length} recurring expense source{expenseItems.length !== 1 ? 's' : ''}
+                </div>
+                {expenseItems.map(item => (
+                  <div key={item.transaction_id}
+                    onClick={() => handleRecurringItemClick(item)}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 16, padding: '12px 16px',
+                      border: '1px solid var(--border-subtle)', borderRadius: 2, cursor: 'pointer',
+                      background: 'var(--bg-primary)', transition: 'background 0.1s',
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-secondary)'}
+                    onMouseLeave={e => e.currentTarget.style.background = 'var(--bg-primary)'}
+                  >
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 2 }}>
+                        {item.description || '—'}
+                        {loadingTxnId === item.transaction_id && <span className="mono" style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 8 }}>Loading...</span>}
+                      </div>
+                      <div className="mono" style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                        {item.frequency || 'monthly'} {item.recurrence_date ? `on day ${item.recurrence_date}` : ''}
+                        {getAccountName(item.account_id) ? ` \u00b7 ${getAccountName(item.account_id)}` : ''}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                      {item.receipt_id && (
+                        <button onClick={(e) => openReceipt(item.receipt_id, e)} title="View receipt"
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--accent-1)', padding: 4 }}>
+                          <Receipt size={18} weight="duotone" />
+                        </button>
+                      )}
+                      <div className="mono" style={{ fontSize: 16, fontWeight: 700, color: 'var(--error)', whiteSpace: 'nowrap' }}>
+                        {formatCurrency(item.monthly_amount || item.amount)}<span style={{ fontSize: 11, fontWeight: 400, color: 'var(--text-muted)' }}>/mo</span>
+                      </div>
+                      <ArrowRight size={14} style={{ color: 'var(--text-muted)' }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
+
+          {/* Mandates drill-down */}
+          {expandedTile === 'mandates' && (() => {
+            const activeMandates = (mandates || []).filter(m => m.status === 'active');
+            return activeMandates.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: 32, color: 'var(--text-muted)', fontSize: 13 }}>
+                No active mandates found.
+              </div>
+            ) : (
+              <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div className="mono" style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.1em', padding: '0 8px 8px' }}>
+                  {activeMandates.length} active mandate{activeMandates.length !== 1 ? 's' : ''}
+                </div>
+                {activeMandates.map(m => {
+                  const monthlyEq = m.frequency === 'weekly' ? m.amount * (52 / 12)
+                    : m.frequency === 'yearly' ? m.amount / 12
+                    : m.frequency === 'quarterly' ? m.amount / 3
+                    : m.amount;
+                  return (
+                    <div key={m.mandate_id} style={{
+                      display: 'flex', alignItems: 'center', gap: 16, padding: '12px 16px',
+                      border: '1px solid var(--border-subtle)', borderRadius: 2,
+                      background: 'var(--bg-primary)',
+                    }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 2 }}>
+                          {m.merchant || '—'}
+                        </div>
+                        <div className="mono" style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                          {m.mandate_type || 'mandate'} \u00b7 {m.frequency || 'monthly'}
+                          {m.start_date ? ` \u00b7 since ${m.start_date}` : ''}
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <div className="mono" style={{ fontSize: 16, fontWeight: 700, color: 'var(--error)', whiteSpace: 'nowrap' }}>
+                          {formatCurrency(monthlyEq)}<span style={{ fontSize: 11, fontWeight: 400, color: 'var(--text-muted)' }}>/mo</span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
+
+          {/* OD Interest drill-down */}
+          {expandedTile === 'odInterest' && (() => {
+            const odItems = proj.od_interest_items || [];
+            return odItems.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: 32, color: 'var(--text-muted)', fontSize: 13 }}>
+                No OD interest items found.
+              </div>
+            ) : (
+              <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div className="mono" style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.1em', padding: '0 8px 8px' }}>
+                  {odItems.length} OD account{odItems.length !== 1 ? 's' : ''}
+                </div>
+                {odItems.map((item, idx) => (
+                  <div key={item.account_id || idx} style={{
+                    display: 'flex', alignItems: 'center', gap: 16, padding: '12px 16px',
+                    border: '1px solid var(--border-subtle)', borderRadius: 2,
+                    background: 'var(--bg-primary)',
+                  }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 2 }}>
+                        {item.account_name || getAccountName(item.account_id) || 'OD Account'}
+                      </div>
+                      <div className="mono" style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                        Rate: {item.interest_rate != null ? `${item.interest_rate}%` : '—'}
+                        {item.od_balance != null ? ` \u00b7 Balance: ${formatCurrency(item.od_balance)}` : ''}
+                      </div>
+                    </div>
+                    <div className="mono" style={{ fontSize: 16, fontWeight: 700, color: 'var(--error)', whiteSpace: 'nowrap' }}>
+                      {formatCurrency(item.monthly_interest || item.amount)}<span style={{ fontSize: 11, fontWeight: 400, color: 'var(--text-muted)' }}>/mo</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
+
+          {/* Net drill-down (summary breakdown) */}
+          {expandedTile === 'net' && (
+            <div style={{ padding: 24 }}>
+              <div className="mono" style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 16 }}>
+                Monthly Net Breakdown
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid var(--border-subtle)' }}>
+                  <span style={{ fontSize: 14 }}>Recurring Income</span>
+                  <span className="mono" style={{ fontSize: 16, fontWeight: 600, color: 'var(--success)' }}>
+                    + {formatCurrency(proj.monthly_recurring_income || 0)}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid var(--border-subtle)' }}>
+                  <span style={{ fontSize: 14 }}>Recurring Expenses</span>
+                  <span className="mono" style={{ fontSize: 16, fontWeight: 600, color: 'var(--error)' }}>
+                    - {formatCurrency(proj.monthly_recurring_expense || 0)}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid var(--border-subtle)' }}>
+                  <span style={{ fontSize: 14 }}>Mandates</span>
+                  <span className="mono" style={{ fontSize: 16, fontWeight: 600, color: 'var(--error)' }}>
+                    - {formatCurrency(proj.monthly_mandate_expense || 0)}
+                  </span>
+                </div>
+                {(proj.monthly_od_interest || 0) > 0 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid var(--border-subtle)' }}>
+                    <span style={{ fontSize: 14 }}>OD Interest</span>
+                    <span className="mono" style={{ fontSize: 16, fontWeight: 600, color: 'var(--error)' }}>
+                      - {formatCurrency(proj.monthly_od_interest || 0)}
+                    </span>
+                  </div>
+                )}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 0', borderTop: '2px solid var(--border-strong)' }}>
+                  <span style={{ fontSize: 16, fontWeight: 700 }}>Monthly Net</span>
+                  <span className="mono" style={{ fontSize: 22, fontWeight: 700, color: (proj.monthly_net || 0) >= 0 ? 'var(--success)' : 'var(--error)' }}>
+                    {formatCurrency(proj.monthly_net || 0)}
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* 24-Month Chart */}
       <div style={{
@@ -589,6 +875,17 @@ export default function CashFlow() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {/* Edit Transaction Modal */}
+      {showEditModal && editTxn && (
+        <EditTransactionModal
+          transaction={editTxn}
+          accounts={accounts}
+          categories={categories}
+          onSave={handleEditModalSave}
+          onClose={handleEditModalClose}
+        />
       )}
     </div>
   );
