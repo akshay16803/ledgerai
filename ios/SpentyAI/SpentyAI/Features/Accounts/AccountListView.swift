@@ -60,6 +60,9 @@ struct AccountListView: View {
                     .animation(.easeInOut, value: viewModel.errorMessage)
                 }
             }
+            .navigationDestination(for: String.self) { accountId in
+                AccountDetailView(viewModel: viewModel, accountId: accountId)
+            }
             .task {
                 if viewModel.accounts.isEmpty {
                     await viewModel.loadAccounts()
@@ -86,9 +89,6 @@ struct AccountListView: View {
                 }
             }
             .padding(.bottom, 20)
-        }
-        .navigationDestination(for: String.self) { accountId in
-            AccountDetailView(viewModel: viewModel, accountId: accountId)
         }
     }
 
