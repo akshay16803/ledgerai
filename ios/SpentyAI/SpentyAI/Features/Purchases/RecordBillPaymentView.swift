@@ -103,7 +103,7 @@ struct RecordBillPaymentView: View {
                 Spacer()
                 Text(formatCurrency(bill.amountPaid ?? 0))
                     .font(SpentyFonts.subheadline)
-                    .foregroundStyle(Color.spentySuccess)
+                    .foregroundColor(.spentySuccess)
             }
 
             HStack {
