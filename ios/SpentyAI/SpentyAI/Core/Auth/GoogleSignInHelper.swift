@@ -4,20 +4,36 @@ import Foundation
 
 final class GoogleSignInHelper: NSObject, ASWebAuthenticationPresentationContextProviding {
 
+    /// The iOS OAuth client ID.  Must come from an **iOS-type** OAuth client
+    /// in Google Cloud Console (not "Web application").  A Web client ID will
+    /// cause `unsupported_response_type` because Google rejects custom-scheme
+    /// redirect URIs for Web clients.
     private static let clientID: String = {
         guard let path = Bundle.main.path(forResource: "Config", ofType: "plist"),
               let dict = NSDictionary(contentsOfFile: path),
-              let id = dict["GOOGLE_CLIENT_ID"] as? String else { return "" }
+              let id = dict["GOOGLE_IOS_CLIENT_ID"] as? String,
+              !id.isEmpty else {
+            // Fall back to the legacy key so existing setups keep working
+            // while the iOS client ID is being provisioned.
+            guard let path = Bundle.main.path(forResource: "Config", ofType: "plist"),
+                  let dict = NSDictionary(contentsOfFile: path),
+                  let id = dict["GOOGLE_CLIENT_ID"] as? String else { return "" }
+            return id
+        }
         return id
     }()
 
-    /// Google requires the reverse client ID as the callback scheme for iOS OAuth clients.
+    /// Google registers the reversed client ID as the custom-scheme redirect
+    /// for iOS OAuth clients.  The scheme is:
+    ///   com.googleusercontent.apps.<numeric-id-hash>
     private static var callbackScheme: String {
-        "com.googleusercontent.apps." + clientID.components(separatedBy: ".apps.googleusercontent.com").first!
+        clientID.components(separatedBy: ".").reversed().joined(separator: ".")
     }
 
+    /// The redirect URI sent in the authorization request.  Google's iOS
+    /// OAuth flow expects the path `/oauthredirect` (not `/oauth2callback`).
     private static var redirectURI: String {
-        callbackScheme + ":/oauth2callback"
+        callbackScheme + ":/oauthredirect"
     }
 
     private static let tokenEndpoint = "https://oauth2.googleapis.com/token"
@@ -32,6 +48,10 @@ final class GoogleSignInHelper: NSObject, ASWebAuthenticationPresentationContext
     // MARK: - Private
 
     private func _signIn() async throws -> String {
+        guard !Self.clientID.isEmpty else {
+            throw APIError.badRequest("Google Sign-In is not configured — missing iOS client ID in Config.plist")
+        }
+
         // 1. Generate PKCE code verifier and challenge
         let codeVerifier = Self.generateCodeVerifier()
         let codeChallenge = Self.generateCodeChallenge(from: codeVerifier)
