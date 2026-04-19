@@ -1541,6 +1541,56 @@ async def merge_categories(request: Request, user: dict = Depends(get_current_us
     }
 
 
+async def enrich_transactions_with_names(user_id: str, transactions: list) -> list:
+    """Resolve category_id, subcategory_id, account_id, to_account_id into human-readable names."""
+    if not transactions:
+        return transactions
+
+    # Collect all unique IDs
+    category_ids = set()
+    account_ids = set()
+    for txn in transactions:
+        if txn.get("category_id"):
+            category_ids.add(txn["category_id"])
+        if txn.get("account_id"):
+            account_ids.add(txn["account_id"])
+        if txn.get("to_account_id"):
+            account_ids.add(txn["to_account_id"])
+
+    # Batch-fetch categories and accounts
+    cat_map = {}
+    subcat_map = {}
+    if category_ids:
+        cats = await db.categories.find(
+            {"category_id": {"$in": list(category_ids)}, "user_id": user_id},
+            {"_id": 0, "category_id": 1, "name": 1, "subcategories": 1},
+        ).to_list(None)
+        for cat in cats:
+            cat_map[cat["category_id"]] = cat["name"]
+            for sub in cat.get("subcategories", []):
+                subcat_map[(cat["category_id"], sub["subcategory_id"])] = sub["name"]
+
+    acc_map = {}
+    if account_ids:
+        accs = await db.accounts.find(
+            {"account_id": {"$in": list(account_ids)}, "user_id": user_id},
+            {"_id": 0, "account_id": 1, "name": 1},
+        ).to_list(None)
+        for acc in accs:
+            acc_map[acc["account_id"]] = acc["name"]
+
+    # Enrich each transaction
+    for txn in transactions:
+        txn["category_name"] = cat_map.get(txn.get("category_id"))
+        txn["subcategory_name"] = subcat_map.get(
+            (txn.get("category_id"), txn.get("subcategory_id"))
+        )
+        txn["account_name"] = acc_map.get(txn.get("account_id"))
+        txn["to_account_name"] = acc_map.get(txn.get("to_account_id"))
+
+    return transactions
+
+
 # ─── Transactions Routes ────────────────────────────────────────────
 
 @app.get("/api/transactions")
@@ -1583,7 +1633,19 @@ async def list_transactions(
 
     txns = await db.transactions.find(query, {"_id": 0}).sort("date", -1).skip(skip).limit(limit).to_list(limit)
     total = await db.transactions.count_documents(query)
+    txns = await enrich_transactions_with_names(user["user_id"], txns)
     return {"transactions": txns, "total": total}
+
+
+@app.get("/api/transactions/{transaction_id}")
+async def get_transaction(transaction_id: str, user: dict = Depends(get_current_user)):
+    txn = await db.transactions.find_one(
+        {"transaction_id": transaction_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    if not txn:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    enriched = await enrich_transactions_with_names(user["user_id"], [txn])
+    return enriched[0]
 
 
 @app.post("/api/transactions")

@@ -22,6 +22,12 @@ struct Transaction: Codable, Identifiable {
     var exchangeRate: Double?
     var isEstimatedRate: Bool?
 
+    // Resolved names (populated by backend enrichment)
+    var categoryName: String?
+    var subcategoryName: String?
+    var accountName: String?
+    var toAccountName: String?
+
     enum CodingKeys: String, CodingKey {
         case id = "transactionId"
         case transactionType
@@ -43,6 +49,10 @@ struct Transaction: Codable, Identifiable {
         case originalAmount
         case exchangeRate
         case isEstimatedRate
+        case categoryName
+        case subcategoryName
+        case accountName
+        case toAccountName
     }
 
     init(from decoder: Decoder) throws {
@@ -68,6 +78,10 @@ struct Transaction: Codable, Identifiable {
         self.originalAmount = try? container.decodeIfPresent(Double.self, forKey: .originalAmount)
         self.exchangeRate = try? container.decodeIfPresent(Double.self, forKey: .exchangeRate)
         self.isEstimatedRate = try? container.decodeIfPresent(Bool.self, forKey: .isEstimatedRate)
+        self.categoryName = try? container.decodeIfPresent(String.self, forKey: .categoryName)
+        self.subcategoryName = try? container.decodeIfPresent(String.self, forKey: .subcategoryName)
+        self.accountName = try? container.decodeIfPresent(String.self, forKey: .accountName)
+        self.toAccountName = try? container.decodeIfPresent(String.self, forKey: .toAccountName)
     }
 
     // Memberwise init for creating transactions in code
@@ -91,7 +105,11 @@ struct Transaction: Codable, Identifiable {
         originalCurrency: String? = nil,
         originalAmount: Double? = nil,
         exchangeRate: Double? = nil,
-        isEstimatedRate: Bool? = nil
+        isEstimatedRate: Bool? = nil,
+        categoryName: String? = nil,
+        subcategoryName: String? = nil,
+        accountName: String? = nil,
+        toAccountName: String? = nil
     ) {
         self.id = id
         self.transactionType = transactionType
@@ -113,5 +131,9 @@ struct Transaction: Codable, Identifiable {
         self.originalAmount = originalAmount
         self.exchangeRate = exchangeRate
         self.isEstimatedRate = isEstimatedRate
+        self.categoryName = categoryName
+        self.subcategoryName = subcategoryName
+        self.accountName = accountName
+        self.toAccountName = toAccountName
     }
 }
