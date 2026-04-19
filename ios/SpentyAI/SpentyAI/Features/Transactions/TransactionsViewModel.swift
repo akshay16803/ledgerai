@@ -66,7 +66,7 @@ final class TransactionsViewModel {
 
             let response = try await txnResult
             transactions = response.transactions
-            total = response.total
+            total = response.total ?? transactions.count
             hasMore = transactions.count < total
             accounts = try await accts
             categories = try await cats
@@ -99,7 +99,7 @@ final class TransactionsViewModel {
         do {
             let response = try await fetchTransactionsPage(page: 1)
             transactions = response.transactions
-            total = response.total
+            total = response.total ?? transactions.count
             hasMore = transactions.count < total
         } catch {
             errorMessage = error.localizedDescription
@@ -119,7 +119,7 @@ final class TransactionsViewModel {
         do {
             let response = try await repository.search(query: searchQuery)
             transactions = response.transactions
-            total = response.total
+            total = response.total ?? transactions.count
             hasMore = false
         } catch {
             errorMessage = error.localizedDescription

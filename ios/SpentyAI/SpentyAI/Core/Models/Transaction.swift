@@ -44,4 +44,74 @@ struct Transaction: Codable, Identifiable {
         case exchangeRate
         case isEstimatedRate
     }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try container.decode(String.self, forKey: .id)
+        // Use try? so a single malformed field doesn't discard the entire transaction
+        self.transactionType = try? container.decodeIfPresent(String.self, forKey: .transactionType)
+        self.amount = try? container.decodeIfPresent(Double.self, forKey: .amount)
+        self.date = try? container.decodeIfPresent(Date.self, forKey: .date)
+        self.accountId = try? container.decodeIfPresent(String.self, forKey: .accountId)
+        self.toAccountId = try? container.decodeIfPresent(String.self, forKey: .toAccountId)
+        self.categoryId = try? container.decodeIfPresent(String.self, forKey: .categoryId)
+        self.subcategoryId = try? container.decodeIfPresent(String.self, forKey: .subcategoryId)
+        self.description = try? container.decodeIfPresent(String.self, forKey: .description)
+        self.paymentMethod = try? container.decodeIfPresent(String.self, forKey: .paymentMethod)
+        self.status = try? container.decodeIfPresent(String.self, forKey: .status)
+        self.isRecurring = try? container.decodeIfPresent(Bool.self, forKey: .isRecurring)
+        self.recurringFrequency = try? container.decodeIfPresent(String.self, forKey: .recurringFrequency)
+        self.recurrenceDate = try? container.decodeIfPresent(Int.self, forKey: .recurrenceDate)
+        self.source = try? container.decodeIfPresent(String.self, forKey: .source)
+        self.receiptId = try? container.decodeIfPresent(String.self, forKey: .receiptId)
+        self.originalCurrency = try? container.decodeIfPresent(String.self, forKey: .originalCurrency)
+        self.originalAmount = try? container.decodeIfPresent(Double.self, forKey: .originalAmount)
+        self.exchangeRate = try? container.decodeIfPresent(Double.self, forKey: .exchangeRate)
+        self.isEstimatedRate = try? container.decodeIfPresent(Bool.self, forKey: .isEstimatedRate)
+    }
+
+    // Memberwise init for creating transactions in code
+    init(
+        id: String = "",
+        transactionType: String? = nil,
+        amount: Double? = nil,
+        date: Date? = nil,
+        accountId: String? = nil,
+        toAccountId: String? = nil,
+        categoryId: String? = nil,
+        subcategoryId: String? = nil,
+        description: String? = nil,
+        paymentMethod: String? = nil,
+        status: String? = nil,
+        isRecurring: Bool? = nil,
+        recurringFrequency: String? = nil,
+        recurrenceDate: Int? = nil,
+        source: String? = nil,
+        receiptId: String? = nil,
+        originalCurrency: String? = nil,
+        originalAmount: Double? = nil,
+        exchangeRate: Double? = nil,
+        isEstimatedRate: Bool? = nil
+    ) {
+        self.id = id
+        self.transactionType = transactionType
+        self.amount = amount
+        self.date = date
+        self.accountId = accountId
+        self.toAccountId = toAccountId
+        self.categoryId = categoryId
+        self.subcategoryId = subcategoryId
+        self.description = description
+        self.paymentMethod = paymentMethod
+        self.status = status
+        self.isRecurring = isRecurring
+        self.recurringFrequency = recurringFrequency
+        self.recurrenceDate = recurrenceDate
+        self.source = source
+        self.receiptId = receiptId
+        self.originalCurrency = originalCurrency
+        self.originalAmount = originalAmount
+        self.exchangeRate = exchangeRate
+        self.isEstimatedRate = isEstimatedRate
+    }
 }

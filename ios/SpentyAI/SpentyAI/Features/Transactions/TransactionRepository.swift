@@ -2,12 +2,53 @@ import Foundation
 
 struct TransactionListResponse: Codable {
     let transactions: [Transaction]
-    let total: Int
+    let total: Int?
+
+    init(transactions: [Transaction], total: Int?) {
+        self.transactions = transactions
+        self.total = total
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.total = try container.decodeIfPresent(Int.self, forKey: .total)
+        // Decode transactions one-by-one so a single malformed element
+        // doesn't discard the entire array.
+        var transactionsContainer = try container.nestedUnkeyedContainer(forKey: .transactions)
+        var decoded: [Transaction] = []
+        while !transactionsContainer.isAtEnd {
+            if let txn = try? transactionsContainer.decode(Transaction.self) {
+                decoded.append(txn)
+            } else {
+                // Skip the malformed element
+                _ = try? transactionsContainer.decode(TransactionFallback.self)
+            }
+        }
+        self.transactions = decoded
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case transactions, total
+    }
+}
+
+/// Opaque helper that consumes any JSON value so the unkeyed container advances.
+private struct TransactionFallback: Decodable {
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if container.decodeNil() { return }
+        if let _ = try? container.decode(String.self) { return }
+        if let _ = try? container.decode(Int.self) { return }
+        if let _ = try? container.decode(Double.self) { return }
+        if let _ = try? container.decode(Bool.self) { return }
+        if let _ = try? container.decode([String: TransactionFallback].self) { return }
+        if let _ = try? container.decode([TransactionFallback].self) { return }
+    }
 }
 
 struct TransactionItemsResponse: Codable {
     let items: [Transaction]
-    let total: Int
+    let total: Int?
 
     var asListResponse: TransactionListResponse {
         TransactionListResponse(transactions: items, total: total)
@@ -142,7 +183,8 @@ final class TransactionRepository: Sendable {
     // MARK: - Supporting Data
 
     func fetchAccounts() async throws -> [Account] {
-        return try await api.get(APIEndpoints.accounts)
+        let response: AccountListResponse = try await api.get(APIEndpoints.accounts)
+        return response.accounts
     }
 
     func fetchCategories() async throws -> [Category] {
