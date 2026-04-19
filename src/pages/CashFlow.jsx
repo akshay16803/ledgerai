@@ -12,6 +12,7 @@ function formatCurrency(amount) {
 }
 
 const FREQ_OPTIONS = [
+  { value: 'daily', label: 'Daily' },
   { value: 'weekly', label: 'Weekly' },
   { value: 'biweekly', label: 'Bi-weekly' },
   { value: 'monthly', label: 'Monthly' },
@@ -285,6 +286,7 @@ export default function CashFlow() {
                 <th style={thStyle}>Type</th>
                 <th style={thStyle}>Amount</th>
                 <th style={thStyle}>Frequency</th>
+                <th style={thStyle}>Day</th>
                 <th style={thStyle}>Monthly Equiv.</th>
                 <th style={thStyle}>Account</th>
                 <th style={thStyle}>Category</th>
@@ -329,6 +331,7 @@ export default function CashFlow() {
                       </span>
                     )}
                   </td>
+                  <td style={{ ...tdStyle, fontSize: 12, color: 'var(--text-muted)' }}>{item.recurrence_date ? `${item.recurrence_date}` : '—'}</td>
                   <td className="mono" style={{ ...tdStyle, color: 'var(--text-muted)' }}>{formatCurrency(item.monthly_amount)}/mo</td>
                   <td style={{ ...tdStyle, fontSize: 12 }}>{getAccountName(item.account_id)}</td>
                   <td style={{ ...tdStyle, fontSize: 12 }}>{getCategoryName(item.category_id)}</td>

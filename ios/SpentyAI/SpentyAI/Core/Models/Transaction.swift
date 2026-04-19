@@ -14,6 +14,7 @@ struct Transaction: Codable, Identifiable {
     var status: String?
     var isRecurring: Bool?
     var recurringFrequency: String?
+    var recurrenceDate: Int?
     var source: String?
     var receiptId: String?
     var originalCurrency: String?
@@ -35,6 +36,7 @@ struct Transaction: Codable, Identifiable {
         case status
         case isRecurring
         case recurringFrequency
+        case recurrenceDate
         case source
         case receiptId
         case originalCurrency

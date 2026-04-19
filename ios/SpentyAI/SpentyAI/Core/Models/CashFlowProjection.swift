@@ -48,6 +48,7 @@ struct RecurringItem: Codable, Identifiable {
     var amount: Double?
     var frequency: String?
     var recurringFrequency: String?
+    var recurrenceDate: Int?
     var transactionType: String?
     var monthlyAmount: Double?
     var categoryId: String?

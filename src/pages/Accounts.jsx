@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { getCached, setCache } from '../lib/cache';
 import { Plus, Trash, PencilSimple, Bank, Wallet, CreditCard, X, Gear, Tag, Check, Warning, CaretRight, CaretDown, CalendarBlank, CurrencyCircleDollar, SpinnerGap, ChartLineUp, UploadSimple, PencilLine, FileText, Robot } from '@phosphor-icons/react';
@@ -320,7 +321,7 @@ function AmortizationModal({ accountId, accountName, onClose }) {
 
 
 // ─── Grouped Accounts List ──────────────────────────────────────────
-function AccountsGroupedList({ accounts, onEdit, onDelete, expandedSubTypes, toggleSubType, onViewSchedule, onCalcInterest, onUploadStatement, onManualEntry }) {
+function AccountsGroupedList({ accounts, onEdit, onDelete, expandedSubTypes, toggleSubType, onViewSchedule, onCalcInterest, onUploadStatement, onManualEntry, onViewDetail }) {
   // Group accounts: account_type → sub_type → accounts[]
   const grouped = useMemo(() => {
     const map = {};
@@ -417,7 +418,12 @@ function AccountsGroupedList({ accounts, onEdit, onDelete, expandedSubTypes, tog
                           >
                             <div style={{ flex: 1, minWidth: 0 }}>
                               <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                                <span style={{ fontSize: 14, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{acc.name}</span>
+                                <span
+                                  onClick={(e) => { e.stopPropagation(); if (typeof onViewDetail === 'function') onViewDetail(acc); }}
+                                  style={{ fontSize: 14, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: 'pointer', color: 'var(--text-primary)', transition: 'color 0.15s' }}
+                                  onMouseEnter={e => { e.currentTarget.style.color = 'var(--brand-primary)'; e.currentTarget.style.textDecoration = 'underline'; }}
+                                  onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-primary)'; e.currentTarget.style.textDecoration = 'none'; }}
+                                >{acc.name}</span>
                                 {acc.account_number && (
                                   <span className="mono" style={{ fontSize: 11, color: 'var(--text-muted)', flexShrink: 0 }}>
                                     {acc.account_number}
@@ -1178,6 +1184,7 @@ function DematManualEntryModal({ account, onClose }) {
 
 // ─── Main Accounts Page ─────────────────────────────────────────────
 export default function Accounts() {
+  const navigate = useNavigate();
   const [accounts, setAccounts] = useState(() => getCached('accounts') || []);
   const [loading, setLoading] = useState(!getCached('accounts'));
   const [showForm, setShowForm] = useState(false);
@@ -1693,6 +1700,7 @@ export default function Accounts() {
           onCalcInterest={(acc) => setInterestAcc(acc)}
           onUploadStatement={(acc) => setUploadStatementAcc(acc)}
           onManualEntry={(acc) => setManualEntryAcc(acc)}
+          onViewDetail={(acc) => navigate(`/accounts/${acc.account_id}`)}
         />
       )}
 

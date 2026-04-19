@@ -42,6 +42,18 @@ final class AccountsViewModel {
     var isUploadingDemat = false
     var isDematLoading = false
 
+    // Transaction Filters (for AccountDetailView)
+    var filterTransactionType = ""
+    var filterCategoryId = ""
+    var filterStartDate: Date? = nil
+    var filterEndDate: Date? = nil
+    var filterMinAmount = ""
+    var filterMaxAmount = ""
+    var filterSearch = ""
+    var filterCategories: [(id: String, name: String)] = []
+    var isLoadingFilteredTransactions = false
+    var filteredTransactionTotal = 0
+
     private let repository = AccountRepository()
 
     // MARK: - Computed Properties
@@ -272,6 +284,55 @@ final class AccountsViewModel {
             await loadDematStatements(accountId)
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    // MARK: - Filtered Transactions
+
+    @MainActor
+    func loadFilteredTransactions(_ accountId: String) async {
+        isLoadingFilteredTransactions = true
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyy-MM-dd"
+        do {
+            let result = try await repository.fetchFilteredAccountTransactions(
+                accountId,
+                transactionType: filterTransactionType.isEmpty ? nil : filterTransactionType,
+                categoryId: filterCategoryId.isEmpty ? nil : filterCategoryId,
+                startDate: filterStartDate.map { dateFormatter.string(from: $0) },
+                endDate: filterEndDate.map { dateFormatter.string(from: $0) },
+                minAmount: Double(filterMinAmount),
+                maxAmount: Double(filterMaxAmount),
+                search: filterSearch.isEmpty ? nil : filterSearch
+            )
+            accountTransactions = result.transactions
+            filteredTransactionTotal = result.total
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        isLoadingFilteredTransactions = false
+    }
+
+    func resetFilters() {
+        filterTransactionType = ""
+        filterCategoryId = ""
+        filterStartDate = nil
+        filterEndDate = nil
+        filterMinAmount = ""
+        filterMaxAmount = ""
+        filterSearch = ""
+    }
+
+    @MainActor
+    func loadFilterCategories() async {
+        do {
+            let cats: [Category] = try await APIClient.shared.get(APIEndpoints.categories)
+            filterCategories = cats.compactMap { cat in
+                guard let name = cat.name else { return nil }
+                return (id: cat.id, name: name)
+            }
+        } catch {
+            // Silent — categories are optional for filtering
         }
     }
 

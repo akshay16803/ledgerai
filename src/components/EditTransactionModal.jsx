@@ -16,6 +16,7 @@ export function EditTransactionModal({ transaction, accounts, categories, onSave
     payment_method: transaction?.payment_method || '',
     is_recurring: transaction?.is_recurring || false,
     recurring_frequency: transaction?.recurring_frequency || '',
+    recurrence_date: transaction?.recurrence_date || '',
   });
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -196,6 +197,7 @@ export function EditTransactionModal({ transaction, accounts, categories, onSave
         payment_method: form.payment_method || null,
         is_recurring: form.is_recurring,
         recurring_frequency: form.is_recurring ? form.recurring_frequency : null,
+        recurrence_date: form.is_recurring && form.recurrence_date ? parseInt(form.recurrence_date) : null,
         receipt_id: receiptId || null,
       };
 
@@ -234,9 +236,10 @@ export function EditTransactionModal({ transaction, accounts, categories, onSave
         receipt_id: receiptId || null,
         is_recurring: form.is_recurring,
         recurring_frequency: form.is_recurring ? form.recurring_frequency : null,
+        recurrence_date: form.is_recurring && form.recurrence_date ? parseInt(form.recurrence_date) : null,
       };
       await api.put(`/api/transactions/${transaction.transaction_id}`, payload);
-      
+
       // Then approve the transaction
       await api.post(`/api/transactions/${transaction.transaction_id}/approve`);
       
@@ -432,24 +435,35 @@ export function EditTransactionModal({ transaction, accounts, categories, onSave
               </div>
 
               {/* Recurring */}
-              <div>
+              <div style={{ gridColumn: '1 / -1' }}>
                 <label style={labelStyle}>Recurring</label>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
                   <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer' }}>
                     <input data-testid="modal-recurring-checkbox" type="checkbox" checked={form.is_recurring}
                       onChange={e => setForm(f => ({ ...f, is_recurring: e.target.checked }))} />
                     Is Recurring
                   </label>
                   {form.is_recurring && (
-                    <select data-testid="modal-frequency-select" value={form.recurring_frequency}
-                      onChange={e => setForm(f => ({ ...f, recurring_frequency: e.target.value }))}
-                      style={{ ...inputStyle, width: 'auto', padding: '6px 10px', fontSize: 12 }}>
-                      <option value="">Frequency</option>
-                      <option value="weekly">Weekly</option>
-                      <option value="monthly">Monthly</option>
-                      <option value="quarterly">Quarterly</option>
-                      <option value="yearly">Yearly</option>
-                    </select>
+                    <>
+                      <select data-testid="modal-frequency-select" value={form.recurring_frequency}
+                        onChange={e => setForm(f => ({ ...f, recurring_frequency: e.target.value }))}
+                        style={{ ...inputStyle, width: 'auto', padding: '6px 10px', fontSize: 12 }}>
+                        <option value="">Frequency</option>
+                        <option value="daily">Daily</option>
+                        <option value="weekly">Weekly</option>
+                        <option value="monthly">Monthly</option>
+                        <option value="quarterly">Quarterly</option>
+                        <option value="yearly">Yearly</option>
+                      </select>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <label style={{ fontSize: 12, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>Day of month:</label>
+                        <input data-testid="modal-recurrence-date" type="number" min="1" max="31"
+                          value={form.recurrence_date}
+                          onChange={e => setForm(f => ({ ...f, recurrence_date: e.target.value }))}
+                          placeholder="e.g. 15"
+                          style={{ ...inputStyle, width: 70, padding: '6px 10px', fontSize: 12, fontFamily: 'var(--font-mono)' }} />
+                      </div>
+                    </>
                   )}
                 </div>
               </div>

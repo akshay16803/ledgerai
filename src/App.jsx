@@ -27,6 +27,7 @@ import Invoices from './pages/Invoices.jsx';
 import Customers from './pages/Customers.jsx';
 import Purchases from './pages/Purchases.jsx';
 import Vendors from './pages/Vendors.jsx';
+import AccountDetail from './pages/AccountDetail.jsx';
 import AppLayout from './components/AppLayout.jsx';
 
 /** Wrap each page in an ErrorBoundary so a crash keeps the sidebar intact. */
@@ -87,6 +88,7 @@ export default function App() {
       <Route path="/dashboard" element={<ProtectedRoute><AppLayout><PageBoundary><Dashboard /></PageBoundary></AppLayout></ProtectedRoute>} />
       <Route path="/transactions" element={<ProtectedRoute><AppLayout><PageBoundary><Transactions /></PageBoundary></AppLayout></ProtectedRoute>} />
       <Route path="/accounts" element={<ProtectedRoute><AppLayout><PageBoundary><Accounts /></PageBoundary></AppLayout></ProtectedRoute>} />
+      <Route path="/accounts/:accountId" element={<ProtectedRoute><AppLayout><PageBoundary><AccountDetail /></PageBoundary></AppLayout></ProtectedRoute>} />
       <Route path="/categories" element={<ProtectedRoute><AppLayout><PageBoundary><Categories /></PageBoundary></AppLayout></ProtectedRoute>} />
       <Route path="/ledger" element={<Navigate to="/transactions" replace />} /> {/* Redirect old ledger URL */}
       <Route path="/cashflow" element={<ProtectedRoute><AppLayout><PageBoundary><CashFlow /></PageBoundary></AppLayout></ProtectedRoute>} />

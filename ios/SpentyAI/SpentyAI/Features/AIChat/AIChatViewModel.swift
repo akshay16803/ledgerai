@@ -13,6 +13,17 @@ final class AIChatViewModel {
     var errorMessage: String?
     var scrollToBottomTrigger = 0
 
+    // MARK: - Voice State
+
+    /// Whether voice responses (text-to-speech) are enabled.
+    var isVoiceResponseEnabled: Bool = false
+
+    /// Whether fullscreen voice mode is active (continuous listen + auto-speak).
+    var isVoiceModeActive: Bool = false
+
+    /// The speech manager instance.
+    let speechManager = SpeechManager()
+
     // MARK: - Dependencies
 
     private let repository: AIChatRepository
@@ -58,6 +69,25 @@ final class AIChatViewModel {
             let response = try await repository.sendMessage(text, conversation: messages)
             messages.append(response)
             scrollToBottom()
+
+            // Speak the response if voice responses are enabled or voice mode is active
+            if (isVoiceResponseEnabled || isVoiceModeActive), let content = response.content, !content.isEmpty {
+                speechManager.speak(content)
+            }
+
+            // In voice mode, restart listening after the AI finishes responding
+            if isVoiceModeActive {
+                // Wait briefly for TTS to finish before re-listening
+                Task {
+                    // Give TTS a moment to start, then wait for it to finish
+                    try? await Task.sleep(for: .milliseconds(500))
+                    while speechManager.isSpeaking {
+                        try? await Task.sleep(for: .milliseconds(200))
+                    }
+                    speechManager.resetTranscription()
+                    speechManager.startListening()
+                }
+            }
         } catch let error as APIError {
             errorMessage = error.localizedDescription
         } catch {
@@ -109,6 +139,92 @@ final class AIChatViewModel {
                 "Create an invoice for..."
             ]
         }
+    }
+
+    // MARK: - Voice Actions
+
+    /// Toggle the microphone on/off for speech-to-text.
+    @MainActor
+    func toggleMicrophone() async {
+        if speechManager.isListening {
+            speechManager.stopListening()
+            // Send the transcribed text if there is any
+            if !speechManager.transcribedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                input = speechManager.transcribedText
+                speechManager.resetTranscription()
+                await sendMessage()
+            }
+        } else {
+            // Request permissions if needed
+            if !speechManager.hasMicrophonePermission || !speechManager.hasSpeechPermission {
+                await speechManager.requestPermissions()
+            }
+            speechManager.resetTranscription()
+            speechManager.startListening()
+        }
+    }
+
+    /// Toggle voice response (text-to-speech) on/off.
+    @MainActor
+    func toggleVoiceResponse() {
+        isVoiceResponseEnabled.toggle()
+        if !isVoiceResponseEnabled {
+            speechManager.stopSpeaking()
+        }
+    }
+
+    /// Enter or exit fullscreen voice mode.
+    @MainActor
+    func toggleVoiceMode() async {
+        if isVoiceModeActive {
+            exitVoiceMode()
+        } else {
+            await enterVoiceMode()
+        }
+    }
+
+    /// Enter voice mode: enable TTS, start listening.
+    @MainActor
+    func enterVoiceMode() async {
+        // Request permissions if needed
+        if !speechManager.hasMicrophonePermission || !speechManager.hasSpeechPermission {
+            await speechManager.requestPermissions()
+        }
+
+        guard speechManager.hasMicrophonePermission && speechManager.hasSpeechPermission else {
+            errorMessage = "Microphone and speech recognition permissions are required for voice mode."
+            return
+        }
+
+        isVoiceModeActive = true
+        isVoiceResponseEnabled = true
+        speechManager.resetTranscription()
+        speechManager.startListening()
+    }
+
+    /// Exit voice mode: stop listening, stop speaking.
+    @MainActor
+    func exitVoiceMode() {
+        isVoiceModeActive = false
+        speechManager.stopListening()
+        speechManager.stopSpeaking()
+        speechManager.resetTranscription()
+    }
+
+    /// In voice mode, send the current transcription and re-listen.
+    @MainActor
+    func sendVoiceInput() async {
+        speechManager.stopListening()
+        let text = speechManager.transcribedText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else {
+            // Nothing transcribed; restart listening
+            speechManager.resetTranscription()
+            speechManager.startListening()
+            return
+        }
+        input = text
+        speechManager.resetTranscription()
+        await sendMessage()
     }
 
     // MARK: - Helpers

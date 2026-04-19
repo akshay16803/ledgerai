@@ -4,7 +4,8 @@ import { api } from '../lib/api';
 import { getCached, setCache } from '../lib/cache';
 import {
   TrendUp, TrendDown, Scales, Clock, ArrowRight, Plus,
-  Robot, PaperPlaneTilt, X, SpinnerGap, CheckCircle
+  Robot, PaperPlaneTilt, X, SpinnerGap, CheckCircle,
+  CaretRight, EnvelopeSimple, Check, Prohibit
 } from '@phosphor-icons/react';
 import { EditTransactionModal } from '../components/EditTransactionModal';
 import { SalesInvoiceModal } from '../components/SalesInvoiceModal';
@@ -40,6 +41,53 @@ function formatCurrency(amount) {
     return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', notation: 'compact', compactDisplay: 'short', maximumFractionDigits: 1 }).format(amount);
   }
   return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(amount);
+}
+
+function CollapsibleSection({ title, count, defaultExpanded = false, testId, children }) {
+  const [expanded, setExpanded] = useState(defaultExpanded);
+
+  return (
+    <div data-testid={testId} style={{ background: '#fff', border: '1px solid var(--border-subtle)', borderRadius: 2, overflow: 'hidden' }}>
+      <button
+        onClick={() => setExpanded(!expanded)}
+        style={{
+          width: '100%', background: 'none', border: 'none', cursor: 'pointer',
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          padding: '16px 24px', fontFamily: 'var(--font-body)',
+        }}
+        onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-secondary)'; }}
+        onMouseLeave={e => { e.currentTarget.style.background = 'none'; }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <CaretRight
+            size={14}
+            weight="bold"
+            style={{
+              color: 'var(--text-muted)',
+              transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)',
+              transition: 'transform 0.25s ease',
+            }}
+          />
+          <h3 style={{ fontSize: 16, fontWeight: 600, margin: 0 }}>
+            {title}
+            <span className="mono" style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 500, marginLeft: 6 }}>
+              ({count})
+            </span>
+          </h3>
+        </div>
+      </button>
+      <div style={{
+        maxHeight: expanded ? '2000px' : '0',
+        opacity: expanded ? 1 : 0,
+        overflow: 'hidden',
+        transition: 'max-height 0.35s ease, opacity 0.25s ease',
+      }}>
+        <div style={{ padding: '0 24px 24px 24px' }}>
+          {children}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function AIChatPanel() {
@@ -285,6 +333,10 @@ export default function Dashboard() {
   const [showPurchaseInvoice, setShowPurchaseInvoice] = useState(false);
   const [businessCountry, setBusinessCountry] = useState('IN');
 
+  // Pending approval state
+  const [pendingItems, setPendingItems] = useState([]);
+  const [pendingLoading, setPendingLoading] = useState(false);
+
   const openNewTxnModal = async () => {
     setShowNewTxn(true);
     try {
@@ -329,9 +381,36 @@ export default function Dashboard() {
     }
   }, []);
 
+  const loadPending = useCallback(async () => {
+    setPendingLoading(true);
+    try {
+      const data = await api.get('/api/email/pending-review');
+      setPendingItems(data.transactions || []);
+    } catch {
+      setPendingItems([]);
+    } finally {
+      setPendingLoading(false);
+    }
+  }, []);
+
+  const handleApprove = async (id) => {
+    try {
+      await api.post(`/api/transactions/${id}/approve`);
+      setPendingItems(prev => prev.filter(t => t.transactionId !== id));
+    } catch { /* silent */ }
+  };
+
+  const handleReject = async (id) => {
+    try {
+      await api.post(`/api/transactions/${id}/reject`);
+      setPendingItems(prev => prev.filter(t => t.transactionId !== id));
+    } catch { /* silent */ }
+  };
+
   useEffect(() => {
     loadData();
-  }, [loadData]);
+    loadPending();
+  }, [loadData, loadPending]);
 
   if (loading) {
     return <div className="mono" style={{ color: 'var(--text-muted)', padding: 40 }}>Loading dashboard...</div>;
@@ -372,12 +451,11 @@ export default function Dashboard() {
         <StatCard testId="stat-pending" label="Pending Review" value={summary.pending_review} icon={Clock} color="var(--warning)" accent="var(--warning)" />
       </div>
 
-      {/* Two columns: Accounts + Recent Transactions */}
-      <div className="card-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
+      {/* Collapsible sections */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, marginBottom: 24 }}>
         {/* Accounts */}
-        <div data-testid="accounts-overview" style={{ background: '#fff', border: '1px solid var(--border-subtle)', borderRadius: 2, padding: 24 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-            <h3 style={{ fontSize: 16, fontFamily: 'var(--font-body)', fontWeight: 600 }}>Accounts</h3>
+        <CollapsibleSection title="Accounts" count={summary.accounts?.length || 0} testId="accounts-overview">
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
             <button data-testid="view-all-accounts-btn" onClick={() => navigate('/accounts')} style={{
               background: 'none', border: 'none', color: 'var(--accent-1)',
               fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font-body)',
@@ -391,10 +469,16 @@ export default function Dashboard() {
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {summary.accounts?.map(acc => (
-                <div key={acc.account_id} style={{
+                <div key={acc.account_id}
+                  onClick={() => navigate(`/accounts/${acc.account_id}`)}
+                  style={{
                   display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                  padding: '12px 16px', background: 'var(--bg-secondary)', borderRadius: 2
-                }}>
+                  padding: '12px 16px', background: 'var(--bg-secondary)', borderRadius: 2,
+                  cursor: 'pointer', transition: 'background 0.15s',
+                }}
+                onMouseEnter={e => { e.currentTarget.style.background = 'rgba(58,92,74,0.08)'; }}
+                onMouseLeave={e => { e.currentTarget.style.background = 'var(--bg-secondary)'; }}
+                >
                   <div>
                     <div style={{ fontSize: 14, fontWeight: 500 }}>{acc.name}</div>
                     <span className="mono" style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'capitalize' }}>
@@ -412,12 +496,11 @@ export default function Dashboard() {
               ))}
             </div>
           )}
-        </div>
+        </CollapsibleSection>
 
         {/* Recent Transactions */}
-        <div data-testid="recent-transactions" style={{ background: '#fff', border: '1px solid var(--border-subtle)', borderRadius: 2, padding: 24 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-            <h3 style={{ fontSize: 16, fontFamily: 'var(--font-body)', fontWeight: 600 }}>Recent Transactions</h3>
+        <CollapsibleSection title="Recent Transactions" count={summary.recent_transactions?.length || 0} testId="recent-transactions">
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
             <button data-testid="view-all-transactions-btn" onClick={() => navigate('/transactions')} style={{
               background: 'none', border: 'none', color: 'var(--accent-1)',
               fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font-body)',
@@ -452,8 +535,70 @@ export default function Dashboard() {
               ))}
             </div>
           )}
-        </div>
+        </CollapsibleSection>
       </div>
+
+      {/* Pending Approval — full width */}
+      <CollapsibleSection title="Pending Approval" count={pendingItems.length} testId="pending-approval">
+        {pendingLoading ? (
+          <div className="mono" style={{ color: 'var(--text-muted)', padding: '12px 0', fontSize: 13 }}>Loading pending items...</div>
+        ) : pendingItems.length === 0 ? (
+          <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>No pending transactions to review.</p>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {pendingItems.map(txn => (
+              <div key={txn.transactionId} style={{
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                padding: '12px 16px', background: 'var(--bg-secondary)', borderRadius: 2,
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1, minWidth: 0 }}>
+                  <EnvelopeSimple size={18} weight="duotone" style={{ color: 'var(--warning)', flexShrink: 0 }} />
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {txn.description || 'Transaction'}
+                    </div>
+                    <span className="mono" style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                      {txn.date} {txn.source ? `\u00b7 ${txn.source}` : ''}
+                    </span>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
+                  <span className="mono" style={{
+                    fontSize: 13, fontWeight: 600,
+                    color: txn.transactionType === 'income' ? 'var(--success)' : 'var(--error)',
+                  }}>
+                    {formatCurrency(txn.amount || 0)}
+                  </span>
+                  <button onClick={() => handleReject(txn.transactionId)} title="Reject" style={{
+                    background: 'none', border: '1px solid var(--error)', borderRadius: 4,
+                    color: 'var(--error)', cursor: 'pointer', padding: '4px 10px',
+                    fontSize: 12, fontWeight: 600, fontFamily: 'var(--font-body)',
+                    display: 'flex', alignItems: 'center', gap: 4,
+                    transition: 'background 0.15s',
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.background = 'rgba(200,50,50,0.06)'; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = 'none'; }}
+                  >
+                    <Prohibit size={12} weight="bold" /> Reject
+                  </button>
+                  <button onClick={() => handleApprove(txn.transactionId)} title="Approve" style={{
+                    background: 'var(--success)', border: 'none', borderRadius: 4,
+                    color: '#fff', cursor: 'pointer', padding: '4px 10px',
+                    fontSize: 12, fontWeight: 600, fontFamily: 'var(--font-body)',
+                    display: 'flex', alignItems: 'center', gap: 4,
+                    transition: 'background 0.15s',
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.background = '#1a6b3c'; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = 'var(--success)'; }}
+                  >
+                    <Check size={12} weight="bold" /> Approve
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </CollapsibleSection>
 
       <AIChatPanel />
 

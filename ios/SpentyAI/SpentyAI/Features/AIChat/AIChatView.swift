@@ -17,9 +17,13 @@ struct AIChatView: View {
                 Color.spentyBgPrimary
                     .ignoresSafeArea()
 
-                VStack(spacing: 0) {
-                    messageList
-                    inputBar
+                if viewModel.isVoiceModeActive {
+                    voiceModeView
+                } else {
+                    VStack(spacing: 0) {
+                        messageList
+                        inputBar
+                    }
                 }
             }
             .navigationTitle("AI Assistant")
@@ -30,15 +34,35 @@ struct AIChatView: View {
                         .foregroundStyle(Color.spentyPrimary)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        Button(role: .destructive) {
-                            showClearConfirmation = true
+                    HStack(spacing: 12) {
+                        // Voice mode button
+                        Button {
+                            Task { await viewModel.toggleVoiceMode() }
                         } label: {
-                            Label("Clear History", systemImage: "trash")
+                            Image(systemName: viewModel.isVoiceModeActive ? "waveform.circle.fill" : "waveform.circle")
+                                .font(.system(size: 20))
+                                .foregroundStyle(viewModel.isVoiceModeActive ? Color.spentyPrimary : Color.spentyTextSecondary)
                         }
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
-                            .foregroundStyle(Color.spentyPrimary)
+
+                        // Speaker toggle
+                        Button {
+                            viewModel.toggleVoiceResponse()
+                        } label: {
+                            Image(systemName: viewModel.isVoiceResponseEnabled ? "speaker.wave.2.fill" : "speaker.slash.fill")
+                                .font(.system(size: 18))
+                                .foregroundStyle(viewModel.isVoiceResponseEnabled ? Color.spentyPrimary : Color.spentyTextSecondary)
+                        }
+
+                        Menu {
+                            Button(role: .destructive) {
+                                showClearConfirmation = true
+                            } label: {
+                                Label("Clear History", systemImage: "trash")
+                            }
+                        } label: {
+                            Image(systemName: "ellipsis.circle")
+                                .foregroundStyle(Color.spentyPrimary)
+                        }
                     }
                 }
             }
@@ -67,6 +91,175 @@ struct AIChatView: View {
                 await viewModel.loadHistory()
             }
         }
+    }
+
+    // MARK: - Voice Mode View
+
+    private var voiceModeView: some View {
+        VStack(spacing: 32) {
+            Spacer()
+
+            // Pulsing microphone animation
+            ZStack {
+                // Outer pulsing rings
+                if viewModel.speechManager.isListening {
+                    Circle()
+                        .fill(Color.spentyPrimary.opacity(0.08))
+                        .frame(width: 200, height: 200)
+                        .scaleEffect(voicePulseScale)
+                        .animation(
+                            .easeInOut(duration: 1.2).repeatForever(autoreverses: true),
+                            value: voicePulseScale
+                        )
+
+                    Circle()
+                        .fill(Color.spentyPrimary.opacity(0.12))
+                        .frame(width: 150, height: 150)
+                        .scaleEffect(voicePulseScale)
+                        .animation(
+                            .easeInOut(duration: 1.0).repeatForever(autoreverses: true),
+                            value: voicePulseScale
+                        )
+                }
+
+                Circle()
+                    .fill(
+                        viewModel.speechManager.isListening
+                            ? Color.spentyPrimary
+                            : Color.spentyPrimary.opacity(0.3)
+                    )
+                    .frame(width: 100, height: 100)
+                    .shadow(
+                        color: viewModel.speechManager.isListening
+                            ? Color.spentyPrimary.opacity(0.4)
+                            : .clear,
+                        radius: 20
+                    )
+
+                Image(systemName: "mic.fill")
+                    .font(.system(size: 40, weight: .semibold))
+                    .foregroundStyle(.white)
+            }
+            .onAppear { voicePulsePhase = true }
+
+            // Status text
+            VStack(spacing: 8) {
+                if viewModel.speechManager.isSpeaking {
+                    Text("Speaking...")
+                        .font(SpentyFonts.title3)
+                        .foregroundStyle(Color.spentyPrimary)
+                } else if viewModel.speechManager.isListening {
+                    Text("Listening...")
+                        .font(SpentyFonts.title3)
+                        .foregroundStyle(Color.spentyPrimary)
+                } else if viewModel.isSending {
+                    Text("Thinking...")
+                        .font(SpentyFonts.title3)
+                        .foregroundStyle(Color.spentyTextSecondary)
+                } else {
+                    Text("Tap to speak")
+                        .font(SpentyFonts.title3)
+                        .foregroundStyle(Color.spentyTextSecondary)
+                }
+
+                // Show live transcription
+                if !viewModel.speechManager.transcribedText.isEmpty {
+                    Text(viewModel.speechManager.transcribedText)
+                        .font(SpentyFonts.body)
+                        .foregroundStyle(Color.spentyTextPrimary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 32)
+                        .padding(.top, 8)
+                }
+
+                // Show last AI response
+                if let lastAssistant = viewModel.messages.last(where: { $0.role == "assistant" }),
+                   let content = lastAssistant.content, !content.isEmpty {
+                    Text(content)
+                        .font(SpentyFonts.subheadline)
+                        .foregroundStyle(Color.spentyTextSecondary)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(4)
+                        .padding(.horizontal, 32)
+                        .padding(.top, 12)
+                }
+            }
+
+            Spacer()
+
+            // Voice mode controls
+            HStack(spacing: 40) {
+                // Send button (stop listening and send)
+                Button {
+                    Task { await viewModel.sendVoiceInput() }
+                } label: {
+                    VStack(spacing: 6) {
+                        ZStack {
+                            Circle()
+                                .fill(Color.spentyPrimary.opacity(0.12))
+                                .frame(width: 56, height: 56)
+                            Image(systemName: "arrow.up.circle.fill")
+                                .font(.system(size: 28))
+                                .foregroundStyle(Color.spentyPrimary)
+                        }
+                        Text("Send")
+                            .font(SpentyFonts.caption1)
+                            .foregroundStyle(Color.spentyTextSecondary)
+                    }
+                }
+                .disabled(viewModel.speechManager.transcribedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                // Mic toggle
+                Button {
+                    if viewModel.speechManager.isListening {
+                        viewModel.speechManager.stopListening()
+                    } else {
+                        viewModel.speechManager.resetTranscription()
+                        viewModel.speechManager.startListening()
+                    }
+                } label: {
+                    VStack(spacing: 6) {
+                        ZStack {
+                            Circle()
+                                .fill(viewModel.speechManager.isListening ? Color.spentyError.opacity(0.12) : Color.spentyPrimary.opacity(0.12))
+                                .frame(width: 56, height: 56)
+                            Image(systemName: viewModel.speechManager.isListening ? "mic.slash.fill" : "mic.fill")
+                                .font(.system(size: 24))
+                                .foregroundStyle(viewModel.speechManager.isListening ? Color.spentyError : Color.spentyPrimary)
+                        }
+                        Text(viewModel.speechManager.isListening ? "Mute" : "Unmute")
+                            .font(SpentyFonts.caption1)
+                            .foregroundStyle(Color.spentyTextSecondary)
+                    }
+                }
+
+                // Exit voice mode
+                Button {
+                    viewModel.exitVoiceMode()
+                } label: {
+                    VStack(spacing: 6) {
+                        ZStack {
+                            Circle()
+                                .fill(Color.spentyError.opacity(0.12))
+                                .frame(width: 56, height: 56)
+                            Image(systemName: "xmark")
+                                .font(.system(size: 20, weight: .bold))
+                                .foregroundStyle(Color.spentyError)
+                        }
+                        Text("Exit")
+                            .font(SpentyFonts.caption1)
+                            .foregroundStyle(Color.spentyTextSecondary)
+                    }
+                }
+            }
+            .padding(.bottom, 40)
+        }
+    }
+
+    @State private var voicePulsePhase = false
+
+    private var voicePulseScale: CGFloat {
+        voicePulsePhase ? 1.15 : 0.85
     }
 
     // MARK: - Message List
@@ -211,9 +404,52 @@ struct AIChatView: View {
 
     private var inputBar: some View {
         VStack(spacing: 0) {
+            // Live transcription preview
+            if viewModel.speechManager.isListening && !viewModel.speechManager.transcribedText.isEmpty {
+                HStack(spacing: 8) {
+                    Image(systemName: "mic.fill")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Color.spentyPrimary)
+
+                    Text(viewModel.speechManager.transcribedText)
+                        .font(SpentyFonts.caption1)
+                        .foregroundStyle(Color.spentyTextSecondary)
+                        .lineLimit(2)
+
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(Color.spentyPrimary.opacity(0.06))
+            }
+
             Divider()
 
             HStack(alignment: .bottom, spacing: 10) {
+                // Microphone button
+                Button {
+                    Task { await viewModel.toggleMicrophone() }
+                } label: {
+                    ZStack {
+                        Circle()
+                            .fill(
+                                viewModel.speechManager.isListening
+                                    ? Color.spentyError.opacity(0.12)
+                                    : Color.spentyPrimary.opacity(0.08)
+                            )
+                            .frame(width: 40, height: 40)
+
+                        Image(systemName: viewModel.speechManager.isListening ? "mic.slash.fill" : "mic.fill")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(
+                                viewModel.speechManager.isListening
+                                    ? Color.spentyError
+                                    : Color.spentyPrimary
+                            )
+                    }
+                }
+                .disabled(viewModel.isSending)
+
                 TextField("Ask SpentyAI...", text: $viewModel.input, axis: .vertical)
                     .font(SpentyFonts.body)
                     .lineLimit(1...5)

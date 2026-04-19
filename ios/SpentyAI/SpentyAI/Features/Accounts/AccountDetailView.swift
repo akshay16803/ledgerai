@@ -58,9 +58,11 @@ struct AccountDetailView: View {
         }
         .task {
             await viewModel.loadAccountDetail(accountId)
+            viewModel.filteredTransactionTotal = viewModel.accountTransactions.count
             if isLoan {
                 await viewModel.loadAmortization(accountId)
             }
+            await viewModel.loadFilterCategories()
         }
         .overlay(alignment: .top) {
             if let error = viewModel.errorMessage {
@@ -239,18 +241,201 @@ struct AccountDetailView: View {
 
     // MARK: - Transactions Section
 
+    @State private var showDateFilters = false
+
     private var transactionsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Recent Transactions")
-                .font(SpentyFonts.headline)
-                .foregroundColor(.spentyTextPrimary)
+            // Header
+            HStack {
+                Text("Transactions")
+                    .font(SpentyFonts.headline)
+                    .foregroundColor(.spentyTextPrimary)
 
-            if viewModel.accountTransactions.isEmpty {
+                Spacer()
+
+                if hasActiveFilters {
+                    Button {
+                        viewModel.resetFilters()
+                        Task { await viewModel.loadFilteredTransactions(accountId) }
+                    } label: {
+                        Text("Clear Filters")
+                            .font(SpentyFonts.caption1)
+                            .foregroundColor(.spentyError)
+                    }
+                }
+
+                Text("\(viewModel.filteredTransactionTotal) results")
+                    .font(SpentyFonts.caption1)
+                    .foregroundColor(.spentyTextSecondary)
+            }
+
+            // Search bar
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 14))
+                    .foregroundColor(.spentyTextSecondary)
+
+                TextField("Search transactions...", text: $viewModel.filterSearch)
+                    .font(SpentyFonts.body)
+                    .textFieldStyle(.plain)
+                    .onSubmit {
+                        Task { await viewModel.loadFilteredTransactions(accountId) }
+                    }
+
+                if !viewModel.filterSearch.isEmpty {
+                    Button {
+                        viewModel.filterSearch = ""
+                        Task { await viewModel.loadFilteredTransactions(accountId) }
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 14))
+                            .foregroundColor(.spentyTextSecondary)
+                    }
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(Color.spentyCardBg)
+            .cornerRadius(10)
+
+            // Transaction type segmented control
+            HStack(spacing: 0) {
+                ForEach(["All", "Income", "Expense", "Transfer"], id: \.self) { type in
+                    let value = type == "All" ? "" : type.lowercased()
+                    Button {
+                        viewModel.filterTransactionType = value
+                        Task { await viewModel.loadFilteredTransactions(accountId) }
+                    } label: {
+                        Text(type)
+                            .font(SpentyFonts.caption1)
+                            .fontWeight(.semibold)
+                            .foregroundColor(viewModel.filterTransactionType == value ? .white : .spentyTextPrimary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+                            .background(viewModel.filterTransactionType == value ? Color.spentyPrimary : Color.clear)
+                    }
+                }
+            }
+            .background(Color.spentyCardBg)
+            .cornerRadius(8)
+
+            // Advanced filters toggle
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) { showDateFilters.toggle() }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "line.3.horizontal.decrease")
+                        .font(.system(size: 12))
+                    Text("More Filters")
+                        .font(SpentyFonts.caption1)
+                        .fontWeight(.medium)
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .semibold))
+                        .rotationEffect(.degrees(showDateFilters ? 90 : 0))
+                }
+                .foregroundColor(hasActiveFilters ? .spentyPrimary : .spentyTextSecondary)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(Color.spentyCardBg)
+                .cornerRadius(8)
+            }
+
+            if showDateFilters {
+                VStack(spacing: 12) {
+                    // Date range
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("From")
+                                .font(SpentyFonts.caption2)
+                                .foregroundColor(.spentyTextSecondary)
+                            DatePicker("", selection: Binding(
+                                get: { viewModel.filterStartDate ?? Calendar.current.date(byAdding: .year, value: -1, to: Date())! },
+                                set: { viewModel.filterStartDate = $0 }
+                            ), displayedComponents: .date)
+                            .labelsHidden()
+                        }
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("To")
+                                .font(SpentyFonts.caption2)
+                                .foregroundColor(.spentyTextSecondary)
+                            DatePicker("", selection: Binding(
+                                get: { viewModel.filterEndDate ?? Date() },
+                                set: { viewModel.filterEndDate = $0 }
+                            ), displayedComponents: .date)
+                            .labelsHidden()
+                        }
+                    }
+
+                    // Category picker
+                    if !viewModel.filterCategories.isEmpty {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Category")
+                                .font(SpentyFonts.caption2)
+                                .foregroundColor(.spentyTextSecondary)
+                            Picker("Category", selection: $viewModel.filterCategoryId) {
+                                Text("All Categories").tag("")
+                                ForEach(viewModel.filterCategories, id: \.id) { cat in
+                                    Text(cat.name).tag(cat.id)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                        }
+                    }
+
+                    // Amount range
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Min Amount")
+                                .font(SpentyFonts.caption2)
+                                .foregroundColor(.spentyTextSecondary)
+                            TextField("0", text: $viewModel.filterMinAmount)
+                                .font(SpentyFonts.body)
+                                .keyboardType(.decimalPad)
+                                .textFieldStyle(.roundedBorder)
+                        }
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Max Amount")
+                                .font(SpentyFonts.caption2)
+                                .foregroundColor(.spentyTextSecondary)
+                            TextField("No limit", text: $viewModel.filterMaxAmount)
+                                .font(SpentyFonts.body)
+                                .keyboardType(.decimalPad)
+                                .textFieldStyle(.roundedBorder)
+                        }
+                    }
+
+                    // Apply button
+                    Button {
+                        Task { await viewModel.loadFilteredTransactions(accountId) }
+                    } label: {
+                        Text("Apply Filters")
+                            .primaryButtonStyle()
+                    }
+                }
+                .padding(14)
+                .background(Color.spentyCardBg)
+                .cornerRadius(10)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+
+            // Loading state
+            if viewModel.isLoadingFilteredTransactions {
+                HStack {
+                    Spacer()
+                    ProgressView()
+                        .tint(Color.spentyPrimary)
+                    Spacer()
+                }
+                .padding(.vertical, 24)
+            } else if viewModel.accountTransactions.isEmpty {
                 VStack(spacing: 8) {
                     Image(systemName: "tray")
                         .font(.system(size: 32))
                         .foregroundColor(.spentyTextSecondary.opacity(0.4))
-                    Text("No transactions found")
+                    Text(hasActiveFilters ? "No transactions match your filters" : "No transactions found")
                         .font(SpentyFonts.subheadline)
                         .foregroundColor(.spentyTextSecondary)
                 }
@@ -269,6 +454,16 @@ struct AccountDetailView: View {
                 .cornerRadius(12)
             }
         }
+    }
+
+    private var hasActiveFilters: Bool {
+        !viewModel.filterTransactionType.isEmpty ||
+        !viewModel.filterCategoryId.isEmpty ||
+        viewModel.filterStartDate != nil ||
+        viewModel.filterEndDate != nil ||
+        !viewModel.filterMinAmount.isEmpty ||
+        !viewModel.filterMaxAmount.isEmpty ||
+        !viewModel.filterSearch.isEmpty
     }
 
     private func transactionRow(_ txn: Transaction) -> some View {

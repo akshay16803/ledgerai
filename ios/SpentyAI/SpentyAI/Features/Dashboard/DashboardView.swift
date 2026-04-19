@@ -3,6 +3,9 @@ import SwiftUI
 struct DashboardView: View {
 
     @State private var viewModel = DashboardViewModel()
+    @State private var isAccountsExpanded = false
+    @State private var isTransactionsExpanded = false
+    @State private var isPendingExpanded = false
 
     var body: some View {
         NavigationStack {
@@ -41,6 +44,9 @@ struct DashboardView: View {
                     TransactionFormView(viewModel: TransactionsViewModel())
                 }
             }
+            .navigationDestination(for: String.self) { accountId in
+                AccountDetailView(viewModel: AccountsViewModel(), accountId: accountId)
+            }
             .sheet(isPresented: $viewModel.showAIChat, onDismiss: {
                 Task { await viewModel.refresh() }
             }) {
@@ -78,6 +84,10 @@ struct DashboardView: View {
                     recentTransactionsSection
                         .padding(.horizontal, 16)
                 }
+
+                // Pending approval section
+                pendingApprovalSection
+                    .padding(.horizontal, 16)
 
                 // Bottom spacer for floating button clearance
                 Spacer()
@@ -134,22 +144,30 @@ struct DashboardView: View {
 
     private var accountsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            sectionHeader(title: "Accounts", icon: "building.columns.fill")
+            collapsibleHeader(
+                title: "Accounts",
+                icon: "building.columns.fill",
+                count: viewModel.accounts.count,
+                isExpanded: $isAccountsExpanded
+            )
 
-            VStack(spacing: 0) {
-                ForEach(viewModel.accounts) { account in
-                    NavigationLink(value: account.id) {
-                        accountRow(account)
-                    }
-                    .buttonStyle(.plain)
+            if isAccountsExpanded {
+                VStack(spacing: 0) {
+                    ForEach(viewModel.accounts) { account in
+                        NavigationLink(value: account.id) {
+                            accountRow(account)
+                        }
+                        .buttonStyle(.plain)
 
-                    if account.id != viewModel.accounts.last?.id {
-                        Divider()
-                            .padding(.leading, 48)
+                        if account.id != viewModel.accounts.last?.id {
+                            Divider()
+                                .padding(.leading, 48)
+                        }
                     }
                 }
+                .cardStyle()
+                .transition(.opacity.combined(with: .move(edge: .top)))
             }
-            .cardStyle()
         }
     }
 
@@ -195,19 +213,27 @@ struct DashboardView: View {
 
     private var recentTransactionsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            sectionHeader(title: "Recent Transactions", icon: "clock.arrow.circlepath")
+            collapsibleHeader(
+                title: "Recent Transactions",
+                icon: "clock.arrow.circlepath",
+                count: viewModel.recentTransactions.count,
+                isExpanded: $isTransactionsExpanded
+            )
 
-            VStack(spacing: 0) {
-                ForEach(viewModel.recentTransactions) { txn in
-                    transactionRow(txn)
+            if isTransactionsExpanded {
+                VStack(spacing: 0) {
+                    ForEach(viewModel.recentTransactions) { txn in
+                        transactionRow(txn)
 
-                    if txn.id != viewModel.recentTransactions.last?.id {
-                        Divider()
-                            .padding(.leading, 48)
+                        if txn.id != viewModel.recentTransactions.last?.id {
+                            Divider()
+                                .padding(.leading, 48)
+                        }
                     }
                 }
+                .cardStyle()
+                .transition(.opacity.combined(with: .move(edge: .top)))
             }
-            .cardStyle()
         }
     }
 
@@ -277,20 +303,161 @@ struct DashboardView: View {
         .padding(.bottom, 24)
     }
 
-    // MARK: - Section Header
+    // MARK: - Pending Approval Section
 
-    private func sectionHeader(title: String, icon: String) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: icon)
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundColor(.spentyPrimary)
+    private var pendingApprovalSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            collapsibleHeader(
+                title: "Pending Approval",
+                icon: "envelope.badge.fill",
+                count: viewModel.pendingTransactions.count,
+                isExpanded: $isPendingExpanded
+            )
 
-            Text(title)
-                .font(SpentyFonts.headline)
-                .foregroundColor(.spentyTextPrimary)
+            if isPendingExpanded {
+                if viewModel.isLoadingPending {
+                    HStack {
+                        Spacer()
+                        ProgressView()
+                            .padding(.vertical, 20)
+                        Spacer()
+                    }
+                    .cardStyle()
+                } else if viewModel.pendingTransactions.isEmpty {
+                    HStack {
+                        Spacer()
+                        Text("No pending transactions")
+                            .font(SpentyFonts.subheadline)
+                            .foregroundColor(.spentyTextSecondary)
+                            .padding(.vertical, 20)
+                        Spacer()
+                    }
+                    .cardStyle()
+                } else {
+                    VStack(spacing: 0) {
+                        ForEach(viewModel.pendingTransactions) { txn in
+                            pendingRow(txn)
 
-            Spacer()
+                            if txn.id != viewModel.pendingTransactions.last?.id {
+                                Divider()
+                                    .padding(.leading, 48)
+                            }
+                        }
+                    }
+                    .cardStyle()
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+            }
         }
+    }
+
+    private func pendingRow(_ txn: PendingTransaction) -> some View {
+        VStack(spacing: 8) {
+            HStack(spacing: 12) {
+                Circle()
+                    .fill(Color.spentyWarning.opacity(0.12))
+                    .frame(width: 36, height: 36)
+                    .overlay(
+                        Image(systemName: txn.source == "sms" ? "message.fill" : "envelope.fill")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.spentyWarning)
+                    )
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(txn.description ?? "Transaction")
+                        .font(SpentyFonts.subheadline)
+                        .foregroundColor(.spentyTextPrimary)
+                        .lineLimit(1)
+
+                    if let date = txn.date {
+                        Text(date, style: .date)
+                            .font(SpentyFonts.caption1)
+                            .foregroundColor(.spentyTextSecondary)
+                    }
+                }
+
+                Spacer()
+
+                CurrencyText(
+                    amount: txn.amount ?? 0,
+                    font: SpentyFonts.amountSmall,
+                    color: txn.transactionType == "income" ? .spentySuccess : .spentyAccent1
+                )
+            }
+
+            // Approve / Reject buttons
+            HStack(spacing: 12) {
+                Spacer()
+
+                Button {
+                    Task { await viewModel.rejectPendingTransaction(txn.id) }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 11, weight: .semibold))
+                        Text("Reject")
+                            .font(SpentyFonts.caption1)
+                    }
+                    .foregroundColor(.spentyError)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(Color.spentyError.opacity(0.3), lineWidth: 1)
+                    )
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    Task { await viewModel.approvePendingTransaction(txn.id) }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 11, weight: .semibold))
+                        Text("Approve")
+                            .font(SpentyFonts.caption1)
+                    }
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(Color.spentySuccess)
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.vertical, 10)
+    }
+
+    // MARK: - Collapsible Section Header
+
+    private func collapsibleHeader(title: String, icon: String, count: Int, isExpanded: Binding<Bool>) -> some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.25)) {
+                isExpanded.wrappedValue.toggle()
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: icon)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.spentyPrimary)
+
+                Text("\(title) (\(count))")
+                    .font(SpentyFonts.headline)
+                    .foregroundColor(.spentyTextPrimary)
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.spentyTextSecondary)
+                    .rotationEffect(.degrees(isExpanded.wrappedValue ? 90 : 0))
+                    .animation(.easeInOut(duration: 0.25), value: isExpanded.wrappedValue)
+            }
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Helpers

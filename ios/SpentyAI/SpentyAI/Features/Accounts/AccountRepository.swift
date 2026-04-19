@@ -185,6 +185,47 @@ actor AccountRepository {
         return response.transactions
     }
 
+    func fetchFilteredAccountTransactions(
+        _ accountId: String,
+        transactionType: String? = nil,
+        categoryId: String? = nil,
+        startDate: String? = nil,
+        endDate: String? = nil,
+        minAmount: Double? = nil,
+        maxAmount: Double? = nil,
+        search: String? = nil
+    ) async throws -> (transactions: [Transaction], total: Int) {
+        var endpoint = APIEndpoints.accountTransactions(accountId)
+        var params: [String] = []
+        params.append("limit=100")
+        if let transactionType, !transactionType.isEmpty {
+            params.append("transaction_type=\(transactionType)")
+        }
+        if let categoryId, !categoryId.isEmpty {
+            params.append("category_id=\(categoryId)")
+        }
+        if let startDate, !startDate.isEmpty {
+            params.append("from_date=\(startDate)")
+        }
+        if let endDate, !endDate.isEmpty {
+            params.append("to_date=\(endDate)")
+        }
+        if let minAmount {
+            params.append("min_amount=\(minAmount)")
+        }
+        if let maxAmount {
+            params.append("max_amount=\(maxAmount)")
+        }
+        if let search, !search.isEmpty {
+            params.append("search=\(search.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? search)")
+        }
+        if !params.isEmpty {
+            endpoint += "?" + params.joined(separator: "&")
+        }
+        let response: AccountTransactionsResponse = try await api.get(endpoint)
+        return (transactions: response.transactions, total: response.total ?? 0)
+    }
+
     // MARK: - Sub-Types
 
     func fetchSubTypes() async throws -> [AccountSubType] {

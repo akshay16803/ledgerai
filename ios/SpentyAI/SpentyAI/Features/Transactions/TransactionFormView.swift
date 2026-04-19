@@ -21,6 +21,7 @@ struct TransactionFormView: View {
     @State private var paymentMethod: String = ""
     @State private var isRecurring: Bool = false
     @State private var recurringFrequency: String = "monthly"
+    @State private var recurrenceDate: String = ""
 
     @State private var selectedPhoto: PhotosPickerItem?
     @State private var isSaving: Bool = false
@@ -336,6 +337,19 @@ struct TransactionFormView: View {
                     }
                 }
                 .pickerStyle(.segmented)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Recurrence Day")
+                        .font(SpentyFonts.caption1)
+                        .fontWeight(.medium)
+                        .foregroundColor(.spentyTextSecondary)
+                        .textCase(.uppercase)
+
+                    TextField("Day of month (1-31)", text: $recurrenceDate)
+                        .keyboardType(.numberPad)
+                        .font(SpentyFonts.body)
+                        .inputStyle()
+                }
             }
         }
         .padding(14)
@@ -461,6 +475,7 @@ struct TransactionFormView: View {
         paymentMethod = txn.paymentMethod ?? ""
         isRecurring = txn.isRecurring ?? false
         recurringFrequency = txn.recurringFrequency ?? "monthly"
+        recurrenceDate = txn.recurrenceDate.map { String($0) } ?? ""
     }
 
     // MARK: - Save
@@ -503,6 +518,7 @@ struct TransactionFormView: View {
             status: transaction?.status ?? "approved",
             isRecurring: isRecurring,
             recurringFrequency: isRecurring ? recurringFrequency : nil,
+            recurrenceDate: isRecurring ? Int(recurrenceDate) : nil,
             source: transaction?.source ?? "manual",
             receiptId: transaction?.receiptId,
             originalCurrency: transaction?.originalCurrency,

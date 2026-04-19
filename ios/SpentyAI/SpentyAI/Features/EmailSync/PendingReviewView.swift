@@ -198,6 +198,17 @@ struct PendingReviewView: View {
                         .foregroundColor(.spentyInfo)
                         .lineLimit(1)
                 }
+
+                if txn.isRecurring == true {
+                    Label {
+                        Text(txn.recurringFrequency?.capitalized ?? "Recurring")
+                    } icon: {
+                        Image(systemName: "repeat")
+                    }
+                    .font(SpentyFonts.caption1)
+                    .foregroundColor(.spentyPrimary)
+                    .lineLimit(1)
+                }
             }
 
             // Actions

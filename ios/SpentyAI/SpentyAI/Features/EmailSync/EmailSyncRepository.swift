@@ -161,6 +161,9 @@ struct PendingTransactionUpdate: Encodable {
     var accountId: String?
     var categoryId: String?
     var date: Date?
+    var isRecurring: Bool?
+    var recurringFrequency: String?
+    var recurrenceDate: Int?
 }
 
 // MARK: - Response Models
@@ -242,6 +245,9 @@ struct PendingTransaction: Codable, Identifiable {
     var status: String?
     var sourceEmailId: String?
     var sourceSmsId: String?
+    var isRecurring: Bool?
+    var recurringFrequency: String?
+    var recurrenceDate: Int?
 
     /// The source ID used to fetch the original email or SMS content.
     var sourceId: String? {
@@ -262,6 +268,9 @@ struct PendingTransaction: Codable, Identifiable {
         case status
         case sourceEmailId
         case sourceSmsId
+        case isRecurring
+        case recurringFrequency
+        case recurrenceDate
     }
 
     init(from decoder: Decoder) throws {
@@ -280,6 +289,9 @@ struct PendingTransaction: Codable, Identifiable {
         self.status = try? container.decodeIfPresent(String.self, forKey: .status)
         self.sourceEmailId = try? container.decodeIfPresent(String.self, forKey: .sourceEmailId)
         self.sourceSmsId = try? container.decodeIfPresent(String.self, forKey: .sourceSmsId)
+        self.isRecurring = try? container.decodeIfPresent(Bool.self, forKey: .isRecurring)
+        self.recurringFrequency = try? container.decodeIfPresent(String.self, forKey: .recurringFrequency)
+        self.recurrenceDate = try? container.decodeIfPresent(Int.self, forKey: .recurrenceDate)
     }
 }
 

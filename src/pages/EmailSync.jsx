@@ -856,7 +856,17 @@ export default function EmailSync() {
                       </span>
                     </td>
                     <td style={{ padding: '10px 16px', maxWidth: 250, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {txn.description || '—'}
+                      <span>{txn.description || '—'}</span>
+                      {txn.is_recurring && (
+                        <span title={`Recurring: ${txn.recurring_frequency || 'monthly'}${txn.recurrence_date ? `, day ${txn.recurrence_date}` : ''}`}
+                          style={{
+                            display: 'inline-block', marginLeft: 6, padding: '1px 6px', borderRadius: 2,
+                            fontSize: 9, fontWeight: 700, textTransform: 'uppercase',
+                            background: 'rgba(74,110,125,0.12)', color: 'var(--info)',
+                          }}>
+                          {txn.recurring_frequency || 'recurring'}
+                        </span>
+                      )}
                     </td>
                     <td style={{ padding: '10px 16px', fontSize: 12 }}>{getAccountName(txn.account_id)}</td>
                     <td style={{ padding: '10px 16px', fontSize: 12 }}>{getCategoryName(txn.category_id)}</td>

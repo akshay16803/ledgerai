@@ -10,6 +10,11 @@ final class DashboardViewModel {
     var errorMessage = ""
     var showError = false
 
+    // MARK: - Pending Approval State
+
+    var pendingTransactions: [PendingTransaction] = []
+    var isLoadingPending = false
+
     // MARK: - Sheet State
 
     var showNewTransaction = false
@@ -18,11 +23,13 @@ final class DashboardViewModel {
     // MARK: - Dependencies
 
     private let repository: DashboardRepository
+    private let emailRepository: EmailSyncRepository
 
     // MARK: - Init
 
-    init(repository: DashboardRepository = .shared) {
+    init(repository: DashboardRepository = .shared, emailRepository: EmailSyncRepository = .shared) {
         self.repository = repository
+        self.emailRepository = emailRepository
     }
 
     // MARK: - Load
@@ -39,6 +46,9 @@ final class DashboardViewModel {
         }
 
         isLoading = false
+
+        // Load pending transactions in background
+        await loadPendingTransactions()
     }
 
     // MARK: - Refresh (pull-to-refresh)
@@ -47,6 +57,41 @@ final class DashboardViewModel {
     func refresh() async {
         do {
             summary = try await repository.getSummary()
+        } catch {
+            handleError(error)
+        }
+        await loadPendingTransactions()
+    }
+
+    // MARK: - Pending Transactions
+
+    @MainActor
+    func loadPendingTransactions() async {
+        isLoadingPending = true
+        do {
+            pendingTransactions = try await emailRepository.pendingReview()
+        } catch {
+            // Silently fail — pending section will show empty
+            pendingTransactions = []
+        }
+        isLoadingPending = false
+    }
+
+    @MainActor
+    func approvePendingTransaction(_ id: String) async {
+        do {
+            _ = try await emailRepository.approveTransaction(id)
+            pendingTransactions.removeAll { $0.id == id }
+        } catch {
+            handleError(error)
+        }
+    }
+
+    @MainActor
+    func rejectPendingTransaction(_ id: String) async {
+        do {
+            _ = try await emailRepository.rejectTransaction(id)
+            pendingTransactions.removeAll { $0.id == id }
         } catch {
             handleError(error)
         }

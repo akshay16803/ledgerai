@@ -188,7 +188,8 @@ class TransactionCreate(BaseModel):
     description: Optional[str] = None
     payment_method: Optional[str] = None  # upi, credit_card, debit_card, net_banking, cash, wallet, other
     is_recurring: bool = False
-    recurring_frequency: Optional[str] = None  # monthly, weekly, yearly
+    recurring_frequency: Optional[str] = None  # daily, weekly, monthly, quarterly, yearly
+    recurrence_date: Optional[int] = None  # day of month (1-31) or day of week (1-7) for recurrence
     source: str = "manual"  # manual, email, sms
     status: str = "approved"  # approved, pending_review, rejected
     receipt_id: Optional[str] = None
@@ -204,6 +205,7 @@ class TransactionUpdate(BaseModel):
     payment_method: Optional[str] = None
     is_recurring: Optional[bool] = None
     recurring_frequency: Optional[str] = None
+    recurrence_date: Optional[int] = None
     receipt_id: Optional[str] = None
 
 class FeatureRequestCreate(BaseModel):
@@ -1220,8 +1222,13 @@ async def get_account_transactions(
     skip: int = 0,
     from_date: str = None,
     to_date: str = None,
+    transaction_type: Optional[str] = None,
+    category_id: Optional[str] = None,
+    min_amount: Optional[float] = None,
+    max_amount: Optional[float] = None,
+    search: Optional[str] = None,
 ):
-    """Get transactions for a specific account."""
+    """Get transactions for a specific account with optional filters."""
     account = await db.accounts.find_one(
         {"account_id": account_id, "user_id": user["user_id"]}, {"_id": 0}
     )
@@ -1236,6 +1243,16 @@ async def get_account_transactions(
         query.setdefault("date", {})["$gte"] = from_date
     if to_date:
         query.setdefault("date", {})["$lte"] = to_date
+    if transaction_type:
+        query["transaction_type"] = transaction_type
+    if category_id:
+        query["category_id"] = category_id
+    if min_amount is not None:
+        query.setdefault("amount", {})["$gte"] = min_amount
+    if max_amount is not None:
+        query.setdefault("amount", {})["$lte"] = max_amount
+    if search:
+        query["description"] = {"$regex": search, "$options": "i"}
 
     txns = await db.transactions.find(query, {"_id": 0}).sort("date", -1).skip(skip).limit(limit).to_list(limit)
     total = await db.transactions.count_documents(query)
@@ -1534,6 +1551,10 @@ async def list_transactions(
     from_date: Optional[str] = None,
     to_date: Optional[str] = None,
     account_id: Optional[str] = None,
+    category_id: Optional[str] = None,
+    min_amount: Optional[float] = None,
+    max_amount: Optional[float] = None,
+    search: Optional[str] = None,
     limit: int = 100,
     skip: int = 0,
 ):
@@ -1544,10 +1565,18 @@ async def list_transactions(
         query["status"] = status
     if account_id:
         query["$or"] = [{"account_id": account_id}, {"to_account_id": account_id}]
+    if category_id:
+        query["category_id"] = category_id
     if from_date:
         query.setdefault("date", {})["$gte"] = from_date
     if to_date:
         query.setdefault("date", {})["$lte"] = to_date
+    if min_amount is not None:
+        query.setdefault("amount", {})["$gte"] = min_amount
+    if max_amount is not None:
+        query.setdefault("amount", {})["$lte"] = max_amount
+    if search:
+        query["description"] = {"$regex": search, "$options": "i"}
 
     txns = await db.transactions.find(query, {"_id": 0}).sort("date", -1).skip(skip).limit(limit).to_list(limit)
     total = await db.transactions.count_documents(query)
@@ -1583,6 +1612,7 @@ async def create_transaction(data: TransactionCreate, user: dict = Depends(get_c
         "payment_method": data.payment_method,
         "is_recurring": data.is_recurring,
         "recurring_frequency": data.recurring_frequency,
+        "recurrence_date": data.recurrence_date,
         "source": data.source,
         "status": data.status,
         "receipt_id": data.receipt_id,
@@ -2089,12 +2119,115 @@ async def toggle_recurring(transaction_id: str, request: Request, user: dict = D
 
 
 FREQ_MULTIPLIERS = {
+    "daily": 30.44,
     "weekly": 4.33,
     "biweekly": 2.17,
     "monthly": 1.0,
     "quarterly": 1.0 / 3.0,
     "yearly": 1.0 / 12.0,
 }
+
+# Known recurring service vendors — used to auto-detect recurring charges
+KNOWN_RECURRING_VENDORS = {
+    # Streaming & entertainment
+    "netflix", "spotify", "apple music", "amazon prime", "disney+", "hotstar",
+    "youtube premium", "youtube music", "hbo", "hulu", "apple tv",
+    "jio cinema", "zee5", "sonyliv", "voot", "mubi", "crunchyroll",
+    # Cloud & tech
+    "google one", "google play", "google storage", "icloud", "apple media services",
+    "apple.com/bill", "dropbox", "microsoft 365", "office 365", "adobe",
+    "github", "chatgpt", "openai",
+    # Communication
+    "zoom", "slack", "notion", "canva",
+    # Fitness & health
+    "gym", "fitness", "cult.fit", "cure.fit", "peloton", "fitbit premium",
+    # Insurance
+    "lic", "insurance", "health insurance", "life insurance", "term plan",
+    "bajaj allianz", "hdfc life", "icici prudential", "max life", "star health",
+    # Utilities & telecom
+    "jio", "airtel", "vodafone", "vi", "bsnl", "tata play", "dish tv",
+    "electricity", "water bill", "gas bill", "broadband",
+    # News & reading
+    "kindle unlimited", "audible", "medium", "substack", "the hindu",
+    "times of india", "economic times",
+    # Software / SaaS
+    "aws", "azure", "heroku", "vercel", "netlify", "digitalocean",
+    "namecheap", "godaddy", "cloudflare", "freshworks",
+}
+
+# Keywords in email/SMS content that hint at recurring billing
+RECURRING_KEYWORDS = [
+    "subscription", "recurring", "monthly", "renewal", "billing cycle",
+    "auto-renewal", "auto renewal", "autopay", "auto pay", "auto debit",
+    "your plan", "membership", "premium plan", "next billing", "renews on",
+    "charged monthly", "charged yearly", "annual plan", "yearly plan",
+    "billing period", "next payment", "plan renewal",
+]
+
+
+def _detect_recurring_from_vendor_and_content(
+    vendor_or_description: str, content: str = ""
+) -> dict:
+    """Check if a transaction is likely recurring based on vendor name and content.
+    Returns dict with is_recurring, recurrence_frequency, recurrence_date (if detectable)."""
+    vendor_lower = (vendor_or_description or "").lower()
+    content_lower = (content or "").lower()
+    combined = f"{vendor_lower} {content_lower}"
+
+    is_recurring = False
+    frequency = None
+    recurrence_date = None
+
+    # Check vendor name against known recurring services
+    for known_vendor in KNOWN_RECURRING_VENDORS:
+        if known_vendor in vendor_lower or known_vendor in content_lower:
+            is_recurring = True
+            frequency = "monthly"  # default for subscriptions
+            break
+
+    # Check content for recurring keywords
+    if not is_recurring:
+        for keyword in RECURRING_KEYWORDS:
+            if keyword in combined:
+                is_recurring = True
+                frequency = "monthly"  # default
+                break
+
+    # Try to detect frequency from content
+    if is_recurring:
+        if any(w in combined for w in ["yearly", "annual", "per year", "/year", "charged yearly"]):
+            frequency = "yearly"
+        elif any(w in combined for w in ["quarterly", "per quarter", "every 3 months"]):
+            frequency = "quarterly"
+        elif any(w in combined for w in ["weekly", "per week", "/week", "every week"]):
+            frequency = "weekly"
+        elif any(w in combined for w in ["daily", "per day", "/day", "every day"]):
+            frequency = "daily"
+        # else keep monthly default
+
+    # Try to extract recurrence date from content
+    if is_recurring:
+        # Look for patterns like "15th of each month", "on the 5th", "billing date: 20"
+        date_patterns = [
+            r'(\d{1,2})(?:st|nd|rd|th)\s+of\s+(?:each|every)\s+month',
+            r'(?:billing|renewal|payment)\s+(?:date|day)[:\s]+(\d{1,2})',
+            r'(?:on|every)\s+(?:the\s+)?(\d{1,2})(?:st|nd|rd|th)',
+            r'renews?\s+(?:on\s+)?(?:the\s+)?(\d{1,2})(?:st|nd|rd|th)',
+            r'next\s+(?:billing|payment|charge)\s+(?:on\s+)?(?:\w+\s+)?(\d{1,2})',
+        ]
+        for pattern in date_patterns:
+            match = re.search(pattern, combined)
+            if match:
+                day = int(match.group(1))
+                if 1 <= day <= 31:
+                    recurrence_date = day
+                    break
+
+    return {
+        "is_recurring": is_recurring,
+        "recurrence_frequency": frequency,
+        "recurrence_date": recurrence_date,
+    }
 
 
 def _compute_recurring_summary(recurring_txns: list) -> tuple:
@@ -2112,6 +2245,7 @@ def _compute_recurring_summary(recurring_txns: list) -> tuple:
             "transaction_type": txn["transaction_type"],
             "amount": txn["amount"],
             "frequency": freq,
+            "recurrence_date": txn.get("recurrence_date"),
             "monthly_amount": round(monthly_amount, 2),
             "category_id": txn.get("category_id"),
             "account_id": txn.get("account_id"),
@@ -2135,6 +2269,8 @@ def _mandate_monthly_outflow(mandate: dict) -> float:
     if amt <= 0:
         return 0.0
     freq = (mandate.get("frequency") or "monthly").lower()
+    if freq == "daily":
+        return amt * 30.44
     if freq == "monthly":
         return amt
     if freq == "weekly":
@@ -5768,6 +5904,31 @@ async def _create_transaction_from_ai_result(
     final_category_id = prefilled_category.get("category_id") or result.get("category_id")
     final_subcategory_id = prefilled_category.get("subcategory_id") or result.get("subcategory_id")
 
+    # --- Recurring detection: merge AI result with server-side vendor/keyword detection ---
+    ai_is_recurring = result.get("is_recurring", False)
+    ai_frequency = result.get("recurring_frequency")
+    ai_recurrence_date = result.get("recurrence_date")
+
+    if not ai_is_recurring:
+        # Server-side fallback: check vendor name and email content for recurring patterns
+        email_content = f"{email_doc.get('subject', '')} {email_doc.get('body_text', '')[:2000]}"
+        vendor_detection = _detect_recurring_from_vendor_and_content(
+            result.get("description", ""), email_content
+        )
+        if vendor_detection["is_recurring"]:
+            ai_is_recurring = True
+            ai_frequency = ai_frequency or vendor_detection["recurrence_frequency"]
+            ai_recurrence_date = ai_recurrence_date or vendor_detection["recurrence_date"]
+
+    # If recurrence_date not detected, try to extract from the transaction date
+    if ai_is_recurring and not ai_recurrence_date:
+        txn_date_str = result.get("date", "")
+        if txn_date_str:
+            try:
+                ai_recurrence_date = int(txn_date_str.split("-")[2])
+            except (IndexError, ValueError):
+                pass
+
     txn = {
         "transaction_id": f"txn_{uuid.uuid4().hex[:12]}",
         "user_id": user_id,
@@ -5785,8 +5946,9 @@ async def _create_transaction_from_ai_result(
         "category_prefilled": bool(prefilled_category),
         "description": result.get("description", ""),
         "payment_method": result.get("payment_method"),
-        "is_recurring": result.get("is_recurring", False),
-        "recurring_frequency": result.get("recurring_frequency"),
+        "is_recurring": ai_is_recurring,
+        "recurring_frequency": ai_frequency,
+        "recurrence_date": ai_recurrence_date,
         "source": "email",
         "source_provider": source_provider,
         "source_email_id": email_doc["email_id"],
@@ -6614,6 +6776,7 @@ CRITICAL RULES — READ CAREFULLY:
 6. For payment_method: Detect how the payment was made. Common methods: "upi", "credit_card", "debit_card", "net_banking", "cash", "wallet", "cheque", "neft", "rtgs", "imps", "other".
 7. Extract date in YYYY-MM-DD format. If not clear, use the email date.
 8. CURRENCY: Detect the currency of the transaction from the email. Look for currency symbols ($, USD, EUR, GBP, etc.) or currency codes. If the email is from an Indian bank or UPI, use "INR". If unclear, default to "INR".
+9. RECURRING DETECTION: If the charge is from a known subscription/recurring service (Netflix, Spotify, Google Play, Apple, Amazon Prime, gym, insurance, SaaS, telecom, etc.) OR the email mentions "subscription", "recurring", "renewal", "billing cycle", "auto-renewal", "monthly plan", etc., set is_recurring to true. Also detect the billing frequency and the recurrence day if mentioned (e.g., "renews on the 15th" -> recurrence_date: 15).
 
 Respond ONLY with valid JSON (no markdown, no explanation):
 {{
@@ -6631,7 +6794,8 @@ Respond ONLY with valid JSON (no markdown, no explanation):
   "subcategory_id": "matching subcategory_id" or null,
   "payment_method": "upi" | "credit_card" | "debit_card" | "net_banking" | "cash" | "wallet" | "cheque" | "neft" | "rtgs" | "imps" | "other" | null,
   "is_recurring": true/false,
-  "recurring_frequency": "monthly" | "weekly" | "yearly" | null,
+  "recurring_frequency": "daily" | "weekly" | "monthly" | "quarterly" | "yearly" | null,
+  "recurrence_date": integer 1-31 (day of month when this charge recurs) or null,
   "is_mandate": true/false,
   "mandate_type": "nach" | "enach" | "upi_autopay" | "ecs" | "sip" | "standing_instruction" | "credit_card_autopay" | "other" | null,
   "mandate_merchant": "payee / merchant name the mandate is for (e.g. 'HDFC Home Loan', 'Netflix', 'ICICI Prudential SIP')" or null,
@@ -6857,6 +7021,7 @@ INSTRUCTIONS:
 - For payment_method: Detect the payment method from the SMS. Common: "upi", "credit_card", "debit_card", "net_banking", "cash", "wallet", "cheque", "neft", "rtgs", "imps", "other".
 - Extract date in YYYY-MM-DD from timestamp.
 - Extract payee name if visible (e.g., "paid to AMAZON" -> payee is "Amazon").
+- RECURRING DETECTION: If the payee is a known subscription/recurring service (Netflix, Spotify, Google Play, Apple, Amazon Prime, gym, insurance, etc.) OR the SMS mentions "subscription", "recurring", "renewal", "auto-debit", etc., set is_recurring to true. Detect the billing frequency and recurrence day if mentioned.
 
 Respond ONLY with valid JSON (no markdown):
 {{
@@ -6874,7 +7039,8 @@ Respond ONLY with valid JSON (no markdown):
   "subcategory_id": "matching subcategory_id" or null,
   "payment_method": "upi" | "credit_card" | "debit_card" | "net_banking" | "cash" | "wallet" | "cheque" | "neft" | "rtgs" | "imps" | "other" | null,
   "is_recurring": true/false,
-  "recurring_frequency": "monthly" | "weekly" | "yearly" | null,
+  "recurring_frequency": "daily" | "weekly" | "monthly" | "quarterly" | "yearly" | null,
+  "recurrence_date": integer 1-31 (day of month when this charge recurs) or null,
   "confidence": "high" | "medium" | "low",
   "reason": "brief reason for classification"
 }}"""
@@ -7074,6 +7240,31 @@ async def _process_sms_transaction(user_id: str, sms_doc: dict, result: dict, ac
     final_category_id = prefilled_category.get("category_id") or result.get("category_id")
     final_subcategory_id = prefilled_category.get("subcategory_id") or result.get("subcategory_id")
 
+    # --- Recurring detection: merge AI result with server-side vendor/keyword detection ---
+    ai_is_recurring = result.get("is_recurring", False)
+    ai_frequency = result.get("recurring_frequency")
+    ai_recurrence_date = result.get("recurrence_date")
+
+    if not ai_is_recurring:
+        sms_content = sms_doc.get("body", "")
+        vendor_detection = _detect_recurring_from_vendor_and_content(
+            result.get("description", "") + " " + result.get("payee", ""),
+            sms_content,
+        )
+        if vendor_detection["is_recurring"]:
+            ai_is_recurring = True
+            ai_frequency = ai_frequency or vendor_detection["recurrence_frequency"]
+            ai_recurrence_date = ai_recurrence_date or vendor_detection["recurrence_date"]
+
+    # If recurrence_date not detected, try to extract from the transaction date
+    if ai_is_recurring and not ai_recurrence_date:
+        txn_date_str = result.get("date") or txn_date
+        if txn_date_str:
+            try:
+                ai_recurrence_date = int(txn_date_str.split("-")[2])
+            except (IndexError, ValueError):
+                pass
+
     txn = {
         "transaction_id": f"txn_{uuid.uuid4().hex[:12]}",
         "user_id": user_id,
@@ -7088,8 +7279,9 @@ async def _process_sms_transaction(user_id: str, sms_doc: dict, result: dict, ac
         "description": result.get("description", ""),
         "payee": result.get("payee", ""),
         "payment_method": result.get("payment_method"),
-        "is_recurring": result.get("is_recurring", False),
-        "recurring_frequency": result.get("recurring_frequency"),
+        "is_recurring": ai_is_recurring,
+        "recurring_frequency": ai_frequency,
+        "recurrence_date": ai_recurrence_date,
         "source": "sms",
         "source_sms_id": sms_doc["sms_id"],
         "status": "pending_review",
