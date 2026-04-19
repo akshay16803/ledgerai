@@ -24,19 +24,20 @@ struct EmailAccount: Codable, Identifiable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         // Backend returns gmail_email or outlook_email, map either to email
-        if let gmail = try container.decodeIfPresent(String.self, forKey: .gmailEmail) {
+        if let gmail = try? container.decodeIfPresent(String.self, forKey: .gmailEmail) {
             self.email = gmail
-        } else if let outlook = try container.decodeIfPresent(String.self, forKey: .outlookEmail) {
+        } else if let outlook = try? container.decodeIfPresent(String.self, forKey: .outlookEmail) {
             self.email = outlook
         } else {
             self.email = nil
         }
-        self.provider = try container.decodeIfPresent(String.self, forKey: .provider)
-        self.connectedAt = try container.decodeIfPresent(Date.self, forKey: .connectedAt)
-        self.syncFromDate = try container.decodeIfPresent(Date.self, forKey: .syncFromDate)
-        self.syncing = try container.decodeIfPresent(Bool.self, forKey: .syncing)
-        self.needsReconnect = try container.decodeIfPresent(Bool.self, forKey: .needsReconnect)
-        self.stats = try container.decodeIfPresent(SyncStats.self, forKey: .stats)
+        self.provider = try? container.decodeIfPresent(String.self, forKey: .provider)
+        // Use try? so that invalid / empty date strings don't crash the entire model
+        self.connectedAt = try? container.decodeIfPresent(Date.self, forKey: .connectedAt)
+        self.syncFromDate = try? container.decodeIfPresent(Date.self, forKey: .syncFromDate)
+        self.syncing = try? container.decodeIfPresent(Bool.self, forKey: .syncing)
+        self.needsReconnect = try? container.decodeIfPresent(Bool.self, forKey: .needsReconnect)
+        self.stats = try? container.decodeIfPresent(SyncStats.self, forKey: .stats)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -61,4 +62,8 @@ struct SyncStats: Codable {
     var processedByAi: Int?
     var transactionsCreated: Int?
     var pendingReview: Int?
+    var noTransaction: Int?
+    var aiPending: Int?
+    var aiFailed: Int?
+    var isProcessing: Bool?
 }

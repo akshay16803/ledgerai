@@ -110,6 +110,43 @@ struct BulkTransactionRequest: Encodable {
 struct PendingReviewResponse: Decodable {
     let transactions: [PendingTransaction]
     let total: Int?
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.total = try container.decodeIfPresent(Int.self, forKey: .total)
+
+        // Decode transactions one-by-one so a single malformed element
+        // doesn't discard the entire array.
+        var transactionsContainer = try container.nestedUnkeyedContainer(forKey: .transactions)
+        var decoded: [PendingTransaction] = []
+        while !transactionsContainer.isAtEnd {
+            if let txn = try? transactionsContainer.decode(PendingTransaction.self) {
+                decoded.append(txn)
+            } else {
+                // Skip the malformed element by consuming it as an opaque JSON value
+                _ = try? transactionsContainer.decode(AnyCodable.self)
+            }
+        }
+        self.transactions = decoded
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case transactions, total
+    }
+}
+
+/// Opaque helper that consumes any JSON value so the unkeyed container advances.
+private struct AnyCodable: Decodable {
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if container.decodeNil() { return }
+        if let _ = try? container.decode(Bool.self) { return }
+        if let _ = try? container.decode(Int.self) { return }
+        if let _ = try? container.decode(Double.self) { return }
+        if let _ = try? container.decode(String.self) { return }
+        if let _ = try? container.decode([AnyCodable].self) { return }
+        if let _ = try? container.decode([String: AnyCodable].self) { return }
+    }
 }
 
 struct PendingTransactionUpdate: Encodable {
@@ -131,6 +168,32 @@ struct EmailProviderStatus: Decodable {
     let connected: Bool?
     let accounts: [EmailAccount]?
     let message: String?
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.connected = try? container.decodeIfPresent(Bool.self, forKey: .connected)
+        self.message = try? container.decodeIfPresent(String.self, forKey: .message)
+
+        // Decode accounts one-by-one so a single malformed account
+        // doesn't discard the entire array.
+        if var accountsContainer = try? container.nestedUnkeyedContainer(forKey: .accounts) {
+            var decoded: [EmailAccount] = []
+            while !accountsContainer.isAtEnd {
+                if let account = try? accountsContainer.decode(EmailAccount.self) {
+                    decoded.append(account)
+                } else {
+                    _ = try? accountsContainer.decode(AnyCodable.self)
+                }
+            }
+            self.accounts = decoded
+        } else {
+            self.accounts = nil
+        }
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case connected, accounts, message
+    }
 }
 
 struct EmailSyncResponse: Decodable {
@@ -184,5 +247,21 @@ struct PendingTransaction: Codable, Identifiable {
         case transactionType
         case source
         case status
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try container.decode(String.self, forKey: .id)
+        // Use try? so that invalid / empty date strings don't crash the entire model
+        self.date = try? container.decodeIfPresent(Date.self, forKey: .date)
+        self.description = try? container.decodeIfPresent(String.self, forKey: .description)
+        self.amount = try? container.decodeIfPresent(Double.self, forKey: .amount)
+        self.accountId = try? container.decodeIfPresent(String.self, forKey: .accountId)
+        self.accountName = try? container.decodeIfPresent(String.self, forKey: .accountName)
+        self.categoryId = try? container.decodeIfPresent(String.self, forKey: .categoryId)
+        self.categoryName = try? container.decodeIfPresent(String.self, forKey: .categoryName)
+        self.transactionType = try? container.decodeIfPresent(String.self, forKey: .transactionType)
+        self.source = try? container.decodeIfPresent(String.self, forKey: .source)
+        self.status = try? container.decodeIfPresent(String.self, forKey: .status)
     }
 }
