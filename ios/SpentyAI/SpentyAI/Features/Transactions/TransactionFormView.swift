@@ -42,6 +42,7 @@ struct TransactionFormView: View {
     private let transactionTypes = ["income", "expense", "transfer"]
     private let paymentMethods = ["Cash", "UPI", "Bank Transfer", "Credit Card", "Debit Card", "Cheque", "Net Banking", "Wallet", "Other"]
     private let frequencies = ["daily", "weekly", "monthly", "quarterly", "yearly"]
+    private let frequencyLabels = ["daily": "Daily", "weekly": "Weekly", "monthly": "Monthly", "quarterly": "Quarterly", "yearly": "Yearly"]
 
     // MARK: - Filtered Categories
 
@@ -65,13 +66,13 @@ struct TransactionFormView: View {
                 Color.spentyBgPrimary.ignoresSafeArea()
 
                 ScrollView {
-                    VStack(spacing: 16) {
+                    VStack(spacing: 20) {
                         amountHero
-                        detailsCard
-                        categoryCard
-                        optionalCard
-                        recurringCard
-                        receiptRow
+                        detailsSection
+                        categorySection
+                        noteSection
+                        recurringSection
+                        attachmentSection
                         switchToInvoiceButton
 
                         if let errorMessage {
@@ -104,10 +105,21 @@ struct TransactionFormView: View {
         }
     }
 
+    // MARK: - Section Label
+
+    private func sectionLabel(_ text: String) -> some View {
+        Text(text.uppercased())
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundColor(.spentyTextSecondary)
+            .tracking(0.8)
+            .padding(.leading, 4)
+            .padding(.bottom, -12)
+    }
+
     // MARK: - Amount Hero
 
     private var amountHero: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 20) {
             // Type picker
             HStack(spacing: 0) {
                 ForEach(transactionTypes, id: \.self) { type in
@@ -119,8 +131,7 @@ struct TransactionFormView: View {
                         }
                     } label: {
                         Text(type.capitalized)
-                            .font(SpentyFonts.subheadline)
-                            .fontWeight(transactionType == type ? .semibold : .regular)
+                            .font(.system(size: 14, weight: transactionType == type ? .semibold : .regular))
                             .foregroundColor(transactionType == type ? .white : .spentyTextSecondary)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 10)
@@ -138,14 +149,14 @@ struct TransactionFormView: View {
             .cornerRadius(12)
 
             // Amount input
-            VStack(spacing: 6) {
-                HStack(alignment: .firstTextBaseline, spacing: 4) {
+            VStack(spacing: 8) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text("\u{20B9}")
-                        .font(.system(size: 32, weight: .semibold, design: .rounded))
+                        .font(.system(size: 30, weight: .semibold, design: .rounded))
                         .foregroundColor(typeAccentColor)
 
                     TextField("0.00", text: $amount)
-                        .font(.system(size: 40, weight: .bold, design: .rounded))
+                        .font(.system(size: 44, weight: .bold, design: .rounded))
                         .foregroundColor(.spentyTextPrimary)
                         .keyboardType(.decimalPad)
                         .multilineTextAlignment(.center)
@@ -154,10 +165,10 @@ struct TransactionFormView: View {
                 .frame(maxWidth: .infinity)
 
                 Text(transactionType == "transfer" ? "Transfer amount" : transactionType == "income" ? "Money received" : "Money spent")
-                    .font(SpentyFonts.caption1)
+                    .font(.system(size: 13))
                     .foregroundColor(.spentyTextSecondary)
             }
-            .padding(.vertical, 8)
+            .padding(.vertical, 4)
         }
         .padding(20)
         .background(Color.spentyCardBg)
@@ -165,289 +176,333 @@ struct TransactionFormView: View {
         .shadow(color: .black.opacity(0.04), radius: 8, x: 0, y: 2)
     }
 
-    // MARK: - Details Card
+    // MARK: - Details Section
 
-    private var detailsCard: some View {
-        VStack(spacing: 0) {
-            // Date row
-            formRow(icon: "calendar", label: "Date") {
-                DatePicker("", selection: $date, displayedComponents: .date)
-                    .datePickerStyle(.compact)
-                    .labelsHidden()
-            }
+    private var detailsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionLabel("Details")
 
-            formDivider
-
-            // Account row
-            formRow(icon: "building.columns", label: isTransfer ? "From Account" : "Account") {
-                Picker("", selection: $accountId) {
-                    Text("Select").tag("").foregroundColor(.spentyTextSecondary)
-                    ForEach(viewModel.accounts) { account in
-                        Text(account.name ?? "Unnamed").tag(account.id)
-                    }
+            VStack(spacing: 0) {
+                // Date row
+                formRow(icon: "calendar", label: "Date") {
+                    DatePicker("", selection: $date, displayedComponents: .date)
+                        .datePickerStyle(.compact)
+                        .labelsHidden()
                 }
-                .pickerStyle(.menu)
-                .tint(.spentyTextPrimary)
-            }
 
-            if isTransfer {
                 formDivider
 
-                formRow(icon: "arrow.right.circle", label: "To Account") {
-                    Picker("", selection: $toAccountId) {
-                        Text("Select").tag("").foregroundColor(.spentyTextSecondary)
-                        ForEach(viewModel.accounts.filter { $0.id != accountId }) { account in
+                // Account row
+                formRow(icon: "building.columns", label: isTransfer ? "From" : "Account") {
+                    Picker("", selection: $accountId) {
+                        Text("Select account").tag("")
+                        ForEach(viewModel.accounts) { account in
                             Text(account.name ?? "Unnamed").tag(account.id)
                         }
                     }
                     .pickerStyle(.menu)
                     .tint(.spentyTextPrimary)
                 }
-            }
-        }
-        .cardStyle()
-    }
 
-    // MARK: - Category Card
+                if isTransfer {
+                    formDivider
 
-    private var categoryCard: some View {
-        VStack(spacing: 0) {
-            // Category row
-            HStack(spacing: 12) {
-                Image(systemName: "tag")
-                    .font(.system(size: 16))
-                    .foregroundColor(.spentyPrimary)
-                    .frame(width: 24)
-
-                Text("Category")
-                    .font(SpentyFonts.body)
-                    .foregroundColor(.spentyTextPrimary)
-
-                Spacer()
-
-                Picker("", selection: $categoryId) {
-                    Text("Select").tag("")
-                    ForEach(filteredCategories) { cat in
-                        Text(cat.name ?? "Unnamed").tag(cat.id)
+                    formRow(icon: "arrow.right.circle", label: "To") {
+                        Picker("", selection: $toAccountId) {
+                            Text("Select account").tag("")
+                            ForEach(viewModel.accounts.filter { $0.id != accountId }) { account in
+                                Text(account.name ?? "Unnamed").tag(account.id)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .tint(.spentyTextPrimary)
                     }
                 }
-                .pickerStyle(.menu)
-                .tint(.spentyTextPrimary)
-                .onChange(of: categoryId) { _, _ in
-                    subcategoryId = ""
-                }
 
-                Button {
-                    newCategoryName = ""
-                    showNewCategorySheet = true
-                } label: {
-                    Image(systemName: "plus.circle.fill")
-                        .font(.system(size: 22))
-                        .foregroundColor(.spentyPrimary.opacity(0.7))
-                }
-            }
-            .padding(.vertical, 12)
-
-            if !subcategories.isEmpty || !categoryId.isEmpty {
                 formDivider
 
-                // Subcategory row
-                HStack(spacing: 12) {
-                    Image(systemName: "tag.circle")
-                        .font(.system(size: 16))
-                        .foregroundColor(.spentyPrimary.opacity(0.6))
-                        .frame(width: 24)
-
-                    Text("Subcategory")
-                        .font(SpentyFonts.body)
-                        .foregroundColor(.spentyTextPrimary)
-
-                    Spacer()
-
-                    Picker("", selection: $subcategoryId) {
-                        Text("None").tag("")
-                        ForEach(subcategories) { sub in
-                            Text(sub.name ?? "Unnamed").tag(sub.id)
+                // Payment method row (moved here from optional card)
+                formRow(icon: "creditcard", label: "Payment") {
+                    Picker("", selection: $paymentMethod) {
+                        Text("Select method").tag("")
+                        ForEach(paymentMethods, id: \.self) { method in
+                            Text(method).tag(method)
                         }
                     }
                     .pickerStyle(.menu)
                     .tint(.spentyTextPrimary)
+                }
+            }
+            .cardStyle()
+        }
+    }
 
-                    if !categoryId.isEmpty {
-                        Button {
-                            newSubcategoryName = ""
-                            showNewSubcategorySheet = true
-                        } label: {
-                            Image(systemName: "plus.circle.fill")
-                                .font(.system(size: 22))
-                                .foregroundColor(.spentyPrimary.opacity(0.7))
+    // MARK: - Category Section
+
+    private var categorySection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionLabel("Category")
+
+            VStack(spacing: 0) {
+                // Category row
+                HStack(spacing: 10) {
+                    Image(systemName: "tag")
+                        .font(.system(size: 15))
+                        .foregroundColor(.spentyPrimary)
+                        .frame(width: 24)
+
+                    Text("Category")
+                        .font(.system(size: 15))
+                        .foregroundColor(.spentyTextPrimary)
+                        .lineLimit(1)
+
+                    Spacer()
+
+                    Picker("", selection: $categoryId) {
+                        Text("Select").tag("")
+                        ForEach(filteredCategories) { cat in
+                            Text(cat.name ?? "Unnamed").tag(cat.id)
                         }
+                    }
+                    .pickerStyle(.menu)
+                    .tint(.spentyTextPrimary)
+                    .onChange(of: categoryId) { _, _ in
+                        subcategoryId = ""
+                    }
+
+                    Button {
+                        newCategoryName = ""
+                        showNewCategorySheet = true
+                    } label: {
+                        Image(systemName: "plus.circle.fill")
+                            .font(.system(size: 20))
+                            .foregroundColor(.spentyPrimary.opacity(0.7))
                     }
                 }
                 .padding(.vertical, 12)
-            }
-        }
-        .cardStyle()
-        .alert("New Category", isPresented: $showNewCategorySheet) {
-            TextField("Category name", text: $newCategoryName)
-            Button("Cancel", role: .cancel) { }
-            Button("Create") {
-                Task { await createInlineCategory() }
-            }
-            .disabled(newCategoryName.trimmingCharacters(in: .whitespaces).isEmpty)
-        } message: {
-            Text("Enter a name for the new \(transactionType) category.")
-        }
-        .alert("New Subcategory", isPresented: $showNewSubcategorySheet) {
-            TextField("Subcategory name", text: $newSubcategoryName)
-            Button("Cancel", role: .cancel) { }
-            Button("Create") {
-                Task { await createInlineSubcategory() }
-            }
-            .disabled(newSubcategoryName.trimmingCharacters(in: .whitespaces).isEmpty)
-        } message: {
-            Text("Enter a name for the new subcategory.")
-        }
-    }
 
-    // MARK: - Optional Details Card
+                if !subcategories.isEmpty || !categoryId.isEmpty {
+                    formDivider
 
-    private var optionalCard: some View {
-        VStack(spacing: 0) {
-            // Description row
-            formRow(icon: "text.alignleft", label: "Description") {
-                TextField("Add note", text: $descriptionText)
-                    .font(SpentyFonts.body)
-                    .foregroundColor(.spentyTextPrimary)
-                    .multilineTextAlignment(.trailing)
-            }
-
-            formDivider
-
-            // Payment method row
-            formRow(icon: "creditcard", label: "Payment") {
-                Picker("", selection: $paymentMethod) {
-                    Text("Select").tag("")
-                    ForEach(paymentMethods, id: \.self) { method in
-                        Text(method).tag(method)
-                    }
-                }
-                .pickerStyle(.menu)
-                .tint(.spentyTextPrimary)
-            }
-        }
-        .cardStyle()
-    }
-
-    // MARK: - Recurring Card
-
-    private var recurringCard: some View {
-        VStack(spacing: 0) {
-            // Toggle row
-            HStack(spacing: 12) {
-                Image(systemName: "repeat")
-                    .font(.system(size: 16))
-                    .foregroundColor(.spentyPrimary)
-                    .frame(width: 24)
-
-                Toggle(isOn: $isRecurring) {
-                    Text("Recurring")
-                        .font(SpentyFonts.body)
-                        .foregroundColor(.spentyTextPrimary)
-                }
-                .tint(Color.spentyPrimary)
-            }
-            .padding(.vertical, 12)
-
-            if isRecurring {
-                formDivider
-
-                // Frequency
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack(spacing: 12) {
-                        Image(systemName: "clock.arrow.2.circlepath")
-                            .font(.system(size: 16))
+                    // Subcategory row
+                    HStack(spacing: 10) {
+                        Image(systemName: "tag.circle")
+                            .font(.system(size: 15))
                             .foregroundColor(.spentyPrimary.opacity(0.6))
                             .frame(width: 24)
 
-                        Text("Frequency")
-                            .font(SpentyFonts.body)
+                        Text("Subcategory")
+                            .font(.system(size: 15))
                             .foregroundColor(.spentyTextPrimary)
-                    }
-                    .padding(.top, 12)
+                            .lineLimit(1)
 
-                    HStack(spacing: 0) {
-                        ForEach(frequencies, id: \.self) { freq in
+                        Spacer()
+
+                        Picker("", selection: $subcategoryId) {
+                            Text("None").tag("")
+                            ForEach(subcategories) { sub in
+                                Text(sub.name ?? "Unnamed").tag(sub.id)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .tint(.spentyTextPrimary)
+
+                        if !categoryId.isEmpty {
                             Button {
-                                recurringFrequency = freq
+                                newSubcategoryName = ""
+                                showNewSubcategorySheet = true
                             } label: {
-                                Text(freq.prefix(1).uppercased() + freq.dropFirst().prefix(2))
-                                    .font(SpentyFonts.caption1)
-                                    .fontWeight(recurringFrequency == freq ? .semibold : .regular)
-                                    .foregroundColor(recurringFrequency == freq ? .white : .spentyTextSecondary)
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 8)
-                                    .background(
-                                        recurringFrequency == freq
-                                            ? Color.spentyPrimary
-                                            : Color.clear
-                                    )
-                                    .cornerRadius(8)
+                                Image(systemName: "plus.circle.fill")
+                                    .font(.system(size: 20))
+                                    .foregroundColor(.spentyPrimary.opacity(0.7))
                             }
                         }
                     }
-                    .padding(3)
-                    .background(Color.spentyBgSecondary)
-                    .cornerRadius(10)
-                }
-
-                formDivider
-
-                // Recurrence day
-                formRow(icon: "number", label: "Day of Month") {
-                    TextField("1-31", text: $recurrenceDate)
-                        .keyboardType(.numberPad)
-                        .font(SpentyFonts.body)
-                        .foregroundColor(.spentyTextPrimary)
-                        .multilineTextAlignment(.trailing)
+                    .padding(.vertical, 12)
                 }
             }
+            .cardStyle()
+            .alert("New Category", isPresented: $showNewCategorySheet) {
+                TextField("Category name", text: $newCategoryName)
+                Button("Cancel", role: .cancel) { }
+                Button("Create") {
+                    Task { await createInlineCategory() }
+                }
+                .disabled(newCategoryName.trimmingCharacters(in: .whitespaces).isEmpty)
+            } message: {
+                Text("Enter a name for the new \(transactionType) category.")
+            }
+            .alert("New Subcategory", isPresented: $showNewSubcategorySheet) {
+                TextField("Subcategory name", text: $newSubcategoryName)
+                Button("Cancel", role: .cancel) { }
+                Button("Create") {
+                    Task { await createInlineSubcategory() }
+                }
+                .disabled(newSubcategoryName.trimmingCharacters(in: .whitespaces).isEmpty)
+            } message: {
+                Text("Enter a name for the new subcategory.")
+            }
         }
-        .cardStyle()
     }
 
-    // MARK: - Receipt Row
+    // MARK: - Note Section
 
-    private var receiptRow: some View {
-        PhotosPicker(
-            selection: $selectedPhoto,
-            matching: .images
-        ) {
-            HStack(spacing: 12) {
-                Image(systemName: "doc.viewfinder")
-                    .font(.system(size: 16))
+    private var noteSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionLabel("Note")
+
+            HStack(spacing: 10) {
+                Image(systemName: "text.alignleft")
+                    .font(.system(size: 15))
                     .foregroundColor(.spentyPrimary)
-                    .frame(width: 24)
 
-                Text(selectedPhoto == nil ? "Attach Receipt" : "Receipt Selected")
-                    .font(SpentyFonts.body)
-                    .foregroundColor(selectedPhoto == nil ? .spentyTextPrimary : .spentySuccess)
+                TextField("Add a note...", text: $descriptionText)
+                    .font(.system(size: 15))
+                    .foregroundColor(.spentyTextPrimary)
+            }
+            .padding(14)
+            .background(Color.spentyCardBg)
+            .cornerRadius(12)
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(Color.spentyBorder, lineWidth: 0.5)
+            )
+            .shadow(color: .black.opacity(0.04), radius: 8, x: 0, y: 2)
+        }
+    }
 
-                Spacer()
+    // MARK: - Recurring Section
 
-                if selectedPhoto != nil {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 18))
-                        .foregroundColor(.spentySuccess)
-                } else {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.spentyTextSecondary.opacity(0.5))
+    private var recurringSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionLabel("Recurring")
+
+            VStack(spacing: 0) {
+                // Toggle row
+                HStack(spacing: 10) {
+                    Image(systemName: "repeat")
+                        .font(.system(size: 15))
+                        .foregroundColor(.spentyPrimary)
+                        .frame(width: 24)
+
+                    Toggle(isOn: $isRecurring) {
+                        Text("Repeat")
+                            .font(.system(size: 15))
+                            .foregroundColor(.spentyTextPrimary)
+                            .lineLimit(1)
+                    }
+                    .tint(Color.spentyPrimary)
+                }
+                .padding(.vertical, 12)
+
+                if isRecurring {
+                    formDivider
+
+                    // Frequency
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(spacing: 10) {
+                            Image(systemName: "clock.arrow.2.circlepath")
+                                .font(.system(size: 15))
+                                .foregroundColor(.spentyPrimary.opacity(0.6))
+                                .frame(width: 24)
+
+                            Text("Frequency")
+                                .font(.system(size: 15))
+                                .foregroundColor(.spentyTextPrimary)
+                                .lineLimit(1)
+                        }
+                        .padding(.top, 12)
+
+                        HStack(spacing: 2) {
+                            ForEach(frequencies, id: \.self) { freq in
+                                Button {
+                                    recurringFrequency = freq
+                                } label: {
+                                    Text(frequencyLabels[freq] ?? freq.capitalized)
+                                        .font(.system(size: 12, weight: recurringFrequency == freq ? .semibold : .regular))
+                                        .foregroundColor(recurringFrequency == freq ? .white : .spentyTextSecondary)
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 9)
+                                        .background(
+                                            recurringFrequency == freq
+                                                ? Color.spentyPrimary
+                                                : Color.clear
+                                        )
+                                        .cornerRadius(10)
+                                }
+                            }
+                        }
+                        .padding(3)
+                        .background(Color.spentyBgSecondary)
+                        .cornerRadius(12)
+                    }
+
+                    formDivider
+
+                    // Recurrence day
+                    formRow(icon: "number", label: "Day") {
+                        TextField("1-31", text: $recurrenceDate)
+                            .keyboardType(.numberPad)
+                            .font(.system(size: 15))
+                            .foregroundColor(.spentyTextPrimary)
+                            .multilineTextAlignment(.trailing)
+                    }
                 }
             }
-            .padding(.vertical, 12)
+            .cardStyle()
         }
-        .cardStyle()
+    }
+
+    // MARK: - Attachment Section
+
+    private var attachmentSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionLabel("Attachment")
+
+            PhotosPicker(
+                selection: $selectedPhoto,
+                matching: .images
+            ) {
+                HStack(spacing: 12) {
+                    // Icon with badge background
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(Color.spentyPrimary.opacity(0.12))
+                            .frame(width: 36, height: 36)
+
+                        Image(systemName: "doc.viewfinder")
+                            .font(.system(size: 16))
+                            .foregroundColor(.spentyPrimary)
+                    }
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(selectedPhoto == nil ? "Attach Receipt" : "Receipt Selected")
+                            .font(.system(size: 15, weight: .medium))
+                            .foregroundColor(selectedPhoto == nil ? .spentyTextPrimary : .spentySuccess)
+                            .lineLimit(1)
+
+                        Text("Photo or document")
+                            .font(.system(size: 12))
+                            .foregroundColor(.spentyTextSecondary)
+                            .lineLimit(1)
+                    }
+
+                    Spacer()
+
+                    if selectedPhoto != nil {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 18))
+                            .foregroundColor(.spentySuccess)
+                    } else {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(.spentyTextSecondary.opacity(0.5))
+                    }
+                }
+                .padding(.vertical, 10)
+            }
+            .cardStyle()
+        }
     }
 
     // MARK: - Switch to Invoice
@@ -460,16 +515,19 @@ struct TransactionFormView: View {
             } label: {
                 HStack(spacing: 8) {
                     Image(systemName: "doc.text")
-                        .font(.system(size: 16))
+                        .font(.system(size: 15))
                     Text("Switch to Invoice")
-                        .font(SpentyFonts.subheadline)
-                        .fontWeight(.medium)
+                        .font(.system(size: 14, weight: .medium))
                 }
                 .foregroundColor(.spentyInfo)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 14)
                 .background(Color.spentyInfo.opacity(0.08))
                 .cornerRadius(12)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(Color.spentyInfo.opacity(0.15), lineWidth: 1)
+                )
             }
         }
     }
@@ -481,15 +539,16 @@ struct TransactionFormView: View {
         label: String,
         @ViewBuilder content: () -> Content
     ) -> some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 10) {
             Image(systemName: icon)
-                .font(.system(size: 16))
+                .font(.system(size: 15))
                 .foregroundColor(.spentyPrimary)
                 .frame(width: 24)
 
             Text(label)
-                .font(SpentyFonts.body)
+                .font(.system(size: 15))
                 .foregroundColor(.spentyTextPrimary)
+                .lineLimit(1)
 
             Spacer()
 
@@ -500,7 +559,7 @@ struct TransactionFormView: View {
 
     private var formDivider: some View {
         Divider()
-            .padding(.leading, 48)
+            .padding(.leading, 40)
     }
 
     // MARK: - Helpers
