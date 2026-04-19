@@ -39,7 +39,7 @@ final class APIClient: Sendable {
         return e
     }()
 
-    private init(baseURL: String = "https://spentyai.com") {
+    private init(baseURL: String = "https://api.spentyai.com") {
         self.baseURL = baseURL
     }
 
