@@ -747,33 +747,42 @@ struct DashboardAccountsListView: View {
                     ContentUnavailableView("No Accounts", systemImage: "building.columns", description: Text("No accounts found"))
                 } else {
                     List(accounts) { account in
-                        HStack(spacing: 12) {
-                            Circle()
-                                .fill(Color.spentyPrimary.opacity(0.1))
-                                .frame(width: 40, height: 40)
-                                .overlay(
-                                    Image(systemName: "building.columns.fill")
-                                        .font(.system(size: 16, weight: .semibold))
-                                        .foregroundColor(.spentyPrimary)
+                        NavigationLink {
+                            AccountDetailView(viewModel: AccountsViewModel(), accountId: account.id)
+                        } label: {
+                            HStack(spacing: 12) {
+                                Circle()
+                                    .fill(Color.spentyPrimary.opacity(0.1))
+                                    .frame(width: 40, height: 40)
+                                    .overlay(
+                                        Image(systemName: "building.columns.fill")
+                                            .font(.system(size: 16, weight: .semibold))
+                                            .foregroundColor(.spentyPrimary)
+                                    )
+
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(account.name ?? "Unnamed")
+                                        .font(SpentyFonts.subheadline)
+                                        .foregroundColor(.spentyTextPrimary)
+                                    if let type = account.accountType {
+                                        Text(type.capitalized)
+                                            .font(SpentyFonts.caption1)
+                                            .foregroundColor(.spentyTextSecondary)
+                                    }
+                                }
+
+                                Spacer()
+
+                                CurrencyText(
+                                    amount: account.balance ?? 0,
+                                    font: SpentyFonts.amountSmall,
+                                    color: (account.balance ?? 0) >= 0 ? .spentySuccess : .spentyError
                                 )
 
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(account.name ?? "Unnamed")
-                                    .font(SpentyFonts.subheadline)
-                                if let type = account.accountType {
-                                    Text(type.capitalized)
-                                        .font(SpentyFonts.caption1)
-                                        .foregroundColor(.spentyTextSecondary)
-                                }
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundColor(.spentyTextSecondary.opacity(0.5))
                             }
-
-                            Spacer()
-
-                            CurrencyText(
-                                amount: account.balance ?? 0,
-                                font: SpentyFonts.amountSmall,
-                                color: (account.balance ?? 0) >= 0 ? .spentySuccess : .spentyError
-                            )
                         }
                         .listRowBackground(Color.spentyCardBg)
                     }
