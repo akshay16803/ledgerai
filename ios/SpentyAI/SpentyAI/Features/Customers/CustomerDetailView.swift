@@ -2,14 +2,6 @@ import SwiftUI
 
 struct CustomerDetailView: View {
 
-    // MARK: - Brand
-
-    private enum Brand {
-        static let primary = Color(red: 0x3A / 255, green: 0x5C / 255, blue: 0x4A / 255)
-        static let background = Color(red: 0xF8 / 255, green: 0xF6 / 255, blue: 0xF3 / 255)
-        static let error = Color(red: 0x96 / 255, green: 0x45 / 255, blue: 0x3A / 255)
-    }
-
     // MARK: - Properties
 
     let customer: Customer
@@ -23,7 +15,7 @@ struct CustomerDetailView: View {
 
     var body: some View {
         ZStack {
-            Brand.background.ignoresSafeArea()
+            Color.spentyBgPrimary.ignoresSafeArea()
 
             ScrollView {
                 VStack(spacing: 20) {
@@ -41,7 +33,7 @@ struct CustomerDetailView: View {
                 Button("Edit") {
                     viewModel.startEdit(displayCustomer)
                 }
-                .foregroundStyle(Brand.primary)
+                .foregroundStyle(Color.spentyPrimary)
                 .fontWeight(.semibold)
             }
         }
@@ -88,11 +80,11 @@ struct CustomerDetailView: View {
             cardHeader("Financial Summary", icon: "indianrupeesign.circle")
 
             HStack(spacing: 0) {
-                summaryTile("Invoiced", amount: displayCustomer.totalInvoiced ?? 0, color: Brand.primary)
+                summaryTile("Invoiced", amount: displayCustomer.totalInvoiced ?? 0, color: Color.spentyPrimary)
                 Divider().frame(height: 44)
                 summaryTile("Paid", amount: displayCustomer.totalPaid ?? 0, color: .green)
                 Divider().frame(height: 44)
-                summaryTile("Outstanding", amount: displayCustomer.outstanding ?? 0, color: Brand.error)
+                summaryTile("Outstanding", amount: displayCustomer.outstanding ?? 0, color: Color.spentyError)
             }
         }
         .padding(16)
@@ -166,7 +158,7 @@ struct CustomerDetailView: View {
     private func statusBadge(_ status: String) -> some View {
         let color: Color = switch status.lowercased() {
         case "paid": .green
-        case "overdue": Brand.error
+        case "overdue": Color.spentyError
         case "sent", "pending": .orange
         default: .secondary
         }
@@ -184,7 +176,7 @@ struct CustomerDetailView: View {
     private func cardHeader(_ title: String, icon: String) -> some View {
         Label(title, systemImage: icon)
             .font(.headline)
-            .foregroundStyle(Brand.primary)
+            .foregroundStyle(Color.spentyPrimary)
     }
 
     private func infoRow(_ label: String, value: String) -> some View {

@@ -2,14 +2,6 @@ import SwiftUI
 
 struct LoginView: View {
 
-    // MARK: - Constants
-
-    private enum Brand {
-        static let primary = Color(red: 0x3A / 255, green: 0x5C / 255, blue: 0x4A / 255) // #3A5C4A
-        static let background = Color(red: 0xF8 / 255, green: 0xF6 / 255, blue: 0xF3 / 255) // #F8F6F3
-        static let primaryDark = Color(red: 0x2C / 255, green: 0x46 / 255, blue: 0x38 / 255)
-    }
-
     // MARK: - State
 
     @State private var viewModel: AuthViewModel
@@ -24,7 +16,7 @@ struct LoginView: View {
 
     var body: some View {
         ZStack {
-            Brand.background
+            Color.spentyBgPrimary
                 .ignoresSafeArea()
 
             VStack(spacing: 0) {
@@ -55,19 +47,19 @@ struct LoginView: View {
             // App icon / logo mark
             ZStack {
                 Circle()
-                    .fill(Brand.primary.opacity(0.12))
+                    .fill(Color.spentyPrimary.opacity(0.12))
                     .frame(width: 96, height: 96)
 
                 Image(systemName: "dollarsign.circle.fill")
                     .resizable()
                     .scaledToFit()
                     .frame(width: 56, height: 56)
-                    .foregroundStyle(Brand.primary)
+                    .foregroundStyle(Color.spentyPrimary)
             }
 
             Text("SpentyAI")
                 .font(.system(size: 34, weight: .bold, design: .rounded))
-                .foregroundStyle(Brand.primary)
+                .foregroundStyle(Color.spentyPrimary)
 
             Text("Smart spending starts here")
                 .font(.subheadline)
@@ -98,9 +90,9 @@ struct LoginView: View {
                 }
                 .frame(maxWidth: .infinity, minHeight: 52)
                 .foregroundStyle(.white)
-                .background(Brand.primary)
+                .background(Color.spentyPrimary)
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .shadow(color: Brand.primary.opacity(0.3), radius: 8, y: 4)
+                .shadow(color: Color.spentyPrimary.opacity(0.3), radius: 8, y: 4)
             }
             .disabled(viewModel.isLoading)
             .opacity(viewModel.isLoading ? 0.6 : 1)
@@ -108,7 +100,7 @@ struct LoginView: View {
             // Loading indicator
             if viewModel.isLoading {
                 ProgressView()
-                    .tint(Brand.primary)
+                    .tint(Color.spentyPrimary)
                     .transition(.opacity)
             }
 
@@ -117,7 +109,7 @@ struct LoginView: View {
                 .font(.caption)
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
-                .tint(Brand.primary)
+                .tint(Color.spentyPrimary)
                 .padding(.top, 8)
         }
         .animation(.easeInOut(duration: 0.25), value: viewModel.isLoading)

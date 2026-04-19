@@ -164,6 +164,25 @@ final class APIClient: Sendable {
         try validateResponse(response, data: data)
         do {
             return try decoder.decode(T.self, from: data)
+        } catch let decodingError as DecodingError {
+            #if DEBUG
+            let path = request.url?.path ?? "unknown"
+            let preview = String(data: data.prefix(500), encoding: .utf8) ?? "<binary>"
+            switch decodingError {
+            case .typeMismatch(let type, let ctx):
+                print("⚠️ DECODE [\(path)] typeMismatch: expected \(type) at \(ctx.codingPath.map(\.stringValue).joined(separator: "."))")
+            case .valueNotFound(let type, let ctx):
+                print("⚠️ DECODE [\(path)] valueNotFound: \(type) at \(ctx.codingPath.map(\.stringValue).joined(separator: "."))")
+            case .keyNotFound(let key, let ctx):
+                print("⚠️ DECODE [\(path)] keyNotFound: \(key.stringValue) at \(ctx.codingPath.map(\.stringValue).joined(separator: "."))")
+            case .dataCorrupted(let ctx):
+                print("⚠️ DECODE [\(path)] dataCorrupted at \(ctx.codingPath.map(\.stringValue).joined(separator: ".")): \(ctx.debugDescription)")
+            @unknown default:
+                print("⚠️ DECODE [\(path)] unknown error")
+            }
+            print("⚠️ DECODE response preview: \(preview)")
+            #endif
+            throw APIError.decodingError(decodingError)
         } catch {
             throw APIError.decodingError(error)
         }

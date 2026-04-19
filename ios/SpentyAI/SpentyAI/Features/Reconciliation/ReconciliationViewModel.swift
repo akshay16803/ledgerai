@@ -58,19 +58,20 @@ final class ReconciliationViewModel {
     func loadInitial() async {
         isLoading = true
         errorMessage = nil
-        do {
-            async let stmts = repository.fetchStatements()
-            async let accts = repository.fetchAccounts()
-            async let subTypes = repository.fetchAccountSubTypes()
-            async let cats = repository.fetchCategories()
 
-            statements = try await stmts
-            accounts = try await accts
-            accountSubTypes = try await subTypes
-            categories = try await cats
-        } catch {
+        // Load each resource independently so one failure doesn't block the rest
+        async let stmts = repository.fetchStatements()
+        async let accts = repository.fetchAccounts()
+        async let subTypes = repository.fetchAccountSubTypes()
+        async let cats = repository.fetchCategories()
+
+        do { statements = try await stmts } catch {
             errorMessage = error.localizedDescription
         }
+        do { accounts = try await accts } catch { /* non-fatal */ }
+        do { accountSubTypes = try await subTypes } catch { /* non-fatal */ }
+        do { categories = try await cats } catch { /* non-fatal */ }
+
         isLoading = false
     }
 
@@ -104,10 +105,18 @@ final class ReconciliationViewModel {
                 periodFrom: Self.dateFormatter.string(from: periodFrom),
                 periodTo: Self.dateFormatter.string(from: periodTo)
             )
-            // Backend returns a lightweight response; refetch the full statement
+            // Backend returns a lightweight response; try to refetch the full statement
+            // but don't fail the whole upload if the refetch/decode fails
             if let stmtId = response.statementId {
-                let fullStatement = try await repository.fetchStatement(id: stmtId)
-                statements.insert(fullStatement, at: 0)
+                if let fullStatement = try? await repository.fetchStatement(id: stmtId) {
+                    statements.insert(fullStatement, at: 0)
+                } else {
+                    // Refetch failed (likely decode issue) — refresh the whole list instead
+                    await refreshStatements()
+                }
+            } else {
+                // No statement ID returned — refresh the whole list
+                await refreshStatements()
             }
             showUploadSheet = false
             successMessage = "Statement uploaded successfully."
@@ -131,16 +140,24 @@ final class ReconciliationViewModel {
     func loadStatement(id: String) async {
         isLoading = true
         errorMessage = nil
-        do {
-            async let stmt = repository.fetchStatement(id: id)
-            async let entries = repository.fetchEntries(statementId: id)
 
-            activeStatement = try await stmt
-            parsedEntries = try await entries
+        // Load statement and entries separately so one failure doesn't block the other
+        do {
+            activeStatement = try await repository.fetchStatement(id: id)
             reconciliationResult = activeStatement?.reconciliation
         } catch {
             errorMessage = error.localizedDescription
         }
+
+        do {
+            parsedEntries = try await repository.fetchEntries(statementId: id)
+        } catch {
+            // Non-fatal: statement header may still display
+            if errorMessage == nil {
+                errorMessage = "Failed to load entries: \(error.localizedDescription)"
+            }
+        }
+
         isLoading = false
     }
 

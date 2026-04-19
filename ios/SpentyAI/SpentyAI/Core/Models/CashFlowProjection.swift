@@ -5,10 +5,34 @@ struct CashFlowProjection: Codable {
     var monthlyRecurringExpense: Double?
     var monthlyMandateExpense: Double?
     var monthlyOdInterest: Double?
+    var monthlyEmiTotal: Double?
     var monthlyNet: Double?
     var recurringItems: [RecurringItem]?
-    var projection: [ProjectionMonth]?
+    var mandateItems: [MandateItem]?
     var odInterestItems: [ODInterestItem]?
+    var emiItems: [EMIItem]?
+    var projection: [ProjectionMonth]?
+}
+
+struct MandateItem: Codable, Identifiable {
+    var id: String { mandateId ?? UUID().uuidString }
+    var mandateId: String?
+    var merchant: String?
+    var amount: Double?
+    var frequency: String?
+    var mandateType: String?
+    var monthlyEquivalent: Double?
+    var source: String?
+}
+
+struct EMIItem: Codable, Identifiable {
+    var id: String { accountId ?? UUID().uuidString }
+    var accountId: String?
+    var accountName: String?
+    var emiAmount: Double?
+    var emiDay: Int?
+    var loanInterestRate: Double?
+    var loanTenureMonths: Int?
 }
 
 struct ProjectionMonth: Codable, Identifiable {

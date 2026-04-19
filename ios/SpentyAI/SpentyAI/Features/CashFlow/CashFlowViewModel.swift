@@ -186,8 +186,34 @@ final class CashFlowViewModel {
         projection?.monthlyOdInterest ?? 0
     }
 
+    var monthlyEMI: Double {
+        projection?.monthlyEmiTotal ?? 0
+    }
+
     var monthlyNet: Double {
         projection?.monthlyNet ?? 0
+    }
+
+    // MARK: - Drill-down Data
+
+    var incomeItems: [RecurringItem] {
+        projection?.recurringItems?.filter { $0.transactionType?.lowercased() == "income" } ?? []
+    }
+
+    var expenseItems: [RecurringItem] {
+        projection?.recurringItems?.filter { $0.transactionType?.lowercased() == "expense" } ?? []
+    }
+
+    var mandateItemsList: [MandateItem] {
+        projection?.mandateItems ?? []
+    }
+
+    var odInterestItemsList: [ODInterestItem] {
+        projection?.odInterestItems ?? []
+    }
+
+    var emiItemsList: [EMIItem] {
+        projection?.emiItems ?? []
     }
 
     var projectionMonths: [ProjectionMonth] {

@@ -2,14 +2,6 @@ import SwiftUI
 
 struct VendorDetailView: View {
 
-    // MARK: - Constants
-
-    private enum Brand {
-        static let primary    = Color(red: 0x3A / 255, green: 0x5C / 255, blue: 0x4A / 255)
-        static let primaryDark = Color(red: 0x2C / 255, green: 0x46 / 255, blue: 0x38 / 255)
-        static let background = Color(red: 0xF8 / 255, green: 0xF6 / 255, blue: 0xF3 / 255)
-    }
-
     // MARK: - State
 
     @Bindable var viewModel: VendorsViewModel
@@ -25,7 +17,7 @@ struct VendorDetailView: View {
 
     var body: some View {
         ZStack {
-            Brand.background.ignoresSafeArea()
+            Color.spentyBgPrimary.ignoresSafeArea()
 
             ScrollView {
                 VStack(spacing: 20) {
@@ -46,7 +38,7 @@ struct VendorDetailView: View {
                     Text("Edit")
                         .fontWeight(.medium)
                 }
-                .tint(Brand.primary)
+                .tint(Color.spentyPrimary)
             }
         }
         .sheet(isPresented: $viewModel.showForm) {
@@ -65,12 +57,12 @@ struct VendorDetailView: View {
             HStack {
                 ZStack {
                     Circle()
-                        .fill(Brand.primary.opacity(0.12))
+                        .fill(Color.spentyPrimary.opacity(0.12))
                         .frame(width: 48, height: 48)
 
                     Text(String((displayVendor.name ?? "V").prefix(1)).uppercased())
                         .font(.title2.weight(.bold))
-                        .foregroundStyle(Brand.primary)
+                        .foregroundStyle(Color.spentyPrimary)
                 }
 
                 VStack(alignment: .leading, spacing: 2) {
@@ -120,7 +112,7 @@ struct VendorDetailView: View {
         HStack(spacing: 12) {
             Image(systemName: icon)
                 .font(.subheadline)
-                .foregroundStyle(Brand.primary)
+                .foregroundStyle(Color.spentyPrimary)
                 .frame(width: 24)
 
             VStack(alignment: .leading, spacing: 1) {
@@ -149,7 +141,7 @@ struct VendorDetailView: View {
                 summaryTile(
                     title: "Total Billed",
                     value: displayVendor.totalBilled ?? 0,
-                    color: Brand.primary,
+                    color: Color.spentyPrimary,
                     icon: "doc.text.fill"
                 )
                 summaryTile(
@@ -200,7 +192,7 @@ struct VendorDetailView: View {
                 HStack {
                     Spacer()
                     ProgressView()
-                        .tint(Brand.primary)
+                        .tint(Color.spentyPrimary)
                     Spacer()
                 }
                 .padding(.vertical, 24)
@@ -210,7 +202,7 @@ struct VendorDetailView: View {
                     VStack(spacing: 8) {
                         Image(systemName: "doc.plaintext")
                             .font(.largeTitle)
-                            .foregroundStyle(Brand.primary.opacity(0.4))
+                            .foregroundStyle(Color.spentyPrimary.opacity(0.4))
                         Text("No bills found")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)

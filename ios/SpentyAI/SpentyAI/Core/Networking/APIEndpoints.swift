@@ -89,10 +89,10 @@ struct APIEndpoints {
     static func statementUnlock(_ id: String) -> String { "/api/statements/\(id)/unlock" }
 
     // MARK: - Email Sync
-    static let gmailConnect = "/api/gmail/connect"
+    static let gmailConnect = "/api/gmail/connect?platform=ios"
     static let gmailStatus = "/api/gmail/status"
     static let gmailDisconnect = "/api/gmail/disconnect"
-    static let outlookConnect = "/api/outlook/connect"
+    static let outlookConnect = "/api/outlook/connect?platform=ios"
     static let outlookStatus = "/api/outlook/status"
     static let outlookDisconnect = "/api/outlook/disconnect"
     static let outlookStartSync = "/api/outlook/start-sync"

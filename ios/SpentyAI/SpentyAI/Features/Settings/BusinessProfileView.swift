@@ -2,13 +2,6 @@ import SwiftUI
 
 struct BusinessProfileView: View {
 
-    // MARK: - Constants
-
-    private enum Brand {
-        static let primary = Color(red: 0x3A / 255, green: 0x5C / 255, blue: 0x4A / 255)
-        static let background = Color(red: 0xF8 / 255, green: 0xF6 / 255, blue: 0xF3 / 255)
-    }
-
     // MARK: - Indian States
 
     private static let indianStates = [
@@ -45,7 +38,7 @@ struct BusinessProfileView: View {
 
     var body: some View {
         ZStack {
-            Brand.background
+            Color.spentyBgPrimary
                 .ignoresSafeArea()
 
             Form {
@@ -79,7 +72,7 @@ struct BusinessProfileView: View {
         Section {
             HStack(spacing: 12) {
                 Image(systemName: "building.2")
-                    .foregroundStyle(Brand.primary)
+                    .foregroundStyle(Color.spentyPrimary)
                     .frame(width: 24)
                 TextField("Firm Name", text: binding(\.firmName))
                     .focused($focusedField, equals: .firmName)
@@ -89,7 +82,7 @@ struct BusinessProfileView: View {
         } header: {
             Text("Firm Details")
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(Brand.primary)
+                .foregroundStyle(Color.spentyPrimary)
                 .textCase(nil)
         }
     }
@@ -100,7 +93,7 @@ struct BusinessProfileView: View {
         Section {
             HStack(spacing: 12) {
                 Image(systemName: "number")
-                    .foregroundStyle(Brand.primary)
+                    .foregroundStyle(Color.spentyPrimary)
                     .frame(width: 24)
                 TextField("GSTIN", text: binding(\.firmGstin))
                     .focused($focusedField, equals: .gstin)
@@ -110,7 +103,7 @@ struct BusinessProfileView: View {
 
             HStack(spacing: 12) {
                 Image(systemName: "creditcard")
-                    .foregroundStyle(Brand.primary)
+                    .foregroundStyle(Color.spentyPrimary)
                     .frame(width: 24)
                 TextField("PAN", text: binding(\.firmPan))
                     .focused($focusedField, equals: .pan)
@@ -120,7 +113,7 @@ struct BusinessProfileView: View {
         } header: {
             Text("Tax Identifiers")
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(Brand.primary)
+                .foregroundStyle(Color.spentyPrimary)
                 .textCase(nil)
         }
     }
@@ -132,7 +125,7 @@ struct BusinessProfileView: View {
             // State Picker
             HStack(spacing: 12) {
                 Image(systemName: "map")
-                    .foregroundStyle(Brand.primary)
+                    .foregroundStyle(Color.spentyPrimary)
                     .frame(width: 24)
 
                 Picker("State", selection: binding(\.firmState)) {
@@ -141,13 +134,13 @@ struct BusinessProfileView: View {
                         Text(state).tag(state)
                     }
                 }
-                .tint(Brand.primary)
+                .tint(Color.spentyPrimary)
             }
 
             // Country Picker
             HStack(spacing: 12) {
                 Image(systemName: "globe")
-                    .foregroundStyle(Brand.primary)
+                    .foregroundStyle(Color.spentyPrimary)
                     .frame(width: 24)
 
                 Picker("Country", selection: binding(\.businessCountry)) {
@@ -156,13 +149,13 @@ struct BusinessProfileView: View {
                         Text(country).tag(country)
                     }
                 }
-                .tint(Brand.primary)
+                .tint(Color.spentyPrimary)
             }
 
             // Address
             HStack(alignment: .top, spacing: 12) {
                 Image(systemName: "location")
-                    .foregroundStyle(Brand.primary)
+                    .foregroundStyle(Color.spentyPrimary)
                     .frame(width: 24)
                     .padding(.top, 8)
 
@@ -174,7 +167,7 @@ struct BusinessProfileView: View {
         } header: {
             Text("Location")
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(Brand.primary)
+                .foregroundStyle(Color.spentyPrimary)
                 .textCase(nil)
         }
     }
@@ -189,11 +182,11 @@ struct BusinessProfileView: View {
             if viewModel.isSaving {
                 ProgressView()
                     .controlSize(.small)
-                    .tint(Brand.primary)
+                    .tint(Color.spentyPrimary)
             } else {
                 Text("Save")
                     .font(.body.weight(.semibold))
-                    .foregroundStyle(Brand.primary)
+                    .foregroundStyle(Color.spentyPrimary)
             }
         }
         .disabled(viewModel.isSaving)

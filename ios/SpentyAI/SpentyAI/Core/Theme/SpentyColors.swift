@@ -8,7 +8,7 @@ extension Color {
             ? UIColor(red: 0x1C/255.0, green: 0x1C/255.0, blue: 0x1E/255.0, alpha: 1)
             : UIColor(red: 0xF8/255.0, green: 0xF6/255.0, blue: 0xF3/255.0, alpha: 1)
     })
-    static let spentySuccess = Color(hex: 0x3A5C4A)
+    static let spentySuccess = Color(hex: 0x34C759)
     static let spentyError = Color(hex: 0x96453A)
     static let spentyWarning = Color(hex: 0xC28C3C)
     static let spentyInfo = Color(hex: 0x4A6E7D)

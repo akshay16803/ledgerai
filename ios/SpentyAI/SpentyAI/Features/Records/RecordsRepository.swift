@@ -5,12 +5,35 @@ import Foundation
 struct RecordListResponse: Codable {
     let records: [Record]
     let total: Int
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        total = (try? c.decode(Int.self, forKey: .total)) ?? 0
+        // Decode records individually — skip any that fail
+        let safe = (try? c.decode([SafeDecodable<Record>].self, forKey: .records)) ?? []
+        records = safe.compactMap(\.value)
+    }
 }
 
 /// Search endpoint returns `items` instead of `records`
 struct RecordSearchResponse: Codable {
     let items: [Record]
     let total: Int
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        total = (try? c.decode(Int.self, forKey: .total)) ?? 0
+        let safe = (try? c.decode([SafeDecodable<Record>].self, forKey: .items)) ?? []
+        items = safe.compactMap(\.value)
+    }
+}
+
+/// Wrapper that never throws — if the inner type fails to decode, value is nil
+private struct SafeDecodable<T: Decodable>: Decodable {
+    let value: T?
+    init(from decoder: Decoder) throws {
+        value = try? T(from: decoder)
+    }
 }
 
 struct ReceiptListResponse: Codable {
@@ -38,6 +61,19 @@ struct RecordPreviewResponse: Codable {
         case subject, fromEmail, archivedAt, source, body, bodyHtml
         case attachments, transactionId
     }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        subject = try? c.decode(String.self, forKey: .subject)
+        fromEmail = try? c.decode(String.self, forKey: .fromEmail)
+        archivedAt = try? c.decode(Date.self, forKey: .archivedAt)
+        source = try? c.decode(String.self, forKey: .source)
+        body = try? c.decode(String.self, forKey: .body)
+        bodyHtml = try? c.decode(String.self, forKey: .bodyHtml)
+        attachments = try? c.decode([RecordAttachment].self, forKey: .attachments)
+        transactionId = try? c.decode(String.self, forKey: .transactionId)
+    }
 }
 
 struct RecordAttachment: Codable, Identifiable {
@@ -46,6 +82,15 @@ struct RecordAttachment: Codable, Identifiable {
     let filename: String?
     let mimeType: String?
     let size: Int?
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        // index may be missing for legacy records — default to 0
+        index = (try? c.decode(Int.self, forKey: .index)) ?? 0
+        filename = try? c.decode(String.self, forKey: .filename)
+        mimeType = try? c.decode(String.self, forKey: .mimeType)
+        size = try? c.decode(Int.self, forKey: .size)
+    }
 }
 
 struct ReceiptLinkBody: Codable {

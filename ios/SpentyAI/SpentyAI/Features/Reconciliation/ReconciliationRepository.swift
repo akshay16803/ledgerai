@@ -2,6 +2,11 @@ import Foundation
 
 struct StatementListResponse: Codable {
     let statements: [Statement]
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.statements = (try? container.decode([Statement].self, forKey: .statements)) ?? []
+    }
 }
 
 struct StatementUploadResponse: Codable {
@@ -32,6 +37,13 @@ struct EntriesResponse: Codable {
     let entries: [ParsedEntry]
     let total: Int?
     let statementId: String?
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.entries = (try? container.decode([ParsedEntry].self, forKey: .entries)) ?? []
+        self.total = try? container.decodeIfPresent(Int.self, forKey: .total)
+        self.statementId = try? container.decodeIfPresent(String.self, forKey: .statementId)
+    }
 }
 
 struct EntryUpdateResponse: Codable {

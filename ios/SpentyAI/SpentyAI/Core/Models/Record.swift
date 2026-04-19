@@ -30,6 +30,20 @@ struct Record: Codable, Identifiable {
         case hasAttachments
         case attachments
     }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        subject = try? c.decode(String.self, forKey: .subject)
+        fromEmail = try? c.decode(String.self, forKey: .fromEmail)
+        archivedAt = try? c.decode(Date.self, forKey: .archivedAt)
+        date = try? c.decode(String.self, forKey: .date)
+        source = try? c.decode(String.self, forKey: .source)
+        transactionAmount = try? c.decode(Double.self, forKey: .transactionAmount)
+        transactionType = try? c.decode(String.self, forKey: .transactionType)
+        hasAttachments = try? c.decode(Bool.self, forKey: .hasAttachments)
+        attachments = try? c.decode([RecordAttachmentRef].self, forKey: .attachments)
+    }
 }
 
 /// Lightweight attachment reference returned inside a Record list item

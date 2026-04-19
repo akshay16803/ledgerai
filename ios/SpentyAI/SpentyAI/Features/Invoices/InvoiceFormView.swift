@@ -2,15 +2,6 @@ import SwiftUI
 
 struct InvoiceFormView: View {
 
-    // MARK: - Brand
-
-    private enum Brand {
-        static let primary = Color(red: 0x3A / 255, green: 0x5C / 255, blue: 0x4A / 255)
-        static let background = Color(red: 0xF8 / 255, green: 0xF6 / 255, blue: 0xF3 / 255)
-        static let error = Color(red: 0x96 / 255, green: 0x45 / 255, blue: 0x3A / 255)
-        static let warning = Color(red: 0xC2 / 255, green: 0x8C / 255, blue: 0x3C / 255)
-    }
-
     // MARK: - State
 
     @Bindable var viewModel: InvoicesViewModel
@@ -76,7 +67,7 @@ struct InvoiceFormView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Brand.background.ignoresSafeArea()
+                Color.spentyBgPrimary.ignoresSafeArea()
 
                 Form {
                     invoiceInfoSection
@@ -99,7 +90,7 @@ struct InvoiceFormView: View {
                         Task { await save() }
                     }
                     .fontWeight(.semibold)
-                    .foregroundStyle(Brand.primary)
+                    .foregroundStyle(Color.spentyPrimary)
                     .disabled(isSaving)
                 }
             }
@@ -129,7 +120,7 @@ struct InvoiceFormView: View {
             if showValidation && invoiceNumber.trimmingCharacters(in: .whitespaces).isEmpty {
                 Text("Invoice number is required.")
                     .font(.caption)
-                    .foregroundStyle(Brand.error)
+                    .foregroundStyle(Color.spentyError)
             }
         } header: {
             Text("Invoice")
@@ -148,7 +139,7 @@ struct InvoiceFormView: View {
                         .foregroundStyle(.primary)
                     Spacer()
                     Text(customerName.isEmpty ? "Select Customer" : customerName)
-                        .foregroundStyle(customerName.isEmpty ? .secondary : Brand.primary)
+                        .foregroundStyle(customerName.isEmpty ? .secondary : Color.spentyPrimary)
                     Image(systemName: "chevron.right")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -161,7 +152,7 @@ struct InvoiceFormView: View {
             if showValidation && selectedCustomerId == nil {
                 Text("Customer is required.")
                     .font(.caption)
-                    .foregroundStyle(Brand.error)
+                    .foregroundStyle(Color.spentyError)
             }
         } header: {
             Text("Customer")
@@ -190,7 +181,7 @@ struct InvoiceFormView: View {
                         Spacer()
                         if customer.id == selectedCustomerId {
                             Image(systemName: "checkmark")
-                                .foregroundStyle(Brand.primary)
+                                .foregroundStyle(Color.spentyPrimary)
                         }
                     }
                 }
@@ -232,13 +223,13 @@ struct InvoiceFormView: View {
             } label: {
                 Label("Add Line Item", systemImage: "plus.circle.fill")
                     .font(.subheadline.weight(.medium))
-                    .foregroundStyle(Brand.primary)
+                    .foregroundStyle(Color.spentyPrimary)
             }
 
             if showValidation && lineItems.isEmpty {
                 Text("At least one line item is required.")
                     .font(.caption)
-                    .foregroundStyle(Brand.error)
+                    .foregroundStyle(Color.spentyError)
             }
         } header: {
             Text("Line Items")
@@ -293,14 +284,14 @@ struct InvoiceFormView: View {
                         .foregroundStyle(.secondary)
                     Text(formatCurrency(item.wrappedValue.lineTotal))
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(Brand.primary)
+                        .foregroundStyle(Color.spentyPrimary)
                 }
             }
 
             if showValidation && item.wrappedValue.description.trimmingCharacters(in: .whitespaces).isEmpty {
                 Text("Description is required.")
                     .font(.caption)
-                    .foregroundStyle(Brand.error)
+                    .foregroundStyle(Color.spentyError)
             }
         }
         .padding(.vertical, 4)
@@ -362,7 +353,7 @@ struct InvoiceFormView: View {
                 Spacer()
                 Text(formatCurrency(grandTotal))
                     .font(.title3.weight(.bold))
-                    .foregroundStyle(Brand.primary)
+                    .foregroundStyle(Color.spentyPrimary)
             }
         } header: {
             Text("GST Summary")

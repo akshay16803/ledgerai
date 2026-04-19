@@ -2,13 +2,6 @@ import SwiftUI
 
 struct CategoryFormView: View {
 
-    // MARK: - Constants
-
-    private enum Brand {
-        static let primary    = Color(red: 0x3A / 255, green: 0x5C / 255, blue: 0x4A / 255)
-        static let background = Color(red: 0xF8 / 255, green: 0xF6 / 255, blue: 0xF3 / 255)
-    }
-
     // MARK: - Environment & State
 
     @Environment(\.dismiss) private var dismiss
@@ -25,7 +18,7 @@ struct CategoryFormView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Brand.background.ignoresSafeArea()
+                Color.spentyBgPrimary.ignoresSafeArea()
 
                 Form {
                     // ── Name ────────────────────────────────────
@@ -76,7 +69,7 @@ struct CategoryFormView: View {
                         Task { await save() }
                     }
                     .fontWeight(.semibold)
-                    .tint(Brand.primary)
+                    .tint(Color.spentyPrimary)
                     .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || isSaving)
                 }
             }

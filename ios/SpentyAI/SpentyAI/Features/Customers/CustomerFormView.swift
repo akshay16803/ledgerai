@@ -2,14 +2,6 @@ import SwiftUI
 
 struct CustomerFormView: View {
 
-    // MARK: - Brand
-
-    private enum Brand {
-        static let primary = Color(red: 0x3A / 255, green: 0x5C / 255, blue: 0x4A / 255)
-        static let background = Color(red: 0xF8 / 255, green: 0xF6 / 255, blue: 0xF3 / 255)
-        static let error = Color(red: 0x96 / 255, green: 0x45 / 255, blue: 0x3A / 255)
-    }
-
     // MARK: - State
 
     @Bindable var viewModel: CustomersViewModel
@@ -33,7 +25,7 @@ struct CustomerFormView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Brand.background.ignoresSafeArea()
+                Color.spentyBgPrimary.ignoresSafeArea()
 
                 Form {
                     Section {
@@ -42,7 +34,7 @@ struct CustomerFormView: View {
                         if showValidation && !isNameValid {
                             Text("Name is required.")
                                 .font(.caption)
-                                .foregroundStyle(Brand.error)
+                                .foregroundStyle(Color.spentyError)
                         }
                     } header: {
                         Text("Required")
@@ -91,7 +83,7 @@ struct CustomerFormView: View {
                         Task { await save() }
                     }
                     .fontWeight(.semibold)
-                    .foregroundStyle(Brand.primary)
+                    .foregroundStyle(Color.spentyPrimary)
                     .disabled(isSaving)
                 }
             }

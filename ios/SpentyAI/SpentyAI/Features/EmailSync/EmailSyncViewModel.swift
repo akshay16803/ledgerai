@@ -1,6 +1,13 @@
 import Foundation
 import AuthenticationServices
 
+/// Lightweight presentation anchor for ASWebAuthenticationSession
+private final class AuthPresentationContext: NSObject, ASWebAuthenticationPresentationContextProviding {
+    func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
+        ASPresentationAnchor()
+    }
+}
+
 @Observable
 final class EmailSyncViewModel {
 
@@ -49,6 +56,7 @@ final class EmailSyncViewModel {
     // MARK: - Dependencies
 
     private let repository: EmailSyncRepository
+    private let authContextProvider = AuthPresentationContext()
 
     // MARK: - Init
 
@@ -414,25 +422,37 @@ final class EmailSyncViewModel {
                 callbackURLScheme: "spentyai"
             ) { [weak self] callbackURL, error in
                 if let error {
+                    // User explicitly cancelled — don't show an error
                     if (error as NSError).code != ASWebAuthenticationSessionError.canceledLogin.rawValue {
                         Task { @MainActor in
-                            self?.errorMessage = "Authentication cancelled or failed: \(error.localizedDescription)"
+                            self?.errorMessage = "Authentication failed. Please try again."
                             self?.showError = true
                         }
                     }
-                } else {
-                    Task { @MainActor in
-                        self?.showSuccessMessage("\(provider.capitalized) connected successfully")
-                        if provider == "gmail" {
-                            await self?.loadGmailStatus()
-                        } else {
-                            await self?.loadOutlookStatus()
+                } else if let callbackURL {
+                    // Check callback URL for error param from backend
+                    let components = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false)
+                    let errorParam = components?.queryItems?.first(where: { $0.name == "error" })?.value
+                    if let errorParam, !errorParam.isEmpty {
+                        Task { @MainActor in
+                            self?.errorMessage = "Connection failed: \(errorParam.replacingOccurrences(of: "_", with: " "))"
+                            self?.showError = true
                         }
-                        await self?.loadSyncStats()
+                    } else {
+                        Task { @MainActor in
+                            self?.showSuccessMessage("\(provider.capitalized) connected successfully")
+                            if provider == "gmail" {
+                                await self?.loadGmailStatus()
+                            } else {
+                                await self?.loadOutlookStatus()
+                            }
+                            await self?.loadSyncStats()
+                        }
                     }
                 }
                 continuation.resume()
             }
+            session.presentationContextProvider = self.authContextProvider
             session.prefersEphemeralWebBrowserSession = false
             session.start()
         }

@@ -2,13 +2,6 @@ import SwiftUI
 
 struct CurrencySettingsView: View {
 
-    // MARK: - Constants
-
-    private enum Brand {
-        static let primary = Color(red: 0x3A / 255, green: 0x5C / 255, blue: 0x4A / 255)
-        static let background = Color(red: 0xF8 / 255, green: 0xF6 / 255, blue: 0xF3 / 255)
-    }
-
     // MARK: - State
 
     @Bindable var viewModel: SettingsViewModel
@@ -19,12 +12,12 @@ struct CurrencySettingsView: View {
 
     var body: some View {
         ZStack {
-            Brand.background
+            Color.spentyBgPrimary
                 .ignoresSafeArea()
 
             if isLoadingOptions && viewModel.currencies.isEmpty {
                 ProgressView("Loading options...")
-                    .tint(Brand.primary)
+                    .tint(Color.spentyPrimary)
             } else {
                 formContent
             }
@@ -75,11 +68,11 @@ struct CurrencySettingsView: View {
                 }
             }
             .pickerStyle(.navigationLink)
-            .tint(Brand.primary)
+            .tint(Color.spentyPrimary)
         } header: {
             Label("Default Currency", systemImage: "coloncurrencysign.circle")
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(Brand.primary)
+                .foregroundStyle(Color.spentyPrimary)
                 .textCase(nil)
         } footer: {
             Text("This currency will be used as the default for new invoices and transactions.")
@@ -91,7 +84,7 @@ struct CurrencySettingsView: View {
     private var pickerLabel: some View {
         HStack(spacing: 12) {
             Image(systemName: "banknote")
-                .foregroundStyle(Brand.primary)
+                .foregroundStyle(Color.spentyPrimary)
                 .frame(width: 24)
             Text("Currency")
         }
@@ -125,11 +118,11 @@ struct CurrencySettingsView: View {
                 }
             }
             .pickerStyle(.navigationLink)
-            .tint(Brand.primary)
+            .tint(Color.spentyPrimary)
         } header: {
             Label("Date Format", systemImage: "calendar")
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(Brand.primary)
+                .foregroundStyle(Color.spentyPrimary)
                 .textCase(nil)
         } footer: {
             Text("Dates on invoices and reports will use this format.")
@@ -141,7 +134,7 @@ struct CurrencySettingsView: View {
     private var datePickerLabel: some View {
         HStack(spacing: 12) {
             Image(systemName: "calendar.badge.clock")
-                .foregroundStyle(Brand.primary)
+                .foregroundStyle(Color.spentyPrimary)
                 .frame(width: 24)
             Text("Date Format")
         }
@@ -163,11 +156,11 @@ struct CurrencySettingsView: View {
             if viewModel.isSaving {
                 ProgressView()
                     .controlSize(.small)
-                    .tint(Brand.primary)
+                    .tint(Color.spentyPrimary)
             } else {
                 Text("Save")
                     .font(.body.weight(.semibold))
-                    .foregroundStyle(Brand.primary)
+                    .foregroundStyle(Color.spentyPrimary)
             }
         }
         .disabled(viewModel.isSaving)

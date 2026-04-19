@@ -138,6 +138,9 @@ private struct CategoryTreeRow: View {
                             editButton(for: child)
                         }
                 }
+
+                // Visible "Add Subcategory" button
+                addSubcategoryRow
             } label: {
                 parentRow(category)
                     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
@@ -173,6 +176,15 @@ private struct CategoryTreeRow: View {
                     .padding(.vertical, 2)
                     .background(Color.spentyPrimary.opacity(0.7), in: Capsule())
             }
+
+            Button {
+                onAddChild()
+            } label: {
+                Image(systemName: "plus.circle")
+                    .font(.system(size: 18))
+                    .foregroundStyle(Color.spentyPrimary.opacity(0.6))
+            }
+            .buttonStyle(.plain)
         }
         .contentShape(Rectangle())
     }
@@ -187,6 +199,25 @@ private struct CategoryTreeRow: View {
                 .font(SpentyFonts.subheadline)
         }
         .padding(.leading, 4)
+    }
+
+    // MARK: - Add Subcategory Row
+
+    private var addSubcategoryRow: some View {
+        Button {
+            onAddChild()
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "plus.circle.fill")
+                    .foregroundStyle(Color.spentyPrimary.opacity(0.7))
+                    .frame(width: 24)
+
+                Text("Add Subcategory")
+                    .font(SpentyFonts.subheadline)
+                    .foregroundStyle(Color.spentyPrimary)
+            }
+            .padding(.leading, 4)
+        }
     }
 
     // MARK: - Swipe Buttons

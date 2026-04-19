@@ -37,7 +37,8 @@ struct Statement: Codable, Identifiable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.id = try container.decode(String.self, forKey: .id)
+        // Defensive: fallback to UUID if statement_id is missing or null
+        self.id = (try? container.decode(String.self, forKey: .id)) ?? UUID().uuidString
         self.filename = try? container.decodeIfPresent(String.self, forKey: .filename)
         self.accountId = try? container.decodeIfPresent(String.self, forKey: .accountId)
         self.accountName = try? container.decodeIfPresent(String.self, forKey: .accountName)
@@ -56,7 +57,11 @@ struct Statement: Codable, Identifiable {
 }
 
 struct ParsedEntry: Codable, Identifiable {
-    var id: String { "\(date?.description ?? "")-\(amount ?? 0)-\(description ?? "")" }
+    /// Stable unique ID — uses matchedTransactionId when available, otherwise a composite key
+    var id: String {
+        if let txnId = matchedTransactionId, !txnId.isEmpty { return txnId }
+        return "\(date?.timeIntervalSince1970 ?? 0)-\(amount ?? 0)-\(description ?? "")-\(balance ?? 0)"
+    }
     var date: Date?
     var description: String?
     var amount: Double?
@@ -81,7 +86,25 @@ struct ParsedEntry: Codable, Identifiable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.date = try? container.decodeIfPresent(Date.self, forKey: .date)
+        // Try decoding date as Date first; if that fails, try as raw String and parse manually
+        if let dateValue = try? container.decodeIfPresent(Date.self, forKey: .date) {
+            self.date = dateValue
+        } else if let dateStr = try? container.decodeIfPresent(String.self, forKey: .date),
+                  !dateStr.isEmpty {
+            // Fallback: try common date formats the custom decoder might miss
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            for fmt in ["dd/MM/yyyy", "dd-MM-yyyy", "MM/dd/yyyy", "dd MMM yyyy", "yyyy/MM/dd"] {
+                formatter.dateFormat = fmt
+                if let parsed = formatter.date(from: dateStr) {
+                    self.date = parsed
+                    break
+                }
+            }
+            if self.date == nil { self.date = nil }
+        } else {
+            self.date = nil
+        }
         self.description = try? container.decodeIfPresent(String.self, forKey: .description)
         self.amount = try? container.decodeIfPresent(Double.self, forKey: .amount)
         self.type = try? container.decodeIfPresent(String.self, forKey: .type)

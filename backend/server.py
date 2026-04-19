@@ -1541,6 +1541,21 @@ async def merge_categories(request: Request, user: dict = Depends(get_current_us
     }
 
 
+def snake_to_camel(s: str) -> str:
+    """Convert snake_case string to camelCase."""
+    parts = s.split("_")
+    return parts[0] + "".join(p.capitalize() for p in parts[1:])
+
+
+def camelise(obj):
+    """Recursively convert all dict keys from snake_case to camelCase."""
+    if isinstance(obj, list):
+        return [camelise(item) for item in obj]
+    if isinstance(obj, dict):
+        return {snake_to_camel(k): camelise(v) for k, v in obj.items()}
+    return obj
+
+
 async def enrich_transactions_with_names(user_id: str, transactions: list) -> list:
     """Resolve category_id, subcategory_id, account_id, to_account_id into human-readable names."""
     if not transactions:
@@ -2754,16 +2769,34 @@ async def cashflow_projection(user: dict = Depends(get_current_user)):
             "running_balance": round(running_balance, 2),
         })
 
+    # Extract EMI items from accounts with loan_emi_amount
+    emi_items = []
+    monthly_emi_total = 0.0
+    for acc in accounts:
+        emi_amt = acc.get("loan_emi_amount")
+        if emi_amt and emi_amt > 0:
+            emi_items.append({
+                "account_id": acc.get("account_id"),
+                "account_name": acc.get("name", "Loan Account"),
+                "emi_amount": round(emi_amt, 2),
+                "emi_day": acc.get("loan_emi_day", 1),
+                "loan_interest_rate": acc.get("loan_interest_rate"),
+                "loan_tenure_months": acc.get("loan_tenure_months"),
+            })
+            monthly_emi_total += emi_amt
+
     return {
         "current_balance": round(current_balance, 2),
         "monthly_recurring_income": round(monthly_recurring_income, 2),
         "monthly_recurring_expense": round(monthly_recurring_expense, 2),
         "monthly_mandate_expense": round(monthly_mandate_expense, 2),
         "monthly_od_interest": round(monthly_od_interest, 2),
+        "monthly_emi_total": round(monthly_emi_total, 2),
         "monthly_net": round(monthly_recurring_income - monthly_recurring_expense - monthly_mandate_expense - monthly_od_interest, 2),
         "recurring_items": recurring_items,
         "mandate_items": mandate_items,
         "od_interest_items": od_interest_items,
+        "emi_items": emi_items,
         "projection": months,
     }
 
@@ -3459,11 +3492,11 @@ async def upload_statement(
 
     asyncio.create_task(parse_statement_background(statement_id, user["user_id"]))
 
-    return {
+    return camelise({
         "statement_id": statement_id,
         "message": "Statement uploaded, parsing in progress",
         "filename": file.filename,
-    }
+    })
 
 
 @app.get("/api/statements/list")
@@ -3471,7 +3504,7 @@ async def list_statements(user: dict = Depends(get_current_user)):
     stmts = await db.statements.find(
         {"user_id": user["user_id"]}, {"_id": 0, "file_path": 0}
     ).sort("uploaded_at", -1).to_list(50)
-    return {"statements": stmts}
+    return camelise({"statements": stmts})
 
 
 @app.get("/api/statements/{statement_id}")
@@ -3482,7 +3515,7 @@ async def get_statement(statement_id: str, user: dict = Depends(get_current_user
     )
     if not stmt:
         raise HTTPException(status_code=404, detail="Statement not found")
-    return stmt
+    return camelise(stmt)
 
 
 @app.post("/api/statements/{statement_id}/reconcile")
@@ -3533,7 +3566,7 @@ async def reconcile_statement(statement_id: str, user: dict = Depends(get_curren
         }}
     )
 
-    return results
+    return camelise(results)
 
 
 @app.post("/api/statements/{statement_id}/add-missing")
@@ -3641,7 +3674,7 @@ async def reaudit_statement(statement_id: str, user: dict = Depends(get_current_
     )
 
     asyncio.create_task(parse_statement_background(statement_id, user["user_id"]))
-    return {"statement_id": statement_id, "status": "parsing", "message": "Re-audit started"}
+    return camelise({"statement_id": statement_id, "status": "parsing", "message": "Re-audit started"})
 
 
 
@@ -3688,7 +3721,7 @@ async def approve_statement(statement_id: str, user: dict = Depends(get_current_
         {"$set": {"status": "approved", "approved_at": datetime.now(timezone.utc)}},
     )
 
-    return {"message": f"Statement approved, {created} transactions created", "transactions_created": created}
+    return camelise({"message": f"Statement approved, {created} transactions created", "transactions_created": created})
 
 
 @app.post("/api/statements/{statement_id}/reject")
@@ -3718,7 +3751,7 @@ async def get_statement_entries(statement_id: str, user: dict = Depends(get_curr
         raise HTTPException(status_code=404, detail="Statement not found")
 
     entries = stmt.get("parsed_entries", [])
-    return {"entries": entries, "total": len(entries), "statement_id": statement_id}
+    return camelise({"entries": entries, "total": len(entries), "statement_id": statement_id})
 
 
 @app.post("/api/statements/{statement_id}/bulk-categorize")
@@ -3839,7 +3872,7 @@ async def update_statement_entry(
         {"$set": {"parsed_entries": entries, "updated_at": datetime.now(timezone.utc)}},
     )
 
-    return {"entry_index": entry_index, "entry": entry}
+    return camelise({"entry_index": entry_index, "entry": entry})
 
 
 @app.post("/api/statements/{statement_id}/unlock")
@@ -3903,11 +3936,11 @@ async def unlock_statement(
         parse_statement_background(statement_id, user["user_id"], password=password)
     )
 
-    return {
+    return camelise({
         "statement_id": statement_id,
         "status": "parsing",
         "message": "Password accepted, parsing in progress",
-    }
+    })
 
 
 # ─── Statement Parsing Helpers ───────────────────────────────────────
@@ -5273,7 +5306,7 @@ def get_gmail_flow(redirect_uri: str):
 
 
 @app.get("/api/gmail/connect")
-async def gmail_connect(request: Request, user: dict = Depends(get_current_user)):
+async def gmail_connect(request: Request, platform: Optional[str] = None, user: dict = Depends(get_current_user)):
     redirect_uri = get_gmail_redirect_uri(request)
     flow = get_gmail_flow(redirect_uri)
     auth_url, state = flow.authorization_url(
@@ -5288,6 +5321,7 @@ async def gmail_connect(request: Request, user: dict = Depends(get_current_user)
         "user_id": user["user_id"],
         "redirect_uri": redirect_uri,
         "code_verifier": code_verifier,
+        "platform": platform,  # "ios" for mobile app
         "created_at": datetime.now(timezone.utc),
         "expires_at": datetime.now(timezone.utc) + timedelta(minutes=10),
     })
@@ -5298,22 +5332,34 @@ async def gmail_connect(request: Request, user: dict = Depends(get_current_user)
 async def gmail_callback(request: Request, code: str = None, state: str = None, error: str = None):
     frontend = _get_frontend_url(request)
 
+    # Helper: redirect to iOS app or web frontend based on platform stored in state
+    def _redirect(path_or_params: str, is_error: bool = False, state_doc: dict = None):
+        is_ios = state_doc.get("platform") == "ios" if state_doc else False
+        if is_ios:
+            scheme = "spentyai://gmail-callback"
+            if is_error:
+                return RedirectResponse(f"{scheme}?error={path_or_params}")
+            return RedirectResponse(f"{scheme}?status=connected")
+        if is_error:
+            return RedirectResponse(f"{frontend}/?gmail_error={path_or_params}")
+        return RedirectResponse(f"{frontend}{path_or_params}")
+
     if error:
         logger.error(f"Gmail OAuth error: {error}")
-        return RedirectResponse(f"{frontend}/?gmail_error={error}")
+        return _redirect(error, is_error=True)
 
     if not code or not state:
-        return RedirectResponse(f"{frontend}/?gmail_error=missing_params")
+        return _redirect("missing_params", is_error=True)
 
     state_doc = await db.gmail_oauth_states.find_one({"state": state}, {"_id": 0})
     if not state_doc:
-        return RedirectResponse(f"{frontend}/?gmail_error=invalid_state")
+        return _redirect("invalid_state", is_error=True)
 
     expires_at = state_doc["expires_at"]
     if isinstance(expires_at, datetime) and expires_at.tzinfo is None:
         expires_at = expires_at.replace(tzinfo=timezone.utc)
     if datetime.now(timezone.utc) > expires_at:
-        return RedirectResponse(f"{frontend}/?gmail_error=state_expired")
+        return _redirect("state_expired", is_error=True, state_doc=state_doc)
 
     await db.gmail_oauth_states.delete_one({"state": state})
     user_id = state_doc["user_id"]
@@ -5351,11 +5397,11 @@ async def gmail_callback(request: Request, code: str = None, state: str = None, 
             upsert=True,
         )
 
-        return RedirectResponse(f"{frontend}/email-sync?gmail=connected")
+        return _redirect("/email-sync?gmail=connected", state_doc=state_doc)
 
     except Exception as e:
         logger.error(f"Gmail OAuth token exchange failed: {e}")
-        return RedirectResponse(f"{frontend}/?gmail_error=token_exchange_failed")
+        return _redirect("token_exchange_failed", is_error=True, state_doc=state_doc)
 
 
 @app.get("/api/gmail/status")
@@ -5413,7 +5459,7 @@ def get_outlook_redirect_uri(request: Request):
 
 
 @app.get("/api/outlook/connect")
-async def outlook_connect(request: Request, user: dict = Depends(get_current_user)):
+async def outlook_connect(request: Request, platform: Optional[str] = None, user: dict = Depends(get_current_user)):
     redirect_uri = get_outlook_redirect_uri(request)
     state = secrets.token_urlsafe(32)
 
@@ -5421,6 +5467,7 @@ async def outlook_connect(request: Request, user: dict = Depends(get_current_use
         "state": state,
         "user_id": user["user_id"],
         "redirect_uri": redirect_uri,
+        "platform": platform,  # "ios" for mobile app
         "created_at": datetime.now(timezone.utc),
         "expires_at": datetime.now(timezone.utc) + timedelta(minutes=10),
     })
@@ -5475,22 +5522,34 @@ async def _fetch_outlook_profile(access_token: str) -> dict:
 async def outlook_callback(request: Request, code: str = None, state: str = None, error: str = None):
     frontend = _get_frontend_url(request)
 
+    # Helper: redirect to iOS app or web frontend based on platform stored in state
+    def _redirect(path_or_params: str, is_error: bool = False, state_doc: dict = None):
+        is_ios = state_doc.get("platform") == "ios" if state_doc else False
+        if is_ios:
+            scheme = "spentyai://outlook-callback"
+            if is_error:
+                return RedirectResponse(f"{scheme}?error={path_or_params}")
+            return RedirectResponse(f"{scheme}?status=connected")
+        if is_error:
+            return RedirectResponse(f"{frontend}/?outlook_error={path_or_params}")
+        return RedirectResponse(f"{frontend}{path_or_params}")
+
     if error:
         logger.error(f"Outlook OAuth error: {error}")
-        return RedirectResponse(f"{frontend}/?outlook_error={error}")
+        return _redirect(error, is_error=True)
 
     if not code or not state:
-        return RedirectResponse(f"{frontend}/?outlook_error=missing_params")
+        return _redirect("missing_params", is_error=True)
 
     state_doc = await db.outlook_oauth_states.find_one({"state": state}, {"_id": 0})
     if not state_doc:
-        return RedirectResponse(f"{frontend}/?outlook_error=invalid_state")
+        return _redirect("invalid_state", is_error=True)
 
     expires_at = state_doc["expires_at"]
     if isinstance(expires_at, datetime) and expires_at.tzinfo is None:
         expires_at = expires_at.replace(tzinfo=timezone.utc)
     if datetime.now(timezone.utc) > expires_at:
-        return RedirectResponse(f"{frontend}/?outlook_error=state_expired")
+        return _redirect("state_expired", is_error=True, state_doc=state_doc)
 
     await db.outlook_oauth_states.delete_one({"state": state})
     user_id = state_doc["user_id"]
@@ -5498,11 +5557,11 @@ async def outlook_callback(request: Request, code: str = None, state: str = None
     try:
         tokens = await _exchange_outlook_token(code, state_doc["redirect_uri"])
         if not tokens:
-            return RedirectResponse(f"{frontend}/?outlook_error=token_exchange_failed")
+            return _redirect("token_exchange_failed", is_error=True, state_doc=state_doc)
 
         profile = await _fetch_outlook_profile(tokens["access_token"])
         if not profile:
-            return RedirectResponse(f"{frontend}/?outlook_error=profile_fetch_failed")
+            return _redirect("profile_fetch_failed", is_error=True, state_doc=state_doc)
 
         outlook_email = profile.get("mail") or profile.get("userPrincipalName", "")
         await db.outlook_tokens.update_one(
@@ -5516,11 +5575,11 @@ async def outlook_callback(request: Request, code: str = None, state: str = None
             }},
             upsert=True,
         )
-        return RedirectResponse(f"{frontend}/email-sync?outlook=connected")
+        return _redirect("/email-sync?outlook=connected", state_doc=state_doc)
 
     except Exception as e:
         logger.error(f"Outlook OAuth callback failed: {e}")
-        return RedirectResponse(f"{frontend}/?outlook_error=token_exchange_failed")
+        return _redirect("token_exchange_failed", is_error=True, state_doc=state_doc)
 
 
 @app.get("/api/outlook/status")
@@ -7695,10 +7754,12 @@ async def get_records(
 
     total = await db.email_archives.count_documents(query)
 
-    # Convert datetime fields for JSON
+    # Convert datetime fields and normalise field names for iOS
     for r in records:
         if isinstance(r.get("archived_at"), datetime):
             r["archived_at"] = r["archived_at"].isoformat()
+        if "source_provider" in r:
+            r["source"] = r.pop("source_provider")
 
     return {"records": records, "total": total}
 
@@ -7730,6 +7791,8 @@ async def search_records(
     for r in records:
         if isinstance(r.get("archived_at"), datetime):
             r["archived_at"] = r["archived_at"].isoformat()
+        if "source_provider" in r:
+            r["source"] = r.pop("source_provider")
 
     return {"items": records, "total": total}
 
@@ -7787,9 +7850,32 @@ async def preview_record(archive_id: str, user: dict = Depends(get_current_user)
     )
     if not record:
         raise HTTPException(status_code=404, detail="Record not found")
-    if isinstance(record.get("archived_at"), datetime):
-        record["archived_at"] = record["archived_at"].isoformat()
-    return record
+
+    # Build clean response with field names matching iOS model
+    archived_at = record.get("archived_at")
+    if isinstance(archived_at, datetime):
+        archived_at = archived_at.isoformat()
+
+    attachments = []
+    for i, att in enumerate(record.get("attachments") or []):
+        attachments.append({
+            "index": i,
+            "filename": att.get("filename"),
+            "mime_type": att.get("mime_type"),
+            "size": att.get("size"),
+        })
+
+    return {
+        "archive_id": record.get("archive_id"),
+        "subject": record.get("subject"),
+        "from_email": record.get("from_email"),
+        "archived_at": archived_at,
+        "source": record.get("source_provider"),
+        "body": record.get("body_text"),
+        "body_html": record.get("body_html"),
+        "attachments": attachments,
+        "transaction_id": record.get("transaction_id"),
+    }
 
 
 
@@ -7804,6 +7890,8 @@ async def get_record(archive_id: str, user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=404, detail="Record not found")
     if isinstance(record.get("archived_at"), datetime):
         record["archived_at"] = record["archived_at"].isoformat()
+    if "source_provider" in record:
+        record["source"] = record.pop("source_provider")
     return record
 
 
@@ -11024,7 +11112,7 @@ async def get_customer_invoices(
         {"customer_id": customer_id, "user_id": user["user_id"]}
     )
 
-    return {"items": invoices, "total": total, "customer_name": customer.get("name")}
+    return {"items": camelise(invoices), "total": total, "customer_name": customer.get("name")}
 
 
 # =====================================================================
@@ -11340,7 +11428,7 @@ async def create_invoice(request: Request, user: dict = Depends(get_current_user
 
     await db.invoices.insert_one(invoice)
     del invoice["_id"]
-    return invoice
+    return camelise(invoice)
 
 
 @app.get("/api/invoices")
@@ -11365,7 +11453,7 @@ async def list_invoices(
 
     invoices = await db.invoices.find(query, {"_id": 0}).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
     total = await db.invoices.count_documents(query)
-    return {"items": invoices, "total": total}
+    return {"items": camelise(invoices), "total": total}
 
 @app.get("/api/invoices/next-number")
 async def get_next_invoice_number(user: dict = Depends(get_current_user)):
@@ -11406,7 +11494,7 @@ async def invoice_stats(user: dict = Depends(get_current_user)):
         i.get("grand_total", 0) - i.get("amount_paid", 0) for i in overdue_invoices
     )
 
-    return {
+    return camelise({
         "total": total,
         "paid": paid,
         "unpaid": unpaid,
@@ -11415,7 +11503,7 @@ async def invoice_stats(user: dict = Depends(get_current_user)):
         "total_paid": round(total_paid, 2),
         "total_outstanding": round(total_outstanding, 2),
         "total_overdue": round(total_overdue, 2),
-    }
+    })
 
 
 
@@ -11428,7 +11516,7 @@ async def get_invoice(invoice_id: str, user: dict = Depends(get_current_user)):
     )
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
-    return invoice
+    return camelise(invoice)
 
 
 @app.put("/api/invoices/{invoice_id}")
@@ -11477,7 +11565,7 @@ async def update_invoice(invoice_id: str, request: Request, user: dict = Depends
     updated = await db.invoices.find_one(
         {"invoice_id": invoice_id, "user_id": user["user_id"]}, {"_id": 0}
     )
-    return updated
+    return camelise(updated)
 
 
 @app.delete("/api/invoices/{invoice_id}")
@@ -11581,7 +11669,7 @@ async def record_payment(invoice_id: str, request: Request, user: dict = Depends
     updated = await db.invoices.find_one(
         {"invoice_id": invoice_id, "user_id": user["user_id"]}, {"_id": 0}
     )
-    return updated
+    return camelise(updated)
 
 
 @app.get("/api/invoices/{invoice_id}/pdf")
@@ -11597,7 +11685,7 @@ async def get_invoice_pdf(invoice_id: str, user: dict = Depends(get_current_user
 
     # Return invoice data with settings for client-side PDF generation
     return {
-        "invoice": invoice,
+        "invoice": camelise(invoice),
         "settings": {
             "firm_name": settings.get("firm_name", ""),
             "firm_address": settings.get("firm_address", ""),
@@ -11656,7 +11744,7 @@ async def mark_invoice_paid(invoice_id: str, request: Request, user: dict = Depe
     updated = await db.invoices.find_one(
         {"invoice_id": invoice_id, "user_id": user["user_id"]}, {"_id": 0}
     )
-    return updated
+    return camelise(updated)
 
 
 @app.post("/api/invoices/{invoice_id}/duplicate")
@@ -11683,7 +11771,7 @@ async def duplicate_invoice(invoice_id: str, user: dict = Depends(get_current_us
 
     await db.invoices.insert_one(new_invoice)
     del new_invoice["_id"]
-    return new_invoice
+    return camelise(new_invoice)
 
 
 # =============================================================================
