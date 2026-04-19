@@ -40,12 +40,24 @@ struct InvoiceFormView: View {
         lineItems.reduce(0) { $0 + $1.taxAmount }
     }
 
+    /// When editing an inter-state invoice the backend will have set IGST.
+    private var isInterState: Bool {
+        if let inv = viewModel.editingInvoice {
+            return (inv.totalIgst ?? 0) > 0
+        }
+        return false
+    }
+
     private var cgst: Double {
-        totalTax / 2.0
+        isInterState ? 0 : totalTax / 2.0
     }
 
     private var sgst: Double {
-        totalTax / 2.0
+        isInterState ? 0 : totalTax / 2.0
+    }
+
+    private var igst: Double {
+        isInterState ? totalTax : 0
     }
 
     private var grandTotal: Double {
@@ -310,20 +322,30 @@ struct InvoiceFormView: View {
                     .font(.body)
             }
 
-            HStack {
-                Text("CGST")
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Text(formatCurrency(cgst))
-                    .font(.body)
-            }
+            if isInterState {
+                HStack {
+                    Text("IGST")
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text(formatCurrency(igst))
+                        .font(.body)
+                }
+            } else {
+                HStack {
+                    Text("CGST")
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text(formatCurrency(cgst))
+                        .font(.body)
+                }
 
-            HStack {
-                Text("SGST")
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Text(formatCurrency(sgst))
-                    .font(.body)
+                HStack {
+                    Text("SGST")
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text(formatCurrency(sgst))
+                        .font(.body)
+                }
             }
 
             HStack {
@@ -383,14 +405,14 @@ struct InvoiceFormView: View {
             invoiceNumber: invoiceNumber.trimmingCharacters(in: .whitespaces),
             customerId: selectedCustomerId,
             customerName: customerName.trimmingCharacters(in: .whitespaces),
-            date: invoiceDate,
+            invoiceDate: invoiceDate,
             dueDate: dueDate,
             lineItems: itemPayloads,
             subtotal: subtotal,
             taxAmount: totalTax,
             grandTotal: grandTotal,
             notes: notes.isEmpty ? nil : notes.trimmingCharacters(in: .whitespaces),
-            terms: terms.isEmpty ? nil : terms.trimmingCharacters(in: .whitespaces)
+            termsConditions: terms.isEmpty ? nil : terms.trimmingCharacters(in: .whitespaces)
         )
 
         var success = false

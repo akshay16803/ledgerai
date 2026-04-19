@@ -11,15 +11,33 @@ struct CurrencyOption: Codable, Identifiable, Hashable {
 }
 
 struct DateFormatOption: Codable, Identifiable, Hashable {
-    let format: String
+    let value: String?
+    let label: String?
     let example: String?
 
+    /// Use `value` if present, fall back to `label`
+    var format: String { value ?? label ?? "" }
     var id: String { format }
+}
+
+struct CurrenciesResponse: Codable {
+    let currencies: [CurrencyOption]
+}
+
+struct DateFormatsResponse: Codable {
+    let formats: [DateFormatOption]
 }
 
 struct UploadResponse: Codable {
     let url: String?
+    let logoUrl: String?
+    let signatureUrl: String?
     let message: String?
+
+    /// Returns the first non-nil URL from the response
+    var resolvedUrl: String? {
+        url ?? logoUrl ?? signatureUrl
+    }
 }
 
 // MARK: - Repository
@@ -42,11 +60,13 @@ final class SettingsRepository {
     // MARK: - Currencies & Date Formats
 
     func getCurrencies() async throws -> [CurrencyOption] {
-        try await APIClient.shared.get(APIEndpoints.settingsCurrencies)
+        let response: CurrenciesResponse = try await APIClient.shared.get(APIEndpoints.settingsCurrencies)
+        return response.currencies
     }
 
     func getDateFormats() async throws -> [DateFormatOption] {
-        try await APIClient.shared.get(APIEndpoints.settingsDateFormats)
+        let response: DateFormatsResponse = try await APIClient.shared.get(APIEndpoints.settingsDateFormats)
+        return response.formats
     }
 
     // MARK: - Logo

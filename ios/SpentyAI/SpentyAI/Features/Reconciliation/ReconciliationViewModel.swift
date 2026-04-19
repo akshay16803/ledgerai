@@ -96,7 +96,7 @@ final class ReconciliationViewModel {
         errorMessage = nil
         let mimeType = filename.lowercased().hasSuffix(".pdf") ? "application/pdf" : "text/csv"
         do {
-            let statement = try await repository.uploadStatement(
+            let response = try await repository.uploadStatement(
                 fileData: fileData,
                 filename: filename,
                 mimeType: mimeType,
@@ -104,7 +104,11 @@ final class ReconciliationViewModel {
                 periodFrom: Self.dateFormatter.string(from: periodFrom),
                 periodTo: Self.dateFormatter.string(from: periodTo)
             )
-            statements.insert(statement, at: 0)
+            // Backend returns a lightweight response; refetch the full statement
+            if let stmtId = response.statementId {
+                let fullStatement = try await repository.fetchStatement(id: stmtId)
+                statements.insert(fullStatement, at: 0)
+            }
             showUploadSheet = false
             successMessage = "Statement uploaded successfully."
             resetUploadForm()
@@ -147,7 +151,9 @@ final class ReconciliationViewModel {
         isReconciling = true
         errorMessage = nil
         do {
-            let updated = try await repository.reconcile(statementId: statementId)
+            _ = try await repository.reconcile(statementId: statementId)
+            // Backend returns raw reconcile results; refetch the full statement
+            let updated = try await repository.fetchStatement(id: statementId)
             activeStatement = updated
             reconciliationResult = updated.reconciliation
             updateStatementInList(updated)
@@ -161,14 +167,21 @@ final class ReconciliationViewModel {
     // MARK: - Add Missing to Ledger
 
     @MainActor
-    func addMissingToLedger(statementId: String) async {
+    func addMissingToLedger(statementId: String, entryIndices: [Int]? = nil) async {
         isProcessing = true
         errorMessage = nil
         do {
-            let updated = try await repository.addMissingToLedger(statementId: statementId)
+            // If no indices specified, send all missing entry indices
+            let indices = entryIndices ?? {
+                guard let missing = reconciliationResult?.missing, missing > 0 else { return [Int]() }
+                return Array(0..<missing)
+            }()
+            let response = try await repository.addMissingToLedger(statementId: statementId, entryIndices: indices)
+            // Refetch the full statement to update UI
+            let updated = try await repository.fetchStatement(id: statementId)
             activeStatement = updated
             updateStatementInList(updated)
-            successMessage = "Missing entries added to ledger."
+            successMessage = response.message ?? "Missing entries added to ledger."
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -182,11 +195,13 @@ final class ReconciliationViewModel {
         isProcessing = true
         errorMessage = nil
         do {
-            let updated = try await repository.reaudit(statementId: statementId)
+            _ = try await repository.reaudit(statementId: statementId)
+            // Backend returns lightweight response; refetch full statement
+            let updated = try await repository.fetchStatement(id: statementId)
             activeStatement = updated
             reconciliationResult = updated.reconciliation
             updateStatementInList(updated)
-            successMessage = "Re-audit complete."
+            successMessage = "Re-audit started."
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -204,13 +219,15 @@ final class ReconciliationViewModel {
         isProcessing = true
         errorMessage = nil
         do {
-            let updated = try await repository.unlock(statementId: statementId, password: unlockPassword)
+            _ = try await repository.unlock(statementId: statementId, password: unlockPassword)
+            // Backend returns lightweight response; refetch full statement
+            let updated = try await repository.fetchStatement(id: statementId)
             activeStatement = updated
             parsedEntries = updated.parsedEntries ?? []
             updateStatementInList(updated)
             showUnlockSheet = false
             unlockPassword = ""
-            successMessage = "Statement unlocked and parsed."
+            successMessage = "Statement unlocked and parsing."
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -223,14 +240,19 @@ final class ReconciliationViewModel {
     func updateEntryCategory(statementId: String, index: Int, categoryId: String?, categoryName: String?) async {
         errorMessage = nil
         do {
-            let updated = try await repository.updateEntry(
+            let response = try await repository.updateEntry(
                 statementId: statementId,
                 index: index,
                 categoryId: categoryId,
                 categoryName: categoryName
             )
+            // Update the entry in-place if we got one back
+            if let updatedEntry = response.entry, let entryIndex = response.entryIndex, entryIndex < parsedEntries.count {
+                parsedEntries[entryIndex] = updatedEntry
+            }
+            // Also refetch the full statement to stay in sync
+            let updated = try await repository.fetchStatement(id: statementId)
             activeStatement = updated
-            parsedEntries = updated.parsedEntries ?? parsedEntries
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -243,7 +265,13 @@ final class ReconciliationViewModel {
         isProcessing = true
         errorMessage = nil
         do {
-            let updated = try await repository.bulkCategorize(statementId: statementId, categoryId: categoryId)
+            // Build updates array for all current entries
+            let updates = parsedEntries.enumerated().map { index, _ in
+                BulkCategorizeEntry(entryIndex: index, categoryId: categoryId, subcategoryId: nil)
+            }
+            _ = try await repository.bulkCategorize(statementId: statementId, updates: updates)
+            // Refetch the full statement to get updated entries
+            let updated = try await repository.fetchStatement(id: statementId)
             activeStatement = updated
             parsedEntries = updated.parsedEntries ?? parsedEntries
             successMessage = "All entries categorized."
@@ -260,7 +288,9 @@ final class ReconciliationViewModel {
         isProcessing = true
         errorMessage = nil
         do {
-            let updated = try await repository.approveStatement(id: id)
+            _ = try await repository.approveStatement(id: id)
+            // Backend returns message response; refetch the full statement
+            let updated = try await repository.fetchStatement(id: id)
             activeStatement = updated
             updateStatementInList(updated)
             successMessage = "Statement approved."
@@ -275,7 +305,9 @@ final class ReconciliationViewModel {
         isProcessing = true
         errorMessage = nil
         do {
-            let updated = try await repository.rejectStatement(id: id)
+            _ = try await repository.rejectStatement(id: id)
+            // Backend returns message response; refetch the full statement
+            let updated = try await repository.fetchStatement(id: id)
             activeStatement = updated
             updateStatementInList(updated)
             successMessage = "Statement rejected."

@@ -6,7 +6,7 @@ struct Vendor: Codable, Identifiable {
     var email: String?
     var phone: String?
     var gstin: String?
-    var address: String?
+    var billingAddress: String?
     var totalBilled: Double?
     var totalPaid: Double?
     var outstanding: Double?
@@ -17,7 +17,7 @@ struct Vendor: Codable, Identifiable {
         case email
         case phone
         case gstin
-        case address
+        case billingAddress
         case totalBilled
         case totalPaid
         case outstanding

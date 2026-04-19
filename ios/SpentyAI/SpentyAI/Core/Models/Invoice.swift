@@ -10,6 +10,9 @@ struct Invoice: Codable, Identifiable, Equatable {
     var lineItems: [InvoiceLineItem]?
     var subtotal: Double?
     var taxAmount: Double?
+    var totalCgst: Double?
+    var totalSgst: Double?
+    var totalIgst: Double?
     var grandTotal: Double?
     var paymentStatus: String?
     var amountPaid: Double?
@@ -22,17 +25,20 @@ struct Invoice: Codable, Identifiable, Equatable {
         case invoiceNumber
         case customerId
         case customerName
-        case date
+        case date = "invoiceDate"
         case dueDate
         case lineItems
         case subtotal
         case taxAmount
+        case totalCgst
+        case totalSgst
+        case totalIgst
         case grandTotal
         case paymentStatus
         case amountPaid
         case payments
         case notes
-        case terms
+        case terms = "termsConditions"
     }
 
     static func == (lhs: Invoice, rhs: Invoice) -> Bool {
@@ -47,6 +53,9 @@ struct InvoiceLineItem: Codable, Identifiable, Equatable {
     var quantity: Double?
     var rate: Double?
     var taxPercent: Double?
+    var cgst: Double?
+    var sgst: Double?
+    var igst: Double?
     var amount: Double?
 
     enum CodingKeys: String, CodingKey {
@@ -55,6 +64,9 @@ struct InvoiceLineItem: Codable, Identifiable, Equatable {
         case quantity
         case rate
         case taxPercent
+        case cgst
+        case sgst
+        case igst
         case amount
     }
 

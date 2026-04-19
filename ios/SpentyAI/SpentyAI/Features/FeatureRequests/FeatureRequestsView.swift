@@ -172,6 +172,7 @@ struct FeatureRequestsView: View {
 extension FeatureRequestStatus {
     var displayName: String {
         switch self {
+        case .submitted:  return "Submitted"
         case .pending:    return "Pending"
         case .inProgress: return "In Progress"
         case .completed:  return "Completed"
@@ -180,6 +181,7 @@ extension FeatureRequestStatus {
 
     var color: Color {
         switch self {
+        case .submitted:  return .orange
         case .pending:    return .yellow.opacity(0.9)
         case .inProgress: return .blue
         case .completed:  return .green

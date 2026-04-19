@@ -7,11 +7,14 @@ struct TaxSummary: Codable, Identifiable {
     var dateTo: Date?
     var status: String?
     var totalIncome: Double?
-    var totalExpense: Double?
+    var totalExpenses: Double?
     var net: Double?
     var transactionCount: Int?
     var emailAddress: String?
     var provider: String?
+
+    /// UI convenience – keep backward compatibility with views that use `totalExpense`
+    var totalExpense: Double? { totalExpenses }
 
     enum CodingKeys: String, CodingKey {
         case id = "summaryId"
@@ -20,7 +23,7 @@ struct TaxSummary: Codable, Identifiable {
         case dateTo
         case status
         case totalIncome
-        case totalExpense
+        case totalExpenses
         case net
         case transactionCount
         case emailAddress
@@ -34,8 +37,13 @@ struct TaxSummaryTransaction: Codable, Identifiable {
     var description: String?
     var amount: Double?
     var transactionType: String?
-    var categoryName: String?
+    var category: String?
     var accountName: String?
+    var fromEmail: String?
+    var source: String?
+
+    /// UI convenience – keep backward compatibility with views that use `categoryName`
+    var categoryName: String? { category }
 
     enum CodingKeys: String, CodingKey {
         case id = "txnId"
@@ -43,7 +51,9 @@ struct TaxSummaryTransaction: Codable, Identifiable {
         case description
         case amount
         case transactionType
-        case categoryName
+        case category
         case accountName
+        case fromEmail
+        case source
     }
 }

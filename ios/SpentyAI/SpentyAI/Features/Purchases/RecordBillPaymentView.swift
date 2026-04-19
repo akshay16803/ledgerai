@@ -203,7 +203,7 @@ struct RecordBillPaymentView: View {
         let payload = RecordBillPaymentPayload(
             amount: amount,
             date: date,
-            method: method,
+            paymentMethod: method,
             accountId: selectedAccountId,
             notes: notes.isEmpty ? nil : notes
         )

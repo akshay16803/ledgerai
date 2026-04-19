@@ -69,7 +69,7 @@ struct RecurringListView: View {
                     .lineLimit(1)
 
                 HStack(spacing: 6) {
-                    if let freq = item.frequency {
+                    if let freq = item.effectiveFrequency {
                         Text(freq.capitalized)
                             .font(SpentyFonts.caption2)
                             .foregroundColor(.spentyInfo)

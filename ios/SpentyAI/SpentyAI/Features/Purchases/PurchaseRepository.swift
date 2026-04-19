@@ -27,7 +27,7 @@ struct BillLineItemPayload: Codable {
 struct RecordBillPaymentPayload: Codable {
     var amount: Double
     var date: Date?
-    var method: String?
+    var paymentMethod: String?
     var accountId: String?
     var notes: String?
 }
@@ -37,11 +37,14 @@ struct BillNextNumberResponse: Codable {
 }
 
 struct BillStatsResponse: Codable {
+    let total: Int?
+    let paid: Int?
+    let unpaid: Int?
+    let partial: Int?
     let totalBilled: Double?
     let totalPaid: Double?
     let totalOutstanding: Double?
     let totalOverdue: Double?
-    let count: Int?
 }
 
 struct BillCountResponse: Codable {
@@ -52,9 +55,9 @@ struct CreditorSummary: Codable, Identifiable {
     var id: String { vendorId ?? UUID().uuidString }
     let vendorId: String?
     let vendorName: String?
-    let totalOwed: Double?
-    let totalPaid: Double?
-    let outstanding: Double?
+    let totalOutstanding: Double?
+    let billCount: Int?
+    let oldestDate: String?
 }
 
 struct AgingBucket: Codable, Identifiable {
@@ -84,9 +87,24 @@ struct BillParseResponse: Codable {
     let notes: String?
 }
 
-struct BillMarkPaidResponse: Codable {
-    let detail: String?
-    let bill: Bill?
+struct BillListResponse: Codable {
+    let items: [Bill]
+    let total: Int?
+}
+
+struct CreditorListResponse: Codable {
+    let items: [CreditorSummary]
+    let total: Int?
+}
+
+struct AgingBucketListResponse: Codable {
+    let items: [AgingBucket]?
+    let buckets: [String: AgingBucketDetail]?
+}
+
+struct AgingBucketDetail: Codable {
+    let amount: Double?
+    let count: Int?
 }
 
 // MARK: - Repository
@@ -101,7 +119,8 @@ final class PurchaseRepository {
     // MARK: - CRUD
 
     func fetchBills() async throws -> [Bill] {
-        try await api.get(APIEndpoints.bills)
+        let response: BillListResponse = try await api.get(APIEndpoints.bills)
+        return response.items
     }
 
     func fetchBill(id: String) async throws -> Bill {
@@ -127,9 +146,8 @@ final class PurchaseRepository {
     }
 
     func markPaid(id: String) async throws -> Bill {
-        let response: BillMarkPaidResponse = try await api.post(APIEndpoints.billMarkPaid(id))
-        if let bill = response.bill { return bill }
-        return try await fetchBill(id: id)
+        let updated: Bill = try await api.post(APIEndpoints.billMarkPaid(id))
+        return updated
     }
 
     func duplicateBill(id: String) async throws -> Bill {
@@ -150,11 +168,18 @@ final class PurchaseRepository {
     }
 
     func fetchCreditors() async throws -> [CreditorSummary] {
-        try await api.get(APIEndpoints.billsCreditors)
+        let response: CreditorListResponse = try await api.get(APIEndpoints.billsCreditors)
+        return response.items
     }
 
     func fetchAging() async throws -> [AgingBucket] {
-        try await api.get(APIEndpoints.billsAging)
+        let response: AgingBucketListResponse = try await api.get(APIEndpoints.billsAging)
+        if let items = response.items { return items }
+        // Convert from buckets dict format
+        guard let buckets = response.buckets else { return [] }
+        return buckets.map { key, value in
+            AgingBucket(bucket: key, amount: value.amount, count: value.count)
+        }
     }
 
     func fetchPurchasesByVendor() async throws -> [VendorPurchaseSummary] {
@@ -181,7 +206,8 @@ final class PurchaseRepository {
     // MARK: - Vendors & Accounts (for pickers)
 
     func fetchVendors() async throws -> [Vendor] {
-        try await api.get(APIEndpoints.vendors)
+        let response: VendorListResponse = try await api.get(APIEndpoints.vendors)
+        return response.items
     }
 
     func fetchAccounts() async throws -> [Account] {

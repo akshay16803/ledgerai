@@ -15,8 +15,9 @@ final class EmailSyncRepository {
         try await APIClient.shared.get(APIEndpoints.gmailStatus)
     }
 
-    func disconnectGmail() async throws -> GenericMessageResponse {
-        try await APIClient.shared.post(APIEndpoints.gmailDisconnect)
+    func disconnectGmail(email: String) async throws -> GenericMessageResponse {
+        let body = DisconnectRequest(gmailEmail: email)
+        return try await APIClient.shared.post(APIEndpoints.gmailDisconnect, body: body)
     }
 
     // MARK: - Outlook
@@ -29,18 +30,21 @@ final class EmailSyncRepository {
         try await APIClient.shared.get(APIEndpoints.outlookStatus)
     }
 
-    func disconnectOutlook() async throws -> GenericMessageResponse {
-        try await APIClient.shared.post(APIEndpoints.outlookDisconnect)
+    func disconnectOutlook(email: String) async throws -> GenericMessageResponse {
+        let body = DisconnectRequest(outlookEmail: email)
+        return try await APIClient.shared.post(APIEndpoints.outlookDisconnect, body: body)
     }
 
     // MARK: - Sync
 
-    func startSync() async throws -> EmailSyncResponse {
-        try await APIClient.shared.post(APIEndpoints.emailStartSync)
+    func startSync(gmailEmail: String, syncFromDate: String) async throws -> EmailSyncResponse {
+        let body = StartSyncRequest(gmailEmail: gmailEmail, syncFromDate: syncFromDate)
+        return try await APIClient.shared.post(APIEndpoints.emailStartSync, body: body)
     }
 
-    func retryPending() async throws -> EmailRetryResponse {
-        try await APIClient.shared.post(APIEndpoints.emailRetryPending)
+    func retryPending(gmailEmail: String? = nil) async throws -> EmailRetryResponse {
+        let body = RetryPendingRequest(gmailEmail: gmailEmail ?? "")
+        return try await APIClient.shared.post(APIEndpoints.emailRetryPending, body: body)
     }
 
     // MARK: - Stats & Review
@@ -50,7 +54,8 @@ final class EmailSyncRepository {
     }
 
     func pendingReview() async throws -> [PendingTransaction] {
-        try await APIClient.shared.get(APIEndpoints.emailPendingReview)
+        let response: PendingReviewResponse = try await APIClient.shared.get(APIEndpoints.emailPendingReview)
+        return response.transactions
     }
 
     func approveTransaction(_ id: String) async throws -> GenericMessageResponse {
@@ -84,8 +89,27 @@ final class EmailSyncRepository {
 
 // MARK: - Request Models
 
+struct DisconnectRequest: Encodable {
+    var gmailEmail: String?
+    var outlookEmail: String?
+}
+
+struct StartSyncRequest: Encodable {
+    let gmailEmail: String
+    let syncFromDate: String
+}
+
+struct RetryPendingRequest: Encodable {
+    let gmailEmail: String
+}
+
 struct BulkTransactionRequest: Encodable {
     let transactionIds: [String]
+}
+
+struct PendingReviewResponse: Decodable {
+    let transactions: [PendingTransaction]
+    let total: Int?
 }
 
 struct PendingTransactionUpdate: Encodable {
@@ -110,27 +134,24 @@ struct EmailProviderStatus: Decodable {
 }
 
 struct EmailSyncResponse: Decodable {
-    let syncing: Bool?
     let message: String?
-    let emailsFound: Int?
+    let gmailEmail: String?
 }
 
 struct EmailRetryResponse: Decodable {
-    let retried: Int?
-    let succeeded: Int?
-    let failed: Int?
     let message: String?
+    let count: Int?
+    let alreadyProcessing: Bool?
 }
 
 struct EmailSyncStatsResponse: Decodable {
-    let totalEmails: Int?
-    let processedEmails: Int?
+    let totalSynced: Int?
+    let processedByAi: Int?
     let transactionsCreated: Int?
     let pendingReview: Int?
     let aiFailed: Int?
     let aiPending: Int?
     let isProcessing: Bool?
-    let lastSyncAt: Date?
 }
 
 struct GenericMessageResponse: Decodable {

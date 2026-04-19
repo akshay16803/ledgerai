@@ -119,6 +119,8 @@ final class PurchasesViewModel {
             group.addTask { await self.loadStats() }
             group.addTask { await self.loadVendors() }
             group.addTask { await self.loadAccounts() }
+            group.addTask { await self.loadCreditors() }
+            group.addTask { await self.loadAging() }
         }
     }
 

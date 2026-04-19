@@ -289,21 +289,23 @@ struct PurchaseListView: View {
                             .font(SpentyFonts.subheadline)
                             .foregroundStyle(Color.spentyTextPrimary)
 
-                        Text("Owed: \(formatCurrency(creditor.outstanding ?? 0))")
+                        Text("\(creditor.billCount ?? 0) bill(s)")
                             .font(SpentyFonts.caption1)
-                            .foregroundStyle(Color.spentyError)
+                            .foregroundStyle(Color.spentyTextSecondary)
                     }
 
                     Spacer()
 
                     VStack(alignment: .trailing, spacing: 3) {
-                        Text(formatCurrency(creditor.totalOwed ?? 0))
+                        Text(formatCurrency(creditor.totalOutstanding ?? 0))
                             .font(SpentyFonts.footnote)
-                            .foregroundStyle(Color.spentyTextSecondary)
+                            .foregroundStyle(Color.spentyError)
 
-                        Text("Paid: \(formatCurrency(creditor.totalPaid ?? 0))")
-                            .font(SpentyFonts.caption1)
-                            .foregroundStyle(Color.spentySuccess)
+                        if let oldest = creditor.oldestDate {
+                            Text("Since: \(oldest)")
+                                .font(SpentyFonts.caption1)
+                                .foregroundStyle(Color.spentyTextSecondary)
+                        }
                     }
                 }
                 .padding(.vertical, 2)

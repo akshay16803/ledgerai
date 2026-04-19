@@ -122,6 +122,7 @@ final class BillingViewModel {
 
     @MainActor
     func purchasePlan(_ productId: String) async {
+        guard !isPurchasing else { return }
         guard let product = storeProducts[productId] else {
             errorMessage = "Product not available. Please try again later."
             showError = true
@@ -185,8 +186,8 @@ final class BillingViewModel {
 
         do {
             let response = try await repository.validatePromo(code: code)
-            promoValid = response.valid
-            promoMessage = response.message
+            promoValid = response.valid ?? false
+            promoMessage = response.displayMessage
         } catch {
             promoValid = false
             promoMessage = "Failed to validate promo code."
@@ -204,9 +205,10 @@ final class BillingViewModel {
 
         do {
             let response = try await repository.activatePromo(code: code)
-            promoMessage = response.message
+            promoMessage = response.displayMessage
 
-            if response.valid {
+            // Activate endpoint may not return `valid`; treat presence of subscriptionPlan as success
+            if response.valid == true || response.subscriptionPlan != nil {
                 promoCode = ""
                 promoValid = nil
                 await loadStatus()

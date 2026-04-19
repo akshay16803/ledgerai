@@ -131,8 +131,8 @@ struct CashFlowChartView: View {
         guard let raw else { return "---" }
         let inFmt = DateFormatter()
         inFmt.locale = Locale(identifier: "en_US_POSIX")
-        // Try common formats: "2026-05", "2026-05-01"
-        for fmt in ["yyyy-MM", "yyyy-MM-dd"] {
+        // Try common formats: "May 2026" (backend label), "2026-05", "2026-05-01"
+        for fmt in ["MMM yyyy", "yyyy-MM", "yyyy-MM-dd"] {
             inFmt.dateFormat = fmt
             if let date = inFmt.date(from: raw) {
                 let outFmt = DateFormatter()

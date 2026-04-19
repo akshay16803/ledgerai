@@ -34,12 +34,16 @@ struct DashboardView: View {
             .task {
                 await viewModel.loadSummary()
             }
-            .sheet(isPresented: $viewModel.showNewTransaction) {
+            .sheet(isPresented: $viewModel.showNewTransaction, onDismiss: {
+                Task { await viewModel.refresh() }
+            }) {
                 NavigationStack {
                     TransactionFormView(viewModel: TransactionsViewModel())
                 }
             }
-            .sheet(isPresented: $viewModel.showAIChat) {
+            .sheet(isPresented: $viewModel.showAIChat, onDismiss: {
+                Task { await viewModel.refresh() }
+            }) {
                 AIChatView()
             }
         }
@@ -155,7 +159,7 @@ struct DashboardView: View {
                 .fill(Color.spentyPrimary.opacity(0.1))
                 .frame(width: 36, height: 36)
                 .overlay(
-                    Image(systemName: iconForAccountType(account.accountType))
+                    Image(systemName: iconForAccountType(account.subType))
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundColor(.spentyPrimary)
                 )

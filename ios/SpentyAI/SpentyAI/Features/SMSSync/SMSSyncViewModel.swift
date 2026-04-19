@@ -40,15 +40,27 @@ final class SMSSyncViewModel {
 
     @MainActor
     func uploadAndParse() async {
-        let messages = smsText
+        let lines = smsText
             .components(separatedBy: .newlines)
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
 
-        guard !messages.isEmpty else {
+        guard !lines.isEmpty else {
             errorMessage = "Please paste at least one SMS message."
             showError = true
             return
+        }
+
+        // Convert plain text lines into SmsMessagePayload objects
+        let formatter = ISO8601DateFormatter()
+        let now = formatter.string(from: Date())
+        let messages = lines.map { line in
+            SmsMessagePayload(
+                sender: "unknown",
+                body: line,
+                timestamp: now,
+                phoneNumber: nil
+            )
         }
 
         isUploading = true

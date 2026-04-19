@@ -37,6 +37,11 @@ struct CustomerPayload: Codable {
     let shippingAddress: String?
 }
 
+struct CustomerListResponse: Codable {
+    let items: [Customer]
+    let total: Int?
+}
+
 // MARK: - Repository
 
 struct CustomerRepository {
@@ -46,7 +51,8 @@ struct CustomerRepository {
     // MARK: - CRUD
 
     func fetchAll() async throws -> [Customer] {
-        try await api.get(APIEndpoints.customers)
+        let response: CustomerListResponse = try await api.get(APIEndpoints.customers)
+        return response.items
     }
 
     func create(_ payload: CustomerPayload) async throws -> Customer {

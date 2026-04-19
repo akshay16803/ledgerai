@@ -4,9 +4,9 @@ struct PaymentHistoryView: View {
 
     let orders: [PaymentOrder]
 
-    private let brandPrimary = Color(hex: "#3A5C4A")
-    private let brandBg      = Color(hex: "#F8F6F3")
-    private let brandError   = Color(hex: "#96453A")
+    private let brandPrimary = Color.spentyPrimary
+    private let brandBg      = Color.spentyBgPrimary
+    private let brandError   = Color.spentyError
 
     var body: some View {
         Group {
@@ -84,7 +84,7 @@ struct PaymentHistoryView: View {
                 }
             }
             .padding(.vertical, 4)
-            .listRowBackground(Color.white)
+            .listRowBackground(Color.spentyCardBg)
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
@@ -94,7 +94,7 @@ struct PaymentHistoryView: View {
 
     private func statusColor(_ status: String) -> Color {
         switch status.lowercased() {
-        case "completed": return brandPrimary
+        case "completed", "paid": return brandPrimary
         case "refunded":  return .orange
         case "pending":   return .yellow.opacity(0.8)
         default:          return .secondary
@@ -103,7 +103,7 @@ struct PaymentHistoryView: View {
 
     private func statusIcon(_ status: String) -> String {
         switch status.lowercased() {
-        case "completed": return "checkmark"
+        case "completed", "paid": return "checkmark"
         case "refunded":  return "arrow.uturn.backward"
         case "pending":   return "clock"
         default:          return "questionmark"

@@ -50,7 +50,7 @@ struct TransactionLedgerView: View {
 
     private var openingBalance: Double {
         guard isFilteredByAccount else { return 0 }
-        return viewModel.accounts.first(where: { $0.id == viewModel.filterAccountId })?.balance ?? 0
+        return viewModel.accounts.first(where: { $0.id == viewModel.filterAccountId })?.openingBalance ?? 0
     }
 
     // MARK: - Body

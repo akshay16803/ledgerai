@@ -17,7 +17,7 @@ struct VendorFormView: View {
     @State private var email = ""
     @State private var phone = ""
     @State private var gstin = ""
-    @State private var address = ""
+    @State private var billingAddress = ""
     @State private var isSaving = false
 
     @Environment(\.dismiss) private var dismiss
@@ -54,7 +54,7 @@ struct VendorFormView: View {
                         TextField("GSTIN", text: $gstin)
                             .autocapitalization(.allCharacters)
 
-                        TextField("Address", text: $address, axis: .vertical)
+                        TextField("Address", text: $billingAddress, axis: .vertical)
                             .lineLimit(3...6)
                             .textContentType(.fullStreetAddress)
                     }
@@ -94,7 +94,7 @@ struct VendorFormView: View {
         email   = vendor.email ?? ""
         phone   = vendor.phone ?? ""
         gstin   = vendor.gstin ?? ""
-        address = vendor.address ?? ""
+        billingAddress = vendor.billingAddress ?? ""
     }
 
     private func save() async {
@@ -103,13 +103,13 @@ struct VendorFormView: View {
             await viewModel.updateVendor(
                 id: vendor.id, name: name,
                 email: email, phone: phone,
-                gstin: gstin, address: address
+                gstin: gstin, billingAddress: billingAddress
             )
         } else {
             await viewModel.createVendor(
                 name: name, email: email,
                 phone: phone, gstin: gstin,
-                address: address
+                billingAddress: billingAddress
             )
         }
         isSaving = false

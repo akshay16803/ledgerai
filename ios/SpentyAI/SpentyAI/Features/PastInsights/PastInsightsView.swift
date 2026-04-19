@@ -199,8 +199,8 @@ struct PastInsightsView: View {
                             }
                         } else {
                             Picker("Email", selection: $viewModel.createSelectedEmail) {
-                                ForEach(viewModel.availableEmails, id: \.self) { email in
-                                    Text(email).tag(email)
+                                ForEach(viewModel.availableEmails, id: \.email) { option in
+                                    Text("\(option.email) (\(option.provider))").tag(option.email)
                                 }
                             }
                             .pickerStyle(.menu)

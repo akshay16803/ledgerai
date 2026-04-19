@@ -51,6 +51,7 @@ final class CustomersViewModel {
         do {
             let customer = try await repository.create(payload)
             customers.append(customer)
+            isLoading = false
             return true
         } catch {
             errorMessage = error.localizedDescription

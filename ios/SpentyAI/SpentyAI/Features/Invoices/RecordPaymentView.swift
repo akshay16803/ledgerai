@@ -206,7 +206,7 @@ struct RecordPaymentView: View {
         let payload = RecordPaymentPayload(
             amount: amount,
             date: paymentDate,
-            method: selectedMethod,
+            paymentMethod: selectedMethod,
             accountId: selectedAccountId,
             note: note.isEmpty ? nil : note.trimmingCharacters(in: .whitespaces)
         )

@@ -104,9 +104,9 @@ final class CashFlowViewModel {
     // MARK: - Actions
 
     @MainActor
-    func toggleRecurring(transactionId: String) async {
+    func toggleRecurring(transactionId: String, isRecurring: Bool = false, recurringFrequency: String? = nil) async {
         do {
-            _ = try await repository.toggleRecurring(transactionId: transactionId)
+            _ = try await repository.toggleRecurring(transactionId: transactionId, isRecurring: isRecurring, recurringFrequency: recurringFrequency)
             await loadRecurring()
             await loadProjection()
         } catch {

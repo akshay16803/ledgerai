@@ -98,7 +98,7 @@ final class SettingsViewModel {
 
         do {
             let response = try await repository.uploadLogo(imageData: imageData)
-            settings.logoUrl = response.url
+            settings.logoUrl = response.resolvedUrl
         } catch {
             handleError(error)
         }
@@ -130,7 +130,7 @@ final class SettingsViewModel {
 
         do {
             let response = try await repository.uploadSignature(imageData: imageData)
-            settings.signatureUrl = response.url
+            settings.signatureUrl = response.resolvedUrl
         } catch {
             handleError(error)
         }

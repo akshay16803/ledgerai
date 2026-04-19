@@ -135,7 +135,7 @@ struct SettingsView: View {
     }
 
     private var currencySubtitle: String {
-        let parts = [viewModel.settings.defaultCurrency, viewModel.settings.dateFormat].compactMap { $0 }
+        let parts = [viewModel.settings.baseCurrency, viewModel.settings.dateFormat].compactMap { $0 }
         return parts.isEmpty ? "Set currency and date format" : parts.joined(separator: " / ")
     }
 
@@ -322,6 +322,19 @@ struct SettingsView: View {
 
     private var accountSection: some View {
         Section {
+            Button {
+                Task { await authManager.logout() }
+            } label: {
+                HStack(spacing: 14) {
+                    sectionIcon("rectangle.portrait.and.arrow.right", color: .orange)
+
+                    Text("Sign Out")
+                        .font(.body.weight(.medium))
+                        .foregroundStyle(.primary)
+                }
+                .padding(.vertical, 4)
+            }
+
             Button(role: .destructive) {
                 viewModel.showDeleteConfirm = true
             } label: {

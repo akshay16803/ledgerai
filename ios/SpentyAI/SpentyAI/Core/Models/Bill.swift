@@ -21,7 +21,7 @@ struct Bill: Codable, Identifiable {
         case billNumber
         case vendorId
         case vendorName
-        case date
+        case date = "billDate"
         case dueDate
         case lineItems
         case subtotal
@@ -37,6 +37,7 @@ struct Bill: Codable, Identifiable {
 struct BillLineItem: Codable, Identifiable {
     var id: String { description ?? UUID().uuidString }
     var description: String?
+    var hsnSac: String?
     var quantity: Double?
     var rate: Double?
     var amount: Double?
@@ -44,6 +45,7 @@ struct BillLineItem: Codable, Identifiable {
 
     enum CodingKeys: String, CodingKey {
         case description
+        case hsnSac
         case quantity
         case rate
         case amount

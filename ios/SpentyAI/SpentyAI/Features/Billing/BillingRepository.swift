@@ -25,10 +25,18 @@ struct PlansResponse: Codable {
 }
 
 struct PromoResponse: Codable {
-    let valid: Bool
-    let message: String
+    let valid: Bool?
+    let message: String?
+    let description: String?
     let plan: String?
     let discount: Double?
+    let subscriptionPlan: String?
+    let subscriptionStatus: String?
+
+    /// Unified message — uses `message` if present, falls back to `description`
+    var displayMessage: String {
+        message ?? description ?? ""
+    }
 }
 
 struct VerifyReceiptRequest: Codable {

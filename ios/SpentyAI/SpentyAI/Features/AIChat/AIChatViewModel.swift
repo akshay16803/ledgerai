@@ -79,7 +79,7 @@ final class AIChatViewModel {
             messages = try await repository.loadHistory()
             scrollToBottom()
         } catch {
-            // Silently fail — user starts fresh
+            errorMessage = "Could not load chat history."
         }
     }
 

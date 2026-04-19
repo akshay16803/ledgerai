@@ -7,9 +7,9 @@ struct BillingView: View {
 
     // MARK: - Brand Colors
 
-    private let brandPrimary = Color(hex: "#3A5C4A")
-    private let brandBg      = Color(hex: "#F8F6F3")
-    private let brandError   = Color(hex: "#96453A")
+    private let brandPrimary = Color.spentyPrimary
+    private let brandBg      = Color.spentyBgPrimary
+    private let brandError   = Color.spentyError
 
     var body: some View {
         ScrollView {
@@ -189,7 +189,7 @@ struct BillingView: View {
             }
         }
         .padding()
-        .background(.white)
+        .background(Color.spentyCardBg)
         .clipShape(RoundedRectangle(cornerRadius: 14))
         .overlay(
             RoundedRectangle(cornerRadius: 14)
@@ -255,7 +255,7 @@ struct BillingView: View {
             }
         }
         .padding()
-        .background(.white)
+        .background(Color.spentyCardBg)
         .clipShape(RoundedRectangle(cornerRadius: 14))
         .shadow(color: .black.opacity(0.04), radius: 4, y: 2)
     }
@@ -302,7 +302,7 @@ struct BillingView: View {
                     .font(.subheadline.weight(.semibold))
                 Text((order.status ?? "").capitalized)
                     .font(.caption2)
-                    .foregroundStyle(order.status == "completed" ? brandPrimary : brandError)
+                    .foregroundStyle(order.status == "completed" || order.status == "paid" ? brandPrimary : brandError)
             }
         }
         .padding(.vertical, 4)

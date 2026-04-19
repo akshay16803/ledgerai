@@ -87,6 +87,9 @@ struct AccountListView: View {
             }
             .padding(.bottom, 20)
         }
+        .navigationDestination(for: String.self) { accountId in
+            AccountDetailView(viewModel: viewModel, accountId: accountId)
+        }
     }
 
     // MARK: - Total Balance Card
@@ -161,9 +164,6 @@ struct AccountListView: View {
             .cornerRadius(12)
             .padding(.horizontal, 16)
             .padding(.bottom, 16)
-            .navigationDestination(for: String.self) { accountId in
-                AccountDetailView(viewModel: viewModel, accountId: accountId)
-            }
         }
     }
 

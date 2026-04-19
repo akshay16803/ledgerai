@@ -160,9 +160,9 @@ struct PastInsightDetailView: View {
             }
 
             Button {
-                Task { await viewModel.downloadPDF() }
+                Task { await viewModel.downloadCSV() }
             } label: {
-                Label("Download PDF", systemImage: "arrow.down.doc.fill")
+                Label("Download CSV", systemImage: "arrow.down.doc.fill")
                     .font(.subheadline.weight(.medium))
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
@@ -433,7 +433,7 @@ private struct InsightShareSheet: UIViewControllerRepresentable {
                 dateTo: Date(),
                 status: "completed",
                 totalIncome: 850000,
-                totalExpense: 620000,
+                totalExpenses: 620000,
                 net: 230000,
                 transactionCount: 142,
                 emailAddress: "user@example.com",

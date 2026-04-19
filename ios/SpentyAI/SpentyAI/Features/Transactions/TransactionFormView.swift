@@ -92,7 +92,7 @@ struct TransactionFormView: View {
                     }
                     .fontWeight(.semibold)
                     .foregroundColor(.spentyPrimary)
-                    .disabled(isSaving || amount.isEmpty)
+                    .disabled(isSaving || amount.isEmpty || accountId.isEmpty || (!isTransfer && categoryId.isEmpty))
                 }
             }
             .onAppear { populateFields() }
@@ -373,6 +373,21 @@ struct TransactionFormView: View {
             return
         }
 
+        guard !accountId.isEmpty else {
+            errorMessage = "Please select an account."
+            return
+        }
+
+        if !isTransfer && categoryId.isEmpty {
+            errorMessage = "Please select a category."
+            return
+        }
+
+        if isTransfer && toAccountId.isEmpty {
+            errorMessage = "Please select a destination account."
+            return
+        }
+
         isSaving = true
         errorMessage = nil
 
@@ -402,6 +417,11 @@ struct TransactionFormView: View {
             await viewModel.updateTransaction(txn)
         } else {
             await viewModel.createTransaction(txn)
+        }
+
+        // Surface any network error from the view model
+        if let vmError = viewModel.errorMessage {
+            errorMessage = vmError
         }
 
         isSaving = false

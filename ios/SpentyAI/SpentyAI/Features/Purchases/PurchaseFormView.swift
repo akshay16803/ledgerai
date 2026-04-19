@@ -35,8 +35,12 @@ struct PurchaseFormView: View {
         subtotal + taxAmount
     }
 
+    private var hasValidLineItems: Bool {
+        lineItems.contains { !$0.description.isEmpty }
+    }
+
     private var isValid: Bool {
-        !vendorName.trimmingCharacters(in: .whitespaces).isEmpty
+        !vendorName.trimmingCharacters(in: .whitespaces).isEmpty && hasValidLineItems
     }
 
     // MARK: - Body
@@ -170,6 +174,12 @@ struct PurchaseFormView: View {
                 Label("Add Line Item", systemImage: "plus.circle.fill")
                     .font(SpentyFonts.subheadline)
                     .foregroundStyle(Color.spentyPrimary)
+            }
+
+            if showValidation && !hasValidLineItems {
+                Text("At least one line item with a description is required.")
+                    .font(SpentyFonts.caption1)
+                    .foregroundStyle(Color.spentyError)
             }
         } header: {
             Text("Line Items")
@@ -338,7 +348,7 @@ struct PurchaseFormView: View {
             lineItems = items.map { item in
                 PurchaseFormLineItem(
                     description: item.description ?? "",
-                    hsnSac: "",
+                    hsnSac: item.hsnSac ?? "",
                     quantity: item.quantity ?? 1,
                     rate: item.rate ?? 0,
                     taxRate: item.taxPercent ?? 0

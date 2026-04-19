@@ -9,6 +9,7 @@ enum FeatureRequestCategory: String, Codable, CaseIterable {
 }
 
 enum FeatureRequestStatus: String, Codable {
+    case submitted
     case pending
     case inProgress = "in_progress"
     case completed

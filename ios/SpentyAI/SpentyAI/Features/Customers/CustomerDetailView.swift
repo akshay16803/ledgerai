@@ -15,6 +15,10 @@ struct CustomerDetailView: View {
     let customer: Customer
     @Bindable var viewModel: CustomersViewModel
 
+    private var displayCustomer: Customer {
+        viewModel.customers.first(where: { $0.id == customer.id }) ?? customer
+    }
+
     // MARK: - Body
 
     var body: some View {
@@ -30,12 +34,12 @@ struct CustomerDetailView: View {
                 .padding()
             }
         }
-        .navigationTitle(customer.name ?? "Customer")
+        .navigationTitle(displayCustomer.name ?? "Customer")
         .navigationBarTitleDisplayMode(.large)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button("Edit") {
-                    viewModel.startEdit(customer)
+                    viewModel.startEdit(displayCustomer)
                 }
                 .foregroundStyle(Brand.primary)
                 .fontWeight(.semibold)
@@ -55,20 +59,20 @@ struct CustomerDetailView: View {
         VStack(alignment: .leading, spacing: 12) {
             cardHeader("Customer Details", icon: "person.text.rectangle")
 
-            infoRow("Name", value: customer.name ?? "")
-            if let email = customer.email, !email.isEmpty {
+            infoRow("Name", value: displayCustomer.name ?? "")
+            if let email = displayCustomer.email, !email.isEmpty {
                 infoRow("Email", value: email)
             }
-            if let phone = customer.phone, !phone.isEmpty {
+            if let phone = displayCustomer.phone, !phone.isEmpty {
                 infoRow("Phone", value: phone)
             }
-            if let gstin = customer.gstin, !gstin.isEmpty {
+            if let gstin = displayCustomer.gstin, !gstin.isEmpty {
                 infoRow("GSTIN", value: gstin)
             }
-            if let billing = customer.billingAddress, !billing.isEmpty {
+            if let billing = displayCustomer.billingAddress, !billing.isEmpty {
                 infoRow("Billing Address", value: billing)
             }
-            if let shipping = customer.shippingAddress, !shipping.isEmpty {
+            if let shipping = displayCustomer.shippingAddress, !shipping.isEmpty {
                 infoRow("Shipping Address", value: shipping)
             }
         }
@@ -84,11 +88,11 @@ struct CustomerDetailView: View {
             cardHeader("Financial Summary", icon: "indianrupeesign.circle")
 
             HStack(spacing: 0) {
-                summaryTile("Invoiced", amount: customer.totalInvoiced ?? 0, color: Brand.primary)
+                summaryTile("Invoiced", amount: displayCustomer.totalInvoiced ?? 0, color: Brand.primary)
                 Divider().frame(height: 44)
-                summaryTile("Paid", amount: customer.totalPaid ?? 0, color: .green)
+                summaryTile("Paid", amount: displayCustomer.totalPaid ?? 0, color: .green)
                 Divider().frame(height: 44)
-                summaryTile("Outstanding", amount: customer.outstanding ?? 0, color: Brand.error)
+                summaryTile("Outstanding", amount: displayCustomer.outstanding ?? 0, color: Brand.error)
             }
         }
         .padding(16)

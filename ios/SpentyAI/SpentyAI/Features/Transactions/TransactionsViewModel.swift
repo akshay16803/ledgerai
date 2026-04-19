@@ -184,9 +184,9 @@ final class TransactionsViewModel {
     @MainActor
     func rejectTransaction(id: String) async {
         do {
-            let updated = try await repository.rejectTransaction(id: id)
+            _ = try await repository.rejectTransaction(id: id)
             if let idx = transactions.firstIndex(where: { $0.id == id }) {
-                transactions[idx] = updated
+                transactions[idx].status = "rejected"
             }
         } catch {
             errorMessage = error.localizedDescription
@@ -196,9 +196,9 @@ final class TransactionsViewModel {
     // MARK: - Recurring
 
     @MainActor
-    func toggleRecurring(id: String) async {
+    func toggleRecurring(id: String, isRecurring: Bool, frequency: String? = nil) async {
         do {
-            let updated = try await repository.toggleRecurring(id: id)
+            let updated = try await repository.toggleRecurring(id: id, isRecurring: isRecurring, frequency: frequency)
             if let idx = transactions.firstIndex(where: { $0.id == id }) {
                 transactions[idx] = updated
             }

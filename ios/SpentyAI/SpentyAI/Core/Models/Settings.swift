@@ -2,12 +2,12 @@ import Foundation
 
 struct AppSettings: Codable {
     var firmName: String?
-    var gstin: String?
-    var pan: String?
-    var state: String?
-    var address: String?
+    var firmGstin: String?
+    var firmPan: String?
+    var firmState: String?
+    var firmAddress: String?
     var businessCountry: String?
-    var defaultCurrency: String?
+    var baseCurrency: String?
     var dateFormat: String?
     var logoUrl: String?
     var signatureUrl: String?

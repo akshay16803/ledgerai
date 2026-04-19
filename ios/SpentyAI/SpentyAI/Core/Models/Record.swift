@@ -3,25 +3,40 @@ import Foundation
 struct Record: Codable, Identifiable {
     let id: String
     var subject: String?
-    var sender: String?
-    var receivedDate: Date?
+    var fromEmail: String?
+    var archivedAt: Date?
+    var date: String?
     var source: String?
-    var amount: Double?
+    var transactionAmount: Double?
     var transactionType: String?
     var hasAttachments: Bool?
-    var attachmentCount: Int?
+    var attachments: [RecordAttachmentRef]?
+
+    /// Convenience accessors used by the UI
+    var sender: String? { fromEmail }
+    var receivedDate: Date? { archivedAt }
+    var amount: Double? { transactionAmount }
+    var attachmentCount: Int? { attachments?.count }
 
     enum CodingKeys: String, CodingKey {
-        case id = "emailId"
+        case id = "archiveId"
         case subject
-        case sender
-        case receivedDate
+        case fromEmail
+        case archivedAt
+        case date
         case source
-        case amount
+        case transactionAmount
         case transactionType
         case hasAttachments
-        case attachmentCount
+        case attachments
     }
+}
+
+/// Lightweight attachment reference returned inside a Record list item
+struct RecordAttachmentRef: Codable {
+    let filename: String?
+    let mimeType: String?
+    let size: Int?
 }
 
 struct Receipt: Codable, Identifiable {
@@ -45,17 +60,27 @@ struct Receipt: Codable, Identifiable {
 }
 
 struct ReceiptParsedData: Codable {
-    var merchant: String?
+    var vendor: String?
     var amount: Double?
     var date: Date?
     var items: [ReceiptItem]?
     var tax: Double?
     var total: Double?
+    var categoryName: String?
+    var description: String?
+    var paymentMethod: String?
+
+    /// UI convenience – backend uses `vendor`, UI displays as merchant
+    var merchant: String? { vendor }
 }
 
 struct ReceiptItem: Codable, Identifiable {
-    var id: String { description ?? UUID().uuidString }
-    var description: String?
+    var id: String { item ?? UUID().uuidString }
+    var item: String?
     var amount: Double?
-    var quantity: Double?
+    var qty: Double?
+
+    /// UI convenience accessors
+    var description: String? { item }
+    var quantity: Double? { qty }
 }

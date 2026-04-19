@@ -13,7 +13,9 @@ struct VendorBill: Codable, Identifiable {
 
     enum CodingKeys: String, CodingKey {
         case id = "billId"
-        case date, total, status
+        case date = "billDate"
+        case total = "grandTotal"
+        case status = "paymentStatus"
         case billNumber
         case dueDate
         case amountPaid
@@ -31,7 +33,12 @@ struct CreateVendorRequest: Codable {
     let email: String?
     let phone: String?
     let gstin: String?
-    let address: String?
+    let billingAddress: String?
+}
+
+struct VendorListResponse: Codable {
+    let items: [Vendor]
+    let total: Int?
 }
 
 // MARK: - Repository
@@ -44,7 +51,8 @@ final class VendorRepository {
     // MARK: - CRUD
 
     func getVendors() async throws -> [Vendor] {
-        try await APIClient.shared.get(APIEndpoints.vendors)
+        let response: VendorListResponse = try await APIClient.shared.get(APIEndpoints.vendors)
+        return response.items
     }
 
     func getVendor(id: String) async throws -> Vendor {

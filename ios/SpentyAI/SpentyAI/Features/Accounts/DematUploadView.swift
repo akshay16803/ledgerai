@@ -172,7 +172,7 @@ struct DematUploadView: View {
             }
 
             // Actions for pending statements
-            if statement.status?.lowercased() == "pending" {
+            if statement.isPendingApproval {
                 HStack(spacing: 4) {
                     Button {
                         pendingAction = (id: statement.id, approve: true)

@@ -1,7 +1,7 @@
 import Foundation
 
 struct RecurringListResponse: Codable {
-    let items: [RecurringItem]
+    let transactions: [RecurringItem]
 }
 
 struct MandateListResponse: Codable {
@@ -12,9 +12,23 @@ struct UpcomingMandatesResponse: Codable {
     let upcoming: [Mandate]
 }
 
+struct DetectedMandatePattern: Codable {
+    let merchant: String?
+    let amount: Double?
+    let frequency: String?
+    let occurrences: Int?
+    let lastDate: String?
+    let accountId: String?
+}
+
 struct DetectMandatesResponse: Codable {
-    let detected: Int?
-    let message: String?
+    let detected: [DetectedMandatePattern]?
+    let total: Int?
+}
+
+struct ToggleRecurringBody: Codable {
+    let isRecurring: Bool
+    let recurringFrequency: String?
 }
 
 struct MandateCreateBody: Codable {
@@ -81,10 +95,11 @@ final class CashFlowRepository: Sendable {
 
     func getRecurringList() async throws -> [RecurringItem] {
         let response: RecurringListResponse = try await api.get(APIEndpoints.recurringList)
-        return response.items
+        return response.transactions
     }
 
-    func toggleRecurring(transactionId: String) async throws -> Transaction {
-        try await api.post(APIEndpoints.transactionToggleRecurring(transactionId))
+    func toggleRecurring(transactionId: String, isRecurring: Bool, recurringFrequency: String? = nil) async throws -> Transaction {
+        let body = ToggleRecurringBody(isRecurring: isRecurring, recurringFrequency: recurringFrequency)
+        return try await api.post(APIEndpoints.transactionToggleRecurring(transactionId), body: body)
     }
 }

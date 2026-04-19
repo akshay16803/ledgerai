@@ -1,5 +1,13 @@
 import Foundation
 
+struct PeriodsResponse: Codable {
+    let periods: [ReportPeriod]
+}
+
+struct CategoriesResponse: Codable {
+    let categories: [ReportCategory]
+}
+
 final class ReportsRepository {
 
     static let shared = ReportsRepository()
@@ -16,14 +24,16 @@ final class ReportsRepository {
 
     func getPeriods(from: Date, to: Date) async throws -> [ReportPeriod] {
         let query = dateQuery(from: from, to: to)
-        return try await APIClient.shared.get(APIEndpoints.reportsByPeriod + query)
+        let response: PeriodsResponse = try await APIClient.shared.get(APIEndpoints.reportsByPeriod + query)
+        return response.periods
     }
 
     // MARK: - Category Breakdown
 
     func getCategories(from: Date, to: Date, type: String = "expense") async throws -> [ReportCategory] {
-        let query = dateQuery(from: from, to: to) + "&type=\(type)"
-        return try await APIClient.shared.get(APIEndpoints.reportsByCategory + query)
+        let query = dateQuery(from: from, to: to) + "&transaction_type=\(type)"
+        let response: CategoriesResponse = try await APIClient.shared.get(APIEndpoints.reportsByCategory + query)
+        return response.categories
     }
 
     // MARK: - Income vs Expense
@@ -52,6 +62,6 @@ final class ReportsRepository {
         formatter.formatOptions = [.withFullDate]
         let fromStr = formatter.string(from: from)
         let toStr = formatter.string(from: to)
-        return "?from=\(fromStr)&to=\(toStr)"
+        return "?start_date=\(fromStr)&end_date=\(toStr)"
     }
 }

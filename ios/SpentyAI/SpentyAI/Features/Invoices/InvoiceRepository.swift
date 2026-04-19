@@ -4,14 +4,14 @@ struct InvoicePayload: Codable {
     let invoiceNumber: String?
     let customerId: String?
     let customerName: String?
-    let date: Date?
+    let invoiceDate: Date?
     let dueDate: Date?
     let lineItems: [InvoiceLineItemPayload]?
     let subtotal: Double?
     let taxAmount: Double?
     let grandTotal: Double?
     let notes: String?
-    let terms: String?
+    let termsConditions: String?
 }
 
 struct InvoiceLineItemPayload: Codable {
@@ -26,7 +26,7 @@ struct InvoiceLineItemPayload: Codable {
 struct RecordPaymentPayload: Codable {
     let amount: Double
     let date: Date
-    let method: String?
+    let paymentMethod: String?
     let accountId: String?
     let note: String?
 }
@@ -106,7 +106,8 @@ struct InvoiceRepository {
     // MARK: - Customers & Accounts (for pickers)
 
     func fetchCustomers() async throws -> [Customer] {
-        try await api.get(APIEndpoints.customers)
+        let response: CustomerListResponse = try await api.get(APIEndpoints.customers)
+        return response.items
     }
 
     func fetchAccounts() async throws -> [Account] {

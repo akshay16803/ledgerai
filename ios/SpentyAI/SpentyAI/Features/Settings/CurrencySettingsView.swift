@@ -99,8 +99,8 @@ struct CurrencySettingsView: View {
 
     private var currencyBinding: Binding<String> {
         Binding(
-            get: { viewModel.settings.defaultCurrency ?? "" },
-            set: { viewModel.settings.defaultCurrency = $0.isEmpty ? nil : $0 }
+            get: { viewModel.settings.baseCurrency ?? "" },
+            set: { viewModel.settings.baseCurrency = $0.isEmpty ? nil : $0 }
         )
     }
 

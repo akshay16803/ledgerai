@@ -5,19 +5,41 @@ struct TransactionListResponse: Codable {
     let total: Int
 }
 
+struct TransactionItemsResponse: Codable {
+    let items: [Transaction]
+    let total: Int
+
+    var asListResponse: TransactionListResponse {
+        TransactionListResponse(transactions: items, total: total)
+    }
+}
+
 struct BulkIdsBody: Codable {
-    let ids: [String]
+    let transactionIds: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case transactionIds = "transaction_ids"
+    }
 }
 
 struct BulkUpdateBody: Codable {
-    let ids: [String]
-    let updates: [String: String]
+    let transactionIds: [String]
+    let fields: [String: String]
+
+    enum CodingKeys: String, CodingKey {
+        case transactionIds = "transaction_ids"
+        case fields
+    }
 }
 
-struct SearchBody: Codable {
-    let query: String
-    let page: Int?
-    let limit: Int?
+struct RecurringToggleBody: Codable {
+    let isRecurring: Bool
+    let recurringFrequency: String?
+
+    enum CodingKeys: String, CodingKey {
+        case isRecurring = "is_recurring"
+        case recurringFrequency = "recurring_frequency"
+    }
 }
 
 final class TransactionRepository: Sendable {
@@ -38,25 +60,30 @@ final class TransactionRepository: Sendable {
         dateTo: String? = nil,
         status: String? = nil
     ) async throws -> TransactionListResponse {
-        var query: [String] = ["page=\(page)", "limit=\(limit)"]
-        if let type, !type.isEmpty { query.append("type=\(type)") }
+        let skip = (page - 1) * limit
+        var query: [String] = ["skip=\(skip)", "limit=\(limit)"]
+        if let type, !type.isEmpty { query.append("transaction_type=\(type)") }
         if let accountId, !accountId.isEmpty { query.append("account_id=\(accountId)") }
-        if let dateFrom, !dateFrom.isEmpty { query.append("date_from=\(dateFrom)") }
-        if let dateTo, !dateTo.isEmpty { query.append("date_to=\(dateTo)") }
+        if let dateFrom, !dateFrom.isEmpty { query.append("from_date=\(dateFrom)") }
+        if let dateTo, !dateTo.isEmpty { query.append("to_date=\(dateTo)") }
         if let status, !status.isEmpty { query.append("status=\(status)") }
         let path = APIEndpoints.transactions + "?" + query.joined(separator: "&")
         return try await api.get(path)
     }
 
     func fetchPending() async throws -> TransactionListResponse {
-        return try await api.get(APIEndpoints.transactionsPending)
+        let response: TransactionItemsResponse = try await api.get(APIEndpoints.transactionsPending)
+        return response.asListResponse
     }
 
     // MARK: - Search
 
     func search(query: String, page: Int = 1, limit: Int = 30) async throws -> TransactionListResponse {
-        let body = SearchBody(query: query, page: page, limit: limit)
-        return try await api.post(APIEndpoints.transactionsSearch, body: body)
+        let skip = (page - 1) * limit
+        let encodedQuery = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
+        let path = APIEndpoints.transactionsSearch + "?q=\(encodedQuery)&skip=\(skip)&limit=\(limit)"
+        let response: TransactionItemsResponse = try await api.get(path)
+        return response.asListResponse
     }
 
     // MARK: - CRUD
@@ -83,32 +110,33 @@ final class TransactionRepository: Sendable {
         return try await api.post(APIEndpoints.transactionApprove(id))
     }
 
-    func rejectTransaction(id: String) async throws -> Transaction {
+    func rejectTransaction(id: String) async throws -> MessageResponse {
         return try await api.post(APIEndpoints.transactionReject(id))
     }
 
     // MARK: - Bulk Operations
 
     func bulkApprove(ids: [String]) async throws -> MessageResponse {
-        return try await api.post(APIEndpoints.transactionsBulkApprove, body: BulkIdsBody(ids: ids))
+        return try await api.post(APIEndpoints.transactionsBulkApprove, body: BulkIdsBody(transactionIds: ids))
     }
 
     func bulkReject(ids: [String]) async throws -> MessageResponse {
-        return try await api.post(APIEndpoints.transactionsBulkReject, body: BulkIdsBody(ids: ids))
+        return try await api.post(APIEndpoints.transactionsBulkReject, body: BulkIdsBody(transactionIds: ids))
     }
 
     func bulkDelete(ids: [String]) async throws -> MessageResponse {
-        return try await api.post(APIEndpoints.transactionsBulkDelete, body: BulkIdsBody(ids: ids))
+        return try await api.post(APIEndpoints.transactionsBulkDelete, body: BulkIdsBody(transactionIds: ids))
     }
 
     func bulkUpdate(ids: [String], updates: [String: String]) async throws -> MessageResponse {
-        return try await api.post(APIEndpoints.transactionsBulkUpdate, body: BulkUpdateBody(ids: ids, updates: updates))
+        return try await api.post(APIEndpoints.transactionsBulkUpdate, body: BulkUpdateBody(transactionIds: ids, fields: updates))
     }
 
     // MARK: - Recurring
 
-    func toggleRecurring(id: String) async throws -> Transaction {
-        return try await api.post(APIEndpoints.transactionToggleRecurring(id))
+    func toggleRecurring(id: String, isRecurring: Bool, frequency: String? = nil) async throws -> Transaction {
+        let body = RecurringToggleBody(isRecurring: isRecurring, recurringFrequency: frequency)
+        return try await api.post(APIEndpoints.transactionToggleRecurring(id), body: body)
     }
 
     // MARK: - Supporting Data

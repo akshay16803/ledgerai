@@ -97,11 +97,11 @@ struct VendorDetailView: View {
                 if let phone = displayVendor.phone, !phone.isEmpty {
                     infoRow(icon: "phone.fill", label: "Phone", value: phone)
                 }
-                if let address = displayVendor.address, !address.isEmpty {
+                if let address = displayVendor.billingAddress, !address.isEmpty {
                     infoRow(icon: "mappin.circle.fill", label: "Address", value: address)
                 }
 
-                if displayVendor.email == nil && displayVendor.phone == nil && displayVendor.address == nil {
+                if displayVendor.email == nil && displayVendor.phone == nil && displayVendor.billingAddress == nil {
                     HStack {
                         Text("No contact details added.")
                             .font(.subheadline)
@@ -301,7 +301,7 @@ struct VendorDetailView: View {
                 email: "billing@acme.com",
                 phone: "+91 98765 43210",
                 gstin: "29ABCDE1234F1Z5",
-                address: "123 Business Park, Mumbai",
+                billingAddress: "123 Business Park, Mumbai",
                 totalBilled: 150000,
                 totalPaid: 120000,
                 outstanding: 30000

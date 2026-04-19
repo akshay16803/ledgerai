@@ -48,13 +48,13 @@ final class VendorsViewModel {
     }
 
     @MainActor
-    func createVendor(name: String, email: String?, phone: String?, gstin: String?, address: String?) async {
+    func createVendor(name: String, email: String?, phone: String?, gstin: String?, billingAddress: String?) async {
         let request = CreateVendorRequest(
             name: name,
             email: email?.nilIfEmpty,
             phone: phone?.nilIfEmpty,
             gstin: gstin?.nilIfEmpty,
-            address: address?.nilIfEmpty
+            billingAddress: billingAddress?.nilIfEmpty
         )
         do {
             let vendor = try await repository.createVendor(request)
@@ -66,13 +66,13 @@ final class VendorsViewModel {
     }
 
     @MainActor
-    func updateVendor(id: String, name: String, email: String?, phone: String?, gstin: String?, address: String?) async {
+    func updateVendor(id: String, name: String, email: String?, phone: String?, gstin: String?, billingAddress: String?) async {
         let request = CreateVendorRequest(
             name: name,
             email: email?.nilIfEmpty,
             phone: phone?.nilIfEmpty,
             gstin: gstin?.nilIfEmpty,
-            address: address?.nilIfEmpty
+            billingAddress: billingAddress?.nilIfEmpty
         )
         do {
             let updated = try await repository.updateVendor(id: id, request)

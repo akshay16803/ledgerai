@@ -144,6 +144,7 @@ class AccountCreate(BaseModel):
 
 class AccountUpdate(BaseModel):
     name: Optional[str] = None
+    account_type: Optional[str] = None
     sub_type: Optional[str] = None
     account_number: Optional[str] = None
     description: Optional[str] = None
@@ -827,7 +828,18 @@ async def list_accounts(user: dict = Depends(get_current_user)):
     accounts = await db.accounts.find(
         {"user_id": user["user_id"]}, {"_id": 0}
     ).to_list(1000)
-    return accounts
+    return {"accounts": accounts}
+
+
+@app.get("/api/accounts/{account_id}")
+async def get_account(account_id: str, user: dict = Depends(get_current_user)):
+    """Get a single account by ID."""
+    account = await db.accounts.find_one(
+        {"account_id": account_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+    return {"account": account}
 
 
 @app.post("/api/accounts")
@@ -1065,9 +1077,13 @@ def _generate_amortization_schedule(outstanding: float, annual_rate: float, tenu
             "month": month,
             "due_date": due_date.strftime("%Y-%m-%d"),
             "emi": round(emi, 2),
+            "emi_amount": round(emi, 2),
             "principal": principal,
+            "principal_component": principal,
             "interest": interest,
+            "interest_component": interest,
             "outstanding": balance,
+            "outstanding_balance": balance,
         })
         
         if balance <= 0:
@@ -1180,7 +1196,7 @@ async def get_account_transactions(
     txns = await db.transactions.find(query, {"_id": 0}).sort("date", -1).skip(skip).limit(limit).to_list(limit)
     total = await db.transactions.count_documents(query)
 
-    return {"items": txns, "total": total, "account_name": account.get("name")}
+    return {"transactions": txns, "total": total, "account_name": account.get("name")}
 
 
 # =====================================================================
@@ -1223,22 +1239,26 @@ async def list_account_sub_types(user: dict = Depends(get_current_user), account
     # Get user's custom sub types
     custom_types = await db.account_sub_types.find(query, {"_id": 0}).to_list(100)
     
-    # Combine with defaults
+    # Combine with defaults — build both grouped dict and flat list
     result = {}
-    for acc_type in ["asset", "liability", "equity"]:
+    flat_list = []
+    for acc_type in ["asset", "liability", "equity", "investment"]:
         if account_type and acc_type != account_type:
             continue
         # Start with defaults
-        result[acc_type] = [
-            {**st, "is_default": True, "account_type": acc_type} 
+        type_list = [
+            {**st, "is_default": True, "account_type": acc_type}
             for st in DEFAULT_SUB_TYPES.get(acc_type, [])
         ]
         # Add custom sub types
         for custom in custom_types:
             if custom.get("account_type") == acc_type:
-                result[acc_type].append({**custom, "is_default": False})
-    
-    return result
+                type_list.append({**custom, "is_default": False})
+        result[acc_type] = type_list
+        flat_list.extend(type_list)
+
+    # Return both flat list (for iOS) and grouped dict (for backward compat)
+    return {"sub_types": flat_list, "grouped": result}
 
 
 @app.post("/api/account-sub-types")
@@ -1269,7 +1289,7 @@ async def create_account_sub_type(data: AccountSubTypeCreate, user: dict = Depen
     }
     await db.account_sub_types.insert_one(sub_type)
     del sub_type["_id"]
-    return sub_type
+    return {"sub_type": sub_type}
 
 
 @app.put("/api/account-sub-types/{sub_type_id}")
@@ -1301,7 +1321,7 @@ async def update_account_sub_type(sub_type_id: str, data: AccountSubTypeUpdate, 
         raise HTTPException(status_code=404, detail="Sub type not found")
     
     sub_type = await db.account_sub_types.find_one({"sub_type_id": sub_type_id}, {"_id": 0})
-    return sub_type
+    return {"sub_type": sub_type}
 
 
 @app.delete("/api/account-sub-types/{sub_type_id}")
@@ -8335,6 +8355,21 @@ async def calculate_od_interest(account_id: str, month: str, user: dict = Depend
     }
 
 
+@app.post("/api/accounts/{account_id}/od-interest/calculate")
+async def calculate_od_interest_post(account_id: str, body: dict = Body(...), user: dict = Depends(get_current_user)):
+    """
+    Calculate OD interest via POST (iOS uses this with fromDate/toDate).
+    Body: { fromDate: str (ISO date), toDate: str (ISO date) }
+    Derives the month from fromDate and delegates to the GET calculation logic.
+    """
+    from_date = body.get("fromDate") or body.get("from_date", "")
+    if not from_date:
+        raise HTTPException(status_code=400, detail="fromDate is required")
+    # Derive month from fromDate (YYYY-MM)
+    month = from_date[:7]
+    return await calculate_od_interest(account_id, month, user)
+
+
 @app.post("/api/accounts/{account_id}/od-interest")
 async def save_od_interest(account_id: str, body: dict = Body(...), user: dict = Depends(get_current_user)):
     """
@@ -8992,6 +9027,18 @@ You can help the user record purchase bills (expenses from vendors/suppliers). S
                 clean_reply = clean_reply.replace(f"|||BILL|||{bill_parts[1]}|||BILL|||", "")
                 clean_reply += "\n\n⚠️ I tried to create a bill but the format was invalid. Let me try again — please confirm the details."
 
+    # Persist both user and assistant messages to chat history
+    now_ts = datetime.now(timezone.utc)
+    try:
+        await db.ai_chat_history.insert_many([
+            {"user_id": user_id, "role": "user", "content": message, "created_at": now_ts},
+            {"user_id": user_id, "role": "assistant", "content": clean_reply.strip(),
+             "transaction_posted": transaction_posted, "invoice_created": invoice_created,
+             "bill_created": bill_created, "created_at": now_ts + timedelta(milliseconds=1)},
+        ])
+    except Exception as e:
+        logger.error(f"Failed to persist chat history: {e}")
+
     return {
         "reply": clean_reply.strip(),
         "transaction_posted": transaction_posted,
@@ -9378,6 +9425,7 @@ async def cancel_subscription(user: dict = Depends(get_current_user)):
     )
 
     return {
+        "success": True,
         "message": "Subscription cancelled. Access continues until expiry.",
         "expiry": user_doc.get("subscription_expiry"),
     }
@@ -9409,7 +9457,7 @@ async def validate_promo_code(data: PromoCodeRequest, user: dict = Depends(get_c
     if user.get("subscription_status") == "active":
         raise HTTPException(status_code=400, detail="You already have an active subscription")
 
-    return {"valid": True, "code": code, "description": PROMO_CODES[code]["description"]}
+    return {"valid": True, "code": code, "description": PROMO_CODES[code]["description"], "message": PROMO_CODES[code]["description"]}
 
 
 @app.post("/api/promo/activate")
@@ -9445,6 +9493,7 @@ async def activate_promo_code(data: PromoCodeRequest, user: dict = Depends(get_c
     })
 
     return {
+        "valid": True,
         "message": "Promo code activated! You now have lifetime access.",
         "subscription_plan": "lifetime",
         "subscription_status": "active",
@@ -9725,10 +9774,14 @@ async def list_demat_statements(
         {"_id": 0, "file_path": 0}
     ).sort("created_at", -1).to_list(100)
 
-    # Ensure datetime fields are serializable
+    # Ensure datetime fields are serializable and add iOS-expected fields
     for s in stmts:
         if "created_at" in s and isinstance(s["created_at"], datetime):
             s["created_at"] = s["created_at"].isoformat()
+        # iOS expects uploaded_at (maps from created_at)
+        s["uploaded_at"] = s.get("created_at")
+        # iOS expects transactions_count
+        s["transactions_count"] = len(s.get("transaction_ids", []))
 
     return {"statements": stmts}
 
@@ -10405,6 +10458,7 @@ async def create_customer(request: Request, user: dict = Depends(get_current_use
         "phone": body.get("phone"),
         "email": body.get("email"),
         "billing_address": body.get("billing_address"),
+        "shipping_address": body.get("shipping_address"),
         "city": body.get("city"),
         "state": body.get("state"),
         "pincode": body.get("pincode"),
@@ -10460,7 +10514,7 @@ async def update_customer(customer_id: str, request: Request, user: dict = Depen
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
 
-    allowed = ["name", "gstin", "pan", "phone", "email", "billing_address", "city", "state", "pincode", "notes"]
+    allowed = ["name", "gstin", "pan", "phone", "email", "billing_address", "shipping_address", "city", "state", "pincode", "notes"]
     update_fields = {k: body[k] for k in allowed if k in body}
     if not update_fields:
         raise HTTPException(status_code=400, detail="No fields to update")
@@ -10658,7 +10712,7 @@ async def get_debtors(user: dict = Depends(get_current_user)):
         {"$sort": {"total_outstanding": -1}},
     ]
     results = await db.invoices.aggregate(pipeline).to_list(1000)
-    return {"items": results, "total": len(results)}
+    return results
 
 
 @app.get("/api/invoices/aging")
@@ -10715,7 +10769,23 @@ async def get_aging(user: dict = Depends(get_current_user)):
     for b in buckets.values():
         b["amount"] = round(b["amount"], 2)
 
-    return buckets
+    # Convert dict to array with label field for iOS compatibility
+    label_map = {
+        "current": "Current",
+        "1_30": "1-30 Days",
+        "31_60": "31-60 Days",
+        "61_90": "61-90 Days",
+        "90_plus": "90+ Days",
+    }
+    result = []
+    for key, data in buckets.items():
+        result.append({
+            "label": label_map.get(key, key),
+            "amount": data["amount"],
+            "count": data["count"],
+            "invoices": data["invoices"],
+        })
+    return result
 
 
 @app.get("/api/invoices/sales-by-customer")
@@ -10844,8 +10914,6 @@ async def get_next_invoice_number(user: dict = Depends(get_current_user)):
     next_num = (settings or {}).get("invoice_next_number", 1)
     return {"next_number": f"{prefix}-{next_num:04d}"}
 
-@app.get("/api/invoices/{invoice_id}/pdf")
-
 @app.get("/api/invoices/stats")
 async def invoice_stats(user: dict = Depends(get_current_user)):
     """Get invoice statistics for the user."""
@@ -10860,8 +10928,22 @@ async def invoice_stats(user: dict = Depends(get_current_user)):
     ).to_list(10000)
 
     total_invoiced = sum(i.get("grand_total", 0) for i in invoices)
-    total_received = sum(i.get("amount_paid", 0) for i in invoices)
-    total_outstanding = total_invoiced - total_received
+    total_paid = sum(i.get("amount_paid", 0) for i in invoices)
+    total_outstanding = total_invoiced - total_paid
+
+    # Calculate total overdue: outstanding amounts for invoices past due date
+    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    overdue_invoices = await db.invoices.find(
+        {
+            "user_id": user_id,
+            "payment_status": {"$in": ["unpaid", "partial"]},
+            "due_date": {"$lt": today_str},
+        },
+        {"_id": 0, "grand_total": 1, "amount_paid": 1},
+    ).to_list(10000)
+    total_overdue = sum(
+        i.get("grand_total", 0) - i.get("amount_paid", 0) for i in overdue_invoices
+    )
 
     return {
         "total": total,
@@ -10869,8 +10951,9 @@ async def invoice_stats(user: dict = Depends(get_current_user)):
         "unpaid": unpaid,
         "partial": partial,
         "total_invoiced": round(total_invoiced, 2),
-        "total_received": round(total_received, 2),
+        "total_paid": round(total_paid, 2),
         "total_outstanding": round(total_outstanding, 2),
+        "total_overdue": round(total_overdue, 2),
     }
 
 
@@ -10983,8 +11066,17 @@ async def record_payment(invoice_id: str, request: Request, user: dict = Depends
 
     payment_info = {
         "payment_account_id": body.get("account_id", invoice.get("payment_account_id")),
-        "payment_method": body.get("payment_method", invoice.get("payment_method")),
+        "payment_method": body.get("payment_method") or body.get("method", invoice.get("payment_method")),
         "payment_date": body.get("date", datetime.now(timezone.utc).strftime("%Y-%m-%d")),
+    }
+
+    # Build payment history entry
+    payment_entry = {
+        "amount": pay_amount,
+        "date": payment_info["payment_date"],
+        "method": payment_info["payment_method"],
+        "account_id": payment_info["payment_account_id"],
+        "note": body.get("note"),
     }
 
     # Create or update transaction
@@ -11011,13 +11103,18 @@ async def record_payment(invoice_id: str, request: Request, user: dict = Depends
 
     await db.invoices.update_one(
         {"invoice_id": invoice_id, "user_id": user["user_id"]},
-        {"$set": {
-            "payment_status": new_status,
-            "amount_paid": new_paid,
-            "transaction_id": txn_id,
-            **payment_info,
-            "updated_at": datetime.now(timezone.utc),
-        }},
+        {
+            "$set": {
+                "payment_status": new_status,
+                "amount_paid": new_paid,
+                "transaction_id": txn_id,
+                **payment_info,
+                "updated_at": datetime.now(timezone.utc),
+            },
+            "$push": {
+                "payments": payment_entry,
+            },
+        },
     )
 
     updated = await db.invoices.find_one(
@@ -11026,6 +11123,7 @@ async def record_payment(invoice_id: str, request: Request, user: dict = Depends
     return updated
 
 
+@app.get("/api/invoices/{invoice_id}/pdf")
 async def get_invoice_pdf(invoice_id: str, user: dict = Depends(get_current_user)):
     """Generate a PDF for the invoice (returns HTML for now, clients render)."""
     invoice = await db.invoices.find_one(
@@ -11385,7 +11483,23 @@ async def get_bill_aging(user: dict = Depends(get_current_user)):
     for b in buckets.values():
         b["amount"] = round(b["amount"], 2)
 
-    return buckets
+    # Convert dict to array with label field for iOS compatibility
+    label_map = {
+        "current": "Current",
+        "1_30": "1-30 Days",
+        "31_60": "31-60 Days",
+        "61_90": "61-90 Days",
+        "90_plus": "90+ Days",
+    }
+    result = []
+    for key, data in buckets.items():
+        result.append({
+            "label": label_map.get(key, key),
+            "amount": data["amount"],
+            "count": data["count"],
+            "bills": data["bills"],
+        })
+    return result
 
 
 @app.get("/api/bills/purchases-by-vendor")
@@ -11515,8 +11629,6 @@ async def get_next_bill_number(user: dict = Depends(get_current_user)):
     next_num = (settings or {}).get("bill_next_number", 1)
     return {"next_number": f"{prefix}-{next_num:04d}"}
 
-@app.get("/api/bills/{bill_id}/pdf")
-
 @app.get("/api/bills/stats")
 async def bill_stats(user: dict = Depends(get_current_user)):
     """Get bill statistics for the user."""
@@ -11526,13 +11638,23 @@ async def bill_stats(user: dict = Depends(get_current_user)):
     unpaid = await db.bills.count_documents({"user_id": user_id, "payment_status": "unpaid"})
     partial = await db.bills.count_documents({"user_id": user_id, "payment_status": "partial"})
 
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
     bills = await db.bills.find(
-        {"user_id": user_id}, {"_id": 0, "grand_total": 1, "amount_paid": 1, "payment_status": 1}
+        {"user_id": user_id}, {"_id": 0, "grand_total": 1, "amount_paid": 1, "payment_status": 1, "due_date": 1}
     ).to_list(10000)
 
     total_billed = sum(b.get("grand_total", 0) for b in bills)
     total_paid = sum(b.get("amount_paid", 0) for b in bills)
     total_outstanding = total_billed - total_paid
+
+    total_overdue = sum(
+        b.get("grand_total", 0) - b.get("amount_paid", 0)
+        for b in bills
+        if b.get("payment_status") != "paid"
+        and b.get("due_date", "") < today
+        and b.get("due_date", "") != ""
+    )
 
     return {
         "total": total,
@@ -11542,6 +11664,7 @@ async def bill_stats(user: dict = Depends(get_current_user)):
         "total_billed": round(total_billed, 2),
         "total_paid": round(total_paid, 2),
         "total_outstanding": round(total_outstanding, 2),
+        "total_overdue": round(total_overdue, 2),
     }
 
 
@@ -11697,6 +11820,7 @@ async def record_bill_payment(bill_id: str, request: Request, user: dict = Depen
     return updated
 
 
+@app.get("/api/bills/{bill_id}/pdf")
 async def get_bill_pdf(bill_id: str, user: dict = Depends(get_current_user)):
     """Return bill data with settings for client-side PDF generation."""
     bill = await db.bills.find_one(

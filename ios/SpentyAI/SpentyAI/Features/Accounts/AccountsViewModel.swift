@@ -69,7 +69,13 @@ final class AccountsViewModel {
     }
 
     var totalBalance: Double {
-        accounts.reduce(0) { $0 + ($1.balance ?? 0) }
+        accounts.reduce(0) { total, account in
+            let balance = account.balance ?? 0
+            if account.accountType?.lowercased() == "liability" {
+                return total - balance
+            }
+            return total + balance
+        }
     }
 
     func subTypesForType(_ accountType: String) -> [AccountSubType] {

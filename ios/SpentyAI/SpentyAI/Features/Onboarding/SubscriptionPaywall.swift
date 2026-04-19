@@ -11,9 +11,9 @@ struct SubscriptionPaywall: View {
 
     // MARK: - Brand Colors
 
-    private let brandPrimary = Color(hex: "#3A5C4A")
-    private let brandBg      = Color(hex: "#F8F6F3")
-    private let brandError   = Color(hex: "#96453A")
+    private let brandPrimary = Color.spentyPrimary
+    private let brandBg      = Color.spentyBgPrimary
+    private let brandError   = Color.spentyError
 
     var body: some View {
         ScrollView {
@@ -190,7 +190,7 @@ struct SubscriptionPaywall: View {
                 }
             }
             .padding(14)
-            .background(isSelected ? brandPrimary.opacity(0.06) : Color.white)
+            .background(isSelected ? brandPrimary.opacity(0.06) : Color.spentyCardBg)
             .clipShape(RoundedRectangle(cornerRadius: 12))
             .overlay(
                 RoundedRectangle(cornerRadius: 12)
@@ -258,7 +258,7 @@ struct SubscriptionPaywall: View {
                         }
                         .buttonStyle(.bordered)
                         .tint(brandPrimary)
-                        .disabled(viewModel.promoCode.trimmingCharacters(in: .whitespaces).isEmpty)
+                        .disabled(viewModel.promoCode.trimmingCharacters(in: .whitespaces).isEmpty || viewModel.isValidatingPromo)
                     }
 
                     if !viewModel.promoMessage.isEmpty {
@@ -286,13 +286,14 @@ struct SubscriptionPaywall: View {
                         }
                         .buttonStyle(.borderedProminent)
                         .tint(brandPrimary)
+                        .disabled(viewModel.isActivatingPromo)
                     }
                 }
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
         .padding()
-        .background(Color.white)
+        .background(Color.spentyCardBg)
         .clipShape(RoundedRectangle(cornerRadius: 14))
     }
 
@@ -327,7 +328,9 @@ struct SubscriptionPaywall: View {
                 Text("·")
                 Link("Privacy Policy", destination: URL(string: "https://spentyai.com/privacy")!)
                 Text("·")
-                Link("Restore Purchases", destination: URL(string: "https://spentyai.com/restore")!)
+                Button("Restore Purchases") {
+                    Task { try? await AppStore.sync() }
+                }
             }
             .font(.caption2)
             .foregroundStyle(.tertiary)

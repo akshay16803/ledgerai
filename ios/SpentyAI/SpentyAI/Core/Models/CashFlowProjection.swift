@@ -12,22 +12,52 @@ struct CashFlowProjection: Codable {
 }
 
 struct ProjectionMonth: Codable, Identifiable {
-    var id: String { month ?? UUID().uuidString }
-    var month: String?
-    var income: Double?
-    var expense: Double?
-    var mandates: Double?
+    var id: String { label ?? "\(monthIndex ?? 0)" }
+    var monthIndex: Int?
+    var label: String?
+    var projectedIncome: Double?
+    var projectedExpense: Double?
+    var mandateExpense: Double?
     var odInterest: Double?
     var net: Double?
-    var cumulativeNet: Double?
+    var runningBalance: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case monthIndex = "month"
+        case label
+        case projectedIncome
+        case projectedExpense
+        case mandateExpense
+        case odInterest
+        case net
+        case runningBalance
+    }
+
+    /// Convenience aliases so views can still use the old names
+    var month: String? { label }
+    var income: Double? { projectedIncome }
+    var expense: Double? { projectedExpense }
+    var mandates: Double? { mandateExpense }
+    var cumulativeNet: Double? { runningBalance }
 }
 
 struct RecurringItem: Codable, Identifiable {
-    var id: String { description ?? UUID().uuidString }
+    var id: String { transactionId ?? description ?? UUID().uuidString }
+    var transactionId: String?
     var description: String?
     var amount: Double?
     var frequency: String?
-    var type: String?
+    var recurringFrequency: String?
+    var transactionType: String?
+    var monthlyAmount: Double?
+    var categoryId: String?
+    var accountId: String?
+    var isRecurring: Bool?
+
+    /// Convenience alias: the projection endpoint uses `frequency`, the list endpoint uses `recurring_frequency`
+    var effectiveFrequency: String? { frequency ?? recurringFrequency }
+    /// Convenience alias for type
+    var type: String? { transactionType }
 }
 
 struct ODInterestItem: Codable, Identifiable {

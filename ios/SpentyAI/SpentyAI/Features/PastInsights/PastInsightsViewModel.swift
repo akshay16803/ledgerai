@@ -7,7 +7,7 @@ final class PastInsightsViewModel {
     // MARK: - State
 
     var summaries: [TaxSummary] = []
-    var availableEmails: [String] = []
+    var availableEmails: [EmailOption] = []
     var selectedSummary: TaxSummary?
     var detailTransactions: [TaxSummaryTransaction] = []
     var isLoading = false
@@ -76,9 +76,10 @@ final class PastInsightsViewModel {
     @MainActor
     func loadAvailableEmails() async {
         do {
-            availableEmails = try await repository.getAvailableEmails()
-            if createSelectedEmail.isEmpty, let first = availableEmails.first {
-                createSelectedEmail = first
+            let emailOptions = try await repository.getAvailableEmails()
+            availableEmails = emailOptions
+            if createSelectedEmail.isEmpty, let first = emailOptions.first {
+                createSelectedEmail = first.email
             }
         } catch {
             setError(error)
@@ -94,10 +95,13 @@ final class PastInsightsViewModel {
         }
 
         isCreating = true
+        let dateFromStr = isoFormatter.string(from: createDateFrom)
+        let dateToStr = isoFormatter.string(from: createDateTo)
+
         let request = CreateTaxSummaryRequest(
             name: createName.trimmingCharacters(in: .whitespaces),
-            dateFrom: isoFormatter.string(from: createDateFrom),
-            dateTo: isoFormatter.string(from: createDateTo),
+            dateFrom: dateFromStr,
+            dateTo: dateToStr,
             emailAddress: createSelectedEmail
         )
 
@@ -105,8 +109,8 @@ final class PastInsightsViewModel {
             let summary = try await repository.createSummary(request)
             summaries.insert(summary, at: 0)
 
-            // Trigger generation
-            _ = try? await repository.generateSummary()
+            // Trigger generation with date params
+            _ = try? await repository.generateSummary(dateFrom: dateFromStr, dateTo: dateToStr)
 
             resetCreateForm()
             showCreateForm = false
@@ -136,12 +140,13 @@ final class PastInsightsViewModel {
         selectedSummary = summary
         isLoadingTransactions = true
         do {
-            let fresh = try await repository.getSummary(id: summary.id)
-            selectedSummary = fresh
+            // Detail endpoint returns both summary and transactions
+            let detailResponse = try await repository.getSummaryDetail(id: summary.id)
+            selectedSummary = detailResponse.summary
             if let idx = summaries.firstIndex(where: { $0.id == summary.id }) {
-                summaries[idx] = fresh
+                summaries[idx] = detailResponse.summary
             }
-            detailTransactions = try await repository.getTransactions(summaryId: summary.id)
+            detailTransactions = detailResponse.transactions
         } catch {
             setError(error)
         }
@@ -169,7 +174,7 @@ final class PastInsightsViewModel {
             description: txnDescription.trimmingCharacters(in: .whitespaces),
             amount: amount,
             transactionType: txnType,
-            categoryName: txnCategory.isEmpty ? nil : txnCategory
+            category: txnCategory.isEmpty ? nil : txnCategory
         )
 
         do {
@@ -192,7 +197,7 @@ final class PastInsightsViewModel {
             description: txnDescription.trimmingCharacters(in: .whitespaces),
             amount: Double(txnAmount),
             transactionType: txnType,
-            categoryName: txnCategory.isEmpty ? nil : txnCategory
+            category: txnCategory.isEmpty ? nil : txnCategory
         )
 
         do {
@@ -238,13 +243,14 @@ final class PastInsightsViewModel {
     }
 
     @MainActor
-    func downloadPDF() async {
+    func downloadCSV() async {
+        // Backend download endpoint returns CSV (not PDF)
         guard let summaryId = selectedSummary?.id else { return }
         do {
-            let data = try await repository.downloadPDF(summaryId: summaryId)
+            let data = try await repository.downloadCSV(summaryId: summaryId)
             let name = selectedSummary?.name ?? "tax-summary"
             let sanitized = name.replacingOccurrences(of: " ", with: "-").lowercased()
-            let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(sanitized).pdf")
+            let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(sanitized)-download.csv")
             try data.write(to: tempURL)
             shareItem = ShareableFile(url: tempURL)
             showShareSheet = true
@@ -272,7 +278,7 @@ final class PastInsightsViewModel {
         txnDescription = txn.description ?? ""
         txnAmount = txn.amount.map { String(format: "%.2f", $0) } ?? ""
         txnType = txn.transactionType ?? "expense"
-        txnCategory = txn.categoryName ?? ""
+        txnCategory = txn.category ?? ""
         showAddTransaction = true
     }
 
@@ -287,7 +293,7 @@ final class PastInsightsViewModel {
         createName = ""
         createDateFrom = Calendar.current.date(byAdding: .year, value: -1, to: Date()) ?? Date()
         createDateTo = Date()
-        createSelectedEmail = availableEmails.first ?? ""
+        createSelectedEmail = availableEmails.first?.email ?? ""
     }
 
     private func resetTransactionForm() {

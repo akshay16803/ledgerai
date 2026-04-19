@@ -5,14 +5,52 @@ struct StatementListResponse: Codable {
 }
 
 struct StatementUploadResponse: Codable {
-    let statement: Statement?
+    let statementId: String?
     let message: String?
+    let filename: String?
 }
 
 struct ReconcileResponse: Codable {
-    let statement: Statement?
-    let reconciliation: ReconciliationResult?
+    let totalEntries: Int?
+    let matched: Int?
+    let unmatched: Int?
+    let missing: Int?
+}
+
+struct ReauditResponse: Codable {
+    let statementId: String?
+    let status: String?
     let message: String?
+}
+
+struct ApproveResponse: Codable {
+    let message: String?
+    let transactionsCreated: Int?
+}
+
+struct EntriesResponse: Codable {
+    let entries: [ParsedEntry]
+    let total: Int?
+    let statementId: String?
+}
+
+struct EntryUpdateResponse: Codable {
+    let entryIndex: Int?
+    let entry: ParsedEntry?
+}
+
+struct BulkCategorizeResponse: Codable {
+    let updated: Int?
+    let total: Int?
+}
+
+struct AddMissingResponse: Codable {
+    let message: String?
+    let added: Int?
+}
+
+struct AddMissingBody: Codable {
+    let entryIndices: [Int]
 }
 
 struct UnlockBody: Codable {
@@ -24,8 +62,14 @@ struct EntryUpdateBody: Codable {
     let categoryName: String?
 }
 
-struct BulkCategorizeBody: Codable {
+struct BulkCategorizeEntry: Codable {
+    let entryIndex: Int
     let categoryId: String
+    let subcategoryId: String?
+}
+
+struct BulkCategorizeBody: Codable {
+    let updates: [BulkCategorizeEntry]
 }
 
 final class ReconciliationRepository: Sendable {
@@ -59,7 +103,7 @@ final class ReconciliationRepository: Sendable {
         accountId: String,
         periodFrom: String,
         periodTo: String
-    ) async throws -> Statement {
+    ) async throws -> StatementUploadResponse {
         let fields: [String: String] = [
             "account_id": accountId,
             "period_from": periodFrom,
@@ -77,45 +121,47 @@ final class ReconciliationRepository: Sendable {
     // MARK: - Entries
 
     func fetchEntries(statementId: String) async throws -> [ParsedEntry] {
-        return try await api.get(APIEndpoints.statementEntries(statementId))
+        let response: EntriesResponse = try await api.get(APIEndpoints.statementEntries(statementId))
+        return response.entries
     }
 
-    func updateEntry(statementId: String, index: Int, categoryId: String?, categoryName: String?) async throws -> Statement {
+    func updateEntry(statementId: String, index: Int, categoryId: String?, categoryName: String?) async throws -> EntryUpdateResponse {
         let body = EntryUpdateBody(categoryId: categoryId, categoryName: categoryName)
         return try await api.patch(APIEndpoints.statementEntryUpdate(statementId, index), body: body)
     }
 
-    func bulkCategorize(statementId: String, categoryId: String) async throws -> Statement {
-        let body = BulkCategorizeBody(categoryId: categoryId)
+    func bulkCategorize(statementId: String, updates: [BulkCategorizeEntry]) async throws -> BulkCategorizeResponse {
+        let body = BulkCategorizeBody(updates: updates)
         return try await api.post(APIEndpoints.statementBulkCategorize(statementId), body: body)
     }
 
     // MARK: - Reconciliation Actions
 
-    func reconcile(statementId: String) async throws -> Statement {
+    func reconcile(statementId: String) async throws -> ReconcileResponse {
         return try await api.post(APIEndpoints.statementReconcile(statementId))
     }
 
-    func addMissingToLedger(statementId: String) async throws -> Statement {
-        return try await api.post(APIEndpoints.statementAddMissing(statementId))
+    func addMissingToLedger(statementId: String, entryIndices: [Int]) async throws -> AddMissingResponse {
+        let body = AddMissingBody(entryIndices: entryIndices)
+        return try await api.post(APIEndpoints.statementAddMissing(statementId), body: body)
     }
 
-    func reaudit(statementId: String) async throws -> Statement {
+    func reaudit(statementId: String) async throws -> ReauditResponse {
         return try await api.post(APIEndpoints.statementReaudit(statementId))
     }
 
-    func unlock(statementId: String, password: String) async throws -> Statement {
+    func unlock(statementId: String, password: String) async throws -> ReauditResponse {
         let body = UnlockBody(password: password)
         return try await api.post(APIEndpoints.statementUnlock(statementId), body: body)
     }
 
     // MARK: - Approve / Reject
 
-    func approveStatement(id: String) async throws -> Statement {
+    func approveStatement(id: String) async throws -> ApproveResponse {
         return try await api.post(APIEndpoints.statementApprove(id))
     }
 
-    func rejectStatement(id: String) async throws -> Statement {
+    func rejectStatement(id: String) async throws -> MessageResponse {
         return try await api.post(APIEndpoints.statementReject(id))
     }
 

@@ -12,6 +12,7 @@ struct ChatMessage: Codable, Identifiable {
     var bill: Bill?
 
     enum CodingKeys: String, CodingKey {
+        case id = "messageId"
         case role
         case content
         case transactionPosted
@@ -39,7 +40,7 @@ struct ChatMessage: Codable, Identifiable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.id = UUID().uuidString
+        self.id = (try? container.decodeIfPresent(String.self, forKey: .id)) ?? UUID().uuidString
         self.role = try container.decodeIfPresent(String.self, forKey: .role)
         self.content = try container.decodeIfPresent(String.self, forKey: .content)
         self.transactionPosted = try container.decodeIfPresent(Bool.self, forKey: .transactionPosted)

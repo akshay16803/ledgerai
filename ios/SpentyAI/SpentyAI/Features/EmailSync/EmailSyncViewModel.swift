@@ -25,6 +25,7 @@ final class EmailSyncViewModel {
 
     var showDisconnectConfirm = false
     var disconnectProvider: String?
+    var disconnectEmail: String?
 
     // MARK: - Pending Review Edit
 
@@ -96,13 +97,17 @@ final class EmailSyncViewModel {
     }
 
     @MainActor
-    func disconnectGmail() async {
+    func disconnectGmail(email: String? = nil) async {
+        guard let emailToDisconnect = email ?? disconnectEmail else {
+            handleError(NSError(domain: "", code: 0, userInfo: [NSLocalizedDescriptionKey: "No email address specified for disconnect"]))
+            return
+        }
         isLoading = true
         showError = false
 
         do {
-            _ = try await repository.disconnectGmail()
-            gmailAccounts = []
+            _ = try await repository.disconnectGmail(email: emailToDisconnect)
+            gmailAccounts.removeAll { $0.email == emailToDisconnect }
             showSuccessMessage("Gmail disconnected successfully")
             await loadSyncStats()
         } catch {
@@ -142,13 +147,17 @@ final class EmailSyncViewModel {
     }
 
     @MainActor
-    func disconnectOutlook() async {
+    func disconnectOutlook(email: String? = nil) async {
+        guard let emailToDisconnect = email ?? disconnectEmail else {
+            handleError(NSError(domain: "", code: 0, userInfo: [NSLocalizedDescriptionKey: "No email address specified for disconnect"]))
+            return
+        }
         isLoading = true
         showError = false
 
         do {
-            _ = try await repository.disconnectOutlook()
-            outlookAccounts = []
+            _ = try await repository.disconnectOutlook(email: emailToDisconnect)
+            outlookAccounts.removeAll { $0.email == emailToDisconnect }
             showSuccessMessage("Outlook disconnected successfully")
             await loadSyncStats()
         } catch {
@@ -161,12 +170,29 @@ final class EmailSyncViewModel {
     // MARK: - Sync
 
     @MainActor
-    func startSync() async {
+    func startSync(forAccount account: EmailAccount? = nil) async {
+        // Use provided account or default to first Gmail account
+        guard let email = account?.email ?? gmailAccounts.first?.email else {
+            handleError(NSError(domain: "", code: 0, userInfo: [NSLocalizedDescriptionKey: "No Gmail account available to sync"]))
+            return
+        }
+
+        // Use the account's syncFromDate or default to 30 days ago
+        let syncFromDate: String
+        if let existingDate = account?.syncFromDate ?? gmailAccounts.first?.syncFromDate {
+            let formatter = ISO8601DateFormatter()
+            syncFromDate = formatter.string(from: existingDate)
+        } else {
+            let thirtyDaysAgo = Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date()
+            let formatter = ISO8601DateFormatter()
+            syncFromDate = formatter.string(from: thirtyDaysAgo)
+        }
+
         isSyncing = true
         showError = false
 
         do {
-            let response = try await repository.startSync()
+            let response = try await repository.startSync(gmailEmail: email, syncFromDate: syncFromDate)
             showSuccessMessage(response.message ?? "Sync started")
             await loadSyncStats()
             await loadGmailStatus()
@@ -184,8 +210,9 @@ final class EmailSyncViewModel {
         showError = false
 
         do {
-            let response = try await repository.retryPending()
-            let msg = response.message ?? "Retried \(response.retried ?? 0) emails"
+            let gmailEmail = gmailAccounts.first?.email
+            let response = try await repository.retryPending(gmailEmail: gmailEmail)
+            let msg = response.message ?? "Processing \(response.count ?? 0) pending emails"
             showSuccessMessage(msg)
             await loadSyncStats()
         } catch {

@@ -105,7 +105,7 @@ struct EmailSyncView: View {
                 ], spacing: 12) {
                     StatCard(
                         label: "Total Emails",
-                        value: "\(stats.totalEmails ?? 0)",
+                        value: "\(stats.totalSynced ?? 0)",
                         icon: "envelope.fill",
                         color: .spentyPrimary
                     )
@@ -129,11 +129,11 @@ struct EmailSyncView: View {
                     )
                 }
 
-                if let lastSync = stats.lastSyncAt {
+                if let processed = stats.processedByAi, processed > 0 {
                     HStack(spacing: 4) {
-                        Image(systemName: "clock")
+                        Image(systemName: "cpu")
                             .font(.system(size: 11))
-                        Text("Last synced: \(lastSync, format: .relative(presentation: .named))")
+                        Text("\(processed) processed by AI")
                             .font(SpentyFonts.caption1)
                     }
                     .foregroundColor(.spentyTextSecondary)
@@ -331,7 +331,7 @@ struct EmailSyncView: View {
                 }
 
                 Button {
-                    Task { await viewModel.startSync() }
+                    Task { await viewModel.startSync(forAccount: account) }
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: "arrow.clockwise")
@@ -351,6 +351,7 @@ struct EmailSyncView: View {
 
                 Button {
                     viewModel.disconnectProvider = provider
+                    viewModel.disconnectEmail = account.email
                     viewModel.showDisconnectConfirm = true
                 } label: {
                     HStack(spacing: 4) {
@@ -392,7 +393,7 @@ struct EmailSyncView: View {
             GridItem(.flexible(), spacing: 8),
             GridItem(.flexible(), spacing: 8)
         ], spacing: 8) {
-            miniStat(label: "Emails", value: "\(stats.totalEmails ?? 0)", color: .spentyPrimary)
+            miniStat(label: "Emails", value: "\(stats.totalSynced ?? 0)", color: .spentyPrimary)
             miniStat(label: "Transactions", value: "\(stats.transactionsCreated ?? 0)", color: .spentySuccess)
             miniStat(label: "Review", value: "\(stats.pendingReview ?? 0)", color: .spentyWarning)
         }
@@ -488,8 +489,8 @@ struct EmailSyncView: View {
                     }
 
                     HStack(spacing: 16) {
-                        Label("\(stats.totalUploaded) messages", systemImage: "envelope.fill")
-                        Label("\(stats.transactionsFound) transactions", systemImage: "banknote.fill")
+                        Label("\(stats.totalSynced) messages", systemImage: "envelope.fill")
+                        Label("\(stats.transactionsCreated) transactions", systemImage: "banknote.fill")
                     }
                     .font(SpentyFonts.caption1)
                     .foregroundColor(.spentyTextSecondary)

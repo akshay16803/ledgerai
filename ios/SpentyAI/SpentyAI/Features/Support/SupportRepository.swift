@@ -13,6 +13,10 @@ struct SupportTicketResponse: Codable {
     }
 }
 
+struct FAQResponse: Codable {
+    let faqs: [FAQItem]
+}
+
 // MARK: - Endpoints
 
 private enum SupportEndpoints {
@@ -36,6 +40,7 @@ final class SupportRepository {
     // MARK: - FAQ
 
     func getFAQ() async throws -> [FAQItem] {
-        try await APIClient.shared.get(SupportEndpoints.faq)
+        let response: FAQResponse = try await APIClient.shared.get(SupportEndpoints.faq)
+        return response.faqs
     }
 }

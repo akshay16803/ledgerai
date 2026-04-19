@@ -157,17 +157,14 @@ struct SMSSyncView: View {
                 }
 
                 if let upload = viewModel.lastUploadResult {
-                    resultRow(icon: "arrow.up.circle.fill", label: "Uploaded", value: "\(upload.uploaded)", color: .spentyPrimary)
-                    if upload.duplicates > 0 {
-                        resultRow(icon: "doc.on.doc", label: "Duplicates skipped", value: "\(upload.duplicates)", color: .spentyWarning)
+                    resultRow(icon: "arrow.up.circle.fill", label: "Stored", value: "\(upload.stored)", color: .spentyPrimary)
+                    if upload.skipped > 0 {
+                        resultRow(icon: "doc.on.doc", label: "Duplicates skipped", value: "\(upload.skipped)", color: .spentyWarning)
                     }
                 }
 
                 if let parse = viewModel.lastParseResult {
-                    resultRow(icon: "banknote.fill", label: "Transactions found", value: "\(parse.transactionsFound)", color: .spentySuccess)
-                    if parse.failed > 0 {
-                        resultRow(icon: "exclamationmark.triangle.fill", label: "Failed to parse", value: "\(parse.failed)", color: .spentyError)
-                    }
+                    resultRow(icon: "banknote.fill", label: "Processing", value: "\(parse.count ?? 0) messages", color: .spentySuccess)
                 }
             }
             .cardStyle()
@@ -218,17 +215,17 @@ struct SMSSyncView: View {
                     GridItem(.flexible(), spacing: 12),
                     GridItem(.flexible(), spacing: 12)
                 ], spacing: 12) {
-                    StatCard(label: "Total Uploaded", value: "\(stats.totalUploaded)", icon: "envelope.fill", color: .spentyPrimary)
-                    StatCard(label: "Transactions", value: "\(stats.transactionsFound)", icon: "banknote.fill", color: .spentySuccess)
+                    StatCard(label: "Total Synced", value: "\(stats.totalSynced)", icon: "envelope.fill", color: .spentyPrimary)
+                    StatCard(label: "Transactions", value: "\(stats.transactionsCreated)", icon: "banknote.fill", color: .spentySuccess)
                     StatCard(label: "Pending Review", value: "\(stats.pendingReview)", icon: "clock.fill", color: .spentyWarning)
-                    StatCard(label: "Failed", value: "\(stats.failed)", icon: "xmark.circle.fill", color: .spentyError)
+                    StatCard(label: "Failed", value: "\(stats.aiFailed)", icon: "xmark.circle.fill", color: .spentyError)
                 }
 
-                if let lastSync = stats.lastSyncDate {
+                if stats.processedByAi > 0 {
                     HStack(spacing: 4) {
-                        Image(systemName: "clock")
+                        Image(systemName: "cpu")
                             .font(.system(size: 11))
-                        Text("Last synced: \(lastSync, format: .relative(presentation: .named))")
+                        Text("\(stats.processedByAi) processed by AI")
                             .font(SpentyFonts.caption1)
                     }
                     .foregroundColor(.spentyTextSecondary)
@@ -244,7 +241,7 @@ struct SMSSyncView: View {
     private var actionsSection: some View {
         if viewModel.hasStats {
             VStack(spacing: 12) {
-                if let stats = viewModel.syncStats, stats.pendingReview > 0 || stats.failed > 0 {
+                if let stats = viewModel.syncStats, stats.pendingReview > 0 || stats.aiFailed > 0 {
                     Button {
                         Task { await viewModel.retryPending() }
                     } label: {
@@ -268,7 +265,7 @@ struct SMSSyncView: View {
                             Image(systemName: "checkmark.circle")
                                 .font(.system(size: 11))
                                 .foregroundColor(.spentySuccess)
-                            Text("Retried \(retry.retried): \(retry.succeeded) succeeded, \(retry.failed) failed")
+                            Text(retry.message ?? "Processing \(retry.count ?? 0) messages")
                                 .font(SpentyFonts.caption1)
                                 .foregroundColor(.spentyTextSecondary)
                         }
@@ -298,7 +295,7 @@ struct SMSSyncView: View {
                         Image(systemName: "checkmark.circle")
                             .font(.system(size: 11))
                             .foregroundColor(.spentySuccess)
-                        Text("\(mandate.mandatesFound) recurring mandate\(mandate.mandatesFound == 1 ? "" : "s") detected")
+                        Text("\(mandate.total) recurring mandate\(mandate.total == 1 ? "" : "s") detected")
                             .font(SpentyFonts.caption1)
                             .foregroundColor(.spentyTextSecondary)
                     }

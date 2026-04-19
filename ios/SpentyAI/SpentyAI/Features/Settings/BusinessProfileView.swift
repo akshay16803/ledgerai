@@ -102,7 +102,7 @@ struct BusinessProfileView: View {
                 Image(systemName: "number")
                     .foregroundStyle(Brand.primary)
                     .frame(width: 24)
-                TextField("GSTIN", text: binding(\.gstin))
+                TextField("GSTIN", text: binding(\.firmGstin))
                     .focused($focusedField, equals: .gstin)
                     .textInputAutocapitalization(.characters)
                     .autocorrectionDisabled()
@@ -112,7 +112,7 @@ struct BusinessProfileView: View {
                 Image(systemName: "creditcard")
                     .foregroundStyle(Brand.primary)
                     .frame(width: 24)
-                TextField("PAN", text: binding(\.pan))
+                TextField("PAN", text: binding(\.firmPan))
                     .focused($focusedField, equals: .pan)
                     .textInputAutocapitalization(.characters)
                     .autocorrectionDisabled()
@@ -135,7 +135,7 @@ struct BusinessProfileView: View {
                     .foregroundStyle(Brand.primary)
                     .frame(width: 24)
 
-                Picker("State", selection: binding(\.state)) {
+                Picker("State", selection: binding(\.firmState)) {
                     Text("Select State").tag("")
                     ForEach(Self.indianStates, id: \.self) { state in
                         Text(state).tag(state)
@@ -166,7 +166,7 @@ struct BusinessProfileView: View {
                     .frame(width: 24)
                     .padding(.top, 8)
 
-                TextField("Business Address", text: binding(\.address), axis: .vertical)
+                TextField("Business Address", text: binding(\.firmAddress), axis: .vertical)
                     .focused($focusedField, equals: .address)
                     .lineLimit(3...6)
                     .textContentType(.fullStreetAddress)

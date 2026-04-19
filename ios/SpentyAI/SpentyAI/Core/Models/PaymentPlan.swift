@@ -49,10 +49,11 @@ struct SubscriptionStatus: Codable {
     let autoRenew: Bool?
 
     enum CodingKeys: String, CodingKey {
-        case plan, provider
+        case plan = "subscriptionPlan"
+        case provider = "subscriptionProvider"
         case isActive
         case productId
-        case expiresAt
+        case expiresAt = "subscriptionExpiry"
         case autoRenew
     }
 }

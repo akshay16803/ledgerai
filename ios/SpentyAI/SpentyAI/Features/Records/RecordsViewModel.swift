@@ -33,10 +33,8 @@ final class RecordsViewModel {
 
     var isLoading: Bool = false
     var isLoadingMore: Bool = false
-    var page: Int = 1
     var hasMore: Bool = true
 
-    var receiptsPage: Int = 1
     var receiptsHasMore: Bool = true
     var isLoadingReceipts: Bool = false
     var isLoadingMoreReceipts: Bool = false
@@ -67,9 +65,8 @@ final class RecordsViewModel {
     func loadRecords() async {
         isLoading = true
         errorMessage = nil
-        page = 1
         do {
-            let response = try await fetchRecordsPage(page: 1)
+            let response = try await fetchRecordsPage(skip: 0)
             records = response.records
             recordsTotal = response.total
             hasMore = records.count < recordsTotal
@@ -83,13 +80,11 @@ final class RecordsViewModel {
     func loadMoreRecords() async {
         guard !isLoadingMore, hasMore else { return }
         isLoadingMore = true
-        page += 1
         do {
-            let response = try await fetchRecordsPage(page: page)
+            let response = try await fetchRecordsPage(skip: records.count)
             records.append(contentsOf: response.records)
             hasMore = records.count < recordsTotal
         } catch {
-            page -= 1
             errorMessage = error.localizedDescription
         }
         isLoadingMore = false
@@ -97,10 +92,9 @@ final class RecordsViewModel {
 
     @MainActor
     func refreshRecords() async {
-        page = 1
         errorMessage = nil
         do {
-            let response = try await fetchRecordsPage(page: 1)
+            let response = try await fetchRecordsPage(skip: 0)
             records = response.records
             recordsTotal = response.total
             hasMore = records.count < recordsTotal
@@ -119,7 +113,7 @@ final class RecordsViewModel {
         errorMessage = nil
         do {
             let response = try await repository.searchRecords(query: searchQuery)
-            records = response.records
+            records = response.items
             recordsTotal = response.total
             hasMore = false
         } catch {
@@ -171,7 +165,8 @@ final class RecordsViewModel {
     func downloadZip() async {
         isDownloadingZip = true
         do {
-            let data = try await repository.downloadZip()
+            let archiveIds = records.map { $0.id }
+            let data = try await repository.downloadZip(archiveIds: archiveIds)
             let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("records_export.zip")
             try data.write(to: tempURL)
             shareItem = ShareItem(url: tempURL)
@@ -187,9 +182,8 @@ final class RecordsViewModel {
     func loadReceipts() async {
         isLoadingReceipts = true
         errorMessage = nil
-        receiptsPage = 1
         do {
-            let response = try await repository.fetchReceipts(page: 1, limit: pageSize)
+            let response = try await repository.fetchReceipts(skip: 0, limit: pageSize)
             receipts = response.receipts
             receiptsTotal = response.total
             receiptsHasMore = receipts.count < receiptsTotal
@@ -203,13 +197,11 @@ final class RecordsViewModel {
     func loadMoreReceipts() async {
         guard !isLoadingMoreReceipts, receiptsHasMore else { return }
         isLoadingMoreReceipts = true
-        receiptsPage += 1
         do {
-            let response = try await repository.fetchReceipts(page: receiptsPage, limit: pageSize)
+            let response = try await repository.fetchReceipts(skip: receipts.count, limit: pageSize)
             receipts.append(contentsOf: response.receipts)
             receiptsHasMore = receipts.count < receiptsTotal
         } catch {
-            receiptsPage -= 1
             errorMessage = error.localizedDescription
         }
         isLoadingMoreReceipts = false
@@ -217,10 +209,9 @@ final class RecordsViewModel {
 
     @MainActor
     func refreshReceipts() async {
-        receiptsPage = 1
         errorMessage = nil
         do {
-            let response = try await repository.fetchReceipts(page: 1, limit: pageSize)
+            let response = try await repository.fetchReceipts(skip: 0, limit: pageSize)
             receipts = response.receipts
             receiptsTotal = response.total
             receiptsHasMore = receipts.count < receiptsTotal
@@ -272,11 +263,13 @@ final class RecordsViewModel {
     @MainActor
     func parseReceipt(id: String) async -> Receipt? {
         do {
-            let parsed = try await repository.parseReceipt(id: id)
+            let parseResponse = try await repository.parseReceipt(id: id)
+            // Fetch the full updated receipt from the server
+            let fullReceipt = try await repository.fetchReceipt(id: id)
             if let idx = receipts.firstIndex(where: { $0.id == id }) {
-                receipts[idx] = parsed
+                receipts[idx] = fullReceipt
             }
-            return parsed
+            return fullReceipt
         } catch {
             errorMessage = error.localizedDescription
             return nil
@@ -286,9 +279,11 @@ final class RecordsViewModel {
     @MainActor
     func linkReceiptToTransaction(receiptId: String, transactionId: String) async {
         do {
-            let updated = try await repository.linkReceipt(id: receiptId, transactionId: transactionId)
+            _ = try await repository.linkReceipt(id: receiptId, transactionId: transactionId)
+            // Re-fetch the full receipt to update local state
+            let fullReceipt = try await repository.fetchReceipt(id: receiptId)
             if let idx = receipts.firstIndex(where: { $0.id == receiptId }) {
-                receipts[idx] = updated
+                receipts[idx] = fullReceipt
             }
         } catch {
             errorMessage = error.localizedDescription
@@ -297,14 +292,14 @@ final class RecordsViewModel {
 
     // MARK: - Helpers
 
-    private func fetchRecordsPage(page: Int) async throws -> RecordListResponse {
+    private func fetchRecordsPage(skip: Int) async throws -> RecordListResponse {
         let dateFromStr = dateFrom.map { Self.queryDateFormatter.string(from: $0) }
         let dateToStr = dateTo.map { Self.queryDateFormatter.string(from: $0) }
         let minAmt = Double(amountMin)
         let maxAmt = Double(amountMax)
 
         return try await repository.fetchRecords(
-            page: page,
+            skip: skip,
             limit: pageSize,
             dateFrom: dateFromStr,
             dateTo: dateToStr,
