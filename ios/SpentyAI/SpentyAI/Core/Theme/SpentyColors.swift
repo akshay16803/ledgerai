@@ -29,6 +29,11 @@ extension Color {
             ? UIColor(red: 0x2C/255.0, green: 0x2C/255.0, blue: 0x2E/255.0, alpha: 1)
             : UIColor(red: 1.0, green: 1.0, blue: 1.0, alpha: 1)
     })
+    static let spentyBgSecondary = Color(uiColor: UIColor { traitCollection in
+        traitCollection.userInterfaceStyle == .dark
+            ? UIColor(red: 0x2C/255.0, green: 0x2C/255.0, blue: 0x2E/255.0, alpha: 1)
+            : UIColor(red: 0xF0/255.0, green: 0xEE/255.0, blue: 0xEB/255.0, alpha: 1)
+    })
     static let spentyBorder = Color(uiColor: UIColor { traitCollection in
         traitCollection.userInterfaceStyle == .dark
             ? UIColor(red: 0x38/255.0, green: 0x38/255.0, blue: 0x3A/255.0, alpha: 1)
