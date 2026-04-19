@@ -377,7 +377,7 @@ struct DashboardView: View {
             collapsibleHeader(
                 title: "Pending Approval",
                 icon: "envelope.badge.fill",
-                count: viewModel.pendingTransactions.count,
+                count: viewModel.pendingReview,
                 isExpanded: $isPendingExpanded
             )
 
