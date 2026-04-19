@@ -111,6 +111,19 @@ struct InvoiceLineItem: Codable, Identifiable, Equatable {
             ?? (try? container.decodeIfPresent(Double.self, forKey: .total))
     }
 
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(description, forKey: .description)
+        try container.encodeIfPresent(hsnSac, forKey: .hsnSac)
+        try container.encodeIfPresent(quantity, forKey: .quantity)
+        try container.encodeIfPresent(rate, forKey: .rate)
+        try container.encodeIfPresent(taxPercent, forKey: .taxPercent)
+        try container.encodeIfPresent(cgst, forKey: .cgst)
+        try container.encodeIfPresent(sgst, forKey: .sgst)
+        try container.encodeIfPresent(igst, forKey: .igst)
+        try container.encodeIfPresent(amount, forKey: .amount)
+    }
+
     init(description: String? = nil, hsnSac: String? = nil, quantity: Double? = nil, rate: Double? = nil, taxPercent: Double? = nil, cgst: Double? = nil, sgst: Double? = nil, igst: Double? = nil, amount: Double? = nil) {
         self.description = description
         self.hsnSac = hsnSac
