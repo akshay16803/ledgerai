@@ -12,6 +12,7 @@ struct CategoryFormView: View {
     @State private var isSaving = false
 
     private var isEditing: Bool { viewModel.editingCategory != nil }
+    private var isSubcategory: Bool { selectedParentId != nil }
 
     // MARK: - Body
 
@@ -23,7 +24,7 @@ struct CategoryFormView: View {
                 Form {
                     // ── Name ────────────────────────────────────
                     Section {
-                        TextField("Category name", text: $name)
+                        TextField(isSubcategory ? "Subcategory name" : "Category name", text: $name)
                             .autocorrectionDisabled()
                     } header: {
                         Text("Name")
@@ -58,7 +59,7 @@ struct CategoryFormView: View {
                 }
                 .scrollContentBackground(.hidden)
             }
-            .navigationTitle(isEditing ? "Edit Category" : "New Category")
+            .navigationTitle(isEditing ? "Edit Category" : (isSubcategory ? "New Subcategory" : "New Category"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
