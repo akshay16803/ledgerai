@@ -53,7 +53,7 @@ enum TicketPriority: String, CaseIterable, Identifiable {
 
     var color: Color {
         switch self {
-        case .low:    return .green
+        case .low:    return .spentySuccess
         case .medium: return .orange
         case .high:   return .spentyError
         }

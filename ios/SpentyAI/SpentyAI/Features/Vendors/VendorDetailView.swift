@@ -147,7 +147,7 @@ struct VendorDetailView: View {
                 summaryTile(
                     title: "Total Paid",
                     value: displayVendor.totalPaid ?? 0,
-                    color: .green,
+                    color: .spentySuccess,
                     icon: "checkmark.circle.fill"
                 )
                 summaryTile(
@@ -257,7 +257,7 @@ struct VendorDetailView: View {
 
     private func statusBadge(_ status: String) -> some View {
         let color: Color = switch status.lowercased() {
-        case "paid":      .green
+        case "paid":      .spentySuccess
         case "partial":   .orange
         case "overdue":   .spentyError
         default:          .secondary

@@ -95,7 +95,7 @@ struct RecordPaymentView: View {
                     .foregroundStyle(.secondary)
                 Spacer()
                 Text(formatCurrency(amountPaid))
-                    .foregroundStyle(.green)
+                    .foregroundStyle(.spentySuccess)
             }
 
             HStack {
@@ -104,7 +104,7 @@ struct RecordPaymentView: View {
                 Spacer()
                 Text(formatCurrency(balanceDue))
                     .font(.title3.weight(.bold))
-                    .foregroundStyle(balanceDue > 0 ? Color.spentyError : .green)
+                    .foregroundStyle(balanceDue > 0 ? Color.spentyError : .spentySuccess)
             }
         } header: {
             Text("Invoice Summary")

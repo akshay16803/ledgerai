@@ -82,7 +82,7 @@ struct CustomerDetailView: View {
             HStack(spacing: 0) {
                 summaryTile("Invoiced", amount: displayCustomer.totalInvoiced ?? 0, color: Color.spentyPrimary)
                 Divider().frame(height: 44)
-                summaryTile("Paid", amount: displayCustomer.totalPaid ?? 0, color: .green)
+                summaryTile("Paid", amount: displayCustomer.totalPaid ?? 0, color: .spentySuccess)
                 Divider().frame(height: 44)
                 summaryTile("Outstanding", amount: displayCustomer.outstanding ?? 0, color: Color.spentyError)
             }
@@ -157,7 +157,7 @@ struct CustomerDetailView: View {
 
     private func statusBadge(_ status: String) -> some View {
         let color: Color = switch status.lowercased() {
-        case "paid": .green
+        case "paid": .spentySuccess
         case "overdue": Color.spentyError
         case "sent", "pending": .orange
         default: .secondary
