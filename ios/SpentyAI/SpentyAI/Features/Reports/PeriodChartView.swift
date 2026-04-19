@@ -152,9 +152,9 @@ struct PeriodChartView: View {
 
 #Preview {
     PeriodChartView(periods: [
-        ReportPeriod(period: "2025-01", income: 50000, expense: -35000, net: 15000, transactionCount: 42),
-        ReportPeriod(period: "2025-02", income: 55000, expense: -40000, net: 15000, transactionCount: 38),
-        ReportPeriod(period: "2025-03", income: 48000, expense: -32000, net: 16000, transactionCount: 45),
+        ReportPeriod(month: "2025-01", income: 50000, expense: -35000, net: 15000, count: 42),
+        ReportPeriod(month: "2025-02", income: 55000, expense: -40000, net: 15000, count: 38),
+        ReportPeriod(month: "2025-03", income: 48000, expense: -32000, net: 16000, count: 45),
     ])
     .padding()
 }

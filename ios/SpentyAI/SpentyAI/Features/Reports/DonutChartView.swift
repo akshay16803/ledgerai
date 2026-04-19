@@ -154,11 +154,11 @@ struct DonutChartView: View {
 #Preview {
     DonutChartView(
         categories: [
-            ReportCategory(categoryId: "1", name: "Food", amount: 12000, percentage: 35, transactionCount: 20),
-            ReportCategory(categoryId: "2", name: "Transport", amount: 8000, percentage: 23, transactionCount: 15),
-            ReportCategory(categoryId: "3", name: "Shopping", amount: 6000, percentage: 17, transactionCount: 10),
-            ReportCategory(categoryId: "4", name: "Bills", amount: 5000, percentage: 14, transactionCount: 8),
-            ReportCategory(categoryId: "5", name: "Other", amount: 3500, percentage: 11, transactionCount: 5),
+            ReportCategory(categoryId: "1", categoryName: "Food", total: 12000, count: 20),
+            ReportCategory(categoryId: "2", categoryName: "Transport", total: 8000, count: 15),
+            ReportCategory(categoryId: "3", categoryName: "Shopping", total: 6000, count: 10),
+            ReportCategory(categoryId: "4", categoryName: "Bills", total: 5000, count: 8),
+            ReportCategory(categoryId: "5", categoryName: "Other", total: 3500, count: 5),
         ],
         totalAmount: 34500,
         type: .expense
