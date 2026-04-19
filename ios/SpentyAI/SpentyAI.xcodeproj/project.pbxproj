@@ -155,6 +155,11 @@
 		0B07D1FD604F757C74C8DA29 /* PDFKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9516B74FA7C45D6F7E5A9858 /* PDFKit.framework */; settings = {ATTRIBUTES = (Required, ); }; };
 		801D3696DE187977AC4EEA2F /* WebKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B8815DCBE22F16251FEF8454 /* WebKit.framework */; settings = {ATTRIBUTES = (Required, ); }; };
 		0F33E14340B96D4CCDFD3658 /* Security.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 11D35AF3EBB2E0ECF2C6354F /* Security.framework */; settings = {ATTRIBUTES = (Required, ); }; };
+		F6A7B8C9D0E1F2A3B4C5D6E7 /* SpeechManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6A7B8C9D0E1F2 /* SpeechManager.swift */; };
+		A7B8C9D0E1F2A3B4C5D6E7F8 /* RecordExpenseIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F6A7B8C9D0E1F2A3 /* RecordExpenseIntent.swift */; };
+		B8C9D0E1F2A3B4C5D6E7F8A9 /* RecordIncomeIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3D4E5F6A7B8C9D0E1F2A3B4 /* RecordIncomeIntent.swift */; };
+		C9D0E1F2A3B4C5D6E7F8A9B0 /* CheckBalanceIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4E5F6A7B8C9D0E1F2A3B4C5 /* CheckBalanceIntent.swift */; };
+		D0E1F2A3B4C5D6E7F8A9B0C1 /* AppShortcuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5F6A7B8C9D0E1F2A3B4C5D6 /* AppShortcuts.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -308,6 +313,11 @@
 		B8815DCBE22F16251FEF8454 /* WebKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WebKit.framework; path = System/Library/Frameworks/WebKit.framework; sourceTree = SDKROOT; };
 		11D35AF3EBB2E0ECF2C6354F /* Security.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Security.framework; path = System/Library/Frameworks/Security.framework; sourceTree = SDKROOT; };
 		CA9C81A7D7091E53D175FBEE /* SpentyAI.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SpentyAI.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A1B2C3D4E5F6A7B8C9D0E1F2 /* SpeechManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechManager.swift; sourceTree = "<group>"; };
+		B2C3D4E5F6A7B8C9D0E1F2A3 /* RecordExpenseIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordExpenseIntent.swift; sourceTree = "<group>"; };
+		C3D4E5F6A7B8C9D0E1F2A3B4 /* RecordIncomeIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordIncomeIntent.swift; sourceTree = "<group>"; };
+		D4E5F6A7B8C9D0E1F2A3B4C5 /* CheckBalanceIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CheckBalanceIntent.swift; sourceTree = "<group>"; };
+		E5F6A7B8C9D0E1F2A3B4C5D6 /* AppShortcuts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppShortcuts.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -384,6 +394,7 @@
 				D529832A72C148C9F39B8AB9 /* Components */,
 				A31651542F39F7E1F3FB0C31 /* Models */,
 				FE36AFBC7ED0892204CEE160 /* Networking */,
+				E1F2A3B4C5D6E7F8A9B0C1D2 /* Services */,
 				5AC03619EAE208578185FCBC /* Theme */,
 			);
 			path = Core;
@@ -486,6 +497,7 @@
 				3F51E644BFB3784ABB1CF740 /* Reports */,
 				AAAFFC6C12D20B9916CD64B6 /* SMSSync */,
 				D9E4300AB7C0FECD8718F860 /* Settings */,
+				F2A3B4C5D6E7F8A9B0C1D2E3 /* SiriIntents */,
 				45ED91596DDBF74CDE490FEB /* Support */,
 				8A03F5A4C8108FDEB9322A47 /* Transactions */,
 				994FCDF4E79811C6CD0E95FA /* Vendors */,
@@ -754,6 +766,25 @@
 			path = Navigation;
 			sourceTree = "<group>";
 		};
+		E1F2A3B4C5D6E7F8A9B0C1D2 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				A1B2C3D4E5F6A7B8C9D0E1F2 /* SpeechManager.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		F2A3B4C5D6E7F8A9B0C1D2E3 /* SiriIntents */ = {
+			isa = PBXGroup;
+			children = (
+				E5F6A7B8C9D0E1F2A3B4C5D6 /* AppShortcuts.swift */,
+				D4E5F6A7B8C9D0E1F2A3B4C5 /* CheckBalanceIntent.swift */,
+				B2C3D4E5F6A7B8C9D0E1F2A3 /* RecordExpenseIntent.swift */,
+				C3D4E5F6A7B8C9D0E1F2A3B4 /* RecordIncomeIntent.swift */,
+			);
+			path = SiriIntents;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -966,6 +997,11 @@
 				35873095A834FEDD2ABEC138 /* MainTabView.swift in Sources */,
 				FBD80E7C63BE7AF6CA254335 /* SidebarView.swift in Sources */,
 				943C47E0A804813620B97935 /* SpentyAIApp.swift in Sources */,
+				F6A7B8C9D0E1F2A3B4C5D6E7 /* SpeechManager.swift in Sources */,
+				A7B8C9D0E1F2A3B4C5D6E7F8 /* RecordExpenseIntent.swift in Sources */,
+				B8C9D0E1F2A3B4C5D6E7F8A9 /* RecordIncomeIntent.swift in Sources */,
+				C9D0E1F2A3B4C5D6E7F8A9B0 /* CheckBalanceIntent.swift in Sources */,
+				D0E1F2A3B4C5D6E7F8A9B0C1 /* AppShortcuts.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
