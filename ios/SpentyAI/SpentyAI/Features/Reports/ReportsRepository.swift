@@ -1,11 +1,21 @@
 import Foundation
 
 struct PeriodsResponse: Codable {
-    let periods: [ReportPeriod]
+    var periods: [ReportPeriod]
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        periods = (try? c.decodeIfPresent([ReportPeriod].self, forKey: .periods)) ?? []
+    }
 }
 
 struct CategoriesResponse: Codable {
-    let categories: [ReportCategory]
+    var categories: [ReportCategory]
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        categories = (try? c.decodeIfPresent([ReportCategory].self, forKey: .categories)) ?? []
+    }
 }
 
 final class ReportsRepository {

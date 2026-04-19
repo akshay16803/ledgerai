@@ -24,6 +24,8 @@ struct CurrencyText: View {
         Text(formattedAmount)
             .font(font)
             .foregroundColor(displayColor)
+            .lineLimit(1)
+            .minimumScaleFactor(0.5)
     }
 }
 

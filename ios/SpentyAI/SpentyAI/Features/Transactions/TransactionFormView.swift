@@ -26,6 +26,13 @@ struct TransactionFormView: View {
     @State private var isSaving: Bool = false
     @State private var errorMessage: String?
 
+    // Quick-add inline creation state
+    @State private var showNewCategorySheet: Bool = false
+    @State private var showNewSubcategorySheet: Bool = false
+    @State private var newCategoryName: String = ""
+    @State private var newSubcategoryName: String = ""
+    @State private var isCreatingCategory: Bool = false
+
     private var isEditing: Bool { transaction != nil }
 
     private var isTransfer: Bool { transactionType == "transfer" }
@@ -193,30 +200,88 @@ struct TransactionFormView: View {
         VStack(alignment: .leading, spacing: 8) {
             sectionLabel("Category")
 
-            Picker("Category", selection: $categoryId) {
-                Text("Select Category").tag("")
-                ForEach(filteredCategories) { cat in
-                    Text(cat.name ?? "Unnamed").tag(cat.id)
-                }
-            }
-            .pickerStyle(.menu)
-            .inputStyle()
-            .onChange(of: categoryId) { _, _ in
-                subcategoryId = ""
-            }
-
-            if !subcategories.isEmpty {
-                sectionLabel("Subcategory")
-
-                Picker("Subcategory", selection: $subcategoryId) {
-                    Text("None").tag("")
-                    ForEach(subcategories) { sub in
-                        Text(sub.name ?? "Unnamed").tag(sub.id)
+            HStack(spacing: 8) {
+                Picker("Category", selection: $categoryId) {
+                    Text("Select Category").tag("")
+                    ForEach(filteredCategories) { cat in
+                        Text(cat.name ?? "Unnamed").tag(cat.id)
                     }
                 }
                 .pickerStyle(.menu)
                 .inputStyle()
+                .onChange(of: categoryId) { _, _ in
+                    subcategoryId = ""
+                }
+
+                Button {
+                    newCategoryName = ""
+                    showNewCategorySheet = true
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.spentyPrimary)
+                        .frame(width: 36, height: 36)
+                        .background(Color.spentyCardBg)
+                        .cornerRadius(8)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(Color.spentyBorder, lineWidth: 1)
+                        )
+                }
             }
+
+            if !subcategories.isEmpty || !categoryId.isEmpty {
+                sectionLabel("Subcategory")
+
+                HStack(spacing: 8) {
+                    Picker("Subcategory", selection: $subcategoryId) {
+                        Text("None").tag("")
+                        ForEach(subcategories) { sub in
+                            Text(sub.name ?? "Unnamed").tag(sub.id)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .inputStyle()
+
+                    if !categoryId.isEmpty {
+                        Button {
+                            newSubcategoryName = ""
+                            showNewSubcategorySheet = true
+                        } label: {
+                            Image(systemName: "plus")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(.spentyPrimary)
+                                .frame(width: 36, height: 36)
+                                .background(Color.spentyCardBg)
+                                .cornerRadius(8)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .stroke(Color.spentyBorder, lineWidth: 1)
+                                )
+                        }
+                    }
+                }
+            }
+        }
+        .alert("New Category", isPresented: $showNewCategorySheet) {
+            TextField("Category name", text: $newCategoryName)
+            Button("Cancel", role: .cancel) { }
+            Button("Create") {
+                Task { await createInlineCategory() }
+            }
+            .disabled(newCategoryName.trimmingCharacters(in: .whitespaces).isEmpty)
+        } message: {
+            Text("Enter a name for the new \(transactionType) category.")
+        }
+        .alert("New Subcategory", isPresented: $showNewSubcategorySheet) {
+            TextField("Subcategory name", text: $newSubcategoryName)
+            Button("Cancel", role: .cancel) { }
+            Button("Create") {
+                Task { await createInlineSubcategory() }
+            }
+            .disabled(newSubcategoryName.trimmingCharacters(in: .whitespaces).isEmpty)
+        } message: {
+            Text("Enter a name for the new subcategory.")
         }
     }
 
@@ -345,6 +410,39 @@ struct TransactionFormView: View {
         case "expense": return .spentyError
         case "transfer": return .spentyInfo
         default: return .spentyPrimary
+        }
+    }
+
+    // MARK: - Inline Category Creation
+
+    private func createInlineCategory() async {
+        let trimmed = newCategoryName.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+
+        let catType: CategoryType = transactionType == "income" ? .income : .expense
+        do {
+            let created = try await CategoryRepository.shared.createCategory(name: trimmed, type: catType, parentId: nil)
+            // Refresh categories in viewModel and auto-select the new one
+            viewModel.categories = try await CategoryRepository.shared.getCategories()
+            categoryId = created.id
+            subcategoryId = ""
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func createInlineSubcategory() async {
+        let trimmed = newSubcategoryName.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty, !categoryId.isEmpty else { return }
+
+        let catType: CategoryType = transactionType == "income" ? .income : .expense
+        do {
+            let created = try await CategoryRepository.shared.createCategory(name: trimmed, type: catType, parentId: categoryId)
+            // Refresh categories in viewModel and auto-select the new subcategory
+            viewModel.categories = try await CategoryRepository.shared.getCategories()
+            subcategoryId = created.id
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 

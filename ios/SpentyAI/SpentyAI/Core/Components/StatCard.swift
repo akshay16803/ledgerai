@@ -19,7 +19,7 @@ struct StatCard: View {
                 .font(SpentyFonts.amountMedium)
                 .foregroundColor(.spentyTextPrimary)
                 .lineLimit(1)
-                .minimumScaleFactor(0.7)
+                .minimumScaleFactor(0.5)
 
             Text(label)
                 .font(SpentyFonts.caption1)

@@ -5737,7 +5737,7 @@ async def _create_transaction_from_ai_result(
             "user_id": user_id,
             "name": "Unknown Bank"
         }, {"_id": 0, "account_id": 1})
-        
+
         if unknown_account:
             account_id = unknown_account["account_id"]
         else:
@@ -5759,6 +5759,15 @@ async def _create_transaction_from_ai_result(
             account_id = unknown_acc["account_id"]
             logger.info(f"Created 'Unknown Bank' fallback account: {account_id}")
 
+    # --- Category pre-fill from historical approved transactions ---
+    prefilled_category = await _prefill_category_from_history(
+        user_id,
+        description=result.get("description", ""),
+        payee=result.get("payee", ""),
+    )
+    final_category_id = prefilled_category.get("category_id") or result.get("category_id")
+    final_subcategory_id = prefilled_category.get("subcategory_id") or result.get("subcategory_id")
+
     txn = {
         "transaction_id": f"txn_{uuid.uuid4().hex[:12]}",
         "user_id": user_id,
@@ -5771,8 +5780,9 @@ async def _create_transaction_from_ai_result(
         "date": result.get("date", datetime.now(timezone.utc).strftime("%Y-%m-%d")),
         "account_id": account_id,
         "to_account_id": result.get("to_account_id"),
-        "category_id": result.get("category_id"),
-        "subcategory_id": result.get("subcategory_id"),
+        "category_id": final_category_id,
+        "subcategory_id": final_subcategory_id,
+        "category_prefilled": bool(prefilled_category),
         "description": result.get("description", ""),
         "payment_method": result.get("payment_method"),
         "is_recurring": result.get("is_recurring", False),
@@ -5865,6 +5875,91 @@ async def _create_mandate_from_ai_result(
     )
     logger.info(f"Mandate detected from email: {merchant} {amount} {frequency}")
     return True
+
+
+async def _prefill_category_from_history(user_id: str, description: str, payee: str = "") -> dict:
+    """Look up previously approved transactions to pre-fill category/subcategory.
+
+    Strategy:
+      1. Exact description match (case-insensitive, trimmed).
+      2. Exact payee match (if payee is provided).
+      3. Fuzzy match — check if significant keywords from the description or payee
+         appear inside a past transaction's description (e.g., both contain "Amazon").
+
+    Returns a dict with category_id, subcategory_id (any of which may be None)
+    taken from the most recent approved match.  Returns empty dict when no match.
+    """
+    desc_clean = (description or "").strip()
+    payee_clean = (payee or "").strip()
+
+    if not desc_clean and not payee_clean:
+        return {}
+
+    _CATEGORY_FIELDS = {"category_id": 1, "subcategory_id": 1, "description": 1, "payee": 1}
+
+    # --- 1. Exact description match (case-insensitive) ---
+    if desc_clean:
+        exact_match = await db.transactions.find_one(
+            {
+                "user_id": user_id,
+                "status": "approved",
+                "description": {"$regex": f"^{re.escape(desc_clean)}$", "$options": "i"},
+            },
+            {**_CATEGORY_FIELDS, "_id": 0},
+            sort=[("created_at", -1)],
+        )
+        if exact_match and exact_match.get("category_id"):
+            logger.info(f"Category pre-fill: exact description match for '{desc_clean}'")
+            return {"category_id": exact_match.get("category_id"),
+                    "subcategory_id": exact_match.get("subcategory_id")}
+
+    # --- 2. Exact payee match ---
+    if payee_clean:
+        payee_match = await db.transactions.find_one(
+            {
+                "user_id": user_id,
+                "status": "approved",
+                "payee": {"$regex": f"^{re.escape(payee_clean)}$", "$options": "i"},
+                "category_id": {"$ne": None},
+            },
+            {**_CATEGORY_FIELDS, "_id": 0},
+            sort=[("created_at", -1)],
+        )
+        if payee_match:
+            logger.info(f"Category pre-fill: exact payee match for '{payee_clean}'")
+            return {"category_id": payee_match.get("category_id"),
+                    "subcategory_id": payee_match.get("subcategory_id")}
+
+    # --- 3. Fuzzy / keyword match ---
+    # Extract significant words (>=3 chars) from description and payee
+    keywords = set()
+    for text in [desc_clean, payee_clean]:
+        if text:
+            keywords.update(w for w in re.split(r'[\s\-_./,]+', text.lower()) if len(w) >= 3)
+    # Remove very common noise words
+    noise = {"the", "for", "from", "payment", "paid", "transaction", "via", "ref", "upi", "imps",
+             "neft", "rtgs", "debit", "credit", "card", "bank", "account", "transfer", "towards"}
+    keywords -= noise
+
+    if keywords:
+        # Build an $or regex query for any keyword appearing in the description
+        keyword_regexes = [{"description": {"$regex": re.escape(kw), "$options": "i"}} for kw in list(keywords)[:5]]
+        fuzzy_match = await db.transactions.find_one(
+            {
+                "user_id": user_id,
+                "status": "approved",
+                "category_id": {"$ne": None},
+                "$or": keyword_regexes,
+            },
+            {**_CATEGORY_FIELDS, "_id": 0},
+            sort=[("created_at", -1)],
+        )
+        if fuzzy_match:
+            logger.info(f"Category pre-fill: fuzzy keyword match (keywords={keywords})")
+            return {"category_id": fuzzy_match.get("category_id"),
+                    "subcategory_id": fuzzy_match.get("subcategory_id")}
+
+    return {}
 
 
 async def _get_category_info_for_ai(user_id: str) -> list:
@@ -6027,6 +6122,46 @@ async def get_pending_review_transactions(user: dict = Depends(get_current_user)
         {"user_id": user["user_id"], "status": "pending_review", "source": {"$in": ["email", "sms", "statement"]}}
     )
     return {"transactions": txns, "total": total}
+
+
+@app.get("/api/source/{source_id}")
+async def get_source_content(source_id: str, user: dict = Depends(get_current_user)):
+    """Return the original email or SMS content for a given source_email_id or source_sms_id."""
+    user_id = user["user_id"]
+
+    # Try email first (em_ prefix)
+    if source_id.startswith("em_"):
+        doc = await db.synced_emails.find_one(
+            {"email_id": source_id, "user_id": user_id}, {"_id": 0}
+        )
+        if not doc:
+            raise HTTPException(status_code=404, detail="Email source not found")
+        return {
+            "type": "email",
+            "source_id": doc["email_id"],
+            "subject": doc.get("subject", ""),
+            "from": doc.get("from_email", ""),
+            "date": doc.get("date", ""),
+            "snippet": doc.get("snippet", ""),
+            "body": doc.get("body_text", doc.get("snippet", "")),
+        }
+
+    # Try SMS (sms_ prefix)
+    if source_id.startswith("sms_"):
+        doc = await db.synced_sms.find_one(
+            {"sms_id": source_id, "user_id": user_id}, {"_id": 0}
+        )
+        if not doc:
+            raise HTTPException(status_code=404, detail="SMS source not found")
+        return {
+            "type": "sms",
+            "source_id": doc["sms_id"],
+            "sender": doc.get("sender", ""),
+            "date": doc.get("timestamp", ""),
+            "body": doc.get("body", ""),
+        }
+
+    raise HTTPException(status_code=400, detail="Invalid source ID format")
 
 
 # ─── Email Sync Helpers ─────────────────────────────────────────────
@@ -6930,6 +7065,15 @@ async def _process_sms_transaction(user_id: str, sms_doc: dict, result: dict, ac
             account_id = unknown_acc["account_id"]
             logger.info(f"Created 'Unknown Bank' fallback account for SMS: {account_id}")
 
+    # --- Category pre-fill from historical approved transactions ---
+    prefilled_category = await _prefill_category_from_history(
+        user_id,
+        description=result.get("description", ""),
+        payee=result.get("payee", ""),
+    )
+    final_category_id = prefilled_category.get("category_id") or result.get("category_id")
+    final_subcategory_id = prefilled_category.get("subcategory_id") or result.get("subcategory_id")
+
     txn = {
         "transaction_id": f"txn_{uuid.uuid4().hex[:12]}",
         "user_id": user_id,
@@ -6938,8 +7082,9 @@ async def _process_sms_transaction(user_id: str, sms_doc: dict, result: dict, ac
         "date": result.get("date") or txn_date,
         "account_id": account_id,
         "to_account_id": result.get("to_account_id"),
-        "category_id": result.get("category_id"),
-        "subcategory_id": result.get("subcategory_id"),
+        "category_id": final_category_id,
+        "subcategory_id": final_subcategory_id,
+        "category_prefilled": bool(prefilled_category),
         "description": result.get("description", ""),
         "payee": result.get("payee", ""),
         "payment_method": result.get("payment_method"),

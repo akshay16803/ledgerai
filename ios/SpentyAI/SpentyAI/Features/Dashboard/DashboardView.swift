@@ -296,17 +296,21 @@ struct DashboardView: View {
     // MARK: - Helpers
 
     private func formatCurrency(_ value: Double) -> String {
+        let absValue = abs(value)
+        if absValue >= 1_00_00_000 {
+            // 1 Cr+ : show compact like "₹1.2Cr"
+            let crores = value / 1_00_00_000
+            return String(format: "₹%.1fCr", crores)
+        } else if absValue >= 1_00_000 {
+            // 1L+ : show compact like "₹12.3L"
+            let lakhs = value / 1_00_000
+            return String(format: "₹%.1fL", lakhs)
+        }
         let formatter = NumberFormatter()
         formatter.numberStyle = .currency
         formatter.currencyCode = "INR"
-        formatter.maximumFractionDigits = 0
-        formatter.minimumFractionDigits = 0
-        if abs(value) >= 100_000 {
-            formatter.maximumFractionDigits = 0
-        } else {
-            formatter.maximumFractionDigits = 2
-            formatter.minimumFractionDigits = 2
-        }
+        formatter.maximumFractionDigits = 2
+        formatter.minimumFractionDigits = 2
         return formatter.string(from: NSNumber(value: value)) ?? "\(value)"
     }
 

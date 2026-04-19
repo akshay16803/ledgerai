@@ -385,7 +385,7 @@ export default function Reports() {
                           {cat.count}
                         </td>
                       </tr>
-                      {isExpanded && cat.subcategories.map(sub => {
+                      {isExpanded && (cat.subcategories || []).map(sub => {
                         const subVal = catType === 'expense' ? sub.expense : sub.income;
                         const subPct = catTotal > 0 ? ((subVal / catTotal) * 100).toFixed(1) : 0;
                         return (

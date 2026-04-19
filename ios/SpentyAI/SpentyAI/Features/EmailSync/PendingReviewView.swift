@@ -51,6 +51,9 @@ struct PendingReviewView: View {
         .sheet(isPresented: $viewModel.showEditSheet) {
             editTransactionSheet
         }
+        .sheet(isPresented: $viewModel.showSourceSheet) {
+            viewSourceSheet
+        }
     }
 
     // MARK: - Transaction List
@@ -247,6 +250,31 @@ struct PendingReviewView: View {
                     .cornerRadius(8)
                 }
 
+                if txn.sourceId != nil {
+                    Button {
+                        Task { await viewModel.loadSource(for: txn) }
+                    } label: {
+                        HStack(spacing: 4) {
+                            if viewModel.isLoadingSource {
+                                ProgressView()
+                                    .controlSize(.mini)
+                                    .tint(Color.purple)
+                            } else {
+                                Image(systemName: "doc.text.magnifyingglass")
+                                    .font(.system(size: 12, weight: .bold))
+                            }
+                            Text("Source")
+                                .font(SpentyFonts.caption1)
+                        }
+                        .foregroundColor(.purple)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .background(Color.purple.opacity(0.1))
+                        .cornerRadius(8)
+                    }
+                    .disabled(viewModel.isLoadingSource)
+                }
+
                 Spacer()
             }
         }
@@ -310,6 +338,113 @@ struct PendingReviewView: View {
                         Task { await viewModel.saveEditedTransaction() }
                     }
                     .fontWeight(.semibold)
+                    .foregroundColor(.spentyPrimary)
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+
+    // MARK: - View Source Sheet
+
+    private var viewSourceSheet: some View {
+        NavigationStack {
+            ScrollView {
+                if let source = viewModel.sourceContent {
+                    VStack(alignment: .leading, spacing: 16) {
+                        if source.type == "email" {
+                            // Email content
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("SUBJECT")
+                                    .font(SpentyFonts.caption2)
+                                    .foregroundColor(.spentyTextSecondary)
+                                Text(source.subject ?? "(no subject)")
+                                    .font(SpentyFonts.headline)
+                                    .foregroundColor(.spentyTextPrimary)
+                            }
+
+                            HStack(spacing: 24) {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("FROM")
+                                        .font(SpentyFonts.caption2)
+                                        .foregroundColor(.spentyTextSecondary)
+                                    Text(source.from ?? "—")
+                                        .font(SpentyFonts.subheadline)
+                                        .foregroundColor(.spentyTextPrimary)
+                                }
+
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("DATE")
+                                        .font(SpentyFonts.caption2)
+                                        .foregroundColor(.spentyTextSecondary)
+                                    Text(source.date ?? "—")
+                                        .font(SpentyFonts.subheadline)
+                                        .foregroundColor(.spentyTextPrimary)
+                                }
+                            }
+
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("BODY")
+                                    .font(SpentyFonts.caption2)
+                                    .foregroundColor(.spentyTextSecondary)
+                                Text(source.body ?? "(empty)")
+                                    .font(SpentyFonts.subheadline)
+                                    .foregroundColor(.spentyTextSecondary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(12)
+                                    .background(Color.spentyBorder.opacity(0.3))
+                                    .cornerRadius(8)
+                            }
+                        } else {
+                            // SMS content
+                            HStack(spacing: 24) {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("SENDER")
+                                        .font(SpentyFonts.caption2)
+                                        .foregroundColor(.spentyTextSecondary)
+                                    Text(source.sender ?? "—")
+                                        .font(SpentyFonts.headline)
+                                        .foregroundColor(.spentyTextPrimary)
+                                }
+
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("DATE")
+                                        .font(SpentyFonts.caption2)
+                                        .foregroundColor(.spentyTextSecondary)
+                                    Text(source.date ?? "—")
+                                        .font(SpentyFonts.subheadline)
+                                        .foregroundColor(.spentyTextPrimary)
+                                }
+                            }
+
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("MESSAGE")
+                                    .font(SpentyFonts.caption2)
+                                    .foregroundColor(.spentyTextSecondary)
+                                Text(source.body ?? "(empty)")
+                                    .font(SpentyFonts.subheadline)
+                                    .foregroundColor(.spentyTextSecondary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(12)
+                                    .background(Color.spentyBorder.opacity(0.3))
+                                    .cornerRadius(8)
+                            }
+                        }
+                    }
+                    .padding(16)
+                } else {
+                    ProgressView("Loading source...")
+                        .padding(40)
+                }
+            }
+            .background(Color.spentyBgPrimary)
+            .navigationTitle(viewModel.sourceContent?.type == "sms" ? "Original SMS" : "Original Email")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") {
+                        viewModel.showSourceSheet = false
+                    }
                     .foregroundColor(.spentyPrimary)
                 }
             }

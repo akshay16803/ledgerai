@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../lib/api';
 import { getCached, setCache } from '../lib/cache';
-import { Plus, Check, X, Funnel, PencilSimple, Robot, Receipt, BookOpen, ListBullets } from '@phosphor-icons/react';
+import { Plus, X, Funnel, PencilSimple, Robot, Receipt, BookOpen, ListBullets } from '@phosphor-icons/react';
 import { useNavigate } from 'react-router-dom';
 import { EditTransactionModal } from '../components/EditTransactionModal';
 import { SalesInvoiceModal } from '../components/SalesInvoiceModal';
@@ -76,30 +76,6 @@ export default function Transactions() {
 
   useEffect(() => { loadData(); }, [loadData]); // eslint-disable-line react-hooks/set-state-in-effect
 
-  const handleApprove = async (id) => {
-    const prevTransactions = transactions;
-    setTransactions(prev => prev.map(t =>
-      t.transaction_id === id ? { ...t, status: 'approved' } : t
-    ));
-    try {
-      await api.post(`/api/transactions/${id}/approve`);
-    } catch (err) {
-      setTransactions(prevTransactions);
-      alert(err.message);
-    }
-  };
-  const handleReject = async (id) => {
-    const prevTransactions = transactions;
-    setTransactions(prev => prev.filter(t => t.transaction_id !== id));
-    setTotal(prev => prev - 1);
-    try {
-      await api.post(`/api/transactions/${id}/reject`);
-    } catch (err) {
-      setTransactions(prevTransactions);
-      setTotal(prev => prev + 1);
-      alert(err.message);
-    }
-  };
   const handleDelete = async (id) => {
     if (!confirm('Delete this transaction?')) return;
     try { await api.del(`/api/transactions/${id}`); loadData(); }
@@ -315,7 +291,6 @@ export default function Transactions() {
                 <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Account</th>
                 <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Category</th>
                 <th style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Amount</th>
-                <th style={{ padding: '12px 16px', textAlign: 'center', fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Status</th>
                 <th style={{ padding: '12px 16px', textAlign: 'center', fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)', position: 'sticky', right: 0, background: 'var(--bg-secondary)', zIndex: 2 }}>Actions</th>
               </tr>
             </thead>
@@ -369,15 +344,6 @@ export default function Transactions() {
                       </div>
                     )}
                   </td>
-                  <td style={{ padding: '12px 16px', textAlign: 'center' }}>
-                    <span style={{
-                      padding: '2px 8px', borderRadius: 2, fontSize: 11, fontWeight: 600,
-                      color: txn.status === 'approved' ? 'var(--success)' : txn.status === 'pending_review' ? 'var(--warning)' : 'var(--error)',
-                      background: txn.status === 'approved' ? 'rgba(58,92,74,0.1)' : txn.status === 'pending_review' ? 'rgba(194,140,60,0.1)' : 'rgba(150,69,58,0.1)'
-                    }}>
-                      {txn.status.replace('_', ' ')}
-                    </span>
-                  </td>
                   <td style={{ padding: '12px 16px', textAlign: 'center', position: 'sticky', right: 0, background: '#fff', zIndex: 1, boxShadow: '-4px 0 8px rgba(0,0,0,0.04)' }}>
                     <div style={{ display: 'flex', gap: 4, justifyContent: 'center' }}>
                       <button data-testid={`edit-txn-${txn.transaction_id}`} onClick={() => setEditingTxn(txn)} title="Edit"
@@ -389,18 +355,6 @@ export default function Transactions() {
                           style={{ background: 'rgba(194,109,92,0.1)', border: 'none', borderRadius: 2, padding: '4px 8px', cursor: 'pointer', color: 'var(--brand-primary)' }}>
                           <Receipt size={14} />
                         </button>
-                      )}
-                      {txn.status === 'pending_review' && (
-                        <>
-                          <button data-testid={`approve-txn-${txn.transaction_id}`} data-guard onClick={() => handleApprove(txn.transaction_id)} title="Approve"
-                            style={{ background: 'rgba(58,92,74,0.1)', border: 'none', borderRadius: 2, padding: '4px 8px', cursor: 'pointer', color: 'var(--success)' }}>
-                            <Check size={14} weight="bold" />
-                          </button>
-                          <button data-testid={`reject-txn-${txn.transaction_id}`} onClick={() => handleReject(txn.transaction_id)} title="Reject"
-                            style={{ background: 'rgba(150,69,58,0.1)', border: 'none', borderRadius: 2, padding: '4px 8px', cursor: 'pointer', color: 'var(--error)' }}>
-                            <X size={14} weight="bold" />
-                          </button>
-                        </>
                       )}
                       <button data-testid={`delete-txn-${txn.transaction_id}`} data-guard onClick={() => handleDelete(txn.transaction_id)} title="Delete"
                         style={{ background: 'none', border: 'none', padding: '4px 8px', cursor: 'pointer', color: 'var(--text-muted)' }}>

@@ -310,7 +310,8 @@ final class TransactionsViewModel {
             type: typeParam,
             accountId: acctId,
             dateFrom: dateFrom,
-            dateTo: dateTo
+            dateTo: dateTo,
+            status: "approved"
         )
     }
 }

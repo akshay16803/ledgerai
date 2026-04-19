@@ -260,18 +260,6 @@ struct TransactionListView: View {
 
                 Spacer()
 
-                Button { Task { await viewModel.bulkApprove() } } label: {
-                    Label("Approve", systemImage: "checkmark.circle")
-                        .font(SpentyFonts.footnote)
-                }
-                .tint(Color.spentySuccess)
-
-                Button { Task { await viewModel.bulkReject() } } label: {
-                    Label("Reject", systemImage: "xmark.circle")
-                        .font(SpentyFonts.footnote)
-                }
-                .tint(Color.spentyWarning)
-
                 Button { Task { await viewModel.bulkDelete() } } label: {
                     Label("Delete", systemImage: "trash")
                         .font(SpentyFonts.footnote)
@@ -333,23 +321,6 @@ struct TransactionListView: View {
                             Label("Edit", systemImage: "pencil")
                         }
                         .tint(Color.spentyInfo)
-                    }
-                    .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                        if txn.status?.lowercased() == "pending" {
-                            Button {
-                                Task { await viewModel.approveTransaction(id: txn.id) }
-                            } label: {
-                                Label("Approve", systemImage: "checkmark.circle")
-                            }
-                            .tint(Color.spentySuccess)
-
-                            Button {
-                                Task { await viewModel.rejectTransaction(id: txn.id) }
-                            } label: {
-                                Label("Reject", systemImage: "xmark.circle")
-                            }
-                            .tint(Color.spentyError)
-                        }
                     }
                     .onAppear {
                         if txn.id == viewModel.transactions.last?.id {
@@ -424,17 +395,11 @@ struct TransactionListView: View {
 
             Spacer()
 
-            VStack(alignment: .trailing, spacing: 4) {
-                CurrencyText(
-                    amount: txn.amount ?? 0,
-                    font: SpentyFonts.amountSmall,
-                    color: amountColor(for: txn.transactionType)
-                )
-
-                if let status = txn.status {
-                    StatusBadge(status: status)
-                }
-            }
+            CurrencyText(
+                amount: txn.amount ?? 0,
+                font: SpentyFonts.amountSmall,
+                color: amountColor(for: txn.transactionType)
+            )
         }
         .padding(.vertical, 4)
     }

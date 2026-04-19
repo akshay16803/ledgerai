@@ -36,6 +36,12 @@ final class EmailSyncViewModel {
     var editAccountId = ""
     var editCategoryId = ""
 
+    // MARK: - View Source
+
+    var sourceContent: SourceContent?
+    var showSourceSheet = false
+    var isLoadingSource = false
+
     // MARK: - Selection for bulk actions
 
     var selectedTransactionIds: Set<String> = []
@@ -354,6 +360,26 @@ final class EmailSyncViewModel {
         } catch {
             handleError(error)
         }
+    }
+
+    // MARK: - View Source
+
+    @MainActor
+    func loadSource(for transaction: PendingTransaction) async {
+        guard let sourceId = transaction.sourceId else {
+            errorMessage = "No source linked to this transaction"
+            showError = true
+            return
+        }
+
+        isLoadingSource = true
+        do {
+            sourceContent = try await repository.sourceContent(id: sourceId)
+            showSourceSheet = true
+        } catch {
+            handleError(error)
+        }
+        isLoadingSource = false
     }
 
     // MARK: - Selection Helpers

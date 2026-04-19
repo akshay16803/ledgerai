@@ -85,6 +85,12 @@ final class EmailSyncRepository {
     func smsStats() async throws -> SMSSyncStats {
         try await APIClient.shared.get(APIEndpoints.smsStats)
     }
+
+    // MARK: - Source Content
+
+    func sourceContent(id: String) async throws -> SourceContent {
+        try await APIClient.shared.get(APIEndpoints.sourceContent(id))
+    }
 }
 
 // MARK: - Request Models
@@ -234,6 +240,13 @@ struct PendingTransaction: Codable, Identifiable {
     var transactionType: String?
     var source: String?
     var status: String?
+    var sourceEmailId: String?
+    var sourceSmsId: String?
+
+    /// The source ID used to fetch the original email or SMS content.
+    var sourceId: String? {
+        sourceEmailId ?? sourceSmsId
+    }
 
     enum CodingKeys: String, CodingKey {
         case id = "transactionId"
@@ -247,6 +260,8 @@ struct PendingTransaction: Codable, Identifiable {
         case transactionType
         case source
         case status
+        case sourceEmailId
+        case sourceSmsId
     }
 
     init(from decoder: Decoder) throws {
@@ -263,5 +278,18 @@ struct PendingTransaction: Codable, Identifiable {
         self.transactionType = try? container.decodeIfPresent(String.self, forKey: .transactionType)
         self.source = try? container.decodeIfPresent(String.self, forKey: .source)
         self.status = try? container.decodeIfPresent(String.self, forKey: .status)
+        self.sourceEmailId = try? container.decodeIfPresent(String.self, forKey: .sourceEmailId)
+        self.sourceSmsId = try? container.decodeIfPresent(String.self, forKey: .sourceSmsId)
     }
+}
+
+struct SourceContent: Decodable {
+    let type: String
+    let sourceId: String?
+    let subject: String?
+    let from: String?
+    let sender: String?
+    let date: String?
+    let snippet: String?
+    let body: String?
 }

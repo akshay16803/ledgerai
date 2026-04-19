@@ -742,7 +742,7 @@ function RecordActions({ record, onDownloadEml, onDownloadAttachment, onPreview 
           background: '#fff', border: '1px solid var(--border-subtle)', borderRadius: 2,
           boxShadow: '0 4px 12px rgba(0,0,0,0.1)', minWidth: 220, padding: 8,
         }}>
-          {record.attachments.map((att, i) => (
+          {(record.attachments || []).map((att, i) => (
             <button
               key={`${record.archive_id}-${att.filename}-${i}`}
               data-testid={`download-att-${record.archive_id}-${i}`}

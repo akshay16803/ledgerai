@@ -73,9 +73,13 @@ export function EditTransactionModal({ transaction, accounts, categories, onSave
   const handleQuickAddCategory = async () => {
     if (!quickCatName.trim()) return;
     try {
-      await api.post('/api/categories', { name: quickCatName.trim(), category_type: txnType });
+      const created = await api.post('/api/categories', { name: quickCatName.trim(), category_type: txnType });
       const cats = await api.get('/api/categories');
       setLocalCategories(cats);
+      // Auto-select the newly created category
+      if (created?.category_id) {
+        setForm(f => ({ ...f, category_id: created.category_id, subcategory_id: '' }));
+      }
       setQuickCatName('');
       setShowQuickCat(false);
     } catch (err) { alert(err.message); }
@@ -84,9 +88,13 @@ export function EditTransactionModal({ transaction, accounts, categories, onSave
   const handleQuickAddSubCategory = async () => {
     if (!quickSubCatName.trim() || !form.category_id) return;
     try {
-      await api.post('/api/categories', { name: quickSubCatName.trim(), category_type: txnType, parent_id: form.category_id });
+      const created = await api.post('/api/categories', { name: quickSubCatName.trim(), category_type: txnType, parent_id: form.category_id });
       const cats = await api.get('/api/categories');
       setLocalCategories(cats);
+      // Auto-select the newly created subcategory
+      if (created?.category_id) {
+        setForm(f => ({ ...f, subcategory_id: created.category_id }));
+      }
       setQuickSubCatName('');
       setShowQuickSubCat(false);
     } catch (err) { alert(err.message); }
@@ -96,9 +104,13 @@ export function EditTransactionModal({ transaction, accounts, categories, onSave
     if (!quickAccName.trim()) return;
     if (quickAccBalance === '') { alert('Please enter the account balance'); return; }
     try {
-      await api.post('/api/accounts', { name: quickAccName.trim(), account_type: 'asset', sub_type: 'bank', opening_balance: parseFloat(quickAccBalance) || 0, balance_as_of_date: quickAccDate, currency: 'INR' });
+      const created = await api.post('/api/accounts', { name: quickAccName.trim(), account_type: 'asset', sub_type: 'bank', opening_balance: parseFloat(quickAccBalance) || 0, balance_as_of_date: quickAccDate, currency: 'INR' });
       const accs = await api.get('/api/accounts');
       setLocalAccounts(accs);
+      // Auto-select the newly created account
+      if (created?.account_id) {
+        setForm(f => ({ ...f, account_id: created.account_id }));
+      }
       setQuickAccName('');
       setQuickAccBalance('');
       setQuickAccDate(new Date().toISOString().split('T')[0]);

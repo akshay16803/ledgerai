@@ -36,6 +36,9 @@ function StatCard({ testId, label, value, icon: Icon, color, accent }) {
 }
 
 function formatCurrency(amount) {
+  if (Math.abs(amount) >= 1_00_00_000) {
+    return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', notation: 'compact', compactDisplay: 'short', maximumFractionDigits: 1 }).format(amount);
+  }
   return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(amount);
 }
 
@@ -399,8 +402,9 @@ export default function Dashboard() {
                     </span>
                   </div>
                   <span className="mono" style={{
-                    fontSize: 15, fontWeight: 600,
-                    color: acc.balance >= 0 ? 'var(--success)' : 'var(--error)'
+                    fontSize: 'clamp(11px, 1.5vw, 15px)', fontWeight: 600,
+                    color: acc.balance >= 0 ? 'var(--success)' : 'var(--error)',
+                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '50%', textAlign: 'right'
                   }}>
                     {formatCurrency(acc.balance)}
                   </span>
@@ -436,9 +440,10 @@ export default function Dashboard() {
                     <span className="mono" style={{ fontSize: 11, color: 'var(--text-muted)' }}>{txn.date}</span>
                   </div>
                   <span className="mono" style={{
-                    fontSize: 14, fontWeight: 600,
+                    fontSize: 'clamp(11px, 1.5vw, 14px)', fontWeight: 600,
                     color: txn.transaction_type === 'income' ? 'var(--success)' :
-                           txn.transaction_type === 'expense' ? 'var(--error)' : 'var(--info)'
+                           txn.transaction_type === 'expense' ? 'var(--error)' : 'var(--info)',
+                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '50%', textAlign: 'right'
                   }}>
                     {txn.transaction_type === 'income' ? '+' : txn.transaction_type === 'expense' ? '-' : ''}
                     {formatCurrency(txn.amount)}

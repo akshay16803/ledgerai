@@ -5,9 +5,98 @@ import {
   EnvelopeSimple, ArrowClockwise, Check, X, Clock,
   Lightning, Warning, CaretDown, CaretUp, CalendarBlank,
   CloudArrowUp, Plugs, PlugsConnected, MicrosoftOutlookLogo,
-  ChatText, DeviceMobile, PencilSimple
+  ChatText, DeviceMobile, PencilSimple, Eye
 } from '@phosphor-icons/react';
 import { EditTransactionModal } from '../components/EditTransactionModal';
+
+function ViewSourceModal({ source, onClose }) {
+  if (!source) return null;
+  const isEmail = source.type === 'email';
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 9999,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+    }}>
+      <div onClick={onClose} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.45)' }} />
+      <div style={{
+        position: 'relative', background: '#fff', borderRadius: 2, width: '90%', maxWidth: 600,
+        maxHeight: '80vh', display: 'flex', flexDirection: 'column',
+        boxShadow: '0 20px 60px rgba(0,0,0,0.2)', border: '1px solid var(--border-subtle)',
+      }}>
+        {/* Header */}
+        <div style={{
+          padding: '16px 24px', borderBottom: '1px solid var(--border-subtle)',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          background: 'var(--bg-secondary)',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {isEmail ? <EnvelopeSimple size={18} weight="bold" style={{ color: '#2563EB' }} />
+              : <ChatText size={18} weight="bold" style={{ color: '#7C3AED' }} />}
+            <span style={{ fontSize: 15, fontWeight: 600 }}>
+              {isEmail ? 'Original Email' : 'Original SMS'}
+            </span>
+          </div>
+          <button onClick={onClose} style={{
+            background: 'none', border: 'none', cursor: 'pointer', padding: 4,
+            color: 'var(--text-muted)', fontSize: 18, lineHeight: 1,
+          }}>&times;</button>
+        </div>
+        {/* Body */}
+        <div style={{ padding: '20px 24px', overflowY: 'auto', flex: 1 }}>
+          {isEmail ? (
+            <>
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>Subject</div>
+                <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>{source.subject || '(no subject)'}</div>
+              </div>
+              <div style={{ display: 'flex', gap: 24, marginBottom: 16 }}>
+                <div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>From</div>
+                  <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{source.from || '—'}</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>Date</div>
+                  <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{source.date || '—'}</div>
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>Body</div>
+                <div style={{
+                  fontSize: 13, lineHeight: 1.6, color: 'var(--text-secondary)',
+                  whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                  background: 'var(--bg-secondary)', padding: 16, borderRadius: 2,
+                  border: '1px solid var(--border-subtle)', maxHeight: 300, overflowY: 'auto',
+                }}>{source.body || '(empty)'}</div>
+              </div>
+            </>
+          ) : (
+            <>
+              <div style={{ display: 'flex', gap: 24, marginBottom: 16 }}>
+                <div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>Sender</div>
+                  <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{source.sender || '—'}</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>Date</div>
+                  <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{source.date || '—'}</div>
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>Message</div>
+                <div style={{
+                  fontSize: 13, lineHeight: 1.6, color: 'var(--text-secondary)',
+                  whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                  background: 'var(--bg-secondary)', padding: 16, borderRadius: 2,
+                  border: '1px solid var(--border-subtle)', maxHeight: 300, overflowY: 'auto',
+                }}>{source.body || '(empty)'}</div>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function formatCurrency(amount) {
   if (!amount) return '—';
@@ -296,6 +385,7 @@ export default function EmailSync() {
   const [retrying, setRetrying] = useState(false);
   const [smsRetrying, setSmsRetrying] = useState(false);
   const [editingTxn, setEditingTxn] = useState(null);
+  const [viewingSource, setViewingSource] = useState(null);
   const [pendingTxns, setPendingTxns] = useState([]);
   const [pendingTotal, setPendingTotal] = useState(0);
   const [accounts, setAccounts] = useState([]);
@@ -504,6 +594,17 @@ export default function EmailSync() {
       setPendingTxns(prevTxns);
       setPendingTotal(prevTotal);
       alert(err.message);
+    }
+  };
+
+  const handleViewSource = async (txn) => {
+    const sourceId = txn.source_email_id || txn.source_sms_id;
+    if (!sourceId) { setError('No source linked to this transaction'); return; }
+    try {
+      const data = await api.get(`/api/source/${sourceId}`);
+      setViewingSource(data);
+    } catch (err) {
+      setError(err.message || 'Failed to load source');
     }
   };
 
@@ -773,6 +874,16 @@ export default function EmailSync() {
                     </td>
                     <td style={{ padding: '10px 16px', textAlign: 'center', position: 'sticky', right: 0, background: '#fff', zIndex: 1, boxShadow: '-4px 0 8px rgba(0,0,0,0.04)' }}>
                       <div style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
+                        <button data-testid={`view-source-${txn.transaction_id}`}
+                          onClick={() => handleViewSource(txn)} title="View original email or SMS"
+                          style={{
+                            background: 'rgba(124,58,237,0.1)', color: '#7C3AED', border: 'none',
+                            borderRadius: 2, padding: '6px 10px', cursor: 'pointer', fontSize: 11,
+                            fontWeight: 600, fontFamily: 'var(--font-body)',
+                            display: 'flex', alignItems: 'center', gap: 4
+                          }}>
+                          <Eye size={12} weight="bold" /> Source
+                        </button>
                         <button data-testid={`edit-review-${txn.transaction_id}`}
                           onClick={() => setEditingTxn(txn)} title="Edit before approving"
                           style={{
@@ -823,6 +934,8 @@ export default function EmailSync() {
           onClose={() => setEditingTxn(null)}
         />
       )}
+
+      <ViewSourceModal source={viewingSource} onClose={() => setViewingSource(null)} />
     </div>
   );
 }

@@ -13,6 +13,9 @@ const accountTypes = [
 const typeIcons = { bank: Bank, cash: Wallet, wallet: Wallet, credit_card: CreditCard, demat: ChartLineUp, chart_line: ChartLineUp };
 
 function formatCurrency(amount) {
+  if (Math.abs(amount) >= 1_00_00_000) {
+    return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', notation: 'compact', compactDisplay: 'short', maximumFractionDigits: 1 }).format(amount);
+  }
   return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(amount);
 }
 
@@ -353,7 +356,7 @@ function AccountsGroupedList({ accounts, onEdit, onDelete, expandedSubTypes, tog
               <h2 style={{ fontSize: 16, fontWeight: 600, textTransform: 'capitalize', letterSpacing: '-0.01em' }}>
                 {typeLabels[type] || type}
               </h2>
-              <span className="mono" style={{ fontSize: 16, fontWeight: 600, color: typeTotal >= 0 ? 'var(--success)' : 'var(--error)' }}>
+              <span className="mono" style={{ fontSize: 'clamp(12px, 1.5vw, 16px)', fontWeight: 600, color: typeTotal >= 0 ? 'var(--success)' : 'var(--error)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '50%', textAlign: 'right' }}>
                 {formatCurrency(typeTotal)}
               </span>
             </div>
@@ -391,7 +394,7 @@ function AccountsGroupedList({ accounts, onEdit, onDelete, expandedSubTypes, tog
                           {accs.length} account{accs.length !== 1 ? 's' : ''}
                         </span>
                       </div>
-                      <span className="mono" style={{ fontSize: 15, fontWeight: 600, color: subTotal >= 0 ? 'var(--success)' : 'var(--error)' }}>
+                      <span className="mono" style={{ fontSize: 'clamp(11px, 1.5vw, 15px)', fontWeight: 600, color: subTotal >= 0 ? 'var(--success)' : 'var(--error)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '50%', textAlign: 'right' }}>
                         {formatCurrency(subTotal)}
                       </span>
                     </button>
@@ -525,7 +528,7 @@ function AccountsGroupedList({ accounts, onEdit, onDelete, expandedSubTypes, tog
                                   </button>
                                 </>
                               )}
-                              <span className="mono" style={{ fontSize: 14, fontWeight: 600, color: acc.balance >= 0 ? 'var(--success)' : 'var(--error)', whiteSpace: 'nowrap' }}>
+                              <span className="mono" style={{ fontSize: 'clamp(11px, 1.5vw, 14px)', fontWeight: 600, color: acc.balance >= 0 ? 'var(--success)' : 'var(--error)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '45%', textAlign: 'right' }}>
                                 {formatCurrency(acc.balance)}
                               </span>
                               <div style={{ display: 'flex', gap: 2 }}>

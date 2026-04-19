@@ -101,6 +101,7 @@ struct APIEndpoints {
     static let emailRetryPending = "/api/email/retry-pending"
     static let emailSyncStats = "/api/email/sync-stats"
     static let emailPendingReview = "/api/email/pending-review"
+    static func sourceContent(_ id: String) -> String { "/api/source/\(id)" }
 
     // MARK: - SMS
     static let smsUpload = "/api/sms/upload"

@@ -1,6 +1,7 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useEffect } from 'react';
 import { useAuth } from './contexts/AuthContext.jsx';
+import ErrorBoundary from './components/ErrorBoundary.jsx';
 import Landing from './pages/Landing.jsx';
 import Login from './pages/Login.jsx';
 import Dashboard from './pages/Dashboard.jsx';
@@ -27,6 +28,11 @@ import Customers from './pages/Customers.jsx';
 import Purchases from './pages/Purchases.jsx';
 import Vendors from './pages/Vendors.jsx';
 import AppLayout from './components/AppLayout.jsx';
+
+/** Wrap each page in an ErrorBoundary so a crash keeps the sidebar intact. */
+function PageBoundary({ children }) {
+  return <ErrorBoundary fullScreen={false}>{children}</ErrorBoundary>;
+}
 
 function ProtectedRoute({ children, requireSubscription = true }) {
   const { user, loading } = useAuth();
@@ -78,24 +84,24 @@ export default function App() {
       <Route path="/verify-email" element={<VerifyEmail />} />
       <Route path="/privacy" element={<Privacy />} />
       <Route path="/terms" element={<Terms />} />
-      <Route path="/dashboard" element={<ProtectedRoute><AppLayout><Dashboard /></AppLayout></ProtectedRoute>} />
-      <Route path="/transactions" element={<ProtectedRoute><AppLayout><Transactions /></AppLayout></ProtectedRoute>} />
-      <Route path="/accounts" element={<ProtectedRoute><AppLayout><Accounts /></AppLayout></ProtectedRoute>} />
-      <Route path="/categories" element={<ProtectedRoute><AppLayout><Categories /></AppLayout></ProtectedRoute>} />
+      <Route path="/dashboard" element={<ProtectedRoute><AppLayout><PageBoundary><Dashboard /></PageBoundary></AppLayout></ProtectedRoute>} />
+      <Route path="/transactions" element={<ProtectedRoute><AppLayout><PageBoundary><Transactions /></PageBoundary></AppLayout></ProtectedRoute>} />
+      <Route path="/accounts" element={<ProtectedRoute><AppLayout><PageBoundary><Accounts /></PageBoundary></AppLayout></ProtectedRoute>} />
+      <Route path="/categories" element={<ProtectedRoute><AppLayout><PageBoundary><Categories /></PageBoundary></AppLayout></ProtectedRoute>} />
       <Route path="/ledger" element={<Navigate to="/transactions" replace />} /> {/* Redirect old ledger URL */}
-      <Route path="/cashflow" element={<ProtectedRoute><AppLayout><CashFlow /></AppLayout></ProtectedRoute>} />
-      <Route path="/reconciliation" element={<ProtectedRoute><AppLayout><Reconciliation /></AppLayout></ProtectedRoute>} />
-      <Route path="/reports" element={<ProtectedRoute><AppLayout><Reports /></AppLayout></ProtectedRoute>} />
-      <Route path="/email-sync" element={<ProtectedRoute><AppLayout><EmailSync /></AppLayout></ProtectedRoute>} />
-      <Route path="/records" element={<ProtectedRoute><AppLayout><Records /></AppLayout></ProtectedRoute>} />
-      <Route path="/past-insights" element={<ProtectedRoute><AppLayout><TaxSummary /></AppLayout></ProtectedRoute>} />
-      <Route path="/feature-requests" element={<ProtectedRoute><AppLayout><FeatureRequests /></AppLayout></ProtectedRoute>} />
-      <Route path="/support" element={<ProtectedRoute><AppLayout><Support /></AppLayout></ProtectedRoute>} />
-      <Route path="/invoices" element={<ProtectedRoute><AppLayout><Invoices /></AppLayout></ProtectedRoute>} />
-      <Route path="/customers" element={<ProtectedRoute><AppLayout><Customers /></AppLayout></ProtectedRoute>} />
-      <Route path="/purchases" element={<ProtectedRoute><AppLayout><Purchases /></AppLayout></ProtectedRoute>} />
-      <Route path="/vendors" element={<ProtectedRoute><AppLayout><Vendors /></AppLayout></ProtectedRoute>} />
-      <Route path="/settings" element={<ProtectedRoute><AppLayout><Settings /></AppLayout></ProtectedRoute>} />
+      <Route path="/cashflow" element={<ProtectedRoute><AppLayout><PageBoundary><CashFlow /></PageBoundary></AppLayout></ProtectedRoute>} />
+      <Route path="/reconciliation" element={<ProtectedRoute><AppLayout><PageBoundary><Reconciliation /></PageBoundary></AppLayout></ProtectedRoute>} />
+      <Route path="/reports" element={<ProtectedRoute><AppLayout><PageBoundary><Reports /></PageBoundary></AppLayout></ProtectedRoute>} />
+      <Route path="/email-sync" element={<ProtectedRoute><AppLayout><PageBoundary><EmailSync /></PageBoundary></AppLayout></ProtectedRoute>} />
+      <Route path="/records" element={<ProtectedRoute><AppLayout><PageBoundary><Records /></PageBoundary></AppLayout></ProtectedRoute>} />
+      <Route path="/past-insights" element={<ProtectedRoute><AppLayout><PageBoundary><TaxSummary /></PageBoundary></AppLayout></ProtectedRoute>} />
+      <Route path="/feature-requests" element={<ProtectedRoute><AppLayout><PageBoundary><FeatureRequests /></PageBoundary></AppLayout></ProtectedRoute>} />
+      <Route path="/support" element={<ProtectedRoute><AppLayout><PageBoundary><Support /></PageBoundary></AppLayout></ProtectedRoute>} />
+      <Route path="/invoices" element={<ProtectedRoute><AppLayout><PageBoundary><Invoices /></PageBoundary></AppLayout></ProtectedRoute>} />
+      <Route path="/customers" element={<ProtectedRoute><AppLayout><PageBoundary><Customers /></PageBoundary></AppLayout></ProtectedRoute>} />
+      <Route path="/purchases" element={<ProtectedRoute><AppLayout><PageBoundary><Purchases /></PageBoundary></AppLayout></ProtectedRoute>} />
+      <Route path="/vendors" element={<ProtectedRoute><AppLayout><PageBoundary><Vendors /></PageBoundary></AppLayout></ProtectedRoute>} />
+      <Route path="/settings" element={<ProtectedRoute><AppLayout><PageBoundary><Settings /></PageBoundary></AppLayout></ProtectedRoute>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

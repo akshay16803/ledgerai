@@ -92,19 +92,26 @@ final class ReportsViewModel {
         isLoading = true
         showError = false
 
-        do {
-            async let summaryTask = repository.getSummary(from: startDate, to: endDate)
-            async let periodsTask = repository.getPeriods(from: startDate, to: endDate)
-            async let categoriesTask = repository.getCategories(
-                from: startDate, to: endDate, type: catType.rawValue.lowercased()
-            )
+        // Run each call independently so one failure does not cancel the others.
+        async let summaryResult = Result { try await repository.getSummary(from: startDate, to: endDate) }
+        async let periodsResult = Result { try await repository.getPeriods(from: startDate, to: endDate) }
+        async let categoriesResult = Result { try await repository.getCategories(
+            from: startDate, to: endDate, type: catType.rawValue.lowercased()
+        ) }
 
-            let (s, p, c) = try await (summaryTask, periodsTask, categoriesTask)
-            summary = s
-            periods = p
-            categories = c
-        } catch {
-            handleError(error)
+        let (sRes, pRes, cRes) = await (summaryResult, periodsResult, categoriesResult)
+
+        switch sRes {
+        case .success(let s): summary = s
+        case .failure(let e): handleError(e)
+        }
+        switch pRes {
+        case .success(let p): periods = p
+        case .failure(let e): handleError(e)
+        }
+        switch cRes {
+        case .success(let c): categories = c
+        case .failure(let e): handleError(e)
         }
 
         isLoading = false
