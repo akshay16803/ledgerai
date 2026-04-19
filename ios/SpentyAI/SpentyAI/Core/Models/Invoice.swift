@@ -86,10 +86,12 @@ struct InvoiceLineItem: Codable, Identifiable, Equatable {
         case quantity
         case rate
         case taxPercent
+        case gstRate          // Backend alias for taxPercent
         case cgst
         case sgst
         case igst
         case amount
+        case total            // Backend alias for amount
     }
 
     init(from decoder: Decoder) throws {
@@ -98,11 +100,15 @@ struct InvoiceLineItem: Codable, Identifiable, Equatable {
         self.hsnSac = try? container.decodeIfPresent(String.self, forKey: .hsnSac)
         self.quantity = try? container.decodeIfPresent(Double.self, forKey: .quantity)
         self.rate = try? container.decodeIfPresent(Double.self, forKey: .rate)
-        self.taxPercent = try? container.decodeIfPresent(Double.self, forKey: .taxPercent)
+        // Backend may send as taxPercent or gstRate
+        self.taxPercent = (try? container.decodeIfPresent(Double.self, forKey: .taxPercent))
+            ?? (try? container.decodeIfPresent(Double.self, forKey: .gstRate))
         self.cgst = try? container.decodeIfPresent(Double.self, forKey: .cgst)
         self.sgst = try? container.decodeIfPresent(Double.self, forKey: .sgst)
         self.igst = try? container.decodeIfPresent(Double.self, forKey: .igst)
-        self.amount = try? container.decodeIfPresent(Double.self, forKey: .amount)
+        // Backend may send as amount or total
+        self.amount = (try? container.decodeIfPresent(Double.self, forKey: .amount))
+            ?? (try? container.decodeIfPresent(Double.self, forKey: .total))
     }
 
     init(description: String? = nil, hsnSac: String? = nil, quantity: Double? = nil, rate: Double? = nil, taxPercent: Double? = nil, cgst: Double? = nil, sgst: Double? = nil, igst: Double? = nil, amount: Double? = nil) {

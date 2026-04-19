@@ -11205,7 +11205,8 @@ def _calculate_line_items(line_items: list, invoice_type: str, is_same_state: bo
         rate = float(item.get("rate", 0))
         discount_pct = float(item.get("discount_percent", 0))
         taxable = round(qty * rate * (1 - discount_pct / 100), 2)
-        gst_rate = float(item.get("gst_rate", 0)) if invoice_type == "gst" else 0
+        # Accept both gst_rate (web) and tax_percent (iOS) as input
+        gst_rate = float(item.get("gst_rate", 0) or item.get("tax_percent", 0)) if invoice_type == "gst" else 0
 
         if invoice_type == "gst" and gst_rate > 0:
             if is_same_state:
@@ -11232,10 +11233,12 @@ def _calculate_line_items(line_items: list, invoice_type: str, is_same_state: bo
             "discount_percent": discount_pct,
             "taxable_amount": taxable,
             "gst_rate": gst_rate,
+            "tax_percent": gst_rate,       # iOS alias
             "cgst": cgst,
             "sgst": sgst,
             "igst": igst,
             "total": total,
+            "amount": total,               # iOS alias
         })
     return calculated
 
@@ -11477,8 +11480,8 @@ async def create_invoice(request: Request, user: dict = Depends(get_current_user
         "po_number": body.get("po_number"),
         "notes": body.get("notes"),
         "terms_conditions": body.get("terms_conditions", (settings or {}).get("invoice_terms")),
-        "created_at": now,
-        "updated_at": now,
+        "created_at": now.isoformat(),
+        "updated_at": now.isoformat(),
     }
 
     # Auto-post transaction for paid / partial
@@ -11619,7 +11622,7 @@ async def update_invoice(invoice_id: str, request: Request, user: dict = Depends
         if k in body:
             update_fields[k] = body[k]
 
-    update_fields["updated_at"] = datetime.now(timezone.utc)
+    update_fields["updated_at"] = datetime.now(timezone.utc).isoformat()
 
     await db.invoices.update_one(
         {"invoice_id": invoice_id, "user_id": user["user_id"]},

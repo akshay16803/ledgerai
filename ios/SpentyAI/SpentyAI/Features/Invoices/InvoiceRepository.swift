@@ -21,6 +21,15 @@ struct InvoiceLineItemPayload: Codable {
     let rate: Double?
     let taxPercent: Double?
     let amount: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case description
+        case hsnSac
+        case quantity
+        case rate
+        case taxPercent = "gstRate"   // Backend reads gst_rate
+        case amount
+    }
 }
 
 struct RecordPaymentPayload: Codable {
