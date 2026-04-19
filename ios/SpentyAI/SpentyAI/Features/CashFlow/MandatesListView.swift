@@ -30,21 +30,27 @@ struct MandatesListView: View {
     // MARK: - Detect Button
 
     private var detectButton: some View {
-        Button {
-            Task { await viewModel.detectMandates() }
-        } label: {
-            HStack(spacing: 8) {
-                if viewModel.isDetecting {
-                    ProgressView()
-                        .tint(.white)
-                } else {
-                    Image(systemName: "sparkle.magnifyingglass")
+        VStack(alignment: .leading, spacing: 6) {
+            Button {
+                Task { await viewModel.detectMandates() }
+            } label: {
+                HStack(spacing: 8) {
+                    if viewModel.isDetecting {
+                        ProgressView()
+                            .tint(.white)
+                    } else {
+                        Image(systemName: "sparkle.magnifyingglass")
+                    }
+                    Text(viewModel.isDetecting ? "Detecting..." : "Detect Mandates")
                 }
-                Text(viewModel.isDetecting ? "Detecting..." : "Detect Mandates")
+                .primaryButtonStyle()
             }
-            .primaryButtonStyle()
+            .disabled(viewModel.isDetecting)
+
+            Text("Scans your past transactions to find recurring payments like subscriptions, EMIs, and auto-pay. Detected mandates improve your cash flow forecast.")
+                .font(SpentyFonts.caption2)
+                .foregroundColor(.spentyTextSecondary.opacity(0.7))
         }
-        .disabled(viewModel.isDetecting)
         .padding(.horizontal, 16)
     }
 
