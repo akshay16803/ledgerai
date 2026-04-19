@@ -59,6 +59,22 @@ final class AuthManager {
     }
 
     func checkSession() async {
+        #if targetEnvironment(simulator)
+        // If no valid token exists on the simulator, auto-login via the dev endpoint
+        // so we can test all screens without Google OAuth.
+        if KeychainHelper.read(key: KeychainHelper.sessionTokenKey) == nil {
+            isLoading = true
+            defer { isLoading = false }
+            do {
+                try await simulatorAutoLogin()
+            } catch {
+                print("[SimulatorBypass] Auto-login failed: \(error)")
+                isAuthenticated = false
+            }
+            return
+        }
+        #endif
+
         guard KeychainHelper.read(key: KeychainHelper.sessionTokenKey) != nil else {
             isAuthenticated = false
             return
@@ -73,8 +89,47 @@ final class AuthManager {
             self.user = nil
             self.isAuthenticated = false
             KeychainHelper.delete(key: KeychainHelper.sessionTokenKey)
+
+            #if targetEnvironment(simulator)
+            // Token was stale — try auto-login again
+            do {
+                try await simulatorAutoLogin()
+            } catch {
+                print("[SimulatorBypass] Re-login failed: \(error)")
+            }
+            #endif
         }
     }
+
+    // MARK: - Simulator Bypass
+
+    #if targetEnvironment(simulator)
+    /// Calls the dev-only backend endpoint to mint a session token without Google OAuth.
+    private func simulatorAutoLogin() async throws {
+        struct SimulatorLoginRequest: Encodable {
+            let email: String
+            let devSecret: String
+        }
+
+        struct SimulatorLoginResponse: Decodable {
+            let sessionToken: String
+            let user: User
+        }
+
+        let response: SimulatorLoginResponse = try await APIClient.shared.post(
+            APIEndpoints.authDevSimulatorLogin,
+            body: SimulatorLoginRequest(
+                email: "akshaychouhan16803@gmail.com",
+                devSecret: "spenty-sim-bypass-2026"
+            )
+        )
+
+        KeychainHelper.save(key: KeychainHelper.sessionTokenKey, value: response.sessionToken)
+        self.user = response.user
+        self.isAuthenticated = true
+        print("[SimulatorBypass] Auto-login successful for \(response.user.email ?? "unknown")")
+    }
+    #endif
 
     func logout() async {
         do {

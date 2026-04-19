@@ -546,6 +546,50 @@ async def google_mobile_login(request: Request, response: Response):
     }
 
 
+@app.post("/api/auth/dev/simulator-login")
+async def simulator_login(request: Request):
+    """DEV ONLY: Create a session for an existing user by email, bypassing Google OAuth.
+    Used by the iOS simulator when Google Sign-In is unavailable."""
+    body = await request.json()
+    email = body.get("email")
+    dev_secret = body.get("dev_secret")
+
+    # Guard: require a shared secret so this endpoint cannot be abused
+    expected_secret = os.environ.get("DEV_SIMULATOR_SECRET", "spenty-sim-bypass-2026")
+    if dev_secret != expected_secret:
+        raise HTTPException(status_code=403, detail="Invalid dev secret")
+
+    if not email:
+        raise HTTPException(status_code=400, detail="email is required")
+
+    existing_user = await db.users.find_one({"email": email}, {"_id": 0})
+    if not existing_user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    user_id = existing_user["user_id"]
+
+    # Create session (same logic as normal login)
+    session_token = secrets.token_urlsafe(48)
+    await db.user_sessions.insert_one({
+        "user_id": user_id,
+        "session_token": session_token,
+        "expires_at": datetime.now(timezone.utc) + timedelta(days=30),
+        "created_at": datetime.now(timezone.utc),
+    })
+
+    return {
+        "session_token": session_token,
+        "user": {
+            "user_id": user_id,
+            "email": existing_user.get("email", ""),
+            "name": existing_user.get("name", ""),
+            "picture": existing_user.get("picture", ""),
+            "subscription_plan": existing_user.get("subscription_plan"),
+            "subscription_status": existing_user.get("subscription_status"),
+        },
+    }
+
+
 @app.delete("/api/auth/delete-account")
 async def delete_account(request: Request, user: dict = Depends(get_current_user)):
     """Permanently delete user account and all associated data."""

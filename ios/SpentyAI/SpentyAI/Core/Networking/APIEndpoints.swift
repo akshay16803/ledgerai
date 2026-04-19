@@ -6,6 +6,7 @@ struct APIEndpoints {
     static let authMe = "/api/auth/me"
     static let authLogout = "/api/auth/logout"
     static let authDeleteAccount = "/api/auth/delete-account"
+    static let authDevSimulatorLogin = "/api/auth/dev/simulator-login"
 
     // MARK: - Accounts
     static let accounts = "/api/accounts"
