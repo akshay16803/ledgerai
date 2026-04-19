@@ -49,6 +49,7 @@ if not MONGO_URL:
 
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID")
+GOOGLE_IOS_CLIENT_ID = os.environ.get("GOOGLE_IOS_CLIENT_ID")
 GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET")
 MICROSOFT_CLIENT_ID = os.environ.get("MICROSOFT_CLIENT_ID")
 MICROSOFT_TENANT_ID = os.environ.get("MICROSOFT_TENANT_ID")
@@ -490,8 +491,9 @@ async def google_mobile_login(request: Request, response: Response):
         if not email:
             raise HTTPException(status_code=400, detail="No email in token")
 
-        # Verify audience matches our client ID
-        if GOOGLE_CLIENT_ID and token_info.get("aud") != GOOGLE_CLIENT_ID:
+        # Verify audience matches our web or iOS client ID
+        valid_audiences = {GOOGLE_CLIENT_ID, GOOGLE_IOS_CLIENT_ID} - {None}
+        if valid_audiences and token_info.get("aud") not in valid_audiences:
             raise HTTPException(status_code=401, detail="Token audience mismatch")
 
     except HTTPException:
