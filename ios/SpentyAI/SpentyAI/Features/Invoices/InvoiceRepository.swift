@@ -31,7 +31,7 @@ struct RecordPaymentPayload: Codable {
     let note: String?
 }
 
-private struct InvoiceListResponse: Codable {
+private struct InvoiceListResponse: Decodable {
     let invoices: [Invoice]
     let total: Int?
 
