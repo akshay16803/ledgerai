@@ -42,6 +42,9 @@ struct RecordsView: View {
         .navigationTitle("Records")
         .navigationBarTitleDisplayMode(.large)
         .toolbar { toolbarContent }
+        .navigationDestination(for: String.self) { recordId in
+            RecordPreviewView(recordId: recordId, viewModel: viewModel)
+        }
         .sheet(item: $viewModel.shareItem) { item in
             RecordsShareSheet(activityItems: [item.url])
         }
@@ -366,11 +369,6 @@ struct RecordsView: View {
                 .listStyle(.plain)
                 .refreshable { await viewModel.refreshRecords() }
             }
-        }
-        // Keep navigationDestination outside the conditional Group
-        // so SwiftUI doesn't lose the registration on re-render
-        .navigationDestination(for: String.self) { recordId in
-            RecordPreviewView(recordId: recordId, viewModel: viewModel)
         }
     }
 
