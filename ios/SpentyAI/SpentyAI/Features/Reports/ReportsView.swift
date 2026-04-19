@@ -4,7 +4,7 @@ import Charts
 struct ReportsView: View {
 
     @State private var vm = ReportsViewModel()
-    @State private var expandedCategoryId: String?
+    @State private var expandedCategoryId: UUID?
     @State private var selectedDrillDown: ReportDrillDown?
 
     // MARK: - Body

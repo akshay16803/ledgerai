@@ -1,7 +1,7 @@
 import Foundation
 
 struct ReportSummary: Identifiable, Codable {
-    var id: String { "\(startDate ?? "")-\(endDate ?? "")" }
+    let id = UUID()
     var totalIncome: Double?
     var totalExpense: Double?
     var totalTransfers: Double?
@@ -10,6 +10,10 @@ struct ReportSummary: Identifiable, Codable {
     var topCategories: [ReportCategory]?
     var startDate: String?
     var endDate: String?
+
+    enum CodingKeys: String, CodingKey {
+        case totalIncome, totalExpense, totalTransfers, net, transactionCount, topCategories, startDate, endDate
+    }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -25,6 +29,7 @@ struct ReportSummary: Identifiable, Codable {
 }
 
 struct IncomeExpenseResponse: Codable {
+    let id = UUID()
     var totalIncome: Double?
     var totalExpense: Double?
     var net: Double?
@@ -32,6 +37,10 @@ struct IncomeExpenseResponse: Codable {
     var expenseByCategory: [ReportCategory]?
     var startDate: String?
     var endDate: String?
+
+    enum CodingKeys: String, CodingKey {
+        case totalIncome, totalExpense, net, incomeByCategory, expenseByCategory, startDate, endDate
+    }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -46,7 +55,7 @@ struct IncomeExpenseResponse: Codable {
 }
 
 struct ReportPeriod: Codable, Identifiable {
-    var id: String { month ?? UUID().uuidString }
+    let id = UUID()
     var month: String?
     var income: Double?
     var expense: Double?
@@ -58,6 +67,10 @@ struct ReportPeriod: Codable, Identifiable {
     var period: String? { month }
     /// Convenience alias so views can still use `transactionCount`
     var transactionCount: Int? { count }
+
+    enum CodingKeys: String, CodingKey {
+        case month, income, expense, net, count, transfer
+    }
 
     init(month: String? = nil, income: Double? = nil, expense: Double? = nil, net: Double? = nil, count: Int? = nil, transfer: Double? = nil) {
         self.month = month
@@ -80,7 +93,7 @@ struct ReportPeriod: Codable, Identifiable {
 }
 
 struct ReportCategory: Codable, Identifiable {
-    var id: String { categoryId ?? categoryName ?? UUID().uuidString }
+    let id = UUID()
     var categoryId: String?
     var categoryName: String?
     var total: Double?
@@ -97,6 +110,10 @@ struct ReportCategory: Codable, Identifiable {
     var transactionCount: Int? { count }
     /// Backend does not send percentage; views compute it from totalCategoryAmount
     var percentage: Double? { nil }
+
+    enum CodingKeys: String, CodingKey {
+        case categoryId, categoryName, total, income, expense, count, subcategories
+    }
 
     init(categoryId: String? = nil, categoryName: String? = nil, total: Double? = nil, income: Double? = nil, expense: Double? = nil, count: Int? = nil, subcategories: [ReportSubcategory]? = nil) {
         self.categoryId = categoryId
@@ -122,13 +139,17 @@ struct ReportCategory: Codable, Identifiable {
 
 /// Subcategory breakdown returned by the backend inside each ReportCategory.
 struct ReportSubcategory: Codable, Identifiable {
-    var id: String { subcategoryId ?? subcategoryName ?? UUID().uuidString }
+    let id = UUID()
     var subcategoryId: String?
     var subcategoryName: String?
     var total: Double?
     var income: Double?
     var expense: Double?
     var count: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case subcategoryId, subcategoryName, total, income, expense, count
+    }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)

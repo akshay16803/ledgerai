@@ -92,26 +92,29 @@ final class ReportsViewModel {
         isLoading = true
         showError = false
 
-        // Run each call independently so one failure does not cancel the others.
-        let summaryTask = Task { try await self.repository.getSummary(from: self.startDate, to: self.endDate) }
-        let periodsTask = Task { try await self.repository.getPeriods(from: self.startDate, to: self.endDate) }
-        let categoriesTask = Task { try await self.repository.getCategories(
-            from: self.startDate, to: self.endDate, type: self.catType.rawValue.lowercased()
-        ) }
+        // Capture dates/type before going off-main-actor to avoid race conditions
+        let from = self.startDate
+        let to = self.endDate
+        let type = self.catType.rawValue.lowercased()
 
-        switch await summaryTask.result {
-        case .success(let s): summary = s
-        case .failure(let e): handleError(e)
-        }
-        switch await periodsTask.result {
-        case .success(let p): periods = p
-        case .failure(let e): handleError(e)
-        }
-        switch await categoriesTask.result {
-        case .success(let c): categories = c
-        case .failure(let e): handleError(e)
-        }
+        // Run all three API calls concurrently
+        async let summaryResult = repository.getSummary(from: from, to: to)
+        async let periodsResult = repository.getPeriods(from: from, to: to)
+        async let categoriesResult = repository.getCategories(from: from, to: to, type: type)
 
+        // Collect results — each wrapped so one failure does not cancel others
+        var newSummary: ReportSummary? = summary
+        var newPeriods: [ReportPeriod] = periods
+        var newCategories: [ReportCategory] = categories
+
+        do { newSummary = try await summaryResult } catch { handleError(error) }
+        do { newPeriods = try await periodsResult } catch { handleError(error) }
+        do { newCategories = try await categoriesResult } catch { handleError(error) }
+
+        // Batch all state updates into one render pass
+        summary = newSummary
+        periods = newPeriods
+        categories = newCategories
         isLoading = false
     }
 
