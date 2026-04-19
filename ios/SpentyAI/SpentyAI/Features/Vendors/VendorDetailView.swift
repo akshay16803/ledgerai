@@ -259,7 +259,7 @@ struct VendorDetailView: View {
         let color: Color = switch status.lowercased() {
         case "paid":      .green
         case "partial":   .orange
-        case "overdue":   .red
+        case "overdue":   .spentyError
         default:          .secondary
         }
 

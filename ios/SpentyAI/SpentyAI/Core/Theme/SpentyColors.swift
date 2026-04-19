@@ -9,10 +9,10 @@ extension Color {
             : UIColor(red: 0xF8/255.0, green: 0xF6/255.0, blue: 0xF3/255.0, alpha: 1)
     })
     static let spentySuccess = Color(hex: 0x34C759)
-    static let spentyError = Color(hex: 0x96453A)
+    static let spentyError = Color(hex: 0xD94438)
     static let spentyWarning = Color(hex: 0xC28C3C)
     static let spentyInfo = Color(hex: 0x4A6E7D)
-    static let spentyAccent1 = Color(hex: 0xC26D5C)
+    static let spentyAccent1 = Color(hex: 0xE07B6A)
     static let spentyAccent3 = Color(hex: 0x4A6E7D)
     static let spentyTextPrimary = Color(uiColor: UIColor { traitCollection in
         traitCollection.userInterfaceStyle == .dark
