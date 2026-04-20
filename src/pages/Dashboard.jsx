@@ -5,13 +5,100 @@ import { getCached, setCache } from '../lib/cache';
 import {
   TrendUp, TrendDown, Scales, Clock, ArrowRight, Plus,
   Robot, PaperPlaneTilt, X, SpinnerGap, CheckCircle,
-  CaretRight, EnvelopeSimple, Check, Prohibit
+  CaretRight, EnvelopeSimple, Check, Prohibit, Eye, ChatText
 } from '@phosphor-icons/react';
 import { EditTransactionModal } from '../components/EditTransactionModal';
 import { SalesInvoiceModal } from '../components/SalesInvoiceModal';
 import { PurchaseBillModal } from '../components/PurchaseBillModal';
 import { InternationalInvoiceModal } from '../components/InternationalInvoiceModal';
 import { usesExistingForms } from '../lib/countryConfig';
+
+function ViewSourceModal({ source, onClose }) {
+  if (!source) return null;
+  const isEmail = source.type === 'email';
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 9999,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+    }}>
+      <div onClick={onClose} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.45)' }} />
+      <div style={{
+        position: 'relative', background: '#fff', borderRadius: 2, width: '90%', maxWidth: 600,
+        maxHeight: '80vh', display: 'flex', flexDirection: 'column',
+        boxShadow: '0 20px 60px rgba(0,0,0,0.2)', border: '1px solid var(--border-subtle)',
+      }}>
+        <div style={{
+          padding: '16px 24px', borderBottom: '1px solid var(--border-subtle)',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          background: 'var(--bg-secondary)',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {isEmail ? <EnvelopeSimple size={18} weight="bold" style={{ color: '#2563EB' }} />
+              : <ChatText size={18} weight="bold" style={{ color: '#7C3AED' }} />}
+            <span style={{ fontSize: 15, fontWeight: 600 }}>
+              {isEmail ? 'Original Email' : 'Original SMS'}
+            </span>
+          </div>
+          <button onClick={onClose} style={{
+            background: 'none', border: 'none', cursor: 'pointer', padding: 4,
+            color: 'var(--text-muted)', fontSize: 18, lineHeight: 1,
+          }}>&times;</button>
+        </div>
+        <div style={{ padding: '20px 24px', overflowY: 'auto', flex: 1 }}>
+          {isEmail ? (
+            <>
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>Subject</div>
+                <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>{source.subject || '(no subject)'}</div>
+              </div>
+              <div style={{ display: 'flex', gap: 24, marginBottom: 16 }}>
+                <div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>From</div>
+                  <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{source.from || '\u2014'}</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>Date</div>
+                  <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{source.date || '\u2014'}</div>
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>Body</div>
+                <div style={{
+                  fontSize: 13, lineHeight: 1.6, color: 'var(--text-secondary)',
+                  whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                  background: 'var(--bg-secondary)', padding: 16, borderRadius: 2,
+                  border: '1px solid var(--border-subtle)', maxHeight: 300, overflowY: 'auto',
+                }}>{source.body || '(empty)'}</div>
+              </div>
+            </>
+          ) : (
+            <>
+              <div style={{ display: 'flex', gap: 24, marginBottom: 16 }}>
+                <div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>Sender</div>
+                  <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{source.sender || '\u2014'}</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>Date</div>
+                  <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{source.date || '\u2014'}</div>
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>Message</div>
+                <div style={{
+                  fontSize: 13, lineHeight: 1.6, color: 'var(--text-secondary)',
+                  whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                  background: 'var(--bg-secondary)', padding: 16, borderRadius: 2,
+                  border: '1px solid var(--border-subtle)', maxHeight: 300, overflowY: 'auto',
+                }}>{source.body || '(empty)'}</div>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function StatCard({ testId, label, value, icon: Icon, color, accent }) {
   return (
@@ -336,6 +423,7 @@ export default function Dashboard() {
   // Pending approval state
   const [pendingItems, setPendingItems] = useState([]);
   const [pendingLoading, setPendingLoading] = useState(false);
+  const [viewingSource, setViewingSource] = useState(null);
 
   const openNewTxnModal = async () => {
     setShowNewTxn(true);
@@ -404,6 +492,15 @@ export default function Dashboard() {
     try {
       await api.post(`/api/transactions/${id}/reject`);
       setPendingItems(prev => prev.filter(t => t.transactionId !== id));
+    } catch { /* silent */ }
+  };
+
+  const handleViewSource = async (txn) => {
+    const sourceId = txn.source_email_id || txn.sourceSmsId || txn.source_sms_id || txn.sourceEmailId;
+    if (!sourceId) return;
+    try {
+      const data = await api.get(`/api/source/${sourceId}`);
+      setViewingSource(data);
     } catch { /* silent */ }
   };
 
@@ -569,6 +666,20 @@ export default function Dashboard() {
                   }}>
                     {formatCurrency(txn.amount || 0)}
                   </span>
+                  {(txn.source_email_id || txn.sourceSmsId || txn.source_sms_id || txn.sourceEmailId) && (
+                    <button onClick={() => handleViewSource(txn)} title="View Source" style={{
+                      background: 'none', border: '1px solid var(--border-subtle)', borderRadius: 4,
+                      color: '#2563EB', cursor: 'pointer', padding: '4px 10px',
+                      fontSize: 12, fontWeight: 600, fontFamily: 'var(--font-body)',
+                      display: 'flex', alignItems: 'center', gap: 4,
+                      transition: 'background 0.15s',
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.background = 'rgba(37,99,235,0.06)'; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'none'; }}
+                    >
+                      <Eye size={12} weight="bold" /> Source
+                    </button>
+                  )}
                   <button onClick={() => handleReject(txn.transactionId)} title="Reject" style={{
                     background: 'none', border: '1px solid var(--error)', borderRadius: 4,
                     color: 'var(--error)', cursor: 'pointer', padding: '4px 10px',
@@ -633,6 +744,11 @@ export default function Dashboard() {
             onClose={() => setShowSalesInvoice(false)}
           />
         )
+      )}
+
+      {/* View Source Modal */}
+      {viewingSource && (
+        <ViewSourceModal source={viewingSource} onClose={() => setViewingSource(null)} />
       )}
 
       {/* Purchase Invoice Modal */}
