@@ -323,8 +323,12 @@ struct TransactionFormView: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .fixedSize(horizontal: false, vertical: true)
-                    .onChange(of: categoryId) { _, _ in
-                        if hasPopulated { subcategoryId = "" }
+                    .onChange(of: categoryId) { oldValue, newValue in
+                        // Only clear subcategory when user manually changes category,
+                        // not during initial population (old value was empty)
+                        if !oldValue.isEmpty && oldValue != newValue {
+                            subcategoryId = ""
+                        }
                     }
 
                     Button {
