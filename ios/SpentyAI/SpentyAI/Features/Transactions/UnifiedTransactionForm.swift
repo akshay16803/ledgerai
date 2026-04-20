@@ -326,7 +326,7 @@ struct UnifiedTransactionForm: View {
                 formDivider
 
                 // Account row
-                HStack(spacing: 8) {
+                HStack(alignment: .center, spacing: 8) {
                     Image(systemName: "building.columns")
                         .font(.system(size: 15))
                         .foregroundColor(.spentyPrimary)
@@ -336,6 +336,7 @@ struct UnifiedTransactionForm: View {
                         .font(.system(size: 15))
                         .foregroundColor(.spentyTextPrimary)
                         .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
 
                     Spacer(minLength: 4)
 
@@ -347,7 +348,7 @@ struct UnifiedTransactionForm: View {
                     }
                     .pickerStyle(.menu)
                     .tint(.spentyTextPrimary)
-                    .fixedSize(horizontal: true, vertical: false)
+                    .lineLimit(1)
 
                     Button {
                         newAccountName = ""
@@ -373,7 +374,7 @@ struct UnifiedTransactionForm: View {
                         }
                         .pickerStyle(.menu)
                         .tint(.spentyTextPrimary)
-                        .fixedSize(horizontal: true, vertical: false)
+                        .lineLimit(1)
                     }
                 }
 
@@ -389,7 +390,7 @@ struct UnifiedTransactionForm: View {
                     }
                     .pickerStyle(.menu)
                     .tint(.spentyTextPrimary)
-                    .fixedSize(horizontal: true, vertical: false)
+                    .lineLimit(1)
                 }
             }
             .cardStyle()
@@ -404,7 +405,7 @@ struct UnifiedTransactionForm: View {
 
             VStack(spacing: 0) {
                 // Category row
-                HStack(spacing: 8) {
+                HStack(alignment: .center, spacing: 8) {
                     Image(systemName: "tag")
                         .font(.system(size: 15))
                         .foregroundColor(.spentyPrimary)
@@ -414,6 +415,7 @@ struct UnifiedTransactionForm: View {
                         .font(.system(size: 15))
                         .foregroundColor(.spentyTextPrimary)
                         .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
 
                     Spacer(minLength: 4)
 
@@ -425,7 +427,7 @@ struct UnifiedTransactionForm: View {
                     }
                     .pickerStyle(.menu)
                     .tint(.spentyTextPrimary)
-                    .fixedSize(horizontal: true, vertical: false)
+                    .lineLimit(1)
                     .onChange(of: categoryId) { _, _ in
                         subcategoryId = ""
                     }
@@ -445,7 +447,7 @@ struct UnifiedTransactionForm: View {
                     formDivider
 
                     // Subcategory row
-                    HStack(spacing: 8) {
+                    HStack(alignment: .center, spacing: 8) {
                         Image(systemName: "tag.circle")
                             .font(.system(size: 15))
                             .foregroundColor(.spentyPrimary.opacity(0.6))
@@ -455,6 +457,7 @@ struct UnifiedTransactionForm: View {
                             .font(.system(size: 15))
                             .foregroundColor(.spentyTextPrimary)
                             .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
 
                         Spacer(minLength: 4)
 
@@ -466,7 +469,7 @@ struct UnifiedTransactionForm: View {
                         }
                         .pickerStyle(.menu)
                         .tint(.spentyTextPrimary)
-                        .fixedSize(horizontal: true, vertical: false)
+                        .lineLimit(1)
 
                         if !categoryId.isEmpty {
                             Button {
@@ -531,10 +534,11 @@ struct UnifiedTransactionForm: View {
         VStack(alignment: .leading, spacing: 8) {
             sectionLabel("Note")
 
-            HStack(spacing: 10) {
+            HStack(alignment: .center, spacing: 8) {
                 Image(systemName: "text.alignleft")
                     .font(.system(size: 15))
                     .foregroundColor(.spentyPrimary)
+                    .frame(width: 22)
 
                 TextField("Add a note...", text: $descriptionText)
                     .font(.system(size: 15))
@@ -559,11 +563,11 @@ struct UnifiedTransactionForm: View {
 
             VStack(spacing: 0) {
                 // Toggle row
-                HStack(spacing: 10) {
+                HStack(alignment: .center, spacing: 10) {
                     Image(systemName: "repeat")
                         .font(.system(size: 15))
                         .foregroundColor(.spentyPrimary)
-                        .frame(width: 24)
+                        .frame(width: 22)
 
                     Toggle(isOn: $isRecurring) {
                         Text("Repeat")
@@ -580,16 +584,17 @@ struct UnifiedTransactionForm: View {
 
                     // Frequency
                     VStack(alignment: .leading, spacing: 10) {
-                        HStack(spacing: 10) {
+                        HStack(alignment: .center, spacing: 8) {
                             Image(systemName: "clock.arrow.2.circlepath")
                                 .font(.system(size: 15))
                                 .foregroundColor(.spentyPrimary.opacity(0.6))
-                                .frame(width: 24)
+                                .frame(width: 22)
 
                             Text("Frequency")
                                 .font(.system(size: 15))
                                 .foregroundColor(.spentyTextPrimary)
                                 .lineLimit(1)
+                                .fixedSize(horizontal: true, vertical: false)
                         }
                         .padding(.top, 12)
 
@@ -933,7 +938,7 @@ struct UnifiedTransactionForm: View {
         label: String,
         @ViewBuilder content: () -> Content
     ) -> some View {
-        HStack(spacing: 8) {
+        HStack(alignment: .center, spacing: 8) {
             Image(systemName: icon)
                 .font(.system(size: 15))
                 .foregroundColor(.spentyPrimary)
@@ -943,6 +948,7 @@ struct UnifiedTransactionForm: View {
                 .font(.system(size: 15))
                 .foregroundColor(.spentyTextPrimary)
                 .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
 
             Spacer(minLength: 4)
 
