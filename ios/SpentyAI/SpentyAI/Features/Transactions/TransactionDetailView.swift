@@ -1,4 +1,5 @@
 import SwiftUI
+import QuickLook
 
 struct TransactionDetailView: View {
 
@@ -28,6 +29,8 @@ struct TransactionDetailView: View {
     @State private var showShareSheet = false
     @State private var shareData: Data?
     @State private var shareFilename: String?
+    @State private var previewURL: URL?
+    @State private var showPreview = false
 
     private let repository = TransactionRepository.shared
     private let emailSyncRepo = EmailSyncRepository.shared
@@ -162,6 +165,27 @@ struct TransactionDetailView: View {
             }
             .sheet(isPresented: $showReceiptSheet) {
                 receiptPreviewSheet
+            }
+            .fullScreenCover(isPresented: $showPreview) {
+                if let url = previewURL {
+                    NavigationStack {
+                        AttachmentPreviewView(url: url)
+                            .navigationBarTitleDisplayMode(.inline)
+                            .toolbar {
+                                ToolbarItem(placement: .topBarLeading) {
+                                    Button("Done") { showPreview = false }
+                                        .font(SpentyFonts.headline)
+                                        .foregroundColor(.spentyPrimary)
+                                }
+                                ToolbarItem(placement: .topBarTrailing) {
+                                    ShareLink(item: url) {
+                                        Image(systemName: "square.and.arrow.up")
+                                            .foregroundColor(.spentyPrimary)
+                                    }
+                                }
+                            }
+                    }
+                }
             }
             .alert("Delete Transaction", isPresented: $showDeleteConfirm) {
                 Button("Cancel", role: .cancel) {}
@@ -468,7 +492,7 @@ struct TransactionDetailView: View {
                             ProgressView()
                                 .tint(.spentyPrimary)
                         } else {
-                            Image(systemName: "arrow.down.circle")
+                            Image(systemName: "eye.circle")
                                 .font(SpentyFonts.body)
                                 .foregroundColor(.spentyPrimary)
                         }
@@ -669,24 +693,11 @@ struct TransactionDetailView: View {
         do {
             let data = try await recordsRepo.downloadAttachment(id: archiveId, index: attachment.index)
             let filename = attachment.filename ?? "attachment_\(attachment.index)"
-            // Save to temp and share
+            // Save to temp and preview inline
             let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
             try data.write(to: tempURL)
-            await MainActor.run {
-                let activityVC = UIActivityViewController(activityItems: [tempURL], applicationActivities: nil)
-                if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                   let root = windowScene.windows.first?.rootViewController {
-                    var topVC = root
-                    while let presented = topVC.presentedViewController {
-                        topVC = presented
-                    }
-                    if let popover = activityVC.popoverPresentationController {
-                        popover.sourceView = topVC.view
-                        popover.sourceRect = CGRect(x: topVC.view.bounds.midX, y: topVC.view.bounds.midY, width: 0, height: 0)
-                    }
-                    topVC.present(activityVC, animated: true)
-                }
-            }
+            previewURL = tempURL
+            showPreview = true
         } catch {
             sourceError = "Failed to download attachment"
         }
@@ -761,6 +772,32 @@ struct TransactionDetailView: View {
         if kb < 1024 { return String(format: "%.1f KB", kb) }
         let mb = kb / 1024.0
         return String(format: "%.1f MB", mb)
+    }
+}
+
+// MARK: - Attachment Preview
+
+struct AttachmentPreviewView: UIViewControllerRepresentable {
+    let url: URL
+
+    func makeUIViewController(context: Context) -> UINavigationController {
+        let controller = QLPreviewController()
+        controller.dataSource = context.coordinator
+        let nav = UINavigationController(rootViewController: controller)
+        return nav
+    }
+
+    func updateUIViewController(_ uiViewController: UINavigationController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator { Coordinator(url: url) }
+
+    class Coordinator: NSObject, QLPreviewControllerDataSource {
+        let url: URL
+        init(url: URL) { self.url = url }
+        func numberOfPreviewItems(in controller: QLPreviewController) -> Int { 1 }
+        func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> QLPreviewItem {
+            url as QLPreviewItem
+        }
     }
 }
 

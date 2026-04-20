@@ -159,8 +159,12 @@ struct PendingTransactionUpdate: Encodable {
     var description: String?
     var amount: Double?
     var accountId: String?
+    var toAccountId: String?
     var categoryId: String?
+    var subcategoryId: String?
     var date: Date?
+    var transactionType: String?
+    var paymentMethod: String?
     var isRecurring: Bool?
     var recurringFrequency: String?
     var recurrenceDate: Int?

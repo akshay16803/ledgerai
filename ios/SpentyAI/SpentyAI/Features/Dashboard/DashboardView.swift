@@ -553,18 +553,61 @@ struct PendingTransactionDetailSheet: View {
 
     @Environment(\.dismiss) private var dismiss
 
-    @State private var editDescription: String = ""
+    // MARK: - Form State (mirrors TransactionFormView)
+
+    @State private var editType: String = "expense"
     @State private var editAmount: String = ""
     @State private var editDate: Date = Date()
-    @State private var editType: String = "expense"
-    @State private var editCategory: String = ""
+    @State private var editAccountId: String = ""
+    @State private var editToAccountId: String = ""
+    @State private var editCategoryId: String = ""
+    @State private var editSubcategoryId: String = ""
+    @State private var editDescription: String = ""
+    @State private var editPaymentMethod: String = ""
+    @State private var editIsRecurring: Bool = false
+    @State private var editRecurringFrequency: String = "monthly"
+    @State private var editRecurrenceDate: String = ""
+
     @State private var isProcessing = false
+
+    // Data lists
+    @State private var accounts: [Account] = []
+    @State private var categories: [Category] = []
 
     // Source document states
     @State private var sourceContent: SourceContent?
     @State private var isLoadingSource = false
     @State private var sourceError: String?
     @State private var isSourceExpanded = false
+
+    private let transactionTypes = ["income", "expense", "transfer"]
+    private let paymentMethods = ["Cash", "UPI", "Bank Transfer", "Credit Card", "Debit Card", "Cheque", "Net Banking", "Wallet", "Other"]
+    private let frequencies = ["daily", "weekly", "monthly", "quarterly", "yearly"]
+    private let frequencyLabels: [String: String] = ["daily": "Daily", "weekly": "Weekly", "monthly": "Monthly", "quarterly": "Quarterly", "yearly": "Yearly"]
+
+    private var isTransfer: Bool { editType == "transfer" }
+
+    private var filteredCategories: [Category] {
+        categories.filter { cat in
+            guard let catType = cat.categoryType?.lowercased() else { return true }
+            if editType == "transfer" { return true }
+            return catType == editType
+        }
+    }
+
+    private var subcategories: [Category] {
+        guard !editCategoryId.isEmpty else { return [] }
+        return categories.first(where: { $0.id == editCategoryId })?.children ?? []
+    }
+
+    private var typeAccentColor: Color {
+        switch editType {
+        case "income": return .spentySuccess
+        case "expense": return .spentyError
+        case "transfer": return .spentyInfo
+        default: return .spentyPrimary
+        }
+    }
 
     var body: some View {
         NavigationStack {
@@ -594,67 +637,23 @@ struct PendingTransactionDetailSheet: View {
                             sourceDocumentCard
                         }
 
-                        // Edit fields
-                        VStack(spacing: 16) {
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text("Description")
-                                    .font(SpentyFonts.caption1)
-                                    .foregroundColor(.spentyTextSecondary)
-                                TextField("Description", text: $editDescription)
-                                    .font(SpentyFonts.body)
-                                    .padding(12)
-                                    .background(Color.spentyBgSecondary, in: RoundedRectangle(cornerRadius: 10))
-                            }
+                        // MARK: Amount Hero
+                        amountHeroSection
 
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text("Amount")
-                                    .font(SpentyFonts.caption1)
-                                    .foregroundColor(.spentyTextSecondary)
-                                TextField("Amount", text: $editAmount)
-                                    .font(SpentyFonts.body)
-                                    .keyboardType(.decimalPad)
-                                    .padding(12)
-                                    .background(Color.spentyBgSecondary, in: RoundedRectangle(cornerRadius: 10))
-                            }
+                        // MARK: Details Section
+                        detailsSection
 
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text("Date")
-                                    .font(SpentyFonts.caption1)
-                                    .foregroundColor(.spentyTextSecondary)
-                                DatePicker("", selection: $editDate, displayedComponents: .date)
-                                    .datePickerStyle(.compact)
-                                    .labelsHidden()
-                                    .tint(.spentyPrimary)
-                            }
+                        // MARK: Category Section
+                        categorySection
 
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text("Type")
-                                    .font(SpentyFonts.caption1)
-                                    .foregroundColor(.spentyTextSecondary)
-                                Picker("Type", selection: $editType) {
-                                    Text("Income").tag("income")
-                                    Text("Expense").tag("expense")
-                                }
-                                .pickerStyle(.segmented)
-                            }
+                        // MARK: Note Section
+                        noteSection
 
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text("Category")
-                                    .font(SpentyFonts.caption1)
-                                    .foregroundColor(.spentyTextSecondary)
-                                TextField("Category (optional)", text: $editCategory)
-                                    .font(SpentyFonts.body)
-                                    .padding(12)
-                                    .background(Color.spentyBgSecondary, in: RoundedRectangle(cornerRadius: 10))
-                            }
-                        }
-                        .padding()
-                        .background(Color.spentyCardBg, in: RoundedRectangle(cornerRadius: 14))
-                        .shadow(color: .black.opacity(0.04), radius: 8, y: 2)
+                        // MARK: Recurring Section
+                        recurringSection
 
                         // Action buttons
                         VStack(spacing: 12) {
-                            // Approve button (primary)
                             Button {
                                 Task { await approveTransaction() }
                             } label: {
@@ -675,7 +674,6 @@ struct PendingTransactionDetailSheet: View {
                             }
                             .disabled(isProcessing)
 
-                            // Reject button (secondary)
                             Button {
                                 Task { await rejectTransaction() }
                             } label: {
@@ -692,7 +690,7 @@ struct PendingTransactionDetailSheet: View {
                             .disabled(isProcessing)
                         }
                     }
-                    .padding()
+                    .padding(16)
                 }
             }
             .navigationTitle("Review Transaction")
@@ -703,22 +701,317 @@ struct PendingTransactionDetailSheet: View {
                         .tint(.spentyPrimary)
                 }
             }
-            .onAppear {
-                editDescription = transaction.description ?? ""
-                editAmount = transaction.amount.map { String(format: "%.2f", $0) } ?? ""
-                editDate = transaction.date ?? Date()
-                editType = transaction.transactionType ?? "expense"
-                editCategory = transaction.categoryName ?? ""
+            .task {
+                await loadFormData()
+                populateFields()
             }
         }
         .presentationDetents([.large])
+    }
+
+    // MARK: - Amount Hero
+
+    private var amountHeroSection: some View {
+        VStack(spacing: 20) {
+            // Type picker
+            HStack(spacing: 0) {
+                ForEach(transactionTypes, id: \.self) { type in
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            editType = type
+                            editCategoryId = ""
+                            editSubcategoryId = ""
+                        }
+                    } label: {
+                        Text(type.capitalized)
+                            .font(.system(size: 14, weight: editType == type ? .semibold : .regular))
+                            .foregroundColor(editType == type ? .white : .spentyTextSecondary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                            .background(editType == type ? typeAccentColor : Color.clear)
+                            .cornerRadius(10)
+                    }
+                }
+            }
+            .padding(3)
+            .background(Color.spentyBgSecondary)
+            .cornerRadius(12)
+
+            // Amount input
+            VStack(spacing: 8) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text("\u{20B9}")
+                        .font(.system(size: 30, weight: .semibold, design: .rounded))
+                        .foregroundColor(typeAccentColor)
+
+                    TextField("0.00", text: $editAmount)
+                        .font(.system(size: 44, weight: .bold, design: .rounded))
+                        .foregroundColor(.spentyTextPrimary)
+                        .keyboardType(.decimalPad)
+                        .multilineTextAlignment(.center)
+                        .minimumScaleFactor(0.5)
+                }
+                .frame(maxWidth: .infinity)
+
+                let subtitle: String = {
+                    switch editType {
+                    case "transfer": return "Transfer amount"
+                    case "income": return "Money received"
+                    default: return "Money spent"
+                    }
+                }()
+                Text(subtitle)
+                    .font(.system(size: 13))
+                    .foregroundColor(.spentyTextSecondary)
+            }
+            .padding(.vertical, 4)
+        }
+        .padding(20)
+        .background(Color.spentyCardBg)
+        .cornerRadius(16)
+        .shadow(color: .black.opacity(0.04), radius: 8, x: 0, y: 2)
+    }
+
+    // MARK: - Details Section
+
+    private var detailsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            reviewSectionLabel("Details")
+
+            VStack(spacing: 0) {
+                // Date
+                reviewFormRow(icon: "calendar", label: "Date") {
+                    DatePicker("", selection: $editDate, displayedComponents: .date)
+                        .datePickerStyle(.compact)
+                        .labelsHidden()
+                }
+
+                reviewFormDivider
+
+                // Account
+                reviewFormRow(icon: "building.columns", label: isTransfer ? "From" : "Account") {
+                    Picker("", selection: $editAccountId) {
+                        Text("Select").tag("")
+                        ForEach(accounts) { account in
+                            Text(account.name ?? "Unnamed").tag(account.id)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .tint(.spentyTextPrimary)
+                    .lineLimit(1)
+                }
+
+                if isTransfer {
+                    reviewFormDivider
+
+                    reviewFormRow(icon: "arrow.right.circle", label: "To") {
+                        Picker("", selection: $editToAccountId) {
+                            Text("Select").tag("")
+                            ForEach(accounts.filter { $0.id != editAccountId }) { account in
+                                Text(account.name ?? "Unnamed").tag(account.id)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .tint(.spentyTextPrimary)
+                        .lineLimit(1)
+                    }
+                }
+
+                reviewFormDivider
+
+                // Payment method
+                reviewFormRow(icon: "creditcard", label: "Payment") {
+                    Picker("", selection: $editPaymentMethod) {
+                        Text("Select").tag("")
+                        ForEach(paymentMethods, id: \.self) { method in
+                            Text(method).tag(method)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .tint(.spentyTextPrimary)
+                    .lineLimit(1)
+                }
+            }
+            .cardStyle()
+        }
+    }
+
+    // MARK: - Category Section
+
+    private var categorySection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            reviewSectionLabel("Category")
+
+            VStack(spacing: 0) {
+                // Category row
+                HStack(spacing: 8) {
+                    Image(systemName: "tag")
+                        .font(.system(size: 15))
+                        .foregroundColor(.spentyPrimary)
+                        .frame(width: 22)
+
+                    Text("Category")
+                        .font(.system(size: 15))
+                        .foregroundColor(.spentyTextPrimary)
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
+
+                    Spacer(minLength: 4)
+
+                    Picker("", selection: $editCategoryId) {
+                        Text("Select").tag("")
+                        ForEach(filteredCategories) { cat in
+                            Text(cat.name ?? "Unnamed").tag(cat.id)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .tint(.spentyTextPrimary)
+                    .lineLimit(1)
+                    .onChange(of: editCategoryId) { _, _ in
+                        editSubcategoryId = ""
+                    }
+                }
+                .padding(.vertical, 12)
+
+                if !subcategories.isEmpty || !editCategoryId.isEmpty {
+                    reviewFormDivider
+
+                    HStack(spacing: 8) {
+                        Image(systemName: "tag.circle")
+                            .font(.system(size: 15))
+                            .foregroundColor(.spentyPrimary.opacity(0.6))
+                            .frame(width: 22)
+
+                        Text("Subcategory")
+                            .font(.system(size: 15))
+                            .foregroundColor(.spentyTextPrimary)
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
+
+                        Spacer(minLength: 4)
+
+                        Picker("", selection: $editSubcategoryId) {
+                            Text("None").tag("")
+                            ForEach(subcategories) { sub in
+                                Text(sub.name ?? "Unnamed").tag(sub.id)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .tint(.spentyTextPrimary)
+                        .lineLimit(1)
+                    }
+                    .padding(.vertical, 12)
+                }
+            }
+            .cardStyle()
+        }
+    }
+
+    // MARK: - Note Section
+
+    private var noteSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            reviewSectionLabel("Note")
+
+            HStack(spacing: 10) {
+                Image(systemName: "text.alignleft")
+                    .font(.system(size: 15))
+                    .foregroundColor(.spentyPrimary)
+
+                TextField("Add a note...", text: $editDescription)
+                    .font(.system(size: 15))
+                    .foregroundColor(.spentyTextPrimary)
+            }
+            .padding(14)
+            .background(Color.spentyCardBg)
+            .cornerRadius(12)
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(Color.spentyBorder, lineWidth: 0.5)
+            )
+            .shadow(color: .black.opacity(0.04), radius: 8, x: 0, y: 2)
+        }
+    }
+
+    // MARK: - Recurring Section
+
+    private var recurringSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            reviewSectionLabel("Recurring")
+
+            VStack(spacing: 0) {
+                HStack(spacing: 10) {
+                    Image(systemName: "repeat")
+                        .font(.system(size: 15))
+                        .foregroundColor(.spentyPrimary)
+                        .frame(width: 24)
+
+                    Toggle(isOn: $editIsRecurring) {
+                        Text("Repeat")
+                            .font(.system(size: 15))
+                            .foregroundColor(.spentyTextPrimary)
+                            .lineLimit(1)
+                    }
+                    .tint(Color.spentyPrimary)
+                }
+                .padding(.vertical, 12)
+
+                if editIsRecurring {
+                    reviewFormDivider
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(spacing: 10) {
+                            Image(systemName: "clock.arrow.2.circlepath")
+                                .font(.system(size: 15))
+                                .foregroundColor(.spentyPrimary.opacity(0.6))
+                                .frame(width: 24)
+
+                            Text("Frequency")
+                                .font(.system(size: 15))
+                                .foregroundColor(.spentyTextPrimary)
+                                .lineLimit(1)
+                        }
+                        .padding(.top, 12)
+
+                        HStack(spacing: 2) {
+                            ForEach(frequencies, id: \.self) { freq in
+                                Button {
+                                    editRecurringFrequency = freq
+                                } label: {
+                                    Text(frequencyLabels[freq] ?? freq.capitalized)
+                                        .font(.system(size: 12, weight: editRecurringFrequency == freq ? .semibold : .regular))
+                                        .foregroundColor(editRecurringFrequency == freq ? .white : .spentyTextSecondary)
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 9)
+                                        .background(editRecurringFrequency == freq ? Color.spentyPrimary : Color.clear)
+                                        .cornerRadius(10)
+                                }
+                            }
+                        }
+                        .padding(3)
+                        .background(Color.spentyBgSecondary)
+                        .cornerRadius(12)
+                    }
+
+                    reviewFormDivider
+
+                    reviewFormRow(icon: "number", label: "Day") {
+                        TextField("1-31", text: $editRecurrenceDate)
+                            .keyboardType(.numberPad)
+                            .font(.system(size: 15))
+                            .foregroundColor(.spentyTextPrimary)
+                            .multilineTextAlignment(.trailing)
+                    }
+                }
+            }
+            .cardStyle()
+        }
     }
 
     // MARK: - Source Document Card
 
     private var sourceDocumentCard: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Header — always visible, tappable
             Button {
                 if sourceContent == nil && !isLoadingSource {
                     Task { await loadSourceContent() }
@@ -767,7 +1060,6 @@ struct PendingTransactionDetailSheet: View {
             }
             .buttonStyle(.plain)
 
-            // Expanded content
             if isSourceExpanded {
                 Divider().padding(.horizontal, 14)
 
@@ -799,7 +1091,6 @@ struct PendingTransactionDetailSheet: View {
                     .padding(.vertical, 16)
                 } else if let sc = sourceContent {
                     VStack(alignment: .leading, spacing: 12) {
-                        // Email header fields
                         if transaction.source != "sms" {
                             if let subject = sc.subject, !subject.isEmpty {
                                 sourceRow(label: "Subject", value: subject)
@@ -816,7 +1107,6 @@ struct PendingTransactionDetailSheet: View {
                             sourceRow(label: "Date", value: date)
                         }
 
-                        // Body / message content
                         if let body = sc.body, !body.isEmpty {
                             Divider()
                             VStack(alignment: .leading, spacing: 4) {
@@ -845,11 +1135,51 @@ struct PendingTransactionDetailSheet: View {
         .background(Color.spentyCardBg, in: RoundedRectangle(cornerRadius: 14))
         .shadow(color: .black.opacity(0.04), radius: 8, y: 2)
         .task {
-            // Auto-load source content on appear for a smoother experience
             if sourceContent == nil {
                 await loadSourceContent()
             }
         }
+    }
+
+    // MARK: - Shared Form Components
+
+    private func reviewSectionLabel(_ text: String) -> some View {
+        Text(text.uppercased())
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundColor(.spentyTextSecondary)
+            .tracking(0.8)
+            .padding(.leading, 4)
+            .padding(.bottom, -12)
+    }
+
+    private func reviewFormRow<Content: View>(
+        icon: String,
+        label: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.system(size: 15))
+                .foregroundColor(.spentyPrimary)
+                .frame(width: 22)
+
+            Text(label)
+                .font(.system(size: 15))
+                .foregroundColor(.spentyTextPrimary)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+
+            Spacer(minLength: 4)
+
+            content()
+                .lineLimit(1)
+        }
+        .padding(.vertical, 12)
+    }
+
+    private var reviewFormDivider: some View {
+        Divider()
+            .padding(.leading, 40)
     }
 
     private func sourceRow(label: String, value: String) -> some View {
@@ -865,6 +1195,32 @@ struct PendingTransactionDetailSheet: View {
         }
     }
 
+    // MARK: - Data Loading
+
+    private func loadFormData() async {
+        do {
+            let repo = TransactionRepository.shared
+            async let fetchedAccounts = repo.fetchAccounts()
+            async let fetchedCategories = repo.fetchCategories()
+            accounts = try await fetchedAccounts
+            categories = try await fetchedCategories
+        } catch {
+            // Graceful degradation — form still works with raw IDs
+        }
+    }
+
+    private func populateFields() {
+        editDescription = transaction.description ?? ""
+        editAmount = transaction.amount.map { String(format: "%.2f", $0) } ?? ""
+        editDate = transaction.date ?? Date()
+        editType = transaction.transactionType ?? "expense"
+        editAccountId = transaction.accountId ?? ""
+        editCategoryId = transaction.categoryId ?? ""
+        editIsRecurring = transaction.isRecurring ?? false
+        editRecurringFrequency = transaction.recurringFrequency ?? "monthly"
+        if let rd = transaction.recurrenceDate { editRecurrenceDate = String(rd) }
+    }
+
     private func loadSourceContent() async {
         guard let sourceId = transaction.sourceId else { return }
         isLoadingSource = true
@@ -877,7 +1233,6 @@ struct PendingTransactionDetailSheet: View {
         isLoadingSource = false
     }
 
-    /// Strips HTML tags from a string for plain-text display.
     private func stripHTML(_ html: String) -> String {
         html.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
             .replacingOccurrences(of: "&nbsp;", with: " ")
@@ -888,14 +1243,24 @@ struct PendingTransactionDetailSheet: View {
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    // MARK: - Actions
+
     private func approveTransaction() async {
         isProcessing = true
 
-        // Save edits first if changed
         let update = PendingTransactionUpdate(
             description: editDescription.isEmpty ? nil : editDescription,
             amount: Double(editAmount),
-            date: editDate
+            accountId: editAccountId.isEmpty ? nil : editAccountId,
+            toAccountId: editToAccountId.isEmpty ? nil : editToAccountId,
+            categoryId: editCategoryId.isEmpty ? nil : editCategoryId,
+            subcategoryId: editSubcategoryId.isEmpty ? nil : editSubcategoryId,
+            date: editDate,
+            transactionType: editType.isEmpty ? nil : editType,
+            paymentMethod: editPaymentMethod.isEmpty ? nil : editPaymentMethod,
+            isRecurring: editIsRecurring,
+            recurringFrequency: editIsRecurring ? editRecurringFrequency : nil,
+            recurrenceDate: editIsRecurring ? Int(editRecurrenceDate) : nil
         )
         do {
             _ = try await EmailSyncRepository.shared.updateTransaction(transaction.id, body: update)

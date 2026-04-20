@@ -651,6 +651,39 @@ function SourceDocumentSection({ sourceContent, sourceExpanded, setSourceExpande
   const isEmail = sourceContent?.type === 'email';
   const isSms = sourceContent?.type === 'sms';
   const attachments = archiveRecord?.attachments || [];
+  const [previewAtt, setPreviewAtt] = useState(null); // { url, filename, mimeType }
+
+  const closePreview = () => {
+    if (previewAtt?.url) URL.revokeObjectURL(previewAtt.url);
+    setPreviewAtt(null);
+  };
+
+  const handleViewAttachment = async (archiveId, att) => {
+    setDownloadingAtt(att.index);
+    try {
+      const res = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/records/${archiveId}/attachments/${att.index}/download`, {
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` },
+      });
+      if (!res.ok) throw new Error('Download failed');
+      const blob = await res.blob();
+      const mimeType = att.mimeType || blob.type || '';
+      if (mimeType.startsWith('image/') || mimeType === 'application/pdf') {
+        const url = URL.createObjectURL(blob);
+        setPreviewAtt({ url, filename: att.filename || `attachment_${att.index}`, mimeType });
+      } else {
+        // Fallback to download for unsupported types
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = att.filename || `attachment_${att.index}`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      }
+    } catch { /* silent */ }
+    finally { setDownloadingAtt(null); }
+  };
 
   const handleDownloadAttachment = async (archiveId, att) => {
     setDownloadingAtt(att.index);
@@ -793,36 +826,139 @@ function SourceDocumentSection({ sourceContent, sourceExpanded, setSourceExpande
                 </span>
               </div>
               {attachments.map(att => (
-                <button
-                  key={att.index}
-                  type="button"
-                  onClick={() => handleDownloadAttachment(archiveRecord.archive_id, att)}
-                  disabled={downloadingAtt !== null}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 10, width: '100%',
-                    padding: '8px 12px', marginBottom: 4, background: 'var(--bg-secondary)',
-                    border: '1px solid var(--border-subtle)', borderRadius: 2, cursor: 'pointer',
-                    fontFamily: 'var(--font-body)', textAlign: 'left',
-                  }}
-                >
-                  <FileText size={16} style={{ color: 'var(--brand-primary)', flexShrink: 0 }} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {att.filename || `Attachment ${att.index + 1}`}
+                <div key={att.index} style={{ display: 'flex', gap: 4, marginBottom: 4 }}>
+                  <button
+                    type="button"
+                    onClick={() => handleViewAttachment(archiveRecord.archive_id, att)}
+                    disabled={downloadingAtt !== null}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 10, flex: 1,
+                      padding: '8px 12px', background: 'var(--bg-secondary)',
+                      border: '1px solid var(--border-subtle)', borderRadius: 2, cursor: 'pointer',
+                      fontFamily: 'var(--font-body)', textAlign: 'left',
+                    }}
+                  >
+                    <FileText size={16} style={{ color: 'var(--brand-primary)', flexShrink: 0 }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {att.filename || `Attachment ${att.index + 1}`}
+                      </div>
+                      {att.size > 0 && (
+                        <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{formatSize(att.size)}</div>
+                      )}
                     </div>
-                    {att.size > 0 && (
-                      <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{formatSize(att.size)}</div>
+                    {downloadingAtt === att.index ? (
+                      <SpinnerGap size={14} className="spin" style={{ color: 'var(--brand-primary)' }} />
+                    ) : (
+                      <Eye size={14} style={{ color: 'var(--brand-primary)' }} />
                     )}
-                  </div>
-                  {downloadingAtt === att.index ? (
-                    <SpinnerGap size={14} className="spin" style={{ color: 'var(--brand-primary)' }} />
-                  ) : (
-                    <DownloadSimple size={14} style={{ color: 'var(--brand-primary)' }} />
-                  )}
-                </button>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleDownloadAttachment(archiveRecord.archive_id, att)}
+                    disabled={downloadingAtt !== null}
+                    title="Download"
+                    style={{
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      padding: '8px 10px', background: 'var(--bg-secondary)',
+                      border: '1px solid var(--border-subtle)', borderRadius: 2, cursor: 'pointer',
+                      flexShrink: 0,
+                    }}
+                  >
+                    <DownloadSimple size={14} style={{ color: 'var(--text-muted)' }} />
+                  </button>
+                </div>
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Inline preview overlay */}
+      {previewAtt && (
+        <div
+          onClick={closePreview}
+          style={{
+            position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+            background: 'rgba(0,0,0,0.6)', zIndex: 9999,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              background: 'var(--bg-primary)', borderRadius: 4,
+              border: '1px solid var(--border-subtle)',
+              width: '90vw', maxWidth: 800, maxHeight: '90vh',
+              display: 'flex', flexDirection: 'column',
+              boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+            }}
+          >
+            {/* Preview header */}
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 10,
+              padding: '12px 16px', borderBottom: '1px solid var(--border-subtle)',
+            }}>
+              <FileText size={16} style={{ color: 'var(--brand-primary)', flexShrink: 0 }} />
+              <span style={{
+                flex: 1, fontSize: 13, fontWeight: 600, color: 'var(--text-primary)',
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              }}>
+                {previewAtt.filename}
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  const a = document.createElement('a');
+                  a.href = previewAtt.url;
+                  a.download = previewAtt.filename;
+                  document.body.appendChild(a);
+                  a.click();
+                  a.remove();
+                }}
+                title="Download"
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  padding: '6px 8px', background: 'none', border: '1px solid var(--border-subtle)',
+                  borderRadius: 2, cursor: 'pointer',
+                }}
+              >
+                <DownloadSimple size={14} style={{ color: 'var(--text-secondary)' }} />
+              </button>
+              <button
+                type="button"
+                onClick={closePreview}
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  padding: '6px 8px', background: 'none', border: '1px solid var(--border-subtle)',
+                  borderRadius: 2, cursor: 'pointer',
+                }}
+              >
+                <X size={14} style={{ color: 'var(--text-secondary)' }} />
+              </button>
+            </div>
+            {/* Preview content */}
+            <div style={{
+              flex: 1, overflow: 'auto', padding: 16,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              minHeight: 200,
+            }}>
+              {previewAtt.mimeType.startsWith('image/') && (
+                <img
+                  src={previewAtt.url}
+                  alt={previewAtt.filename}
+                  style={{ maxWidth: '100%', maxHeight: '75vh', objectFit: 'contain' }}
+                />
+              )}
+              {previewAtt.mimeType === 'application/pdf' && (
+                <iframe
+                  src={previewAtt.url}
+                  title={previewAtt.filename}
+                  style={{ width: '100%', height: '75vh', border: 'none' }}
+                />
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>
