@@ -333,7 +333,7 @@ struct TransactionDetailView: View {
                         Image(systemName: source.lowercased() == "email" ? "envelope.fill" : "message.fill")
                             .font(.system(size: 10))
                         Text("Via \(source.capitalized)")
-                            .font(SpentyFonts.caption)
+                            .font(SpentyFonts.caption1)
                     }
                     .foregroundColor(.spentyAccent3)
                     .padding(.horizontal, 8)
@@ -414,11 +414,11 @@ struct TransactionDetailView: View {
     private func sourceRow(label: String, value: String) -> some View {
         HStack(alignment: .top) {
             Text(label)
-                .font(SpentyFonts.caption)
+                .font(SpentyFonts.caption1)
                 .foregroundColor(.spentyTextSecondary)
                 .frame(width: 60, alignment: .leading)
             Text(value)
-                .font(SpentyFonts.caption)
+                .font(SpentyFonts.caption1)
                 .foregroundColor(.spentyTextPrimary)
                 .textSelection(.enabled)
             Spacer()
@@ -449,14 +449,15 @@ struct TransactionDetailView: View {
                             .frame(width: 28)
 
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(attachment.filename ?? "Attachment \(attachment.index + 1)")
+                            let attName: String = attachment.filename ?? "Attachment \(attachment.index + 1)"
+                            Text(attName)
                                 .font(SpentyFonts.subheadline)
                                 .foregroundColor(.spentyTextPrimary)
                                 .lineLimit(1)
 
                             if let size = attachment.size, size > 0 {
                                 Text(formatFileSize(size))
-                                    .font(SpentyFonts.caption)
+                                    .font(SpentyFonts.caption1)
                                     .foregroundColor(.spentyTextSecondary)
                             }
                         }
