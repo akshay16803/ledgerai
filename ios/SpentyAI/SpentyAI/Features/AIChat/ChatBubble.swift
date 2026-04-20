@@ -235,7 +235,7 @@ struct TransactionCard: View {
                     .foregroundStyle(Color.spentyTextPrimary)
             }
 
-            if let status = transaction.status {
+            if let status = transaction.status, status.lowercased() != "approved" {
                 HStack(spacing: 4) {
                     Circle()
                         .fill(statusColor(status))

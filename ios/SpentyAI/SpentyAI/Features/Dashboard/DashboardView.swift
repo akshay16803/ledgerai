@@ -336,11 +336,7 @@ struct DashboardView: View {
                     color: colorForTransactionType(txn.transactionType)
                 )
 
-                if let status = txn.status, status.lowercased() == "pending" {
-                    Text("Pending")
-                        .font(SpentyFonts.caption2)
-                        .foregroundColor(.spentyWarning)
-                }
+                // Status badge removed — only approved transactions appear here
             }
         }
         .padding(.vertical, 10)

@@ -218,7 +218,9 @@ struct TransactionDetailView: View {
 
     @ViewBuilder
     private var statusSection: some View {
-        if let status = transaction.status, !status.isEmpty {
+        // Only show badge for non-approved statuses (pending review context)
+        if let status = transaction.status, !status.isEmpty,
+           status.lowercased() != "approved" {
             HStack {
                 Spacer()
                 StatusBadge(status: status)
