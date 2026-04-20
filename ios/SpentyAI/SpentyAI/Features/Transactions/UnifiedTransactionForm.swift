@@ -69,6 +69,10 @@ struct UnifiedTransactionForm: View {
     // Guard against subcategoryId wipe during initial population
     @State private var hasPopulated: Bool = false
 
+    // Full transaction fetched from API (edit/approve modes)
+    // The passed-in transaction may be incomplete (e.g. from dashboard summary)
+    @State private var resolvedTransaction: Transaction?
+
     // MARK: - Constants
 
     private let transactionTypes = ["income", "expense", "transfer"]
@@ -1021,12 +1025,21 @@ struct UnifiedTransactionForm: View {
         } catch {
             errorMessage = "Failed to load form data"
         }
+
+        // Re-fetch the full transaction so we always have paymentMethod,
+        // subcategoryId, etc. — the summary endpoint may omit them.
+        if let txnId = existingTransaction?.id, !txnId.isEmpty {
+            resolvedTransaction = try? await TransactionRepository.shared.fetchTransaction(id: txnId)
+        }
     }
 
     // MARK: - Populate Fields
 
     private func populateFields() {
-        guard let txn = existingTransaction else { return }
+        // Prefer the fully-resolved transaction (re-fetched from API)
+        // over the passed-in one, which may be missing fields like
+        // paymentMethod and subcategoryId (e.g. from dashboard summary).
+        guard let txn = resolvedTransaction ?? existingTransaction else { return }
         transactionType = txn.transactionType ?? "expense"
         amount = txn.amount.map { String(format: "%.2f", $0) } ?? ""
         date = txn.date ?? Date()
