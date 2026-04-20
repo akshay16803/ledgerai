@@ -339,7 +339,6 @@ struct PendingReviewView: View {
                                 .font(.system(size: 15))
                                 .foregroundColor(.spentyTextPrimary)
                                 .lineLimit(1)
-                                .fixedSize(horizontal: true, vertical: false)
 
                             Spacer(minLength: 4)
 
@@ -371,7 +370,6 @@ struct PendingReviewView: View {
                                 .font(.system(size: 15))
                                 .foregroundColor(.spentyTextPrimary)
                                 .lineLimit(1)
-                                .fixedSize(horizontal: true, vertical: false)
 
                             Spacer(minLength: 4)
 
@@ -431,7 +429,6 @@ struct PendingReviewView: View {
                                 .font(.system(size: 15))
                                 .foregroundColor(.spentyTextPrimary)
                                 .lineLimit(1)
-                                .fixedSize(horizontal: true, vertical: false)
 
                             Spacer(minLength: 4)
 
@@ -474,7 +471,6 @@ struct PendingReviewView: View {
                                     .font(.system(size: 15))
                                     .foregroundColor(.spentyTextPrimary)
                                     .lineLimit(1)
-                                    .fixedSize(horizontal: true, vertical: false)
 
                                 Spacer(minLength: 4)
 
