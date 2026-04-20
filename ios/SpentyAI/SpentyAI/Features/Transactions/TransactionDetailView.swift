@@ -655,8 +655,40 @@ struct TransactionDetailView: View {
         defer { isLoading = false }
         do {
             transaction = try await repository.fetchTransaction(id: transactionId)
+
+            // Client-side fallback: resolve subcategory name if backend didn't enrich it
+            if transaction.subcategoryId != nil,
+               (transaction.subcategoryName == nil || transaction.subcategoryName?.isEmpty == true) {
+                await resolveSubcategoryName()
+            }
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Fetches categories and resolves subcategoryName client-side as a fallback.
+    @MainActor
+    private func resolveSubcategoryName() async {
+        guard let subcategoryId = transaction.subcategoryId else { return }
+        do {
+            let categories = try await repository.fetchCategories()
+            // Subcategories are stored as top-level items with parentId set,
+            // OR as children nested under a parent.
+            // Check flat list first (backend returns flat with parentId).
+            if let match = categories.first(where: { $0.id == subcategoryId }) {
+                transaction.subcategoryName = match.name
+                return
+            }
+            // Also check nested children arrays
+            for cat in categories {
+                if let children = cat.children,
+                   let match = children.first(where: { $0.id == subcategoryId }) {
+                    transaction.subcategoryName = match.name
+                    return
+                }
+            }
+        } catch {
+            // Silently fail — subcategory name is non-critical
         }
     }
 
