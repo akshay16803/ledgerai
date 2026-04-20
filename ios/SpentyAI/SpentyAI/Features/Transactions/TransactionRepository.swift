@@ -126,7 +126,7 @@ final class TransactionRepository: Sendable {
     func search(query: String, page: Int = 1, limit: Int = 30) async throws -> TransactionListResponse {
         let skip = (page - 1) * limit
         let encodedQuery = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
-        let path = APIEndpoints.transactionsSearch + "?q=\(encodedQuery)&skip=\(skip)&limit=\(limit)"
+        let path = APIEndpoints.transactionsSearch + "?q=\(encodedQuery)&skip=\(skip)&limit=\(limit)&status=approved"
         let response: TransactionItemsResponse = try await api.get(path)
         return response.asListResponse
     }

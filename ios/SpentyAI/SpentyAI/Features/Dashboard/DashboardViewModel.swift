@@ -133,7 +133,8 @@ final class DashboardViewModel {
 
     var recentTransactions: [Transaction] {
         let txns = summary?.recentTransactions ?? []
-        return Array(txns.prefix(10))
+        let approved = txns.filter { ($0.status ?? "approved").lowercased() == "approved" }
+        return Array(approved.prefix(10))
     }
 
     var hasData: Bool {

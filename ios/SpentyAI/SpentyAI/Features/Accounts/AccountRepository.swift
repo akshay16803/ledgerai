@@ -181,7 +181,8 @@ actor AccountRepository {
     // MARK: - Account Transactions
 
     func fetchAccountTransactions(_ accountId: String) async throws -> [Transaction] {
-        let response: AccountTransactionsResponse = try await api.get(APIEndpoints.accountTransactions(accountId))
+        let endpoint = APIEndpoints.accountTransactions(accountId) + "?status=approved"
+        let response: AccountTransactionsResponse = try await api.get(endpoint)
         return response.transactions
     }
 
@@ -198,6 +199,7 @@ actor AccountRepository {
         var endpoint = APIEndpoints.accountTransactions(accountId)
         var params: [String] = []
         params.append("limit=100")
+        params.append("status=approved")
         if let transactionType, !transactionType.isEmpty {
             params.append("transaction_type=\(transactionType)")
         }
