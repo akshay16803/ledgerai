@@ -51,7 +51,7 @@ struct DashboardView: View {
                 }
             }
             .navigationDestination(for: String.self) { accountId in
-                AccountDetailView(viewModel: AccountsViewModel(), accountId: accountId)
+                AccountDetailView(accountId: accountId)
             }
             .sheet(isPresented: $viewModel.showAIChat, onDismiss: {
                 Task { await viewModel.refresh() }
@@ -748,7 +748,7 @@ struct DashboardAccountsListView: View {
                 } else {
                     List(accounts) { account in
                         NavigationLink {
-                            AccountDetailView(viewModel: AccountsViewModel(), accountId: account.id)
+                            AccountDetailView(accountId: account.id)
                         } label: {
                             HStack(spacing: 12) {
                                 Circle()

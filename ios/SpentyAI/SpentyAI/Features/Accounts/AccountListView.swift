@@ -61,7 +61,7 @@ struct AccountListView: View {
                 }
             }
             .navigationDestination(for: String.self) { accountId in
-                AccountDetailView(viewModel: viewModel, accountId: accountId)
+                AccountDetailView(accountId: accountId)
             }
             .task {
                 if viewModel.accounts.isEmpty {

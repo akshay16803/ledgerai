@@ -3,7 +3,7 @@ import Charts
 
 struct AccountDetailView: View {
 
-    @Bindable var viewModel: AccountsViewModel
+    @State private var viewModel = AccountsViewModel()
     let accountId: String
 
     @State private var showEditSheet = false
@@ -882,6 +882,6 @@ struct AccountDetailView: View {
 
 #Preview {
     NavigationStack {
-        AccountDetailView(viewModel: AccountsViewModel(), accountId: "test-id")
+        AccountDetailView(accountId: "test-id")
     }
 }
