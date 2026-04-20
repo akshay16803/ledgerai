@@ -589,6 +589,21 @@ struct PendingTransactionDetailSheet: View {
     private let frequencies = ["daily", "weekly", "monthly", "quarterly", "yearly"]
     private let frequencyLabels: [String: String] = ["daily": "Daily", "weekly": "Weekly", "monthly": "Monthly", "quarterly": "Quarterly", "yearly": "Yearly"]
 
+    private static let paymentMethodMap: [String: String] = [
+        "cash": "Cash", "upi": "UPI", "bank_transfer": "Bank Transfer",
+        "credit_card": "Credit Card", "debit_card": "Debit Card",
+        "cheque": "Cheque", "net_banking": "Net Banking",
+        "wallet": "Wallet", "neft": "Bank Transfer", "rtgs": "Bank Transfer",
+        "imps": "Bank Transfer", "other": "Other"
+    ]
+
+    private static func normalizePaymentMethod(_ raw: String) -> String {
+        guard !raw.isEmpty else { return "" }
+        let displayValues = ["Cash", "UPI", "Bank Transfer", "Credit Card", "Debit Card", "Cheque", "Net Banking", "Wallet", "Other"]
+        if displayValues.contains(raw) { return raw }
+        return paymentMethodMap[raw.lowercased()] ?? raw
+    }
+
     private var isTransfer: Bool { editType == "transfer" }
 
     private var filteredCategories: [Category] {
@@ -1344,6 +1359,8 @@ struct PendingTransactionDetailSheet: View {
         editType = transaction.transactionType ?? "expense"
         editAccountId = transaction.accountId ?? ""
         editCategoryId = transaction.categoryId ?? ""
+        editSubcategoryId = transaction.subcategoryId ?? ""
+        editPaymentMethod = Self.normalizePaymentMethod(transaction.paymentMethod ?? "")
         editIsRecurring = transaction.isRecurring ?? false
         editRecurringFrequency = transaction.recurringFrequency ?? "monthly"
         if let rd = transaction.recurrenceDate { editRecurrenceDate = String(rd) }

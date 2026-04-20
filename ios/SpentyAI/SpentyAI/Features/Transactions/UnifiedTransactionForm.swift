@@ -73,6 +73,32 @@ struct UnifiedTransactionForm: View {
 
     private let transactionTypes = ["income", "expense", "transfer"]
     private let paymentMethods = ["Cash", "UPI", "Bank Transfer", "Credit Card", "Debit Card", "Cheque", "Net Banking", "Wallet", "Other"]
+
+    /// Maps API/backend payment method values to display values used in the picker.
+    /// The backend may store snake_case values (from AI parsing) or display values (from manual entry).
+    private static let paymentMethodMap: [String: String] = [
+        "cash": "Cash",
+        "upi": "UPI",
+        "bank_transfer": "Bank Transfer",
+        "credit_card": "Credit Card",
+        "debit_card": "Debit Card",
+        "cheque": "Cheque",
+        "net_banking": "Net Banking",
+        "wallet": "Wallet",
+        "neft": "Bank Transfer",
+        "rtgs": "Bank Transfer",
+        "imps": "Bank Transfer",
+        "other": "Other"
+    ]
+
+    private static func normalizePaymentMethod(_ raw: String) -> String {
+        guard !raw.isEmpty else { return "" }
+        // If it already matches a display value, return as-is
+        let displayValues = ["Cash", "UPI", "Bank Transfer", "Credit Card", "Debit Card", "Cheque", "Net Banking", "Wallet", "Other"]
+        if displayValues.contains(raw) { return raw }
+        // Try lookup by lowercase key
+        return paymentMethodMap[raw.lowercased()] ?? raw
+    }
     private let frequencies = ["daily", "weekly", "monthly", "quarterly", "yearly"]
     private let frequencyLabels = ["daily": "Daily", "weekly": "Weekly", "monthly": "Monthly", "quarterly": "Quarterly", "yearly": "Yearly"]
 
@@ -135,7 +161,15 @@ struct UnifiedTransactionForm: View {
 
     private var subcategories: [Category] {
         guard !categoryId.isEmpty else { return [] }
-        return categories.filter { $0.parentId == categoryId }
+        // First try flat list (backend returns all categories flat with parentId)
+        let fromFlat = categories.filter { $0.parentId == categoryId }
+        if !fromFlat.isEmpty { return fromFlat }
+        // Fallback: check children arrays of the selected parent category
+        if let parent = categories.first(where: { $0.id == categoryId }),
+           let children = parent.children, !children.isEmpty {
+            return children
+        }
+        return []
     }
 
     private var typeAccentColor: Color {
@@ -997,7 +1031,7 @@ struct UnifiedTransactionForm: View {
         categoryId = txn.categoryId ?? ""
         subcategoryId = txn.subcategoryId ?? ""
         descriptionText = txn.description ?? ""
-        paymentMethod = txn.paymentMethod ?? ""
+        paymentMethod = Self.normalizePaymentMethod(txn.paymentMethod ?? "")
         isRecurring = txn.isRecurring ?? false
         recurringFrequency = txn.recurringFrequency ?? "monthly"
         recurrenceDate = txn.recurrenceDate.map { String($0) } ?? ""
