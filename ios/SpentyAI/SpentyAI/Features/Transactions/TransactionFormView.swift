@@ -33,6 +33,9 @@ struct TransactionFormView: View {
     @State private var newCategoryName: String = ""
     @State private var newSubcategoryName: String = ""
     @State private var isCreatingCategory: Bool = false
+    @State private var showNewAccountAlert: Bool = false
+    @State private var newAccountName: String = ""
+    @State private var newAccountType: String = "savings"
 
     private var isEditing: Bool { transaction != nil }
 
@@ -193,7 +196,20 @@ struct TransactionFormView: View {
                 formDivider
 
                 // Account row
-                formRow(icon: "building.columns", label: isTransfer ? "From" : "Account") {
+                HStack(spacing: 8) {
+                    Image(systemName: "building.columns")
+                        .font(.system(size: 15))
+                        .foregroundColor(.spentyPrimary)
+                        .frame(width: 22)
+
+                    Text(isTransfer ? "From" : "Account")
+                        .font(.system(size: 15))
+                        .foregroundColor(.spentyTextPrimary)
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
+
+                    Spacer(minLength: 4)
+
                     Picker("", selection: $accountId) {
                         Text("Select").tag("")
                         ForEach(viewModel.accounts) { account in
@@ -203,7 +219,18 @@ struct TransactionFormView: View {
                     .pickerStyle(.menu)
                     .tint(.spentyTextPrimary)
                     .lineLimit(1)
+
+                    Button {
+                        newAccountName = ""
+                        newAccountType = "savings"
+                        showNewAccountAlert = true
+                    } label: {
+                        Image(systemName: "plus.circle.fill")
+                            .font(.system(size: 20))
+                            .foregroundColor(.spentyPrimary.opacity(0.7))
+                    }
                 }
+                .padding(.vertical, 12)
 
                 if isTransfer {
                     formDivider
@@ -329,6 +356,25 @@ struct TransactionFormView: View {
                 }
             }
             .cardStyle()
+            .alert("New Account", isPresented: $showNewAccountAlert) {
+                TextField("Account name", text: $newAccountName)
+                Picker("Type", selection: $newAccountType) {
+                    Text("Savings").tag("savings")
+                    Text("Current").tag("current")
+                    Text("Credit Card").tag("credit_card")
+                    Text("Cash").tag("cash")
+                    Text("Wallet").tag("wallet")
+                    Text("Loan").tag("loan")
+                    Text("Investment").tag("investment")
+                }
+                Button("Cancel", role: .cancel) { }
+                Button("Create") {
+                    Task { await createInlineAccount() }
+                }
+                .disabled(newAccountName.trimmingCharacters(in: .whitespaces).isEmpty)
+            } message: {
+                Text("Enter a name and type for the new account.")
+            }
             .alert("New Category", isPresented: $showNewCategorySheet) {
                 TextField("Category name", text: $newCategoryName)
                 Button("Cancel", role: .cancel) { }
@@ -579,6 +625,21 @@ struct TransactionFormView: View {
         case "expense": return .spentyError
         case "transfer": return .spentyInfo
         default: return .spentyPrimary
+        }
+    }
+
+    // MARK: - Inline Account Creation
+
+    private func createInlineAccount() async {
+        let trimmed = newAccountName.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        do {
+            let payload: [String: Any] = ["name": trimmed, "accountType": newAccountType]
+            let created = try await AccountRepository().createAccount(payload)
+            viewModel.accounts = try await AccountRepository().fetchAccounts()
+            accountId = created.id
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 

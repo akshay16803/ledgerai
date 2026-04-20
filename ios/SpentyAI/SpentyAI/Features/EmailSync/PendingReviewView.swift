@@ -4,6 +4,16 @@ struct PendingReviewView: View {
 
     @Bindable var viewModel: EmailSyncViewModel
 
+    @State private var accounts: [Account] = []
+    @State private var categories: [Category] = []
+    @State private var showNewAccountAlert: Bool = false
+    @State private var showNewCategoryAlert: Bool = false
+    @State private var showNewSubcategoryAlert: Bool = false
+    @State private var newAccountName: String = ""
+    @State private var newAccountType: String = "savings"
+    @State private var newCategoryName: String = ""
+    @State private var newSubcategoryName: String = ""
+
     var body: some View {
         Group {
             if viewModel.isLoadingPending && viewModel.pendingTransactions.isEmpty {
@@ -298,6 +308,7 @@ struct PendingReviewView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
+                    // Description
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Description")
                             .font(SpentyFonts.headline)
@@ -306,6 +317,7 @@ struct PendingReviewView: View {
                             .inputStyle()
                     }
 
+                    // Amount
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Amount")
                             .font(SpentyFonts.headline)
@@ -315,20 +327,201 @@ struct PendingReviewView: View {
                             .inputStyle()
                     }
 
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Account ID")
-                            .font(SpentyFonts.headline)
-                            .foregroundColor(.spentyTextPrimary)
-                        TextField("Account ID", text: $viewModel.editAccountId)
-                            .inputStyle()
+                    // Transaction Type
+                    VStack(spacing: 0) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "arrow.left.arrow.right")
+                                .font(.system(size: 15))
+                                .foregroundColor(.spentyPrimary)
+                                .frame(width: 22)
+
+                            Text("Type")
+                                .font(.system(size: 15))
+                                .foregroundColor(.spentyTextPrimary)
+                                .lineLimit(1)
+                                .fixedSize(horizontal: true, vertical: false)
+
+                            Spacer(minLength: 4)
+
+                            Picker("", selection: $viewModel.editTransactionType) {
+                                Text("Expense").tag("expense")
+                                Text("Income").tag("income")
+                            }
+                            .pickerStyle(.menu)
+                            .tint(.spentyTextPrimary)
+                            .lineLimit(1)
+                            .onChange(of: viewModel.editTransactionType) { _, _ in
+                                viewModel.editCategoryId = ""
+                                viewModel.editSubcategoryId = ""
+                            }
+                        }
+                        .padding(.vertical, 12)
+                    }
+                    .cardStyle()
+
+                    // Account
+                    VStack(spacing: 0) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "building.columns")
+                                .font(.system(size: 15))
+                                .foregroundColor(.spentyPrimary)
+                                .frame(width: 22)
+
+                            Text("Account")
+                                .font(.system(size: 15))
+                                .foregroundColor(.spentyTextPrimary)
+                                .lineLimit(1)
+                                .fixedSize(horizontal: true, vertical: false)
+
+                            Spacer(minLength: 4)
+
+                            Picker("", selection: $viewModel.editAccountId) {
+                                Text("Select").tag("")
+                                ForEach(accounts) { account in
+                                    Text(account.name ?? "Unnamed").tag(account.id)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                            .tint(.spentyTextPrimary)
+                            .lineLimit(1)
+
+                            Button {
+                                newAccountName = ""
+                                newAccountType = "savings"
+                                showNewAccountAlert = true
+                            } label: {
+                                Image(systemName: "plus.circle.fill")
+                                    .font(.system(size: 20))
+                                    .foregroundColor(.spentyPrimary.opacity(0.7))
+                            }
+                        }
+                        .padding(.vertical, 12)
+                    }
+                    .cardStyle()
+                    .alert("New Account", isPresented: $showNewAccountAlert) {
+                        TextField("Account name", text: $newAccountName)
+                        Picker("Type", selection: $newAccountType) {
+                            Text("Savings").tag("savings")
+                            Text("Current").tag("current")
+                            Text("Credit Card").tag("credit_card")
+                            Text("Cash").tag("cash")
+                            Text("Wallet").tag("wallet")
+                            Text("Loan").tag("loan")
+                            Text("Investment").tag("investment")
+                        }
+                        Button("Cancel", role: .cancel) { }
+                        Button("Create") {
+                            Task { await createInlineAccount() }
+                        }
+                        .disabled(newAccountName.trimmingCharacters(in: .whitespaces).isEmpty)
+                    } message: {
+                        Text("Enter a name and type for the new account.")
                     }
 
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Category ID")
-                            .font(SpentyFonts.headline)
-                            .foregroundColor(.spentyTextPrimary)
-                        TextField("Category ID", text: $viewModel.editCategoryId)
-                            .inputStyle()
+                    // Category & Subcategory
+                    VStack(spacing: 0) {
+                        // Category row
+                        HStack(spacing: 8) {
+                            Image(systemName: "tag")
+                                .font(.system(size: 15))
+                                .foregroundColor(.spentyPrimary)
+                                .frame(width: 22)
+
+                            Text("Category")
+                                .font(.system(size: 15))
+                                .foregroundColor(.spentyTextPrimary)
+                                .lineLimit(1)
+                                .fixedSize(horizontal: true, vertical: false)
+
+                            Spacer(minLength: 4)
+
+                            Picker("", selection: $viewModel.editCategoryId) {
+                                Text("Select").tag("")
+                                ForEach(filteredCategories) { cat in
+                                    Text(cat.name ?? "Unnamed").tag(cat.id)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                            .tint(.spentyTextPrimary)
+                            .lineLimit(1)
+                            .onChange(of: viewModel.editCategoryId) { _, _ in
+                                viewModel.editSubcategoryId = ""
+                            }
+
+                            Button {
+                                newCategoryName = ""
+                                showNewCategoryAlert = true
+                            } label: {
+                                Image(systemName: "plus.circle.fill")
+                                    .font(.system(size: 20))
+                                    .foregroundColor(.spentyPrimary.opacity(0.7))
+                            }
+                        }
+                        .padding(.vertical, 12)
+
+                        if !subcategories.isEmpty || !viewModel.editCategoryId.isEmpty {
+                            Divider()
+                                .padding(.leading, 40)
+
+                            // Subcategory row
+                            HStack(spacing: 8) {
+                                Image(systemName: "tag.circle")
+                                    .font(.system(size: 15))
+                                    .foregroundColor(.spentyPrimary.opacity(0.6))
+                                    .frame(width: 22)
+
+                                Text("Subcategory")
+                                    .font(.system(size: 15))
+                                    .foregroundColor(.spentyTextPrimary)
+                                    .lineLimit(1)
+                                    .fixedSize(horizontal: true, vertical: false)
+
+                                Spacer(minLength: 4)
+
+                                Picker("", selection: $viewModel.editSubcategoryId) {
+                                    Text("None").tag("")
+                                    ForEach(subcategories) { sub in
+                                        Text(sub.name ?? "Unnamed").tag(sub.id)
+                                    }
+                                }
+                                .pickerStyle(.menu)
+                                .tint(.spentyTextPrimary)
+                                .lineLimit(1)
+
+                                if !viewModel.editCategoryId.isEmpty {
+                                    Button {
+                                        newSubcategoryName = ""
+                                        showNewSubcategoryAlert = true
+                                    } label: {
+                                        Image(systemName: "plus.circle.fill")
+                                            .font(.system(size: 20))
+                                            .foregroundColor(.spentyPrimary.opacity(0.7))
+                                    }
+                                }
+                            }
+                            .padding(.vertical, 12)
+                        }
+                    }
+                    .cardStyle()
+                    .alert("New Category", isPresented: $showNewCategoryAlert) {
+                        TextField("Category name", text: $newCategoryName)
+                        Button("Cancel", role: .cancel) { }
+                        Button("Create") {
+                            Task { await createInlineCategory() }
+                        }
+                        .disabled(newCategoryName.trimmingCharacters(in: .whitespaces).isEmpty)
+                    } message: {
+                        Text("Enter a name for the new \(viewModel.editTransactionType) category.")
+                    }
+                    .alert("New Subcategory", isPresented: $showNewSubcategoryAlert) {
+                        TextField("Subcategory name", text: $newSubcategoryName)
+                        Button("Cancel", role: .cancel) { }
+                        Button("Create") {
+                            Task { await createInlineSubcategory() }
+                        }
+                        .disabled(newSubcategoryName.trimmingCharacters(in: .whitespaces).isEmpty)
+                    } message: {
+                        Text("Enter a name for the new subcategory.")
                     }
                 }
                 .padding(16)
@@ -352,8 +545,64 @@ struct PendingReviewView: View {
                     .foregroundColor(.spentyPrimary)
                 }
             }
+            .task { await loadPickerData() }
         }
         .presentationDetents([.medium, .large])
+    }
+
+    // MARK: - Picker Data
+
+    private var filteredCategories: [Category] {
+        categories.filter { cat in
+            guard let catType = cat.categoryType?.lowercased() else { return true }
+            return catType == viewModel.editTransactionType
+        }
+    }
+
+    private var subcategories: [Category] {
+        guard !viewModel.editCategoryId.isEmpty else { return [] }
+        return categories.first(where: { $0.id == viewModel.editCategoryId })?.children ?? []
+    }
+
+    private func loadPickerData() async {
+        do {
+            accounts = try await TransactionRepository.shared.fetchAccounts()
+            categories = try await CategoryRepository.shared.getCategories()
+        } catch { }
+    }
+
+    private func createInlineAccount() async {
+        let trimmed = newAccountName.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        do {
+            let payload: [String: Any] = ["name": trimmed, "accountType": newAccountType]
+            let created = try await AccountRepository().createAccount(payload)
+            accounts = try await TransactionRepository.shared.fetchAccounts()
+            viewModel.editAccountId = created.id
+        } catch { }
+    }
+
+    private func createInlineCategory() async {
+        let trimmed = newCategoryName.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        let catType: CategoryType = viewModel.editTransactionType == "income" ? .income : .expense
+        do {
+            let created = try await CategoryRepository.shared.createCategory(name: trimmed, type: catType, parentId: nil)
+            categories = try await CategoryRepository.shared.getCategories()
+            viewModel.editCategoryId = created.id
+            viewModel.editSubcategoryId = ""
+        } catch { }
+    }
+
+    private func createInlineSubcategory() async {
+        let trimmed = newSubcategoryName.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty, !viewModel.editCategoryId.isEmpty else { return }
+        let catType: CategoryType = viewModel.editTransactionType == "income" ? .income : .expense
+        do {
+            let created = try await CategoryRepository.shared.createCategory(name: trimmed, type: catType, parentId: viewModel.editCategoryId)
+            categories = try await CategoryRepository.shared.getCategories()
+            viewModel.editSubcategoryId = created.id
+        } catch { }
     }
 
     // MARK: - View Source Sheet

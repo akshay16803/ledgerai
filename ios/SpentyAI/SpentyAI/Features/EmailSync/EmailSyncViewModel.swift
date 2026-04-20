@@ -42,6 +42,8 @@ final class EmailSyncViewModel {
     var editAmount = ""
     var editAccountId = ""
     var editCategoryId = ""
+    var editSubcategoryId = ""
+    var editTransactionType = "expense"
 
     // MARK: - View Source
 
@@ -335,6 +337,8 @@ final class EmailSyncViewModel {
         editAmount = transaction.amount.map { String(format: "%.2f", $0) } ?? ""
         editAccountId = transaction.accountId ?? ""
         editCategoryId = transaction.categoryId ?? ""
+        editSubcategoryId = ""
+        editTransactionType = transaction.transactionType ?? "expense"
         showEditSheet = true
     }
 
@@ -346,7 +350,9 @@ final class EmailSyncViewModel {
             description: editDescription.isEmpty ? nil : editDescription,
             amount: Double(editAmount),
             accountId: editAccountId.isEmpty ? nil : editAccountId,
-            categoryId: editCategoryId.isEmpty ? nil : editCategoryId
+            categoryId: editCategoryId.isEmpty ? nil : editCategoryId,
+            subcategoryId: editSubcategoryId.isEmpty ? nil : editSubcategoryId,
+            transactionType: editTransactionType.isEmpty ? nil : editTransactionType
         )
 
         do {

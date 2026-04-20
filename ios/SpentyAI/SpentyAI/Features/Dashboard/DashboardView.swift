@@ -574,6 +574,15 @@ struct PendingTransactionDetailSheet: View {
     @State private var accounts: [Account] = []
     @State private var categories: [Category] = []
 
+    // Inline creation state
+    @State private var showNewAccountAlert: Bool = false
+    @State private var showNewCategoryAlert: Bool = false
+    @State private var showNewSubcategoryAlert: Bool = false
+    @State private var newAccountName: String = ""
+    @State private var newAccountType: String = "savings"
+    @State private var newCategoryName: String = ""
+    @State private var newSubcategoryName: String = ""
+
     // Source document states
     @State private var sourceContent: SourceContent?
     @State private var isLoadingSource = false
@@ -789,7 +798,20 @@ struct PendingTransactionDetailSheet: View {
                 reviewFormDivider
 
                 // Account
-                reviewFormRow(icon: "building.columns", label: isTransfer ? "From" : "Account") {
+                HStack(spacing: 8) {
+                    Image(systemName: "building.columns")
+                        .font(.system(size: 15))
+                        .foregroundColor(.spentyPrimary)
+                        .frame(width: 22)
+
+                    Text(isTransfer ? "From" : "Account")
+                        .font(.system(size: 15))
+                        .foregroundColor(.spentyTextPrimary)
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
+
+                    Spacer(minLength: 4)
+
                     Picker("", selection: $editAccountId) {
                         Text("Select").tag("")
                         ForEach(accounts) { account in
@@ -799,7 +821,18 @@ struct PendingTransactionDetailSheet: View {
                     .pickerStyle(.menu)
                     .tint(.spentyTextPrimary)
                     .lineLimit(1)
+
+                    Button {
+                        newAccountName = ""
+                        newAccountType = "savings"
+                        showNewAccountAlert = true
+                    } label: {
+                        Image(systemName: "plus.circle.fill")
+                            .font(.system(size: 20))
+                            .foregroundColor(.spentyPrimary.opacity(0.7))
+                    }
                 }
+                .padding(.vertical, 12)
 
                 if isTransfer {
                     reviewFormDivider
@@ -870,6 +903,15 @@ struct PendingTransactionDetailSheet: View {
                     .onChange(of: editCategoryId) { _, _ in
                         editSubcategoryId = ""
                     }
+
+                    Button {
+                        newCategoryName = ""
+                        showNewCategoryAlert = true
+                    } label: {
+                        Image(systemName: "plus.circle.fill")
+                            .font(.system(size: 20))
+                            .foregroundColor(.spentyPrimary.opacity(0.7))
+                    }
                 }
                 .padding(.vertical, 12)
 
@@ -899,11 +941,61 @@ struct PendingTransactionDetailSheet: View {
                         .pickerStyle(.menu)
                         .tint(.spentyTextPrimary)
                         .lineLimit(1)
+
+                        if !editCategoryId.isEmpty {
+                            Button {
+                                newSubcategoryName = ""
+                                showNewSubcategoryAlert = true
+                            } label: {
+                                Image(systemName: "plus.circle.fill")
+                                    .font(.system(size: 20))
+                                    .foregroundColor(.spentyPrimary.opacity(0.7))
+                            }
+                        }
                     }
                     .padding(.vertical, 12)
                 }
             }
             .cardStyle()
+            .alert("New Account", isPresented: $showNewAccountAlert) {
+                TextField("Account name", text: $newAccountName)
+                Picker("Type", selection: $newAccountType) {
+                    Text("Savings").tag("savings")
+                    Text("Current").tag("current")
+                    Text("Credit Card").tag("credit_card")
+                    Text("Cash").tag("cash")
+                    Text("Wallet").tag("wallet")
+                    Text("Loan").tag("loan")
+                    Text("Investment").tag("investment")
+                }
+                Button("Cancel", role: .cancel) { }
+                Button("Create") {
+                    Task { await createInlineAccount() }
+                }
+                .disabled(newAccountName.trimmingCharacters(in: .whitespaces).isEmpty)
+            } message: {
+                Text("Enter a name and type for the new account.")
+            }
+            .alert("New Category", isPresented: $showNewCategoryAlert) {
+                TextField("Category name", text: $newCategoryName)
+                Button("Cancel", role: .cancel) { }
+                Button("Create") {
+                    Task { await createInlineCategory() }
+                }
+                .disabled(newCategoryName.trimmingCharacters(in: .whitespaces).isEmpty)
+            } message: {
+                Text("Enter a name for the new \(editType) category.")
+            }
+            .alert("New Subcategory", isPresented: $showNewSubcategoryAlert) {
+                TextField("Subcategory name", text: $newSubcategoryName)
+                Button("Cancel", role: .cancel) { }
+                Button("Create") {
+                    Task { await createInlineSubcategory() }
+                }
+                .disabled(newSubcategoryName.trimmingCharacters(in: .whitespaces).isEmpty)
+            } message: {
+                Text("Enter a name for the new subcategory.")
+            }
         }
     }
 
@@ -1193,6 +1285,42 @@ struct PendingTransactionDetailSheet: View {
                 .foregroundColor(.spentyTextPrimary)
                 .lineLimit(2)
         }
+    }
+
+    // MARK: - Inline Creation
+
+    private func createInlineAccount() async {
+        let trimmed = newAccountName.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        do {
+            let payload: [String: Any] = ["name": trimmed, "accountType": newAccountType]
+            let created = try await AccountRepository().createAccount(payload)
+            accounts = try await TransactionRepository.shared.fetchAccounts()
+            editAccountId = created.id
+        } catch { }
+    }
+
+    private func createInlineCategory() async {
+        let trimmed = newCategoryName.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        let catType: CategoryType = editType == "income" ? .income : .expense
+        do {
+            let created = try await CategoryRepository.shared.createCategory(name: trimmed, type: catType, parentId: nil)
+            categories = try await CategoryRepository.shared.getCategories()
+            editCategoryId = created.id
+            editSubcategoryId = ""
+        } catch { }
+    }
+
+    private func createInlineSubcategory() async {
+        let trimmed = newSubcategoryName.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty, !editCategoryId.isEmpty else { return }
+        let catType: CategoryType = editType == "income" ? .income : .expense
+        do {
+            let created = try await CategoryRepository.shared.createCategory(name: trimmed, type: catType, parentId: editCategoryId)
+            categories = try await CategoryRepository.shared.getCategories()
+            editSubcategoryId = created.id
+        } catch { }
     }
 
     // MARK: - Data Loading
