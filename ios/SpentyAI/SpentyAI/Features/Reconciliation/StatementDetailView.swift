@@ -81,6 +81,7 @@ struct StatementDetailView: View {
                         entriesSection
                     }
                     .padding(16)
+                    .padding(.bottom, 80)
                 }
             }
         }
