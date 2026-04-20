@@ -456,8 +456,8 @@ export default function CashFlow() {
                         {item.account_name || getAccountName(item.account_id) || 'OD Account'}
                       </div>
                       <div className="mono" style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                        Rate: {item.interest_rate != null ? `${item.interest_rate}%` : '—'}
-                        {item.od_balance != null ? ` \u00b7 Balance: ${formatCurrency(item.od_balance)}` : ''}
+                        Rate: {(item.rate ?? item.interest_rate) != null ? `${item.rate ?? item.interest_rate}%` : '—'}
+                        {(item.balance ?? item.od_balance) != null ? ` \u00b7 Balance: ${formatCurrency(item.balance ?? item.od_balance)}` : ''}
                       </div>
                     </div>
                     <div className="mono" style={{ fontSize: 16, fontWeight: 700, color: 'var(--error)', whiteSpace: 'nowrap' }}>

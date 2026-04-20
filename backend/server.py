@@ -2368,13 +2368,20 @@ def _compute_recurring_summary(recurring_txns: list) -> tuple:
     for txn in recurring_txns:
         freq = txn.get("recurring_frequency", "monthly")
         monthly_amount = txn["amount"] * FREQ_MULTIPLIERS.get(freq, 1.0)
+        # Derive recurrence_date from transaction date if not explicitly set
+        rec_date = txn.get("recurrence_date")
+        if rec_date is None and txn.get("date"):
+            try:
+                rec_date = int(txn["date"].split("-")[2].split("T")[0])
+            except (IndexError, ValueError):
+                rec_date = None
         items.append({
             "transaction_id": txn["transaction_id"],
             "description": txn.get("description", ""),
             "transaction_type": txn["transaction_type"],
             "amount": txn["amount"],
             "frequency": freq,
-            "recurrence_date": txn.get("recurrence_date"),
+            "recurrence_date": rec_date,
             "monthly_amount": round(monthly_amount, 2),
             "category_id": txn.get("category_id"),
             "account_id": txn.get("account_id"),
@@ -2638,7 +2645,7 @@ async def upcoming_mandates(
     return {"upcoming": upcoming, "total": len(upcoming)}
 
 
-async def _compute_od_monthly_interest(user_id: str, account: dict) -> float:
+async def _compute_od_monthly_interest(user_id: str, account: dict) -> tuple:
     """
     Compute the current month's daily interest for an OD account.
     Uses the same timeline-replay logic as the OD interest endpoint.
@@ -2646,7 +2653,7 @@ async def _compute_od_monthly_interest(user_id: str, account: dict) -> float:
     """
     rate = account.get("loan_interest_rate")
     if not rate or rate <= 0:
-        return 0.0
+        return 0.0, 0.0
 
     now = datetime.now(timezone.utc)
     year, mon = now.year, now.month
@@ -2721,7 +2728,7 @@ async def _compute_od_monthly_interest(user_id: str, account: dict) -> float:
             event_idx += 1
         total_interest += max(0, balance) * daily_rate
 
-    return round(total_interest, 2)
+    return round(total_interest, 2), round(max(0, balance), 2)
 
 
 @app.get("/api/cashflow/projection")
@@ -2747,14 +2754,15 @@ async def cashflow_projection(user: dict = Depends(get_current_user)):
     od_interest_items = []
     monthly_od_interest = 0.0
     for od_acc in od_accounts:
-        interest = await _compute_od_monthly_interest(user_id, od_acc)
+        interest, outstanding = await _compute_od_monthly_interest(user_id, od_acc)
         if interest > 0:
             od_interest_items.append({
                 "account_id": od_acc["account_id"],
                 "account_name": od_acc.get("name", "OD Account"),
-                "interest_rate": od_acc.get("loan_interest_rate"),
+                "rate": od_acc.get("loan_interest_rate"),
                 "interest_charge_day": od_acc.get("loan_emi_day"),
-                "projected_monthly_interest": interest,
+                "monthly_interest": interest,
+                "balance": outstanding,
             })
             monthly_od_interest += interest
 
