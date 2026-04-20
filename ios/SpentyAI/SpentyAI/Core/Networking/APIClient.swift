@@ -192,8 +192,13 @@ final class APIClient: Sendable {
         guard let http = response as? HTTPURLResponse else { return }
         guard (200...299).contains(http.statusCode) else {
             if http.statusCode == 401 {
-                Task { @MainActor in
-                    NotificationCenter.default.post(name: .userSessionExpired, object: nil)
+                // Only fire session-expired if there IS an active session token.
+                // A 401 during login (no session yet) is just a normal auth error,
+                // not a session expiry.
+                if KeychainHelper.read(key: KeychainHelper.sessionTokenKey) != nil {
+                    Task { @MainActor in
+                        NotificationCenter.default.post(name: .userSessionExpired, object: nil)
+                    }
                 }
                 throw APIError.unauthorized
             }

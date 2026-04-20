@@ -50,7 +50,7 @@ if not MONGO_URL:
 
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID")
-GOOGLE_IOS_CLIENT_ID = os.environ.get("GOOGLE_IOS_CLIENT_ID")
+GOOGLE_IOS_CLIENT_ID = os.environ.get("GOOGLE_IOS_CLIENT_ID") or GOOGLE_CLIENT_ID  # fallback to web client ID
 GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET")
 MICROSOFT_CLIENT_ID = os.environ.get("MICROSOFT_CLIENT_ID")
 MICROSOFT_TENANT_ID = os.environ.get("MICROSOFT_TENANT_ID")
@@ -485,7 +485,8 @@ async def google_mobile_login(request: Request, response: Response):
                 f"https://oauth2.googleapis.com/tokeninfo?id_token={id_token}"
             )
         if token_info_resp.status_code != 200:
-            raise HTTPException(status_code=401, detail="Invalid ID token")
+            logger.error(f"[MobileLogin] Google tokeninfo returned {token_info_resp.status_code}: {token_info_resp.text[:200]}")
+            raise HTTPException(status_code=401, detail=f"Invalid ID token (Google returned {token_info_resp.status_code})")
 
         token_info = token_info_resp.json()
         email = token_info.get("email", "")
@@ -497,8 +498,11 @@ async def google_mobile_login(request: Request, response: Response):
 
         # Verify audience matches our web or iOS client ID
         valid_audiences = {GOOGLE_CLIENT_ID, GOOGLE_IOS_CLIENT_ID} - {None}
-        if valid_audiences and token_info.get("aud") not in valid_audiences:
-            raise HTTPException(status_code=401, detail="Token audience mismatch")
+        token_aud = token_info.get("aud")
+        logger.info(f"[MobileLogin] token aud={token_aud}, valid_audiences={valid_audiences}")
+        if valid_audiences and token_aud not in valid_audiences:
+            logger.error(f"[MobileLogin] Audience mismatch! token_aud={token_aud} not in {valid_audiences}")
+            raise HTTPException(status_code=401, detail=f"Token audience mismatch: got {token_aud}")
 
     except HTTPException:
         raise

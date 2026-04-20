@@ -5,10 +5,12 @@ struct LoginView: View {
     // MARK: - State
 
     @State private var viewModel: AuthViewModel
+    var authManager: AuthManager
 
     // MARK: - Init
 
     init(authManager: AuthManager) {
+        self.authManager = authManager
         _viewModel = State(initialValue: AuthViewModel(authManager: authManager))
     }
 
@@ -37,6 +39,15 @@ struct LoginView: View {
             Button("OK") { viewModel.dismissError() }
         } message: {
             Text(viewModel.errorMessage)
+        }
+        .onAppear {
+            // If login failed while this view was off-screen (destroyed by AppRouter
+            // switching to LoadingView), recover the error from AuthManager.
+            if let error = authManager.lastLoginError {
+                viewModel.errorMessage = error
+                viewModel.showError = true
+                authManager.lastLoginError = nil
+            }
         }
     }
 

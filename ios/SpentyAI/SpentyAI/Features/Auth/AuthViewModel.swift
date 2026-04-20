@@ -32,15 +32,21 @@ final class AuthViewModel {
         errorMessage = ""
 
         do {
+            print("[AuthVM] Starting Google Sign-In …")
             let idToken = try await GoogleSignInHelper.signIn()
+            print("[AuthVM] Got id_token, calling login() …")
             try await authManager.login(idToken: idToken)
+            print("[AuthVM] Login succeeded!")
             // AuthManager sets isAuthenticated → AppRouter navigates automatically.
         } catch APIError.cancelled {
+            print("[AuthVM] Sign-in cancelled by user")
             // User intentionally cancelled sign-in — no error to show.
         } catch let error as APIError {
+            print("[AuthVM] APIError: \(error)")
             errorMessage = error.localizedDescription
             showError = true
         } catch {
+            print("[AuthVM] Unknown error: \(error)")
             errorMessage = "Something went wrong. Please try again."
             showError = true
         }

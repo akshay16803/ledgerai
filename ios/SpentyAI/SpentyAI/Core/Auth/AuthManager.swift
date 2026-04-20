@@ -8,6 +8,9 @@ final class AuthManager {
     var isAuthenticated = false
     var isLoading = false
 
+    /// Persists login error across LoginView recreation so the user always sees feedback.
+    var lastLoginError: String?
+
     private var sessionExpiredObserver: NSObjectProtocol?
 
     init() {
@@ -32,6 +35,7 @@ final class AuthManager {
 
     func login(idToken: String) async throws {
         isLoading = true
+        lastLoginError = nil
         defer { isLoading = false }
 
         struct LoginRequest: Encodable {
@@ -48,14 +52,23 @@ final class AuthManager {
             }
         }
 
-        let response: LoginResponse = try await APIClient.shared.post(
-            APIEndpoints.authGoogleMobile,
-            body: LoginRequest(idToken: idToken)
-        )
-
-        KeychainHelper.save(key: KeychainHelper.sessionTokenKey, value: response.sessionToken)
-        self.user = response.user
-        self.isAuthenticated = true
+        print("[Auth] login() — calling /api/auth/google/mobile …")
+        print("[Auth] login() — id_token prefix: \(idToken.prefix(20))…")
+        do {
+            let response: LoginResponse = try await APIClient.shared.post(
+                APIEndpoints.authGoogleMobile,
+                body: LoginRequest(idToken: idToken)
+            )
+            print("[Auth] login() — success, userId=\(response.user.id)")
+            KeychainHelper.save(key: KeychainHelper.sessionTokenKey, value: response.sessionToken)
+            self.user = response.user
+            self.isAuthenticated = true
+            print("[Auth] login() — isAuthenticated=\(isAuthenticated), user=\(response.user.email ?? "nil")")
+        } catch {
+            print("[Auth] login() — FAILED: \(error)")
+            lastLoginError = (error as? APIError)?.localizedDescription ?? "Something went wrong. Please try again."
+            throw error
+        }
     }
 
     func checkSession() async {
@@ -75,17 +88,21 @@ final class AuthManager {
         }
         #endif
 
-        guard KeychainHelper.read(key: KeychainHelper.sessionTokenKey) != nil else {
+        guard let token = KeychainHelper.read(key: KeychainHelper.sessionTokenKey) else {
+            print("[Auth] checkSession() — no token found, showing login")
             isAuthenticated = false
             return
         }
+        print("[Auth] checkSession() — token found (\(token.prefix(8))…), calling /api/auth/me …")
         isLoading = true
         defer { isLoading = false }
         do {
             let fetchedUser: User = try await APIClient.shared.get(APIEndpoints.authMe)
+            print("[Auth] checkSession() — success, userId=\(fetchedUser.id)")
             self.user = fetchedUser
             self.isAuthenticated = true
         } catch {
+            print("[Auth] checkSession() — FAILED: \(error)")
             self.user = nil
             self.isAuthenticated = false
             KeychainHelper.delete(key: KeychainHelper.sessionTokenKey)
