@@ -11261,6 +11261,29 @@ async def list_customers(
         ]
     customers = await db.customers.find(query, {"_id": 0}).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
     total = await db.customers.count_documents(query)
+
+    # Enrich each customer with aggregated invoice totals
+    for cust in customers:
+        cid = cust.get("customer_id") or cust.get("customerId")
+        if cid:
+            pipeline = [
+                {"$match": {"customer_id": cid, "user_id": user["user_id"]}},
+                {"$group": {
+                    "_id": None,
+                    "total_invoiced": {"$sum": {"$ifNull": ["$grand_total", 0]}},
+                    "total_paid": {"$sum": {"$ifNull": ["$amount_paid", 0]}},
+                }},
+            ]
+            agg = await db.invoices.aggregate(pipeline).to_list(1)
+            if agg:
+                cust["total_invoiced"] = agg[0].get("total_invoiced", 0)
+                cust["total_paid"] = agg[0].get("total_paid", 0)
+                cust["outstanding"] = cust["total_invoiced"] - cust["total_paid"]
+            else:
+                cust["total_invoiced"] = 0
+                cust["total_paid"] = 0
+                cust["outstanding"] = 0
+
     return {"items": customers, "total": total}
 
 

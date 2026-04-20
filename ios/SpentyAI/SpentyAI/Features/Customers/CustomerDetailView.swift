@@ -201,13 +201,37 @@ struct CustomerDetailView: View {
     private func formatDateString(_ dateString: String) -> String {
         let parser = DateFormatter()
         parser.locale = Locale(identifier: "en_US_POSIX")
-        parser.dateFormat = "yyyy-MM-dd"
-        if let date = parser.date(from: dateString) {
-            let display = DateFormatter()
-            display.dateStyle = .medium
-            display.timeStyle = .none
+
+        // Try ISO 8601 with fractional seconds first
+        let formats = [
+            "yyyy-MM-dd'T'HH:mm:ss.SSSZ",
+            "yyyy-MM-dd'T'HH:mm:ssZ",
+            "yyyy-MM-dd'T'HH:mm:ss",
+            "yyyy-MM-dd"
+        ]
+
+        let display = DateFormatter()
+        display.dateStyle = .medium
+        display.timeStyle = .none
+
+        for format in formats {
+            parser.dateFormat = format
+            if let date = parser.date(from: dateString) {
+                return display.string(from: date)
+            }
+        }
+
+        // Try ISO8601DateFormatter as final fallback
+        let isoParser = ISO8601DateFormatter()
+        isoParser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = isoParser.date(from: dateString) {
             return display.string(from: date)
         }
+        isoParser.formatOptions = [.withInternetDateTime]
+        if let date = isoParser.date(from: dateString) {
+            return display.string(from: date)
+        }
+
         return dateString
     }
 }

@@ -94,6 +94,17 @@ final class CustomersViewModel {
         customerInvoices = []
         do {
             customerInvoices = try await repository.fetchInvoices(customerId: id)
+
+            // Compute financial totals from loaded invoices and update the customer
+            let totalInvoiced = customerInvoices.reduce(0.0) { $0 + ($1.grandTotal ?? 0) }
+            let totalPaid = customerInvoices.reduce(0.0) { $0 + ($1.amountPaid ?? 0) }
+            let outstanding = totalInvoiced - totalPaid
+
+            if let index = customers.firstIndex(where: { $0.id == id }) {
+                customers[index].totalInvoiced = totalInvoiced
+                customers[index].totalPaid = totalPaid
+                customers[index].outstanding = outstanding
+            }
         } catch {
             errorMessage = error.localizedDescription
         }
