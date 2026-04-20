@@ -560,6 +560,12 @@ struct PendingTransactionDetailSheet: View {
     @State private var editCategory: String = ""
     @State private var isProcessing = false
 
+    // Source document states
+    @State private var sourceContent: SourceContent?
+    @State private var isLoadingSource = false
+    @State private var sourceError: String?
+    @State private var isSourceExpanded = false
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -581,6 +587,11 @@ struct PendingTransactionDetailSheet: View {
                             .background(Color.spentyWarning.opacity(0.1), in: Capsule())
 
                             Spacer()
+                        }
+
+                        // Source Document card
+                        if transaction.sourceId != nil {
+                            sourceDocumentCard
                         }
 
                         // Edit fields
@@ -701,6 +712,180 @@ struct PendingTransactionDetailSheet: View {
             }
         }
         .presentationDetents([.large])
+    }
+
+    // MARK: - Source Document Card
+
+    private var sourceDocumentCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Header — always visible, tappable
+            Button {
+                if sourceContent == nil && !isLoadingSource {
+                    Task { await loadSourceContent() }
+                }
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    isSourceExpanded.toggle()
+                }
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: transaction.source == "sms" ? "message.fill" : "envelope.open.fill")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(.spentyInfo)
+                        .frame(width: 32, height: 32)
+                        .background(Color.spentyInfo.opacity(0.1), in: Circle())
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Source Document")
+                            .font(SpentyFonts.subheadline)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.spentyTextPrimary)
+
+                        if let sc = sourceContent {
+                            Text(sc.subject ?? sc.snippet ?? "View original content")
+                                .font(SpentyFonts.caption1)
+                                .foregroundColor(.spentyTextSecondary)
+                                .lineLimit(1)
+                        } else {
+                            Text("Tap to view original \(transaction.source == "sms" ? "SMS" : "email")")
+                                .font(SpentyFonts.caption1)
+                                .foregroundColor(.spentyTextSecondary)
+                        }
+                    }
+
+                    Spacer()
+
+                    if isLoadingSource {
+                        ProgressView()
+                            .scaleEffect(0.8)
+                    } else {
+                        Image(systemName: isSourceExpanded ? "chevron.up" : "chevron.down")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(.spentyTextSecondary)
+                    }
+                }
+                .padding(14)
+            }
+            .buttonStyle(.plain)
+
+            // Expanded content
+            if isSourceExpanded {
+                Divider().padding(.horizontal, 14)
+
+                if isLoadingSource {
+                    HStack {
+                        Spacer()
+                        VStack(spacing: 8) {
+                            ProgressView()
+                            Text("Loading source…")
+                                .font(SpentyFonts.caption1)
+                                .foregroundColor(.spentyTextSecondary)
+                        }
+                        Spacer()
+                    }
+                    .padding(.vertical, 20)
+                } else if let error = sourceError {
+                    VStack(spacing: 8) {
+                        Text(error)
+                            .font(SpentyFonts.caption1)
+                            .foregroundColor(.spentyError)
+                            .multilineTextAlignment(.center)
+                        Button("Retry") {
+                            Task { await loadSourceContent() }
+                        }
+                        .font(SpentyFonts.caption1)
+                        .foregroundColor(.spentyPrimary)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 16)
+                } else if let sc = sourceContent {
+                    VStack(alignment: .leading, spacing: 12) {
+                        // Email header fields
+                        if transaction.source != "sms" {
+                            if let subject = sc.subject, !subject.isEmpty {
+                                sourceRow(label: "Subject", value: subject)
+                            }
+                            if let from = sc.from, !from.isEmpty {
+                                sourceRow(label: "From", value: from)
+                            }
+                        } else {
+                            if let sender = sc.sender, !sender.isEmpty {
+                                sourceRow(label: "Sender", value: sender)
+                            }
+                        }
+                        if let date = sc.date, !date.isEmpty {
+                            sourceRow(label: "Date", value: date)
+                        }
+
+                        // Body / message content
+                        if let body = sc.body, !body.isEmpty {
+                            Divider()
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(transaction.source == "sms" ? "Message" : "Email Body")
+                                    .font(SpentyFonts.caption1)
+                                    .foregroundColor(.spentyTextSecondary)
+
+                                Text(stripHTML(body))
+                                    .font(SpentyFonts.footnote)
+                                    .foregroundColor(.spentyTextPrimary)
+                                    .lineLimit(12)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        } else if let snippet = sc.snippet, !snippet.isEmpty {
+                            Divider()
+                            Text(snippet)
+                                .font(SpentyFonts.footnote)
+                                .foregroundColor(.spentyTextPrimary)
+                                .lineLimit(6)
+                        }
+                    }
+                    .padding(14)
+                }
+            }
+        }
+        .background(Color.spentyCardBg, in: RoundedRectangle(cornerRadius: 14))
+        .shadow(color: .black.opacity(0.04), radius: 8, y: 2)
+        .task {
+            // Auto-load source content on appear for a smoother experience
+            if sourceContent == nil {
+                await loadSourceContent()
+            }
+        }
+    }
+
+    private func sourceRow(label: String, value: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Text(label)
+                .font(SpentyFonts.caption1)
+                .foregroundColor(.spentyTextSecondary)
+                .frame(width: 55, alignment: .leading)
+            Text(value)
+                .font(SpentyFonts.footnote)
+                .foregroundColor(.spentyTextPrimary)
+                .lineLimit(2)
+        }
+    }
+
+    private func loadSourceContent() async {
+        guard let sourceId = transaction.sourceId else { return }
+        isLoadingSource = true
+        sourceError = nil
+        do {
+            sourceContent = try await EmailSyncRepository.shared.sourceContent(id: sourceId)
+        } catch {
+            sourceError = "Could not load source document"
+        }
+        isLoadingSource = false
+    }
+
+    /// Strips HTML tags from a string for plain-text display.
+    private func stripHTML(_ html: String) -> String {
+        html.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
+            .replacingOccurrences(of: "&nbsp;", with: " ")
+            .replacingOccurrences(of: "&amp;", with: "&")
+            .replacingOccurrences(of: "&lt;", with: "<")
+            .replacingOccurrences(of: "&gt;", with: ">")
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func approveTransaction() async {
