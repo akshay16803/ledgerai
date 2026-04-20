@@ -244,6 +244,8 @@ struct PendingTransaction: Codable, Identifiable {
     var accountName: String?
     var categoryId: String?
     var categoryName: String?
+    var subcategoryId: String?
+    var paymentMethod: String?
     var transactionType: String?
     var source: String?
     var status: String?
@@ -267,6 +269,8 @@ struct PendingTransaction: Codable, Identifiable {
         case accountName
         case categoryId
         case categoryName
+        case subcategoryId
+        case paymentMethod
         case transactionType
         case source
         case status
@@ -288,6 +292,8 @@ struct PendingTransaction: Codable, Identifiable {
         self.accountName = try? container.decodeIfPresent(String.self, forKey: .accountName)
         self.categoryId = try? container.decodeIfPresent(String.self, forKey: .categoryId)
         self.categoryName = try? container.decodeIfPresent(String.self, forKey: .categoryName)
+        self.subcategoryId = try? container.decodeIfPresent(String.self, forKey: .subcategoryId)
+        self.paymentMethod = try? container.decodeIfPresent(String.self, forKey: .paymentMethod)
         self.transactionType = try? container.decodeIfPresent(String.self, forKey: .transactionType)
         self.source = try? container.decodeIfPresent(String.self, forKey: .source)
         self.status = try? container.decodeIfPresent(String.self, forKey: .status)
