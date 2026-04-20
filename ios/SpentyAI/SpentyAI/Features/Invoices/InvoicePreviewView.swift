@@ -12,6 +12,8 @@ struct InvoicePreviewView: View {
     @State private var isLoadingPDF = false
     @State private var pdfError: String?
     @State private var showShareSheet = false
+    @State private var showDeleteConfirmation = false
+    @Environment(\.dismiss) private var dismiss
 
     // MARK: - Body
 
@@ -65,6 +67,9 @@ struct InvoicePreviewView: View {
             if let pdfData {
                 InvoiceShareSheet(items: [pdfData])
             }
+        }
+        .sheet(isPresented: $viewModel.showForm) {
+            InvoiceFormView(viewModel: viewModel)
         }
         .task {
             await loadPDF()
@@ -130,9 +135,55 @@ struct InvoicePreviewView: View {
                     Text("Notes")
                 }
             }
+
+            // Action buttons
+            Section {
+                if (invoice.paymentStatus ?? "").lowercased() != "paid" {
+                    Button {
+                        Task { await viewModel.markPaid(id: invoice.id) }
+                    } label: {
+                        Label("Mark as Paid", systemImage: "checkmark.circle.fill")
+                            .foregroundStyle(Color.spentySuccess)
+                    }
+                }
+
+                Button {
+                    viewModel.startEdit(invoice)
+                } label: {
+                    Label("Edit Invoice", systemImage: "pencil")
+                        .foregroundStyle(Color.spentyPrimary)
+                }
+
+                Button {
+                    Task { await viewModel.duplicateInvoice(id: invoice.id) }
+                } label: {
+                    Label("Duplicate", systemImage: "doc.on.doc")
+                        .foregroundStyle(Color.spentyWarning)
+                }
+
+                Button(role: .destructive) {
+                    showDeleteConfirmation = true
+                } label: {
+                    Label("Delete Invoice", systemImage: "trash")
+                        .foregroundStyle(Color.spentyError)
+                }
+            } header: {
+                Text("Actions")
+            }
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
+        .confirmationDialog("Delete Invoice", isPresented: $showDeleteConfirmation, titleVisibility: .visible) {
+            Button("Delete", role: .destructive) {
+                Task {
+                    await viewModel.deleteInvoice(id: invoice.id)
+                    dismiss()
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Are you sure you want to delete this invoice? This action cannot be undone.")
+        }
     }
 
     private func row(_ label: String, value: String?) -> some View {

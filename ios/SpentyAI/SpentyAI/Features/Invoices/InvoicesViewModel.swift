@@ -50,7 +50,19 @@ final class InvoicesViewModel {
         var result = invoices
 
         if statusFilter != .all {
-            result = result.filter { ($0.paymentStatus ?? "").lowercased() == statusFilter.rawValue }
+            if statusFilter == .overdue {
+                // Backend never sets paymentStatus to "overdue".
+                // Overdue = unpaid (or partial) AND dueDate is before today.
+                let now = Date()
+                result = result.filter { invoice in
+                    let status = (invoice.paymentStatus ?? "").lowercased()
+                    guard status != "paid" else { return false }
+                    guard let due = invoice.dueDate else { return false }
+                    return due < now
+                }
+            } else {
+                result = result.filter { ($0.paymentStatus ?? "").lowercased() == statusFilter.rawValue }
+            }
         }
 
         if !searchText.isEmpty {

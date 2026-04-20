@@ -388,7 +388,7 @@ struct InvoiceFormView: View {
                 quantity: item.quantity,
                 rate: item.rate,
                 taxPercent: item.taxPercent,
-                amount: item.lineTotal
+                amount: item.taxableAmount   // Backend expects taxable amount (qty * rate), not lineTotal
             )
         }
 
@@ -401,6 +401,9 @@ struct InvoiceFormView: View {
             lineItems: itemPayloads,
             subtotal: subtotal,
             taxAmount: totalTax,
+            totalCgst: cgst,
+            totalSgst: sgst,
+            totalIgst: igst,
             grandTotal: grandTotal,
             notes: notes.isEmpty ? nil : notes.trimmingCharacters(in: .whitespaces),
             termsConditions: terms.isEmpty ? nil : terms.trimmingCharacters(in: .whitespaces)

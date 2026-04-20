@@ -9,6 +9,9 @@ struct InvoicePayload: Codable {
     let lineItems: [InvoiceLineItemPayload]?
     let subtotal: Double?
     let taxAmount: Double?
+    let totalCgst: Double?
+    let totalSgst: Double?
+    let totalIgst: Double?
     let grandTotal: Double?
     let notes: String?
     let termsConditions: String?

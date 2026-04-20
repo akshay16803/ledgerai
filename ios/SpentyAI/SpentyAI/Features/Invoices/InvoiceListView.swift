@@ -5,7 +5,6 @@ struct InvoiceListView: View {
     // MARK: - State
 
     @State private var viewModel = InvoicesViewModel()
-    @State private var showPaymentSheet = false
     @State private var paymentInvoice: Invoice?
     @State private var debtorsExpanded = false
     @State private var agingExpanded = false
@@ -46,10 +45,8 @@ struct InvoiceListView: View {
             .sheet(isPresented: $viewModel.showForm) {
                 InvoiceFormView(viewModel: viewModel)
             }
-            .sheet(isPresented: $showPaymentSheet) {
-                if let invoice = paymentInvoice {
-                    RecordPaymentView(viewModel: viewModel, invoice: invoice)
-                }
+            .sheet(item: $paymentInvoice) { invoice in
+                RecordPaymentView(viewModel: viewModel, invoice: invoice)
             }
             .alert("Error", isPresented: .init(
                 get: { viewModel.errorMessage != nil },
@@ -143,6 +140,7 @@ struct InvoiceListView: View {
                         } label: {
                             Text(filter.displayName)
                                 .font(SpentyFonts.subheadline.weight(.medium))
+                                .fixedSize(horizontal: true, vertical: false)
                                 .padding(.horizontal, 14)
                                 .padding(.vertical, 7)
                                 .background(
@@ -266,7 +264,6 @@ struct InvoiceListView: View {
                 if (invoice.paymentStatus ?? "").lowercased() != "paid" {
                     Button {
                         paymentInvoice = invoice
-                        showPaymentSheet = true
                     } label: {
                         Label("Record Payment", systemImage: "indianrupeesign.circle")
                             .font(SpentyFonts.caption2.weight(.medium))
