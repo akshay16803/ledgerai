@@ -145,6 +145,7 @@ struct InvoiceRepository {
     }
 
     func fetchAccounts() async throws -> [Account] {
-        try await api.get(APIEndpoints.accounts)
+        let response: AccountListResponse = try await api.get(APIEndpoints.accounts)
+        return response.accounts
     }
 }

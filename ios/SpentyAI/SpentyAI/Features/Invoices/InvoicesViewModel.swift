@@ -250,7 +250,8 @@ final class InvoicesViewModel {
         do {
             customers = try await repository.fetchCustomers()
         } catch {
-            errorMessage = error.localizedDescription
+            // Non-fatal — customer picker will just be empty
+            print("[Invoices] Failed to load customers: \(error.localizedDescription)")
         }
     }
 
@@ -259,7 +260,8 @@ final class InvoicesViewModel {
         do {
             accounts = try await repository.fetchAccounts()
         } catch {
-            errorMessage = error.localizedDescription
+            // Non-fatal — account picker will just be empty
+            print("[Invoices] Failed to load accounts: \(error.localizedDescription)")
         }
     }
 

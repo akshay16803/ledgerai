@@ -184,7 +184,8 @@ final class ReconciliationRepository: Sendable {
     // MARK: - Supporting Data
 
     func fetchAccounts() async throws -> [Account] {
-        return try await api.get(APIEndpoints.accounts)
+        let response: AccountListResponse = try await api.get(APIEndpoints.accounts)
+        return response.accounts
     }
 
     func fetchAccountSubTypes() async throws -> [AccountSubType] {
