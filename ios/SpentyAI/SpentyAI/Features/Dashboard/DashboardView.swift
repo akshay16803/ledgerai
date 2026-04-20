@@ -1149,7 +1149,7 @@ struct PendingTransactionDetailSheet: View {
             .foregroundColor(.spentyTextSecondary)
             .tracking(0.8)
             .padding(.leading, 4)
-            .padding(.bottom, -12)
+            .padding(.bottom, -4)
     }
 
     private func reviewFormRow<Content: View>(
