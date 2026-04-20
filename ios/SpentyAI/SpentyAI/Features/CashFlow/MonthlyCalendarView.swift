@@ -7,6 +7,8 @@ struct CalendarDayEntry: Identifiable {
     let label: String
     let amount: Double
     let type: CalendarEntryType
+    var isEstimatedRate: Bool = false
+    var originalCurrencyLabel: String? = nil  // e.g. "USD 100.00"
 }
 
 enum CalendarEntryType {
@@ -96,10 +98,15 @@ struct MonthlyCalendarView: View {
         // Mandates
         for item in viewModel.mandateItemsList {
             if let day = item.dayOfMonth, day >= 1, day <= daysInNextMonth {
+                let foreignLabel: String? = item.isForeignCurrency
+                    ? "\(item.currency ?? "") \(formatCurrency(item.originalAmount ?? 0))"
+                    : nil
                 let entry = CalendarDayEntry(
                     label: item.merchant ?? "Mandate",
                     amount: item.monthlyEquivalent ?? item.amount ?? 0,
-                    type: .mandate
+                    type: .mandate,
+                    isEstimatedRate: item.isEstimatedRate ?? false,
+                    originalCurrencyLabel: foreignLabel
                 )
                 result[day, default: []].append(entry)
             }
@@ -158,10 +165,15 @@ struct MonthlyCalendarView: View {
 
         for item in viewModel.mandateItemsList {
             if item.dayOfMonth == nil {
+                let foreignLabel: String? = item.isForeignCurrency
+                    ? "\(item.currency ?? "") \(formatCurrency(item.originalAmount ?? 0))"
+                    : nil
                 result.append(CalendarDayEntry(
                     label: item.merchant ?? "Mandate",
                     amount: item.monthlyEquivalent ?? item.amount ?? 0,
-                    type: .mandate
+                    type: .mandate,
+                    isEstimatedRate: item.isEstimatedRate ?? false,
+                    originalCurrencyLabel: foreignLabel
                 ))
             }
         }
@@ -404,9 +416,23 @@ struct MonthlyCalendarView: View {
 
                     Spacer()
 
-                    Text(formatCurrency(entry.amount))
-                        .font(SpentyFonts.amountSmall)
-                        .foregroundColor(entry.type == .income ? .spentySuccess : .spentyAccent1)
+                    VStack(alignment: .trailing, spacing: 1) {
+                        HStack(spacing: 2) {
+                            if entry.isEstimatedRate {
+                                Text("~")
+                                    .font(SpentyFonts.caption2)
+                                    .foregroundColor(.spentyTextSecondary)
+                            }
+                            Text(formatCurrency(entry.amount))
+                                .font(SpentyFonts.amountSmall)
+                                .foregroundColor(entry.type == .income ? .spentySuccess : .spentyAccent1)
+                        }
+                        if let original = entry.originalCurrencyLabel {
+                            Text("\(original) est.")
+                                .font(.system(size: 9))
+                                .foregroundColor(.spentyTextSecondary)
+                        }
+                    }
                 }
                 .padding(.vertical, 6)
 
@@ -462,9 +488,23 @@ struct MonthlyCalendarView: View {
 
                     Spacer()
 
-                    Text(formatCurrency(entry.amount))
-                        .font(SpentyFonts.amountSmall)
-                        .foregroundColor(entry.type == .income ? .spentySuccess : .spentyAccent1)
+                    VStack(alignment: .trailing, spacing: 1) {
+                        HStack(spacing: 2) {
+                            if entry.isEstimatedRate {
+                                Text("~")
+                                    .font(SpentyFonts.caption2)
+                                    .foregroundColor(.spentyTextSecondary)
+                            }
+                            Text(formatCurrency(entry.amount))
+                                .font(SpentyFonts.amountSmall)
+                                .foregroundColor(entry.type == .income ? .spentySuccess : .spentyAccent1)
+                        }
+                        if let original = entry.originalCurrencyLabel {
+                            Text("\(original) est.")
+                                .font(.system(size: 9))
+                                .foregroundColor(.spentyTextSecondary)
+                        }
+                    }
                 }
                 .padding(.vertical, 4)
 

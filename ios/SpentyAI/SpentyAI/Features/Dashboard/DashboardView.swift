@@ -256,8 +256,8 @@ struct DashboardView: View {
                 // Breakdown row
                 HStack(spacing: 0) {
                     projectionMiniStat(label: "Expenses", amount: viewModel.nextMonthExpense, color: .spentyAccent1)
-                    projectionMiniStat(label: "Mandates", amount: viewModel.nextMonthMandates, color: .spentyAccent1)
                     projectionMiniStat(label: "EMIs", amount: viewModel.nextMonthEMI, color: .spentyAccent3)
+                    projectionMiniStat(label: "OD Interest", amount: viewModel.nextMonthODInterest, color: .spentyAccent1)
                 }
 
                 // Total bar

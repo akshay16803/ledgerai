@@ -19,6 +19,11 @@ struct MandateItem: Codable, Identifiable {
     var mandateId: String?
     var merchant: String?
     var amount: Double?
+    var originalAmount: Double?
+    var currency: String?
+    var baseCurrency: String?
+    var exchangeRate: Double?
+    var isEstimatedRate: Bool?
     var frequency: String?
     var mandateType: String?
     var monthlyEquivalent: Double?
@@ -27,6 +32,12 @@ struct MandateItem: Codable, Identifiable {
     var sourceEmailSubject: String?
     var startDate: String?
     var debitDay: Int?
+
+    /// Whether this mandate is in a foreign currency (different from base)
+    var isForeignCurrency: Bool {
+        guard let currency, let baseCurrency else { return false }
+        return currency.uppercased() != baseCurrency.uppercased()
+    }
 
     /// Day of month for calendar placement: prefers explicit debitDay, falls back to startDate day
     var dayOfMonth: Int? {

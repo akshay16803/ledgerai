@@ -2765,23 +2765,45 @@ async def cashflow_projection(user: dict = Depends(get_current_user)):
     mandates = await db.mandates.find(
         {"user_id": user_id, "status": "active"}, {"_id": 0}
     ).to_list(500)
-    mandate_items = [
-        {
+    base_currency = await get_user_base_currency(user_id)
+    mandate_items = []
+    for m in mandates:
+        raw_amount = float(m.get("amount") or 0)
+        mandate_currency = (m.get("currency") or base_currency).upper()
+        monthly_eq = round(_mandate_monthly_outflow(m), 2)
+
+        # Currency conversion: convert to user's base currency if different
+        base_amount = raw_amount
+        base_monthly = monthly_eq
+        is_estimated_rate = False
+        exchange_rate = None
+        if mandate_currency != base_currency.upper():
+            rate_info = await get_exchange_rate(mandate_currency, base_currency)
+            if rate_info and rate_info.get("rate"):
+                exchange_rate = rate_info["rate"]
+                is_estimated_rate = rate_info.get("is_estimated", True)
+                base_amount = round(raw_amount * exchange_rate, 2)
+                base_monthly = round(monthly_eq * exchange_rate, 2)
+
+        mandate_items.append({
             "mandate_id": m.get("mandate_id"),
             "merchant": m.get("merchant"),
-            "amount": float(m.get("amount") or 0),
+            "amount": base_amount,
+            "original_amount": raw_amount,
+            "currency": mandate_currency,
+            "base_currency": base_currency.upper(),
+            "exchange_rate": exchange_rate,
+            "is_estimated_rate": is_estimated_rate,
             "frequency": m.get("frequency") or "monthly",
             "mandate_type": m.get("mandate_type"),
             "start_date": m.get("start_date"),
             "end_date": m.get("end_date"),
             "debit_day": m.get("debit_day"),
-            "monthly_equivalent": round(_mandate_monthly_outflow(m), 2),
+            "monthly_equivalent": base_monthly,
             "source": m.get("source"),
             "source_email_id": m.get("source_email_id"),
             "source_email_subject": m.get("source_email_subject"),
-        }
-        for m in mandates
-    ]
+        })
     monthly_mandate_expense = sum(i["monthly_equivalent"] for i in mandate_items)
 
     now = datetime.now(timezone.utc)

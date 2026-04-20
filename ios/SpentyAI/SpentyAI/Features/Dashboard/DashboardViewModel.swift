@@ -126,16 +126,19 @@ final class DashboardViewModel {
         return expense + mandate + emi + od
     }
 
+    /// Monthly expenses INCLUDING mandates (subscriptions merged into expenses)
     var nextMonthExpense: Double {
-        cashFlowProjection?.monthlyRecurringExpense ?? 0
-    }
-
-    var nextMonthMandates: Double {
-        cashFlowProjection?.monthlyMandateExpense ?? 0
+        let expense = cashFlowProjection?.monthlyRecurringExpense ?? 0
+        let mandate = cashFlowProjection?.monthlyMandateExpense ?? 0
+        return expense + mandate
     }
 
     var nextMonthEMI: Double {
         cashFlowProjection?.monthlyEmiTotal ?? 0
+    }
+
+    var nextMonthODInterest: Double {
+        cashFlowProjection?.monthlyOdInterest ?? 0
     }
 
     var hasProjectionData: Bool {

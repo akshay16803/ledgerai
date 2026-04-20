@@ -496,12 +496,23 @@ struct CashFlowDrillDownSheet: View {
                             Spacer()
 
                             VStack(alignment: .trailing, spacing: 2) {
-                                CurrencyText(
-                                    amount: item.amount ?? 0,
-                                    font: SpentyFonts.amountSmall,
-                                    color: .spentyWarning
-                                )
-                                if let monthly = item.monthlyEquivalent, monthly != item.amount {
+                                HStack(spacing: 2) {
+                                    if item.isEstimatedRate == true {
+                                        Text("~")
+                                            .font(SpentyFonts.caption2)
+                                            .foregroundColor(.spentyTextSecondary)
+                                    }
+                                    CurrencyText(
+                                        amount: item.amount ?? 0,
+                                        font: SpentyFonts.amountSmall,
+                                        color: .spentyWarning
+                                    )
+                                }
+                                if item.isForeignCurrency, let orig = item.originalAmount, let curr = item.currency {
+                                    Text("\(curr) \(formatCurrency(orig)) est.")
+                                        .font(.system(size: 9))
+                                        .foregroundColor(.spentyTextSecondary)
+                                } else if let monthly = item.monthlyEquivalent, monthly != item.amount {
                                     Text("\(formatCurrency(monthly))/mo")
                                         .font(SpentyFonts.caption2)
                                         .foregroundColor(.spentyTextSecondary)
