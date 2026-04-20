@@ -246,7 +246,6 @@ struct UnifiedTransactionForm: View {
             .foregroundColor(.spentyTextSecondary)
             .tracking(0.8)
             .padding(.leading, 4)
-            .padding(.bottom, -12)
     }
 
     // MARK: - Amount Hero
