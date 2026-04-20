@@ -66,6 +66,9 @@ struct UnifiedTransactionForm: View {
     // Delete confirmation
     @State private var showDeleteConfirm: Bool = false
 
+    // Guard against subcategoryId wipe during initial population
+    @State private var hasPopulated: Bool = false
+
     // MARK: - Constants
 
     private let transactionTypes = ["income", "expense", "transfer"]
@@ -436,7 +439,7 @@ struct UnifiedTransactionForm: View {
                     .truncationMode(.tail)
                     .fixedSize(horizontal: false, vertical: true)
                     .onChange(of: categoryId) { _, _ in
-                        subcategoryId = ""
+                        if hasPopulated { subcategoryId = "" }
                     }
 
                     Button {
@@ -998,6 +1001,7 @@ struct UnifiedTransactionForm: View {
         isRecurring = txn.isRecurring ?? false
         recurringFrequency = txn.recurringFrequency ?? "monthly"
         recurrenceDate = txn.recurrenceDate.map { String($0) } ?? ""
+        hasPopulated = true
     }
 
     // MARK: - Load Source Document

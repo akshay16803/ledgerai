@@ -33,6 +33,7 @@ struct TransactionFormView: View {
     @State private var newCategoryName: String = ""
     @State private var newSubcategoryName: String = ""
     @State private var isCreatingCategory: Bool = false
+    @State private var hasPopulated: Bool = false
     @State private var showNewAccountAlert: Bool = false
     @State private var newAccountName: String = ""
     @State private var newAccountType: String = "savings"
@@ -104,7 +105,10 @@ struct TransactionFormView: View {
                     .disabled(isSaving || amount.isEmpty || accountId.isEmpty || (!isTransfer && categoryId.isEmpty))
                 }
             }
-            .onAppear { populateFields() }
+            .task {
+                await viewModel.loadInitial()
+                populateFields()
+            }
         }
     }
 
@@ -116,7 +120,7 @@ struct TransactionFormView: View {
             .foregroundColor(.spentyTextSecondary)
             .tracking(0.8)
             .padding(.leading, 4)
-            .padding(.bottom, -12)
+            .padding(.bottom, 2)
     }
 
     // MARK: - Amount Hero
@@ -305,7 +309,7 @@ struct TransactionFormView: View {
                     .truncationMode(.tail)
                     .fixedSize(horizontal: false, vertical: true)
                     .onChange(of: categoryId) { _, _ in
-                        subcategoryId = ""
+                        if hasPopulated { subcategoryId = "" }
                     }
 
                     Button {
@@ -695,6 +699,7 @@ struct TransactionFormView: View {
         isRecurring = txn.isRecurring ?? false
         recurringFrequency = txn.recurringFrequency ?? "monthly"
         recurrenceDate = txn.recurrenceDate.map { String($0) } ?? ""
+        hasPopulated = true
     }
 
     // MARK: - Save

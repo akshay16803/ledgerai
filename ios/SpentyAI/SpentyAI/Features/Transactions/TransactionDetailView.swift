@@ -154,14 +154,13 @@ struct TransactionDetailView: View {
                 await loadArchiveRecord()
             }
             .sheet(isPresented: $showEditSheet) {
-                TransactionFormView(
-                    viewModel: TransactionsViewModel(),
-                    transaction: transaction
+                UnifiedTransactionForm(
+                    mode: .edit(transaction),
+                    onComplete: {
+                        Task { await loadTransaction() }
+                        onTransactionUpdated?()
+                    }
                 )
-                .onDisappear {
-                    Task { await loadTransaction() }
-                    onTransactionUpdated?()
-                }
             }
             .sheet(isPresented: $showReceiptSheet) {
                 receiptPreviewSheet
