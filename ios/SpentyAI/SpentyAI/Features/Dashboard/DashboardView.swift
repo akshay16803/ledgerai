@@ -819,7 +819,7 @@ struct PendingTransactionDetailSheet: View {
                     }
                     .pickerStyle(.menu)
                     .tint(.spentyTextPrimary)
-                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
 
                     Button {
                         newAccountName = ""
@@ -845,7 +845,7 @@ struct PendingTransactionDetailSheet: View {
                         }
                         .pickerStyle(.menu)
                         .tint(.spentyTextPrimary)
-                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
                     }
                 }
 
@@ -861,7 +861,7 @@ struct PendingTransactionDetailSheet: View {
                     }
                     .pickerStyle(.menu)
                     .tint(.spentyTextPrimary)
-                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
                 }
             }
             .cardStyle()
@@ -897,7 +897,7 @@ struct PendingTransactionDetailSheet: View {
                     }
                     .pickerStyle(.menu)
                     .tint(.spentyTextPrimary)
-                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
                     .onChange(of: editCategoryId) { _, _ in
                         editSubcategoryId = ""
                     }
@@ -937,7 +937,7 @@ struct PendingTransactionDetailSheet: View {
                         }
                         .pickerStyle(.menu)
                         .tint(.spentyTextPrimary)
-                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
 
                         if !editCategoryId.isEmpty {
                             Button {
@@ -1260,7 +1260,6 @@ struct PendingTransactionDetailSheet: View {
             Spacer(minLength: 4)
 
             content()
-                .lineLimit(1)
         }
         .padding(.vertical, 12)
     }

@@ -61,6 +61,7 @@ struct FeatureRequestFormView: View {
                         }
                         .pickerStyle(.menu)
                         .tint(.spentyPrimary)
+                        .fixedSize(horizontal: true, vertical: false)
                     }
                 }
                 .scrollContentBackground(.hidden)

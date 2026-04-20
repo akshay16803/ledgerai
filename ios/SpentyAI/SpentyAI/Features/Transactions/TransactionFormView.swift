@@ -217,7 +217,7 @@ struct TransactionFormView: View {
                     }
                     .pickerStyle(.menu)
                     .tint(.spentyTextPrimary)
-                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
 
                     Button {
                         newAccountName = ""
@@ -243,7 +243,7 @@ struct TransactionFormView: View {
                         }
                         .pickerStyle(.menu)
                         .tint(.spentyTextPrimary)
-                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
                     }
                 }
 
@@ -259,7 +259,7 @@ struct TransactionFormView: View {
                     }
                     .pickerStyle(.menu)
                     .tint(.spentyTextPrimary)
-                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
                 }
             }
             .cardStyle()
@@ -295,7 +295,7 @@ struct TransactionFormView: View {
                     }
                     .pickerStyle(.menu)
                     .tint(.spentyTextPrimary)
-                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
                     .onChange(of: categoryId) { _, _ in
                         subcategoryId = ""
                     }
@@ -336,7 +336,7 @@ struct TransactionFormView: View {
                         }
                         .pickerStyle(.menu)
                         .tint(.spentyTextPrimary)
-                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
 
                         if !categoryId.isEmpty {
                             Button {
@@ -603,7 +603,6 @@ struct TransactionFormView: View {
             Spacer(minLength: 4)
 
             content()
-                .lineLimit(1)
         }
         .padding(.vertical, 12)
     }

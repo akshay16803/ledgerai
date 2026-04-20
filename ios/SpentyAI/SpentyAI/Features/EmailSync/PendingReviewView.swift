@@ -348,7 +348,7 @@ struct PendingReviewView: View {
                             }
                             .pickerStyle(.menu)
                             .tint(.spentyTextPrimary)
-                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
                             .onChange(of: viewModel.editTransactionType) { _, _ in
                                 viewModel.editCategoryId = ""
                                 viewModel.editSubcategoryId = ""
@@ -381,7 +381,7 @@ struct PendingReviewView: View {
                             }
                             .pickerStyle(.menu)
                             .tint(.spentyTextPrimary)
-                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
 
                             Button {
                                 newAccountName = ""
@@ -440,7 +440,7 @@ struct PendingReviewView: View {
                             }
                             .pickerStyle(.menu)
                             .tint(.spentyTextPrimary)
-                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
                             .onChange(of: viewModel.editCategoryId) { _, _ in
                                 viewModel.editSubcategoryId = ""
                             }
@@ -482,7 +482,7 @@ struct PendingReviewView: View {
                                 }
                                 .pickerStyle(.menu)
                                 .tint(.spentyTextPrimary)
-                                .lineLimit(1)
+                                .fixedSize(horizontal: true, vertical: false)
 
                                 if !viewModel.editCategoryId.isEmpty {
                                     Button {

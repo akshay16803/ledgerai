@@ -526,6 +526,7 @@ struct AccountDetailView: View {
                                 }
                             }
                             .pickerStyle(.menu)
+                            .fixedSize(horizontal: true, vertical: false)
                         }
                     }
 
