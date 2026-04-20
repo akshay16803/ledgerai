@@ -1231,6 +1231,7 @@ async def get_account_transactions(
     min_amount: Optional[float] = None,
     max_amount: Optional[float] = None,
     search: Optional[str] = None,
+    status: Optional[str] = None,
 ):
     """Get transactions for a specific account with optional filters."""
     account = await db.accounts.find_one(
@@ -1257,6 +1258,8 @@ async def get_account_transactions(
         query.setdefault("amount", {})["$lte"] = max_amount
     if search:
         query["description"] = {"$regex": search, "$options": "i"}
+    if status:
+        query["status"] = status
 
     txns = await db.transactions.find(query, {"_id": 0}).sort("date", -1).skip(skip).limit(limit).to_list(limit)
     total = await db.transactions.count_documents(query)
