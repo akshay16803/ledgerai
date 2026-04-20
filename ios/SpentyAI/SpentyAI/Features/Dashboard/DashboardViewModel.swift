@@ -117,12 +117,13 @@ final class DashboardViewModel {
         }
     }
 
-    /// Total next month outflow: recurring expenses + mandates + EMIs
+    /// Total next month outflow: recurring expenses + mandates + EMIs + OD interest
     var nextMonthTotalOutflow: Double {
         let expense = cashFlowProjection?.monthlyRecurringExpense ?? 0
         let mandate = cashFlowProjection?.monthlyMandateExpense ?? 0
         let emi = cashFlowProjection?.monthlyEmiTotal ?? 0
-        return expense + mandate + emi
+        let od = cashFlowProjection?.monthlyOdInterest ?? 0
+        return expense + mandate + emi + od
     }
 
     var nextMonthExpense: Double {

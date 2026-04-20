@@ -359,12 +359,13 @@ struct MonthlyCalendarView: View {
                             .foregroundColor(isSelected ? .white.opacity(0.9) : .spentyAccent1)
                             .lineLimit(1)
                     }
-                } else {
-                    Spacer()
                 }
+
+                Spacer(minLength: 0)
             }
             .frame(maxWidth: .infinity)
-            .frame(height: 64)
+            .frame(height: 64, alignment: .top)
+            .padding(.top, 6)
             .background(
                 RoundedRectangle(cornerRadius: 10)
                     .fill(isSelected ? Color.spentyPrimary : (hasItems ? Color.spentyBgSecondary : Color.clear))
