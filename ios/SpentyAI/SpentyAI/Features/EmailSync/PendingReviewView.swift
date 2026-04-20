@@ -357,7 +357,9 @@ struct PendingReviewView: View {
                             }
                             .pickerStyle(.menu)
                             .tint(.spentyTextPrimary)
-                            .fixedSize(horizontal: true, vertical: false)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                            .fixedSize(horizontal: false, vertical: true)
                             .onChange(of: viewModel.editTransactionType) { _, _ in
                                 viewModel.editCategoryId = ""
                                 viewModel.editSubcategoryId = ""
@@ -390,7 +392,9 @@ struct PendingReviewView: View {
                             }
                             .pickerStyle(.menu)
                             .tint(.spentyTextPrimary)
-                            .fixedSize(horizontal: true, vertical: false)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                            .fixedSize(horizontal: false, vertical: true)
 
                             Button {
                                 newAccountName = ""
@@ -449,7 +453,9 @@ struct PendingReviewView: View {
                             }
                             .pickerStyle(.menu)
                             .tint(.spentyTextPrimary)
-                            .fixedSize(horizontal: true, vertical: false)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                            .fixedSize(horizontal: false, vertical: true)
                             .onChange(of: viewModel.editCategoryId) { _, _ in
                                 viewModel.editSubcategoryId = ""
                             }
@@ -491,7 +497,9 @@ struct PendingReviewView: View {
                                 }
                                 .pickerStyle(.menu)
                                 .tint(.spentyTextPrimary)
-                                .fixedSize(horizontal: true, vertical: false)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                                .fixedSize(horizontal: false, vertical: true)
 
                                 if !viewModel.editCategoryId.isEmpty {
                                     Button {

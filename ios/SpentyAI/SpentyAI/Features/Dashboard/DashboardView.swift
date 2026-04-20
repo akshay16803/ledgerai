@@ -818,7 +818,9 @@ struct PendingTransactionDetailSheet: View {
                     }
                     .pickerStyle(.menu)
                     .tint(.spentyTextPrimary)
-                    .fixedSize(horizontal: true, vertical: false)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .fixedSize(horizontal: false, vertical: true)
 
                     Button {
                         newAccountName = ""
@@ -844,7 +846,9 @@ struct PendingTransactionDetailSheet: View {
                         }
                         .pickerStyle(.menu)
                         .tint(.spentyTextPrimary)
-                        .fixedSize(horizontal: true, vertical: false)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .fixedSize(horizontal: false, vertical: true)
                     }
                 }
 
@@ -860,7 +864,9 @@ struct PendingTransactionDetailSheet: View {
                     }
                     .pickerStyle(.menu)
                     .tint(.spentyTextPrimary)
-                    .fixedSize(horizontal: true, vertical: false)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .fixedSize(horizontal: false, vertical: true)
                 }
             }
             .cardStyle()
@@ -896,7 +902,9 @@ struct PendingTransactionDetailSheet: View {
                     }
                     .pickerStyle(.menu)
                     .tint(.spentyTextPrimary)
-                    .fixedSize(horizontal: true, vertical: false)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .fixedSize(horizontal: false, vertical: true)
                     .onChange(of: editCategoryId) { _, _ in
                         editSubcategoryId = ""
                     }
@@ -936,7 +944,9 @@ struct PendingTransactionDetailSheet: View {
                         }
                         .pickerStyle(.menu)
                         .tint(.spentyTextPrimary)
-                        .fixedSize(horizontal: true, vertical: false)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .fixedSize(horizontal: false, vertical: true)
 
                         if !editCategoryId.isEmpty {
                             Button {

@@ -217,7 +217,9 @@ struct TransactionFormView: View {
                     }
                     .pickerStyle(.menu)
                     .tint(.spentyTextPrimary)
-                    .fixedSize(horizontal: true, vertical: false)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .fixedSize(horizontal: false, vertical: true)
 
                     Button {
                         newAccountName = ""
@@ -243,7 +245,9 @@ struct TransactionFormView: View {
                         }
                         .pickerStyle(.menu)
                         .tint(.spentyTextPrimary)
-                        .fixedSize(horizontal: true, vertical: false)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .fixedSize(horizontal: false, vertical: true)
                     }
                 }
 
@@ -259,7 +263,9 @@ struct TransactionFormView: View {
                     }
                     .pickerStyle(.menu)
                     .tint(.spentyTextPrimary)
-                    .fixedSize(horizontal: true, vertical: false)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .fixedSize(horizontal: false, vertical: true)
                 }
             }
             .cardStyle()
@@ -295,7 +301,9 @@ struct TransactionFormView: View {
                     }
                     .pickerStyle(.menu)
                     .tint(.spentyTextPrimary)
-                    .fixedSize(horizontal: true, vertical: false)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .fixedSize(horizontal: false, vertical: true)
                     .onChange(of: categoryId) { _, _ in
                         subcategoryId = ""
                     }
@@ -336,7 +344,9 @@ struct TransactionFormView: View {
                         }
                         .pickerStyle(.menu)
                         .tint(.spentyTextPrimary)
-                        .fixedSize(horizontal: true, vertical: false)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .fixedSize(horizontal: false, vertical: true)
 
                         if !categoryId.isEmpty {
                             Button {

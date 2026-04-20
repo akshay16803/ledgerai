@@ -524,7 +524,9 @@ struct AccountDetailView: View {
                                 }
                             }
                             .pickerStyle(.menu)
-                            .fixedSize(horizontal: true, vertical: false)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                            .fixedSize(horizontal: false, vertical: true)
                         }
                     }
 
