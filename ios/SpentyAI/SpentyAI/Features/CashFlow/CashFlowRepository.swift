@@ -39,9 +39,11 @@ struct MandateCreateBody: Codable {
 }
 
 struct MandateUpdateBody: Codable {
+    let merchant: String?
     let amount: Double?
     let status: String?
     let frequency: String?
+    let mandateType: String?
 }
 
 final class CashFlowRepository: Sendable {
@@ -78,8 +80,8 @@ final class CashFlowRepository: Sendable {
         return try await api.post(APIEndpoints.mandates, body: body)
     }
 
-    func updateMandate(id: String, amount: Double? = nil, status: String? = nil, frequency: String? = nil) async throws -> Mandate {
-        let body = MandateUpdateBody(amount: amount, status: status, frequency: frequency)
+    func updateMandate(id: String, merchant: String? = nil, amount: Double? = nil, status: String? = nil, frequency: String? = nil, mandateType: String? = nil) async throws -> Mandate {
+        let body = MandateUpdateBody(merchant: merchant, amount: amount, status: status, frequency: frequency, mandateType: mandateType)
         return try await api.patch(APIEndpoints.mandate(id), body: body)
     }
 

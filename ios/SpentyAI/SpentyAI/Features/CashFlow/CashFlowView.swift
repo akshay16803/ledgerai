@@ -313,6 +313,23 @@ struct CashFlowDrillDownSheet: View {
     @State private var isLoadingTransaction = false
     @State private var selectedDetailItem: DrillDownDetailItem?
 
+    // Mandate edit/delete state
+    @State private var showMandateEdit = false
+    @State private var editMandateMerchant = ""
+    @State private var editMandateAmount = ""
+    @State private var editMandateFrequency = "monthly"
+    @State private var editMandateType = "other"
+    @State private var editMandateStatus = "active"
+    @State private var editingMandateItem: MandateItem?
+    @State private var showMandateDeleteConfirm = false
+    @State private var deletingMandateId: String?
+
+    // Source document viewer for mandates
+    @State private var mandateSourceContent: SourceContent?
+    @State private var isLoadingMandateSource = false
+    @State private var showMandateSource = false
+    @State private var mandateSourceError: String?
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -818,48 +835,333 @@ struct CashFlowDrillDownSheet: View {
             .background(Color.spentyCardBg)
             .cornerRadius(12)
 
-            // View Latest Transaction button
-            if let merchant = item.merchant, !merchant.isEmpty {
-                Button {
-                    selectedDetailItem = nil
-                    isLoadingTransaction = true
-                    Task {
-                        do {
-                            let result = try await TransactionRepository.shared.search(
-                                query: merchant,
-                                page: 1,
-                                limit: 1
-                            )
-                            await MainActor.run {
-                                isLoadingTransaction = false
-                                if let first = result.transactions.first {
-                                    selectedTransaction = first
+            // Action buttons
+            VStack(spacing: 10) {
+                // View Source Document (when email-sourced)
+                if let sourceEmailId = item.sourceEmailId, !sourceEmailId.isEmpty {
+                    Button {
+                        Task {
+                            isLoadingMandateSource = true
+                            mandateSourceError = nil
+                            do {
+                                mandateSourceContent = try await EmailSyncRepository.shared.sourceContent(id: sourceEmailId)
+                                showMandateSource = true
+                            } catch {
+                                mandateSourceError = "Could not load source document"
+                            }
+                            isLoadingMandateSource = false
+                        }
+                    } label: {
+                        HStack {
+                            if isLoadingMandateSource {
+                                ProgressView()
+                                    .tint(.spentyPrimary)
+                            } else {
+                                Image(systemName: "envelope.open.fill")
+                                    .font(.system(size: 14, weight: .medium))
+                            }
+                            Text("View Source Document")
+                                .font(SpentyFonts.subheadline)
+                                .fontWeight(.medium)
+                        }
+                        .foregroundColor(.spentyPrimary)
+                        .frame(maxWidth: .infinity)
+                        .padding(14)
+                        .background(Color.spentyPrimary.opacity(0.1))
+                        .cornerRadius(12)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isLoadingMandateSource)
+
+                    if let error = mandateSourceError {
+                        Text(error)
+                            .font(SpentyFonts.caption2)
+                            .foregroundColor(.spentyError)
+                    }
+                }
+
+                // View Latest Transaction button
+                if let merchant = item.merchant, !merchant.isEmpty {
+                    Button {
+                        selectedDetailItem = nil
+                        isLoadingTransaction = true
+                        Task {
+                            do {
+                                let result = try await TransactionRepository.shared.search(
+                                    query: merchant,
+                                    page: 1,
+                                    limit: 1
+                                )
+                                await MainActor.run {
+                                    isLoadingTransaction = false
+                                    if let first = result.transactions.first {
+                                        selectedTransaction = first
+                                    }
+                                }
+                            } catch {
+                                await MainActor.run {
+                                    isLoadingTransaction = false
                                 }
                             }
-                        } catch {
-                            await MainActor.run {
-                                isLoadingTransaction = false
-                            }
                         }
+                    } label: {
+                        HStack {
+                            Image(systemName: "doc.text.image")
+                                .font(.system(size: 14, weight: .medium))
+                            Text("View Latest Transaction")
+                                .font(SpentyFonts.subheadline)
+                                .fontWeight(.medium)
+                        }
+                        .foregroundColor(.spentyInfo)
+                        .frame(maxWidth: .infinity)
+                        .padding(14)
+                        .background(Color.spentyInfo.opacity(0.1))
+                        .cornerRadius(12)
                     }
+                    .buttonStyle(.plain)
+                }
+
+                // Edit button
+                Button {
+                    editingMandateItem = item
+                    editMandateMerchant = item.merchant ?? ""
+                    editMandateAmount = item.amount.map { String(format: "%.2f", $0) } ?? ""
+                    editMandateFrequency = item.frequency ?? "monthly"
+                    editMandateType = item.mandateType ?? "other"
+                    showMandateEdit = true
                 } label: {
                     HStack {
-                        Image(systemName: "doc.text.image")
+                        Image(systemName: "pencil")
                             .font(.system(size: 14, weight: .medium))
-                        Text("View Latest Transaction")
+                        Text("Edit Mandate")
                             .font(SpentyFonts.subheadline)
                             .fontWeight(.medium)
                     }
-                    .foregroundColor(.spentyPrimary)
+                    .foregroundColor(.spentyWarning)
                     .frame(maxWidth: .infinity)
                     .padding(14)
-                    .background(Color.spentyPrimary.opacity(0.1))
+                    .background(Color.spentyWarning.opacity(0.1))
+                    .cornerRadius(12)
+                }
+                .buttonStyle(.plain)
+
+                // Delete button
+                Button {
+                    deletingMandateId = item.mandateId
+                    showMandateDeleteConfirm = true
+                } label: {
+                    HStack {
+                        Image(systemName: "trash")
+                            .font(.system(size: 14, weight: .medium))
+                        Text("Delete Mandate")
+                            .font(SpentyFonts.subheadline)
+                            .fontWeight(.medium)
+                    }
+                    .foregroundColor(.spentyError)
+                    .frame(maxWidth: .infinity)
+                    .padding(14)
+                    .background(Color.spentyError.opacity(0.1))
                     .cornerRadius(12)
                 }
                 .buttonStyle(.plain)
             }
         }
         .padding(16)
+        .sheet(isPresented: $showMandateSource) {
+            mandateSourceSheet
+        }
+        .sheet(isPresented: $showMandateEdit) {
+            mandateEditSheet
+        }
+        .alert("Delete Mandate", isPresented: $showMandateDeleteConfirm) {
+            Button("Cancel", role: .cancel) {}
+            Button("Delete", role: .destructive) {
+                if let mandateId = deletingMandateId {
+                    Task {
+                        await viewModel.deleteMandate(id: mandateId)
+                        selectedDetailItem = nil
+                    }
+                }
+            }
+        } message: {
+            Text("Are you sure you want to delete this mandate? This will update your cash flow projections.")
+        }
+    }
+
+    // MARK: - Mandate Source Sheet
+
+    private var mandateSourceSheet: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    if let content = mandateSourceContent {
+                        VStack(alignment: .leading, spacing: 8) {
+                            if let subject = content.subject, !subject.isEmpty {
+                                Text(subject)
+                                    .font(SpentyFonts.headline)
+                                    .foregroundColor(.spentyTextPrimary)
+                            }
+                            if let from = content.from, !from.isEmpty {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "person.circle.fill")
+                                        .font(.system(size: 14))
+                                        .foregroundColor(.spentyTextSecondary)
+                                    Text(from)
+                                        .font(SpentyFonts.caption1)
+                                        .foregroundColor(.spentyTextSecondary)
+                                }
+                            }
+                            if let dateStr = content.date, !dateStr.isEmpty {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "calendar")
+                                        .font(.system(size: 14))
+                                        .foregroundColor(.spentyTextSecondary)
+                                    Text(dateStr)
+                                        .font(SpentyFonts.caption1)
+                                        .foregroundColor(.spentyTextSecondary)
+                                }
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(16)
+                        .background(Color.spentyCardBg)
+                        .cornerRadius(12)
+
+                        if let body = content.body, !body.isEmpty {
+                            Text(body)
+                                .font(SpentyFonts.body)
+                                .foregroundColor(.spentyTextPrimary)
+                                .padding(16)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(Color.spentyCardBg)
+                                .cornerRadius(12)
+                        }
+                    } else {
+                        Text("No source document available")
+                            .font(SpentyFonts.body)
+                            .foregroundColor(.spentyTextSecondary)
+                            .frame(maxWidth: .infinity)
+                            .padding(40)
+                    }
+                }
+                .padding(16)
+            }
+            .background(Color.spentyBgPrimary.ignoresSafeArea())
+            .navigationTitle("Source Document")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { showMandateSource = false }
+                        .foregroundColor(.spentyTextSecondary)
+                }
+            }
+        }
+    }
+
+    // MARK: - Mandate Edit Sheet
+
+    private var mandateEditSheet: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 16) {
+                    // Merchant
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Merchant / Payee")
+                            .font(SpentyFonts.caption1)
+                            .foregroundColor(.spentyTextSecondary)
+                        TextField("Merchant name", text: $editMandateMerchant)
+                            .font(SpentyFonts.body)
+                            .inputStyle()
+                    }
+
+                    // Amount
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Amount")
+                            .font(SpentyFonts.caption1)
+                            .foregroundColor(.spentyTextSecondary)
+                        TextField("0.00", text: $editMandateAmount)
+                            .font(SpentyFonts.body)
+                            .keyboardType(.decimalPad)
+                            .inputStyle()
+                    }
+
+                    // Frequency
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Frequency")
+                            .font(SpentyFonts.caption1)
+                            .foregroundColor(.spentyTextSecondary)
+                        Picker("Frequency", selection: $editMandateFrequency) {
+                            Text("Daily").tag("daily")
+                            Text("Weekly").tag("weekly")
+                            Text("Monthly").tag("monthly")
+                            Text("Quarterly").tag("quarterly")
+                            Text("Yearly").tag("yearly")
+                        }
+                        .pickerStyle(.segmented)
+                    }
+
+                    // Type
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Mandate Type")
+                            .font(SpentyFonts.caption1)
+                            .foregroundColor(.spentyTextSecondary)
+                        Picker("Type", selection: $editMandateType) {
+                            Text("Subscription").tag("subscription")
+                            Text("EMI").tag("emi")
+                            Text("Insurance").tag("insurance")
+                            Text("Utility").tag("utility")
+                            Text("Other").tag("other")
+                        }
+                        .pickerStyle(.menu)
+                        .tint(.spentyTextPrimary)
+                    }
+
+                    // Status
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Status")
+                            .font(SpentyFonts.caption1)
+                            .foregroundColor(.spentyTextSecondary)
+                        Picker("Status", selection: $editMandateStatus) {
+                            Text("Active").tag("active")
+                            Text("Paused").tag("paused")
+                            Text("Cancelled").tag("cancelled")
+                        }
+                        .pickerStyle(.segmented)
+                    }
+                }
+                .padding(16)
+            }
+            .background(Color.spentyBgPrimary.ignoresSafeArea())
+            .navigationTitle("Edit Mandate")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { showMandateEdit = false }
+                        .foregroundColor(.spentyTextSecondary)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        guard let mandateId = editingMandateItem?.mandateId else { return }
+                        let newAmount = Double(editMandateAmount)
+                        Task {
+                            await viewModel.updateMandate(
+                                id: mandateId,
+                                merchant: editMandateMerchant.isEmpty ? nil : editMandateMerchant,
+                                amount: newAmount,
+                                status: editMandateStatus,
+                                frequency: editMandateFrequency,
+                                mandateType: editMandateType
+                            )
+                            showMandateEdit = false
+                            selectedDetailItem = nil
+                        }
+                    }
+                    .fontWeight(.semibold)
+                    .foregroundColor(.spentyPrimary)
+                    .disabled(editMandateMerchant.isEmpty || editMandateAmount.isEmpty)
+                }
+            }
+        }
     }
 
     private func emiDetailContent(_ item: EMIItem) -> some View {

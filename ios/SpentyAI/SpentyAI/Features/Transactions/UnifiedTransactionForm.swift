@@ -247,6 +247,15 @@ struct UnifiedTransactionForm: View {
                 await loadSourceDocument()
                 await loadArchiveRecord()
             }
+            .onChange(of: resolvedTransaction?.id) { _, newId in
+                // Safety net: if the re-fetched transaction arrives after
+                // populateFields() already ran with only the passed-in
+                // transaction, re-populate so subcategoryId/paymentMethod
+                // are picked up from the full API response.
+                if newId != nil {
+                    populateFields()
+                }
+            }
             .alert("Delete Transaction", isPresented: $showDeleteConfirm) {
                 Button("Cancel", role: .cancel) {}
                 Button("Delete", role: .destructive) {

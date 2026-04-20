@@ -126,9 +126,9 @@ final class CashFlowViewModel {
     }
 
     @MainActor
-    func updateMandate(id: String, amount: Double? = nil, status: String? = nil, frequency: String? = nil) async {
+    func updateMandate(id: String, merchant: String? = nil, amount: Double? = nil, status: String? = nil, frequency: String? = nil, mandateType: String? = nil) async {
         do {
-            let updated = try await repository.updateMandate(id: id, amount: amount, status: status, frequency: frequency)
+            let updated = try await repository.updateMandate(id: id, merchant: merchant, amount: amount, status: status, frequency: frequency, mandateType: mandateType)
             if let index = mandates.firstIndex(where: { $0.id == id }) {
                 mandates[index] = updated
             }

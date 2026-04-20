@@ -23,6 +23,8 @@ struct MandateItem: Codable, Identifiable {
     var mandateType: String?
     var monthlyEquivalent: Double?
     var source: String?
+    var sourceEmailId: String?
+    var sourceEmailSubject: String?
 }
 
 struct EMIItem: Codable, Identifiable {

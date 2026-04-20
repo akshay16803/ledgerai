@@ -9,6 +9,7 @@ struct Mandate: Codable, Identifiable {
     var startDate: Date?
     var status: String?
     var source: String?
+    var sourceEmailId: String?
     var sourceEmailSubject: String?
 
     enum CodingKeys: String, CodingKey {
@@ -20,6 +21,7 @@ struct Mandate: Codable, Identifiable {
         case startDate
         case status
         case source
+        case sourceEmailId
         case sourceEmailSubject
     }
 }
