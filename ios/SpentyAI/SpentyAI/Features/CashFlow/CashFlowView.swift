@@ -1,15 +1,13 @@
 import SwiftUI
 
 enum CashFlowDrillDown: Identifiable {
-    case income, expense, mandates, odInterest, net, emi
+    case income, expense, odInterest, emi
 
     var id: String {
         switch self {
         case .income: return "income"
         case .expense: return "expense"
-        case .mandates: return "mandates"
         case .odInterest: return "odInterest"
-        case .net: return "net"
         case .emi: return "emi"
         }
     }
@@ -18,9 +16,7 @@ enum CashFlowDrillDown: Identifiable {
         switch self {
         case .income: return "Monthly Income Items"
         case .expense: return "Monthly Expense Items"
-        case .mandates: return "Active Mandates"
         case .odInterest: return "OD Interest Breakdown"
-        case .net: return "Monthly Net Summary"
         case .emi: return "EMI Schedule"
         }
     }
@@ -80,9 +76,6 @@ struct CashFlowView: View {
                 // Recurring transactions
                 RecurringListView(viewModel: viewModel)
 
-                // Mandates
-                MandatesListView(viewModel: viewModel)
-
                 // Monthly breakdown table
                 if !viewModel.projectionMonths.isEmpty {
                     monthlyBreakdown
@@ -121,19 +114,9 @@ struct CashFlowView: View {
             Button { activeDrillDown = .expense } label: {
                 StatCard(
                     label: "Monthly Expense",
-                    value: formatCurrency(viewModel.monthlyExpense),
+                    value: formatCurrency(viewModel.monthlyExpenseWithMandates),
                     icon: "arrow.up.circle.fill",
                     color: .spentyAccent1
-                )
-            }
-            .buttonStyle(.plain)
-
-            Button { activeDrillDown = .mandates } label: {
-                StatCard(
-                    label: "Monthly Mandates",
-                    value: formatCurrency(viewModel.monthlyMandates),
-                    icon: "doc.text.fill",
-                    color: .spentyWarning
                 )
             }
             .buttonStyle(.plain)
@@ -154,16 +137,6 @@ struct CashFlowView: View {
                     value: formatCurrency(viewModel.monthlyEMI),
                     icon: "creditcard.fill",
                     color: .spentyAccent3
-                )
-            }
-            .buttonStyle(.plain)
-
-            Button { activeDrillDown = .net } label: {
-                StatCard(
-                    label: "Monthly Net",
-                    value: formatCurrency(viewModel.monthlyNet),
-                    icon: "equal.circle.fill",
-                    color: viewModel.monthlyNet >= 0 ? .spentySuccess : .spentyError
                 )
             }
             .buttonStyle(.plain)
@@ -209,24 +182,20 @@ struct CashFlowView: View {
 
     private var tableHeaderRow: some View {
         HStack(spacing: 0) {
-            tableCell("Month", width: 70, isHeader: true, alignment: .leading)
-            tableCell("Income", width: 80, isHeader: true)
-            tableCell("Expense", width: 80, isHeader: true)
-            tableCell("Mandates", width: 80, isHeader: true)
-            tableCell("OD Int.", width: 70, isHeader: true)
-            tableCell("Net", width: 80, isHeader: true)
+            tableCell("Month", width: 80, isHeader: true, alignment: .leading)
+            tableCell("Income", width: 90, isHeader: true)
+            tableCell("Expense", width: 90, isHeader: true)
+            tableCell("OD Int.", width: 80, isHeader: true)
         }
         .padding(.vertical, 8)
     }
 
     private func tableDataRow(_ month: ProjectionMonth, isEven: Bool) -> some View {
         HStack(spacing: 0) {
-            tableCell(formattedMonth(month.month), width: 70, alignment: .leading)
-            tableCell(shortCurrency(month.income ?? 0), width: 80, color: .spentySuccess)
-            tableCell(shortCurrency(month.expense ?? 0), width: 80, color: .spentyAccent1)
-            tableCell(shortCurrency(month.mandates ?? 0), width: 80, color: .spentyWarning)
-            tableCell(shortCurrency(month.odInterest ?? 0), width: 70, color: .spentyError)
-            tableCell(shortCurrency(month.net ?? 0), width: 80, color: (month.net ?? 0) >= 0 ? .spentySuccess : .spentyError)
+            tableCell(formattedMonth(month.month), width: 80, alignment: .leading)
+            tableCell(shortCurrency(month.income ?? 0), width: 90, color: .spentySuccess)
+            tableCell(shortCurrency((month.expense ?? 0) + (month.mandates ?? 0)), width: 90, color: .spentyAccent1)
+            tableCell(shortCurrency(month.odInterest ?? 0), width: 80, color: .spentyError)
         }
         .padding(.vertical, 6)
         .background(isEven ? Color.spentyBgPrimary.opacity(0.5) : Color.clear)
@@ -342,12 +311,8 @@ struct CashFlowDrillDownSheet: View {
                             incomeList
                         case .expense:
                             expenseList
-                        case .mandates:
-                            mandatesList
                         case .odInterest:
                             odInterestList
-                        case .net:
-                            netSummary
                         case .emi:
                             emiList
                         }
@@ -405,16 +370,40 @@ struct CashFlowDrillDownSheet: View {
         }
     }
 
-    // MARK: - Expense Items
+    // MARK: - Expense Items (recurring expenses + mandates)
 
     private var expenseList: some View {
         Group {
-            if viewModel.expenseItems.isEmpty {
-                emptyState(icon: "arrow.up.circle", message: "No recurring expense items found")
-            } else {
-                ForEach(viewModel.expenseItems) { item in
-                    recurringItemButton(item, color: .spentyError)
+            // Recurring expense items
+            if !viewModel.expenseItems.isEmpty {
+                Section {
+                    ForEach(viewModel.expenseItems) { item in
+                        recurringItemButton(item, color: .spentyError)
+                    }
+                } header: {
+                    Text("Recurring Expenses")
+                        .font(SpentyFonts.caption1.bold())
+                        .foregroundColor(.spentyTextSecondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.top, 4)
                 }
+            }
+
+            // Mandate items
+            if !viewModel.mandateItemsList.isEmpty {
+                Section {
+                    mandatesList
+                } header: {
+                    Text("Mandates")
+                        .font(SpentyFonts.caption1.bold())
+                        .foregroundColor(.spentyTextSecondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.top, 8)
+                }
+            }
+
+            if viewModel.expenseItems.isEmpty && viewModel.mandateItemsList.isEmpty {
+                emptyState(icon: "arrow.up.circle", message: "No recurring expense items found")
             }
         }
     }

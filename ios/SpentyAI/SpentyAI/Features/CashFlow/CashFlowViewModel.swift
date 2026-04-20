@@ -182,6 +182,11 @@ final class CashFlowViewModel {
         projection?.monthlyMandateExpense ?? 0
     }
 
+    /// Combined recurring expense + mandate expense (excludes EMI and OD interest)
+    var monthlyExpenseWithMandates: Double {
+        monthlyExpense + monthlyMandates
+    }
+
     var monthlyODInterest: Double {
         projection?.monthlyOdInterest ?? 0
     }
