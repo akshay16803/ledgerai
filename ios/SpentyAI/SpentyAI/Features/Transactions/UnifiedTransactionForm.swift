@@ -348,6 +348,8 @@ struct UnifiedTransactionForm: View {
                     .pickerStyle(.menu)
                     .tint(.spentyTextPrimary)
                     .lineLimit(1)
+                    .truncationMode(.tail)
+                    .fixedSize(horizontal: false, vertical: true)
 
                     Button {
                         newAccountName = ""
@@ -374,6 +376,8 @@ struct UnifiedTransactionForm: View {
                         .pickerStyle(.menu)
                         .tint(.spentyTextPrimary)
                         .lineLimit(1)
+                        .truncationMode(.tail)
+                        .fixedSize(horizontal: false, vertical: true)
                     }
                 }
 
@@ -390,6 +394,8 @@ struct UnifiedTransactionForm: View {
                     .pickerStyle(.menu)
                     .tint(.spentyTextPrimary)
                     .lineLimit(1)
+                    .truncationMode(.tail)
+                    .fixedSize(horizontal: false, vertical: true)
                 }
             }
             .cardStyle()
@@ -427,6 +433,8 @@ struct UnifiedTransactionForm: View {
                     .pickerStyle(.menu)
                     .tint(.spentyTextPrimary)
                     .lineLimit(1)
+                    .truncationMode(.tail)
+                    .fixedSize(horizontal: false, vertical: true)
                     .onChange(of: categoryId) { _, _ in
                         subcategoryId = ""
                     }
@@ -469,6 +477,8 @@ struct UnifiedTransactionForm: View {
                         .pickerStyle(.menu)
                         .tint(.spentyTextPrimary)
                         .lineLimit(1)
+                        .truncationMode(.tail)
+                        .fixedSize(horizontal: false, vertical: true)
 
                         if !categoryId.isEmpty {
                             Button {
