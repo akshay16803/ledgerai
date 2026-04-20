@@ -132,6 +132,63 @@ struct MonthlyCalendarView: View {
         return result
     }
 
+    /// Items that have no day-of-month assigned — still count toward totals
+    private var unscheduledEntries: [CalendarDayEntry] {
+        var result: [CalendarDayEntry] = []
+
+        for item in viewModel.incomeItems {
+            if item.recurrenceDate == nil {
+                result.append(CalendarDayEntry(
+                    label: item.description ?? "Income",
+                    amount: item.monthlyAmount ?? item.amount ?? 0,
+                    type: .income
+                ))
+            }
+        }
+
+        for item in viewModel.expenseItems {
+            if item.recurrenceDate == nil {
+                result.append(CalendarDayEntry(
+                    label: item.description ?? "Expense",
+                    amount: item.monthlyAmount ?? item.amount ?? 0,
+                    type: .expense
+                ))
+            }
+        }
+
+        for item in viewModel.mandateItemsList {
+            if item.dayOfMonth == nil {
+                result.append(CalendarDayEntry(
+                    label: item.merchant ?? "Mandate",
+                    amount: item.monthlyEquivalent ?? item.amount ?? 0,
+                    type: .mandate
+                ))
+            }
+        }
+
+        for item in viewModel.emiItemsList {
+            if item.emiDay == nil {
+                result.append(CalendarDayEntry(
+                    label: item.accountName ?? "EMI",
+                    amount: item.emiAmount ?? 0,
+                    type: .emi
+                ))
+            }
+        }
+
+        for item in viewModel.odInterestItemsList {
+            if item.interestChargeDay == nil {
+                result.append(CalendarDayEntry(
+                    label: item.accountName ?? "OD Interest",
+                    amount: item.monthlyInterest ?? 0,
+                    type: .odInterest
+                ))
+            }
+        }
+
+        return result
+    }
+
     // MARK: - Body
 
     var body: some View {
@@ -143,6 +200,9 @@ struct MonthlyCalendarView: View {
                     calendarGrid
                     if let day = selectedDay, let entries = dayEntries[day], !entries.isEmpty {
                         dayDetail(day: day, entries: entries)
+                    }
+                    if !unscheduledEntries.isEmpty {
+                        unscheduledSection
                     }
                     Spacer().frame(height: 30)
                 }
@@ -164,12 +224,11 @@ struct MonthlyCalendarView: View {
         }
     }
 
-    // MARK: - Summary Bar
+    // MARK: - Summary Bar (uses backend totals to match dashboard tile)
 
     private var summaryBar: some View {
-        let allEntries = dayEntries.values.flatMap { $0 }
-        let totalIncome = allEntries.filter { $0.type == .income }.reduce(0) { $0 + $1.amount }
-        let totalOutflow = allEntries.filter { $0.type != .income }.reduce(0) { $0 + $1.amount }
+        let totalIncome = viewModel.monthlyIncome
+        let totalOutflow = viewModel.monthlyExpense + viewModel.monthlyMandates + viewModel.monthlyEMI + viewModel.monthlyODInterest
         let net = totalIncome - totalOutflow
 
         return HStack(spacing: 12) {
@@ -228,7 +287,7 @@ struct MonthlyCalendarView: View {
     private var calendarGrid: some View {
         VStack(spacing: 4) {
             // Weekday headers
-            LazyVGrid(columns: columns, spacing: 4) {
+            HStack(spacing: 4) {
                 ForEach(weekdays, id: \.self) { day in
                     Text(day)
                         .font(SpentyFonts.caption2.bold())
@@ -238,17 +297,19 @@ struct MonthlyCalendarView: View {
                 }
             }
 
-            // Day cells
+            // Day cells in a single grid
+            let offset = firstWeekday
+            let totalCells = offset + daysInNextMonth
             LazyVGrid(columns: columns, spacing: 4) {
-                // Empty cells before the 1st
-                ForEach(0..<firstWeekday, id: \.self) { _ in
-                    Color.clear
-                        .frame(height: 64)
-                }
-
-                // Actual day cells
-                ForEach(1...daysInNextMonth, id: \.self) { day in
-                    dayCell(day: day)
+                ForEach(0..<totalCells, id: \.self) { index in
+                    if index < offset {
+                        // Empty cell before the 1st
+                        Color.clear
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 64)
+                    } else {
+                        dayCell(day: index - offset + 1)
+                    }
                 }
             }
         }
@@ -359,6 +420,63 @@ struct MonthlyCalendarView: View {
         .cornerRadius(16)
         .shadow(color: .black.opacity(0.04), radius: 8, x: 0, y: 2)
         .transition(.opacity.combined(with: .move(edge: .top)))
+    }
+
+    // MARK: - Unscheduled Items
+
+    private var unscheduledSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "calendar.badge.exclamationmark")
+                    .font(.system(size: 14))
+                    .foregroundColor(.spentyTextSecondary)
+                Text("No Fixed Date")
+                    .font(SpentyFonts.headline)
+                    .foregroundColor(.spentyTextPrimary)
+                Spacer()
+                Text("\(unscheduledEntries.count) items")
+                    .font(SpentyFonts.caption2)
+                    .foregroundColor(.spentyTextSecondary)
+            }
+
+            ForEach(unscheduledEntries) { entry in
+                HStack(spacing: 12) {
+                    Image(systemName: entry.type.icon)
+                        .font(.system(size: 14))
+                        .foregroundColor(entry.type.color)
+                        .frame(width: 28, height: 28)
+                        .background(entry.type.color.opacity(0.12))
+                        .cornerRadius(8)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(entry.label)
+                            .font(SpentyFonts.subheadline)
+                            .foregroundColor(.spentyTextPrimary)
+                            .lineLimit(1)
+
+                        Text(entryTypeLabel(entry.type))
+                            .font(SpentyFonts.caption2)
+                            .foregroundColor(.spentyTextSecondary)
+                    }
+
+                    Spacer()
+
+                    Text(formatCurrency(entry.amount))
+                        .font(SpentyFonts.amountSmall)
+                        .foregroundColor(entry.type == .income ? .spentySuccess : .spentyAccent1)
+                }
+                .padding(.vertical, 4)
+
+                if entry.id != unscheduledEntries.last?.id {
+                    Divider()
+                        .background(Color.spentyBorder)
+                }
+            }
+        }
+        .padding(16)
+        .background(Color.spentyCardBg)
+        .cornerRadius(16)
+        .shadow(color: .black.opacity(0.04), radius: 8, x: 0, y: 2)
     }
 
     // MARK: - Helpers
