@@ -210,10 +210,7 @@ struct TransactionDetailView: View {
                 detailRow(label: "Payment Method", value: paymentMethod)
                 divider
             }
-            if let source = transaction.source, !source.isEmpty {
-                detailRow(label: "Source", value: source)
-                divider
-            }
+            // Source hidden per user request
             recurringRow
             if hasForeignCurrency {
                 foreignCurrencyRows

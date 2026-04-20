@@ -195,13 +195,14 @@ struct TransactionFormView: View {
                 // Account row
                 formRow(icon: "building.columns", label: isTransfer ? "From" : "Account") {
                     Picker("", selection: $accountId) {
-                        Text("Select account").tag("")
+                        Text("Select").tag("")
                         ForEach(viewModel.accounts) { account in
                             Text(account.name ?? "Unnamed").tag(account.id)
                         }
                     }
                     .pickerStyle(.menu)
                     .tint(.spentyTextPrimary)
+                    .lineLimit(1)
                 }
 
                 if isTransfer {
@@ -209,13 +210,14 @@ struct TransactionFormView: View {
 
                     formRow(icon: "arrow.right.circle", label: "To") {
                         Picker("", selection: $toAccountId) {
-                            Text("Select account").tag("")
+                            Text("Select").tag("")
                             ForEach(viewModel.accounts.filter { $0.id != accountId }) { account in
                                 Text(account.name ?? "Unnamed").tag(account.id)
                             }
                         }
                         .pickerStyle(.menu)
                         .tint(.spentyTextPrimary)
+                        .lineLimit(1)
                     }
                 }
 
@@ -224,13 +226,14 @@ struct TransactionFormView: View {
                 // Payment method row (moved here from optional card)
                 formRow(icon: "creditcard", label: "Payment") {
                     Picker("", selection: $paymentMethod) {
-                        Text("Select method").tag("")
+                        Text("Select").tag("")
                         ForEach(paymentMethods, id: \.self) { method in
                             Text(method).tag(method)
                         }
                     }
                     .pickerStyle(.menu)
                     .tint(.spentyTextPrimary)
+                    .lineLimit(1)
                 }
             }
             .cardStyle()
@@ -245,18 +248,19 @@ struct TransactionFormView: View {
 
             VStack(spacing: 0) {
                 // Category row
-                HStack(spacing: 10) {
+                HStack(spacing: 8) {
                     Image(systemName: "tag")
                         .font(.system(size: 15))
                         .foregroundColor(.spentyPrimary)
-                        .frame(width: 24)
+                        .frame(width: 22)
 
                     Text("Category")
                         .font(.system(size: 15))
                         .foregroundColor(.spentyTextPrimary)
                         .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
 
-                    Spacer()
+                    Spacer(minLength: 4)
 
                     Picker("", selection: $categoryId) {
                         Text("Select").tag("")
@@ -266,6 +270,7 @@ struct TransactionFormView: View {
                     }
                     .pickerStyle(.menu)
                     .tint(.spentyTextPrimary)
+                    .lineLimit(1)
                     .onChange(of: categoryId) { _, _ in
                         subcategoryId = ""
                     }
@@ -285,18 +290,19 @@ struct TransactionFormView: View {
                     formDivider
 
                     // Subcategory row
-                    HStack(spacing: 10) {
+                    HStack(spacing: 8) {
                         Image(systemName: "tag.circle")
                             .font(.system(size: 15))
                             .foregroundColor(.spentyPrimary.opacity(0.6))
-                            .frame(width: 24)
+                            .frame(width: 22)
 
                         Text("Subcategory")
                             .font(.system(size: 15))
                             .foregroundColor(.spentyTextPrimary)
                             .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
 
-                        Spacer()
+                        Spacer(minLength: 4)
 
                         Picker("", selection: $subcategoryId) {
                             Text("None").tag("")
@@ -306,6 +312,7 @@ struct TransactionFormView: View {
                         }
                         .pickerStyle(.menu)
                         .tint(.spentyTextPrimary)
+                        .lineLimit(1)
 
                         if !categoryId.isEmpty {
                             Button {
@@ -539,20 +546,22 @@ struct TransactionFormView: View {
         label: String,
         @ViewBuilder content: () -> Content
     ) -> some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 8) {
             Image(systemName: icon)
                 .font(.system(size: 15))
                 .foregroundColor(.spentyPrimary)
-                .frame(width: 24)
+                .frame(width: 22)
 
             Text(label)
                 .font(.system(size: 15))
                 .foregroundColor(.spentyTextPrimary)
                 .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
 
-            Spacer()
+            Spacer(minLength: 4)
 
             content()
+                .lineLimit(1)
         }
         .padding(.vertical, 12)
     }
