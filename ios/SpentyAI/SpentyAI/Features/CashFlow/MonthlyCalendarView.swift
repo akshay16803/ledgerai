@@ -335,6 +335,7 @@ struct MonthlyCalendarView: View {
                 Text("\(day)")
                     .font(SpentyFonts.caption1.bold())
                     .foregroundColor(isSelected ? .white : .spentyTextPrimary)
+                    .padding(.top, 6)
 
                 if hasItems {
                     // Colored dots showing entry types
@@ -365,7 +366,6 @@ struct MonthlyCalendarView: View {
             }
             .frame(maxWidth: .infinity)
             .frame(height: 64, alignment: .top)
-            .padding(.top, 6)
             .background(
                 RoundedRectangle(cornerRadius: 10)
                     .fill(isSelected ? Color.spentyPrimary : (hasItems ? Color.spentyBgSecondary : Color.clear))
