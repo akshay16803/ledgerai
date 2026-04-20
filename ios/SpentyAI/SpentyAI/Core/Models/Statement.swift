@@ -117,6 +117,19 @@ struct ParsedEntry: Codable, Identifiable {
         self.matched = try? container.decodeIfPresent(Bool.self, forKey: .matched)
         self.matchedTransactionId = try? container.decodeIfPresent(String.self, forKey: .matchedTransactionId)
     }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(date, forKey: .date)
+        try container.encodeIfPresent(description, forKey: .description)
+        try container.encodeIfPresent(amount, forKey: .amount)
+        try container.encodeIfPresent(type, forKey: .type)
+        try container.encodeIfPresent(balance, forKey: .balance)
+        try container.encodeIfPresent(categoryId, forKey: .categoryId)
+        try container.encodeIfPresent(categoryName, forKey: .categoryName)
+        try container.encodeIfPresent(matched, forKey: .matched)
+        try container.encodeIfPresent(matchedTransactionId, forKey: .matchedTransactionId)
+    }
 }
 
 struct ReconciliationSummary: Codable {
