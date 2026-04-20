@@ -116,7 +116,9 @@ final class AccountsViewModel {
             async let accountTask = repository.fetchAccount(id)
             async let transactionsTask = repository.fetchAccountTransactions(id)
             selectedAccount = try await accountTask
-            accountTransactions = try await transactionsTask
+            let allTxns = try await transactionsTask
+            // Safety filter: only show approved transactions in account views
+            accountTransactions = allTxns.filter { ($0.status ?? "approved").lowercased() == "approved" }
         } catch {
             errorMessage = error.localizedDescription
         }
