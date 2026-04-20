@@ -3694,7 +3694,25 @@ async def reconcile_statement(statement_id: str, user: dict = Depends(get_curren
         {"_id": 0}
     ).to_list(5000)
 
+    logger.info(
+        f"Reconciling statement {statement_id}: {len(parsed)} parsed entries, "
+        f"{len(ledger_txns)} ledger txns in period {period_from}..{period_to}"
+    )
+    if parsed:
+        sample = parsed[0]
+        logger.info(f"  Sample parsed entry: date={sample.get('date')}, amount={sample.get('amount')}, desc={sample.get('description','')[:40]}")
+    if ledger_txns:
+        sample = ledger_txns[0]
+        logger.info(f"  Sample ledger txn: date={sample.get('date')}, amount={sample.get('amount')}, desc={sample.get('description','')[:40]}")
+
     results = reconcile_entries(parsed, ledger_txns, account_id)
+
+    logger.info(
+        f"Reconciliation results: matched={results['summary']['matched']}, "
+        f"missing_from_ledger={results['summary']['missing_from_ledger']}, "
+        f"missing_from_statement={results['summary']['missing_from_statement']}, "
+        f"conflicts={results['summary']['conflicts']}"
+    )
 
     await db.statements.update_one(
         {"statement_id": statement_id},
@@ -4782,7 +4800,7 @@ def _post_process_entries(entries: list, statement_type: str) -> list:
         if amount <= 0:
             continue
 
-        date = str(e["date"]).strip()[:10]
+        date = normalize_date(str(e["date"]).strip()[:10]) or str(e["date"]).strip()[:10]
         description = str(e.get("description", "") or "").strip()
         ai_type = (e.get("transaction_type") or "").lower()
         if ai_type not in ("income", "expense"):
@@ -5318,40 +5336,86 @@ def parse_amount(val: str) -> float:
         return 0.0
 
 
+def _parse_date_flexible(date_str: str):
+    """Try multiple date formats and return a datetime or None."""
+    if not date_str:
+        return None
+    date_str = date_str.strip()
+    for fmt in [
+        "%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%m/%d/%Y",
+        "%d-%b-%Y", "%d %b %Y", "%d-%B-%Y", "%d %B %Y",
+        "%Y/%m/%d", "%d.%m.%Y", "%m-%d-%Y",
+        "%d-%m-%y", "%d/%m/%y", "%m/%d/%y",
+    ]:
+        try:
+            dt = datetime.strptime(date_str, fmt)
+            if dt.year < 100:
+                dt = dt.replace(year=dt.year + 2000)
+            return dt
+        except ValueError:
+            continue
+    return None
+
+
 def _score_date_match(entry_date: str, ledger_date: str) -> int:
     """Score date similarity between a statement entry and ledger transaction."""
     if ledger_date == entry_date:
         return 40
-    try:
-        d1 = datetime.strptime(entry_date, "%Y-%m-%d")
-        d2 = datetime.strptime(ledger_date, "%Y-%m-%d")
+    d1 = _parse_date_flexible(entry_date)
+    d2 = _parse_date_flexible(ledger_date)
+    if d1 and d2:
         diff = abs((d1 - d2).days)
+        if diff == 0:
+            return 40
         if diff <= 1:
             return 30
         if diff <= 3:
             return 15
-    except (ValueError, TypeError):
-        pass
     return 0
 
 
 def _score_amount_match(entry_amt: float, ledger_amt: float) -> int:
-    """Score amount similarity."""
-    if abs(entry_amt - ledger_amt) < 0.01:
+    """Score amount similarity. Compares absolute values to handle sign
+    differences between statement (always positive after post-processing)
+    and ledger transactions (which may store as positive or negative)."""
+    a = abs(entry_amt)
+    b = abs(ledger_amt)
+    if abs(a - b) < 0.01:
         return 40
-    if abs(entry_amt - ledger_amt) / max(entry_amt, ledger_amt, 1) < 0.02:
+    if max(a, b, 1) > 0 and abs(a - b) / max(a, b, 1) < 0.02:
         return 25
     return 0
 
 
 def _score_description_match(entry_desc: str, ledger_desc: str) -> int:
-    """Score description similarity using word overlap."""
+    """Score description similarity using word overlap and substring matching.
+
+    Bank statement descriptions are often verbose with transaction IDs, bank
+    codes, and reference numbers (e.g. ``UPI/407115789532/SWIGGY/...``) while
+    ledger descriptions are clean (``UPI SWIGGY``). Standard word-overlap
+    alone would miss many matches because one side has tokens the other lacks.
+    We add a substring bonus: if one description contains the other as a
+    substring, that's a strong signal even when word overlap is low."""
     if not entry_desc or not ledger_desc:
         return 0
-    entry_words = set(re.split(r'[\s\-_./,]+', entry_desc.lower()))
-    ledger_words = set(re.split(r'[\s\-_./,]+', ledger_desc.lower()))
+    el = entry_desc.lower()
+    ll = ledger_desc.lower()
+
+    # Word-overlap scoring
+    entry_words = set(re.split(r'[\s\-_./,;:@()]+', el))
+    ledger_words = set(re.split(r'[\s\-_./,;:@()]+', ll))
     significant = {w for w in (entry_words & ledger_words) if len(w) >= 3}
-    return min(20, len(significant) * 5) if significant else 0
+    word_score = min(20, len(significant) * 5) if significant else 0
+
+    # Substring bonus: if all significant words of the shorter description
+    # appear in the longer one, add extra credit
+    shorter_words = ledger_words if len(ll) <= len(el) else entry_words
+    longer_text = el if len(ll) <= len(el) else ll
+    sig_shorter = {w for w in shorter_words if len(w) >= 3}
+    if sig_shorter and all(w in longer_text for w in sig_shorter):
+        word_score = max(word_score, min(20, len(sig_shorter) * 7))
+
+    return word_score
 
 
 def _find_best_match(entry: dict, candidates: list) -> tuple:
@@ -5380,7 +5444,7 @@ def reconcile_entries(parsed: list, ledger_txns: list, account_id: str) -> dict:
         best_match, best_score = _find_best_match(entry, ledger_unmatched)
 
         if best_match:
-            amt_match = abs(entry["amount"] - best_match["amount"]) < 0.01
+            amt_match = abs(abs(entry["amount"]) - abs(best_match["amount"])) < 0.01
             result_entry = {
                 "statement_entry": entry,
                 "ledger_transaction": best_match,

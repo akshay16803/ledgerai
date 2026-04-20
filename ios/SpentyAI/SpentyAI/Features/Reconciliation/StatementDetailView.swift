@@ -106,6 +106,7 @@ struct StatementDetailView: View {
             Button("Approve") {
                 Task { await viewModel.approveStatement(id: statementId) }
             }
+            Button("Cancel", role: .cancel) { }
         } message: {
             Text("Mark this statement as approved?")
         }
@@ -113,6 +114,7 @@ struct StatementDetailView: View {
             Button("Reject", role: .destructive) {
                 Task { await viewModel.rejectStatement(id: statementId) }
             }
+            Button("Cancel", role: .cancel) { }
         } message: {
             Text("Mark this statement as rejected?")
         }
