@@ -51,7 +51,7 @@ function ProjectionChart({ data }) {
   if (!data || data.length === 0) return null;
 
   const maxIncome = Math.max(...data.map(d => d.projected_income), 1);
-  const maxExpense = Math.max(...data.map(d => d.projected_expense), 1);
+  const maxExpense = Math.max(...data.map(d => (d.projected_expense || 0) + (d.mandate_expense || 0)), 1);
   const maxVal = Math.max(maxIncome, maxExpense);
 
   const chartH = 220;
@@ -69,7 +69,8 @@ function ProjectionChart({ data }) {
         {data.map((d, i) => {
           const x = 24 + i * (barW + 8);
           const incomeH = maxVal > 0 ? (d.projected_income / maxVal) * (chartH - 40) : 0;
-          const expenseH = maxVal > 0 ? (d.projected_expense / maxVal) * (chartH - 40) : 0;
+          const totalExpense = (d.projected_expense || 0) + (d.mandate_expense || 0);
+          const expenseH = maxVal > 0 ? (totalExpense / maxVal) * (chartH - 40) : 0;
 
           return (
             <g key={d.label}>

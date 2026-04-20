@@ -2832,8 +2832,8 @@ async def cashflow_projection(user: dict = Depends(get_current_user)):
         )
 
         projected_income = monthly_recurring_income
-        projected_expense = monthly_recurring_expense + month_mandate + monthly_od_interest
-        net = projected_income - projected_expense
+        projected_expense = monthly_recurring_expense          # recurring only; mandates & OD sent separately
+        net = projected_income - projected_expense - month_mandate - monthly_od_interest
         running_balance += net
         months.append({
             "month": i + 1,
