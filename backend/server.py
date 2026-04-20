@@ -1967,6 +1967,24 @@ async def approve_transaction(transaction_id: str, user: dict = Depends(get_curr
     if existing.get("source") == "email" and existing.get("source_email_id"):
         asyncio.create_task(archive_email_for_transaction(user["user_id"], existing))
 
+    # --- Layer 2: Save sender→account mapping on approval ---
+    if existing.get("source_email_id") and existing.get("account_id"):
+        src_email_doc = await db.synced_emails.find_one(
+            {"email_id": existing["source_email_id"]}, {"_id": 0, "from_email": 1}
+        )
+        if src_email_doc and src_email_doc.get("from_email"):
+            sender_email = src_email_doc["from_email"].strip().lower()
+            now = datetime.now(timezone.utc)
+            await db.sender_account_mappings.update_one(
+                {"user_id": user["user_id"], "from_email": sender_email, "account_id": existing["account_id"]},
+                {
+                    "$inc": {"confidence_count": 1},
+                    "$set": {"last_used_at": now},
+                    "$setOnInsert": {"created_at": now},
+                },
+                upsert=True,
+            )
+
     existing["approved_at"] = datetime.now(timezone.utc)
     enriched = await enrich_transactions_with_names(user["user_id"], [existing])
     return enriched[0]
@@ -2024,6 +2042,24 @@ async def bulk_approve_transactions(request: Request, user: dict = Depends(get_c
 
         if txn.get("source") == "email" and txn.get("source_email_id"):
             asyncio.create_task(archive_email_for_transaction(user["user_id"], txn))
+
+        # --- Layer 2: Save sender→account mapping on approval ---
+        if txn.get("source_email_id") and txn.get("account_id"):
+            src_email_doc = await db.synced_emails.find_one(
+                {"email_id": txn["source_email_id"]}, {"_id": 0, "from_email": 1}
+            )
+            if src_email_doc and src_email_doc.get("from_email"):
+                sender_email = src_email_doc["from_email"].strip().lower()
+                now = datetime.now(timezone.utc)
+                await db.sender_account_mappings.update_one(
+                    {"user_id": user["user_id"], "from_email": sender_email, "account_id": txn["account_id"]},
+                    {
+                        "$inc": {"confidence_count": 1},
+                        "$set": {"last_used_at": now},
+                        "$setOnInsert": {"created_at": now},
+                    },
+                    upsert=True,
+                )
 
         return None
 
@@ -5969,7 +6005,24 @@ async def _create_transaction_from_ai_result(
     account_id = result.get("account_id")
     detected_bank_name = result.get("detected_bank_name")
     detected_bank_type = result.get("detected_bank_type")
-    
+
+    # --- Layer 2: Check sender→account mapping from past approvals ---
+    if not account_id:
+        from_email = (email_doc.get("from_email") or "").strip().lower()
+        if from_email:
+            sender_mapping = await db.sender_account_mappings.find_one(
+                {"user_id": user_id, "from_email": from_email},
+                sort=[("confidence_count", -1)],
+            )
+            if sender_mapping:
+                # Verify the mapped account still exists
+                mapped_acc = await db.accounts.find_one(
+                    {"account_id": sender_mapping["account_id"], "user_id": user_id}
+                )
+                if mapped_acc:
+                    account_id = sender_mapping["account_id"]
+                    logger.info(f"Sender mapping hit: {from_email} -> {mapped_acc['name']} (confidence: {sender_mapping['confidence_count']})")
+
     # Also try to detect bank from email sender if AI didn't provide detected_bank_name
     if not detected_bank_name:
         from_email = (email_doc.get("from_email") or "").lower()
@@ -6013,13 +6066,13 @@ async def _create_transaction_from_ai_result(
                 break
     
     # Try to match existing account by bank name keywords
-    if detected_bank_name:
+    if not account_id and detected_bank_name:
         # Extract key bank identifier (e.g., "HDFC" from "HDFC Bank Savings XX1234")
         bank_keywords = [w for w in detected_bank_name.upper().split() if len(w) >= 3]
-        
+
         # Get all user accounts for matching
         existing_accounts = await db.accounts.find({"user_id": user_id}, {"_id": 0, "account_id": 1, "name": 1}).to_list(100)
-        
+
         for acc in existing_accounts:
             acc_name_upper = (acc.get("name") or "").upper()
             # Check if any keyword from detected bank name is in existing account name
@@ -6369,12 +6422,20 @@ async def process_outlook_pending_emails(user_id: str, outlook_email: str = ""):
         )
 
         accounts = await db.accounts.find({"user_id": user_id}, {"_id": 0}).to_list(100)
-        account_names = [f"{a['name']} ({a['account_type']}/{a.get('sub_type', '')}): {a['account_id']}" for a in accounts]
+        account_names = [
+            f"- account_id: {a['account_id']} | name: {a['name']} | type: {a['account_type']}/{a.get('sub_type', '')} | balance: {a.get('opening_balance', 0)}"
+            for a in accounts
+        ]
         category_info = await _get_category_info_for_ai(user_id)
+
+        # Load sender->account mappings for AI context
+        sender_mappings = await db.sender_account_mappings.find(
+            {"user_id": user_id}, {"_id": 0}
+        ).sort("confidence_count", -1).limit(50).to_list(50)
 
         for email_doc in pending_emails:
             try:
-                result = await analyze_email_with_ai(email_doc, account_names, category_info)
+                result = await analyze_email_with_ai(email_doc, account_names, category_info, sender_mappings=sender_mappings)
 
                 if result and result.get("is_mandate"):
                     await _create_mandate_from_ai_result(user_id, email_doc, result, "outlook")
@@ -6730,13 +6791,21 @@ async def process_pending_emails(user_id: str, gmail_email: str = ""):
         )
 
         accounts = await db.accounts.find({"user_id": user_id}, {"_id": 0}).to_list(100)
-        account_names = [f"{a['name']} ({a['account_type']}/{a.get('sub_type', '')}): {a['account_id']}" for a in accounts]
+        account_names = [
+            f"- account_id: {a['account_id']} | name: {a['name']} | type: {a['account_type']}/{a.get('sub_type', '')} | balance: {a.get('opening_balance', 0)}"
+            for a in accounts
+        ]
         category_info = await _get_category_info_for_ai(user_id)
+
+        # Load sender->account mappings for AI context
+        sender_mappings = await db.sender_account_mappings.find(
+            {"user_id": user_id}, {"_id": 0}
+        ).sort("confidence_count", -1).limit(50).to_list(50)
 
         for i, email_doc in enumerate(pending_emails):
             try:
                 logger.info(f"Processing email {i+1}/{len(pending_emails)}: {email_doc.get('subject', '')[:50]}")
-                result = await analyze_email_with_ai(email_doc, account_names, category_info)
+                result = await analyze_email_with_ai(email_doc, account_names, category_info, sender_mappings=sender_mappings)
 
                 if result and result.get("is_mandate"):
                     await _create_mandate_from_ai_result(user_id, email_doc, result, "gmail")
@@ -6911,8 +6980,17 @@ async def check_cross_source_duplicate(user_id: str, amount: float, date_str: st
     return None
 
 
-def _build_email_analysis_prompt(email_doc: dict, account_names: list, category_info: list) -> str:
+def _build_email_analysis_prompt(email_doc: dict, account_names: list, category_info: list, sender_mappings: list = None) -> str:
     """Build the AI prompt for email transaction analysis."""
+    # Build sender mapping context text
+    if sender_mappings:
+        mapping_lines = []
+        for m in sender_mappings:
+            mapping_lines.append(f"- Emails from \"{m['from_email']}\" → account_id: {m['account_id']} (used {m.get('confidence_count', 1)} times)")
+        sender_mapping_text = chr(10).join(mapping_lines)
+    else:
+        sender_mapping_text = "No history yet"
+
     return f"""Analyze this email and determine if it contains an ACTUAL COMPLETED cash transaction.
 
 EMAIL:
@@ -6923,6 +7001,9 @@ Body: {email_doc.get('body_text', '')[:3000]}
 
 AVAILABLE ACCOUNTS:
 {chr(10).join(account_names) if account_names else "No accounts configured"}
+
+SENDER-TO-ACCOUNT HISTORY (from past approved transactions):
+{sender_mapping_text}
 
 AVAILABLE CATEGORIES:
 {chr(10).join(category_info) if category_info else "No categories configured"}
@@ -6964,7 +7045,7 @@ CRITICAL RULES — READ CAREFULLY:
    - Refunds credited to bank
    - Actual dividend CREDITS to bank account
 4. For transaction_type: "income" for money received, "expense" for money spent, "transfer" for money moved between your own accounts.
-5. For account_id: Try to match from AVAILABLE ACCOUNTS. If you can detect a SPECIFIC bank account name from the email (e.g., "HDFC Bank A/c XX1234", "ICICI Savings", "SBI Account ending 5678"), include it in detected_bank_name even if not in AVAILABLE ACCOUNTS - we will auto-create it.
+5. For account_id: IMPORTANT — try hard to match from AVAILABLE ACCOUNTS by comparing bank name in the email (sender domain, subject, body mentions) against account names. For example, if the email is from HDFC Bank and there is an account named "HDFC" or "HDFC Savings", use that account_id. Match by bank keyword (e.g., "hdfc" in email → account with "HDFC" in name). If you can detect a SPECIFIC bank account name from the email but none of the AVAILABLE ACCOUNTS match, include it in detected_bank_name — we will auto-create it.
 6. For payment_method: Detect how the payment was made. Common methods: "upi", "credit_card", "debit_card", "net_banking", "cash", "wallet", "cheque", "neft", "rtgs", "imps", "other".
 7. Extract date in YYYY-MM-DD format. If not clear, use the email date.
 8. CURRENCY: Detect the currency of the transaction from the email. Look for currency symbols ($, USD, EUR, GBP, etc.) or currency codes. If the email is from an Indian bank or UPI, use "INR". If unclear, default to "INR".
@@ -7009,8 +7090,8 @@ def _parse_ai_json_response(content: str) -> dict:
     return json.loads(content)
 
 
-async def analyze_email_with_ai(email_doc: dict, account_names: list, category_info: list):
-    prompt = _build_email_analysis_prompt(email_doc, account_names, category_info)
+async def analyze_email_with_ai(email_doc: dict, account_names: list, category_info: list, sender_mappings: list = None):
+    prompt = _build_email_analysis_prompt(email_doc, account_names, category_info, sender_mappings=sender_mappings)
 
     try:
         response = await async_openai_client.chat.completions.create(
