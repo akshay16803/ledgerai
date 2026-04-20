@@ -208,15 +208,44 @@ final class ReconciliationViewModel {
         isReconciling = true
         errorMessage = nil
         do {
-            _ = try await repository.reconcile(statementId: statementId)
-            // Backend returns raw reconcile results; refetch the full statement
+            // Step 1: Call reconcile endpoint — capture result directly
+            let result = try await repository.reconcile(statementId: statementId)
+
+            // Step 2: Refetch the full statement for updated status + entries
             let updated = try await repository.fetchStatement(id: statementId)
             activeStatement = updated
-            reconciliationResult = updated.reconciliation
+
+            // Prefer the reconciliation from the refetched statement,
+            // but if it's nil, build one from the reconcile response
+            if updated.reconciliation != nil {
+                reconciliationResult = updated.reconciliation
+            } else {
+                // Build reconciliation result from the direct response
+                reconciliationResult = ReconciliationResult(
+                    summary: result.summary,
+                    matched: result.matched,
+                    missingFromLedger: result.missingFromLedger,
+                    missingFromStatement: result.missingFromStatement,
+                    conflicts: result.conflicts
+                )
+            }
+
             updateStatementInList(updated)
             successMessage = "Reconciliation complete."
         } catch {
-            errorMessage = error.localizedDescription
+            // Even if decode fails, try to refetch statement to get updated state
+            if let updated = try? await repository.fetchStatement(id: statementId) {
+                activeStatement = updated
+                reconciliationResult = updated.reconciliation
+                updateStatementInList(updated)
+                if updated.status == "reconciled" {
+                    successMessage = "Reconciliation complete."
+                } else {
+                    errorMessage = error.localizedDescription
+                }
+            } else {
+                errorMessage = error.localizedDescription
+            }
         }
         isReconciling = false
     }
@@ -230,8 +259,9 @@ final class ReconciliationViewModel {
         do {
             // If no indices specified, send all missing entry indices
             let indices = entryIndices ?? {
-                guard let missing = reconciliationResult?.missing, missing > 0 else { return [Int]() }
-                return Array(0..<missing)
+                let missingCount = reconciliationResult?.missingFromLedgerCount ?? reconciliationResult?.missing ?? 0
+                guard missingCount > 0 else { return [Int]() }
+                return Array(0..<missingCount)
             }()
             let response = try await repository.addMissingToLedger(statementId: statementId, entryIndices: indices)
             // Refetch the full statement to update UI

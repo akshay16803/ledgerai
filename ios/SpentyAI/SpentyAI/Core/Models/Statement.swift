@@ -77,6 +77,7 @@ struct ParsedEntry: Codable, Identifiable {
         case description
         case amount
         case type
+        case transactionType
         case balance
         case categoryId
         case categoryName
@@ -94,7 +95,7 @@ struct ParsedEntry: Codable, Identifiable {
             // Fallback: try common date formats the custom decoder might miss
             let formatter = DateFormatter()
             formatter.locale = Locale(identifier: "en_US_POSIX")
-            for fmt in ["dd/MM/yyyy", "dd-MM-yyyy", "MM/dd/yyyy", "dd MMM yyyy", "yyyy/MM/dd"] {
+            for fmt in ["yyyy-MM-dd", "dd/MM/yyyy", "dd-MM-yyyy", "MM/dd/yyyy", "dd MMM yyyy", "yyyy/MM/dd"] {
                 formatter.dateFormat = fmt
                 if let parsed = formatter.date(from: dateStr) {
                     self.date = parsed
@@ -107,7 +108,9 @@ struct ParsedEntry: Codable, Identifiable {
         }
         self.description = try? container.decodeIfPresent(String.self, forKey: .description)
         self.amount = try? container.decodeIfPresent(Double.self, forKey: .amount)
-        self.type = try? container.decodeIfPresent(String.self, forKey: .type)
+        // Backend sends "transactionType" (camelCase), try both keys
+        self.type = (try? container.decodeIfPresent(String.self, forKey: .transactionType))
+            ?? (try? container.decodeIfPresent(String.self, forKey: .type))
         self.balance = try? container.decodeIfPresent(Double.self, forKey: .balance)
         self.categoryId = try? container.decodeIfPresent(String.self, forKey: .categoryId)
         self.categoryName = try? container.decodeIfPresent(String.self, forKey: .categoryName)
@@ -227,6 +230,28 @@ struct ReconciliationResult: Codable {
     var missingFromStatementCount: Int { summary?.missingFromStatement ?? missingFromStatement?.count ?? 0 }
     var conflictsCount: Int { summary?.conflicts ?? conflicts?.count ?? unmatched ?? 0 }
     var totalCount: Int { summary?.totalStatementEntries ?? totalEntries ?? 0 }
+
+    // Memberwise init for building from reconcile response
+    init(
+        summary: ReconciliationSummary? = nil,
+        matched: [MatchedEntry]? = nil,
+        missingFromLedger: [ReconciliationEntry]? = nil,
+        missingFromStatement: [ReconciliationEntry]? = nil,
+        conflicts: [ConflictEntry]? = nil
+    ) {
+        self.totalEntries = nil
+        self.unmatched = nil
+        self.missing = nil
+        self.openingBalance = nil
+        self.closingBalance = nil
+        self.computedClosing = nil
+        self.difference = nil
+        self.summary = summary
+        self.matched = matched
+        self.missingFromLedger = missingFromLedger
+        self.missingFromStatement = missingFromStatement
+        self.conflicts = conflicts
+    }
 
     enum CodingKeys: String, CodingKey {
         case totalEntries

@@ -16,14 +16,21 @@ struct StatementUploadResponse: Codable {
 }
 
 struct ReconcileResponse: Codable {
-    let totalEntries: Int?
-    let matched: Int?
-    let unmatched: Int?
-    let missing: Int?
+    // The backend reconcile endpoint returns the full reconciliation result directly
     let summary: ReconciliationSummary?
+    let matched: [MatchedEntry]?
     let missingFromLedger: [ReconciliationEntry]?
     let missingFromStatement: [ReconciliationEntry]?
     let conflicts: [ConflictEntry]?
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.summary = try? container.decodeIfPresent(ReconciliationSummary.self, forKey: .summary)
+        self.matched = try? container.decodeIfPresent([MatchedEntry].self, forKey: .matched)
+        self.missingFromLedger = try? container.decodeIfPresent([ReconciliationEntry].self, forKey: .missingFromLedger)
+        self.missingFromStatement = try? container.decodeIfPresent([ReconciliationEntry].self, forKey: .missingFromStatement)
+        self.conflicts = try? container.decodeIfPresent([ConflictEntry].self, forKey: .conflicts)
+    }
 }
 
 struct ReauditResponse: Codable {
