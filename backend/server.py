@@ -1263,6 +1263,7 @@ async def get_account_transactions(
 
     txns = await db.transactions.find(query, {"_id": 0}).sort("date", -1).skip(skip).limit(limit).to_list(limit)
     total = await db.transactions.count_documents(query)
+    txns = await enrich_transactions_with_names(user["user_id"], txns)
 
     return {"transactions": txns, "total": total, "account_name": account.get("name")}
 
