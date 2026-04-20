@@ -46,9 +46,10 @@ struct DashboardView: View {
             .sheet(isPresented: $viewModel.showNewTransaction, onDismiss: {
                 Task { await viewModel.refresh() }
             }) {
-                NavigationStack {
-                    TransactionFormView(viewModel: TransactionsViewModel())
-                }
+                UnifiedTransactionForm(
+                    mode: .create,
+                    onComplete: { Task { await viewModel.refresh() } }
+                )
             }
             .navigationDestination(for: String.self) { accountId in
                 AccountDetailView(accountId: accountId)
@@ -61,9 +62,9 @@ struct DashboardView: View {
             .sheet(item: $selectedPendingTxn, onDismiss: {
                 Task { await viewModel.refresh() }
             }) { txn in
-                PendingTransactionDetailSheet(
-                    transaction: txn,
-                    viewModel: viewModel
+                UnifiedTransactionForm(
+                    mode: .approve(Transaction(from: txn)),
+                    onComplete: { Task { await viewModel.refresh() } }
                 )
             }
             .sheet(isPresented: $showAllAccounts) {
@@ -95,11 +96,9 @@ struct DashboardView: View {
                 )
             }
             .sheet(item: $selectedTransaction) { txn in
-                TransactionDetailView(
-                    transaction: txn,
-                    onTransactionUpdated: {
-                        Task { await viewModel.refresh() }
-                    }
+                UnifiedTransactionForm(
+                    mode: .edit(txn),
+                    onComplete: { Task { await viewModel.refresh() } }
                 )
             }
         }
@@ -1542,7 +1541,7 @@ struct DashboardFilteredTransactionsView: View {
                 }
             }
             .sheet(item: $selectedTransaction) { txn in
-                TransactionDetailView(transaction: txn)
+                UnifiedTransactionForm(mode: .edit(txn))
             }
         }
     }

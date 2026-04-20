@@ -656,11 +656,9 @@ struct ReportTransactionsView: View {
                 await loadTransactions()
             }
             .sheet(item: $selectedTransaction) { txn in
-                TransactionDetailView(
-                    transaction: txn,
-                    onTransactionUpdated: {
-                        Task { await loadTransactions() }
-                    }
+                UnifiedTransactionForm(
+                    mode: .edit(txn),
+                    onComplete: { Task { await loadTransactions() } }
                 )
             }
         }

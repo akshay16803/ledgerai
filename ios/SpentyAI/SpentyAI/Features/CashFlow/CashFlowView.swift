@@ -366,9 +366,7 @@ struct CashFlowDrillDownSheet: View {
                 }
             }
             .sheet(item: $selectedTransaction) { transaction in
-                NavigationStack {
-                    TransactionDetailView(transaction: transaction)
-                }
+                UnifiedTransactionForm(mode: .edit(transaction))
             }
             .sheet(item: $selectedDetailItem) { detailItem in
                 detailSheet(for: detailItem)

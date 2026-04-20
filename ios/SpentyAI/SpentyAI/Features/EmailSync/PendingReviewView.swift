@@ -59,7 +59,16 @@ struct PendingReviewView: View {
             await viewModel.loadPendingReview()
         }
         .sheet(isPresented: $viewModel.showEditSheet) {
-            editTransactionSheet
+            if let pending = viewModel.editingTransaction {
+                UnifiedTransactionForm(
+                    mode: .approve(Transaction(from: pending)),
+                    onComplete: {
+                        viewModel.showEditSheet = false
+                        viewModel.editingTransaction = nil
+                        Task { await viewModel.loadPendingReview() }
+                    }
+                )
+            }
         }
         .sheet(isPresented: $viewModel.showSourceSheet) {
             viewSourceSheet

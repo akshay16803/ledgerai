@@ -62,11 +62,9 @@ struct AccountDetailView: View {
             AccountFormView(viewModel: viewModel, account: account)
         }
         .sheet(item: $selectedTransaction) { txn in
-            TransactionDetailView(
-                transaction: txn,
-                onTransactionUpdated: {
-                    Task { await viewModel.loadAccountDetail(accountId) }
-                }
+            UnifiedTransactionForm(
+                mode: .edit(txn),
+                onComplete: { Task { await viewModel.loadAccountDetail(accountId) } }
             )
         }
         .task {

@@ -34,17 +34,17 @@ struct TransactionListView: View {
             .navigationBarTitleDisplayMode(.large)
             .toolbar { toolbarContent }
             .sheet(isPresented: $viewModel.showForm) {
-                TransactionFormView(
-                    viewModel: viewModel,
-                    transaction: viewModel.editingTransaction
+                UnifiedTransactionForm(
+                    mode: viewModel.editingTransaction != nil
+                        ? .edit(viewModel.editingTransaction!)
+                        : .create,
+                    onComplete: { Task { await viewModel.refresh() } }
                 )
             }
             .sheet(item: $selectedTransaction) { txn in
-                TransactionDetailView(
-                    transaction: txn,
-                    onTransactionUpdated: {
-                        Task { await viewModel.refresh() }
-                    }
+                UnifiedTransactionForm(
+                    mode: .edit(txn),
+                    onComplete: { Task { await viewModel.refresh() } }
                 )
             }
             .confirmationDialog(

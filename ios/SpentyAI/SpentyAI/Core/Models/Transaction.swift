@@ -96,6 +96,36 @@ struct Transaction: Codable, Identifiable {
     }
 
     // Memberwise init for creating transactions in code
+    /// Convert a PendingTransaction into a Transaction for use with UnifiedTransactionForm.
+    init(from pending: PendingTransaction) {
+        self.id = pending.id
+        self.transactionType = pending.transactionType
+        self.amount = pending.amount
+        self.date = pending.date
+        self.accountId = pending.accountId
+        self.toAccountId = nil
+        self.categoryId = pending.categoryId
+        self.subcategoryId = nil
+        self.description = pending.description
+        self.paymentMethod = nil
+        self.status = pending.status ?? "pending"
+        self.isRecurring = pending.isRecurring
+        self.recurringFrequency = pending.recurringFrequency
+        self.recurrenceDate = pending.recurrenceDate
+        self.source = pending.source
+        self.receiptId = nil
+        self.originalCurrency = nil
+        self.originalAmount = nil
+        self.exchangeRate = nil
+        self.isEstimatedRate = nil
+        self.sourceEmailId = pending.sourceEmailId
+        self.sourceSmsId = pending.sourceSmsId
+        self.categoryName = pending.categoryName
+        self.subcategoryName = nil
+        self.accountName = pending.accountName
+        self.toAccountName = nil
+    }
+
     init(
         id: String = "",
         transactionType: String? = nil,
