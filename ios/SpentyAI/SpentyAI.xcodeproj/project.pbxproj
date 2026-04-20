@@ -70,6 +70,7 @@
 		F8490B834559EE5DCB1B4EA6 /* CashFlowViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF0C6FB6978E04647A283272 /* CashFlowViewModel.swift */; };
 		0A1800D3C352B866D6976823 /* MandatesListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BCF75F066C38E4CF8DCF99A0 /* MandatesListView.swift */; };
 		0877FB82B0F082BF8B804751 /* RecurringListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 873A7F9509AB66CA92BE84B2 /* RecurringListView.swift */; };
+		CA1E2F3D8B7A4C5E9D0F1234 /* MonthlyCalendarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA2F3A4E9C8B5D6FA1E02345 /* MonthlyCalendarView.swift */; };
 		537C7F7F774FD2493D397A7C /* CategoriesViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59858B70B410ADC347D8442C /* CategoriesViewModel.swift */; };
 		33386B9C1E82D8C2B54C503E /* CategoryFormView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C50449C3B6F41AD710685B33 /* CategoryFormView.swift */; };
 		F1B2DCC62DABA763621A1DF6 /* CategoryListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 135495D919FFE879B0D855CB /* CategoryListView.swift */; };
@@ -227,6 +228,7 @@
 		3B350B2FA97F76253913E8D9 /* CashFlowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CashFlowView.swift; sourceTree = "<group>"; };
 		AF0C6FB6978E04647A283272 /* CashFlowViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CashFlowViewModel.swift; sourceTree = "<group>"; };
 		BCF75F066C38E4CF8DCF99A0 /* MandatesListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MandatesListView.swift; sourceTree = "<group>"; };
+		DA2F3A4E9C8B5D6FA1E02345 /* MonthlyCalendarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonthlyCalendarView.swift; sourceTree = "<group>"; };
 		873A7F9509AB66CA92BE84B2 /* RecurringListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecurringListView.swift; sourceTree = "<group>"; };
 		59858B70B410ADC347D8442C /* CategoriesViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CategoriesViewModel.swift; sourceTree = "<group>"; };
 		C50449C3B6F41AD710685B33 /* CategoryFormView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CategoryFormView.swift; sourceTree = "<group>"; };
@@ -562,6 +564,7 @@
 				3B350B2FA97F76253913E8D9 /* CashFlowView.swift */,
 				AF0C6FB6978E04647A283272 /* CashFlowViewModel.swift */,
 				BCF75F066C38E4CF8DCF99A0 /* MandatesListView.swift */,
+				DA2F3A4E9C8B5D6FA1E02345 /* MonthlyCalendarView.swift */,
 				873A7F9509AB66CA92BE84B2 /* RecurringListView.swift */,
 			);
 			path = CashFlow;
@@ -924,6 +927,7 @@
 				99193D7BCDCED3E17DA8D150 /* CashFlowView.swift in Sources */,
 				F8490B834559EE5DCB1B4EA6 /* CashFlowViewModel.swift in Sources */,
 				0A1800D3C352B866D6976823 /* MandatesListView.swift in Sources */,
+				CA1E2F3D8B7A4C5E9D0F1234 /* MonthlyCalendarView.swift in Sources */,
 				0877FB82B0F082BF8B804751 /* RecurringListView.swift in Sources */,
 				537C7F7F774FD2493D397A7C /* CategoriesViewModel.swift in Sources */,
 				33386B9C1E82D8C2B54C503E /* CategoryFormView.swift in Sources */,

@@ -25,6 +25,17 @@ struct MandateItem: Codable, Identifiable {
     var source: String?
     var sourceEmailId: String?
     var sourceEmailSubject: String?
+    var startDate: String?
+    var debitDay: Int?
+
+    /// Day of month for calendar placement: prefers explicit debitDay, falls back to startDate day
+    var dayOfMonth: Int? {
+        if let debitDay { return debitDay }
+        guard let startDate else { return nil }
+        let parts = startDate.split(separator: "-")
+        guard parts.count >= 3, let day = Int(parts[2].prefix(2)) else { return nil }
+        return day
+    }
 }
 
 struct EMIItem: Codable, Identifiable {
@@ -94,4 +105,5 @@ struct ODInterestItem: Codable, Identifiable {
     var monthlyInterest: Double?
     var balance: Double?
     var rate: Double?
+    var interestChargeDay: Int?
 }

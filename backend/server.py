@@ -2774,6 +2774,7 @@ async def cashflow_projection(user: dict = Depends(get_current_user)):
             "mandate_type": m.get("mandate_type"),
             "start_date": m.get("start_date"),
             "end_date": m.get("end_date"),
+            "debit_day": m.get("debit_day"),
             "monthly_equivalent": round(_mandate_monthly_outflow(m), 2),
             "source": m.get("source"),
             "source_email_id": m.get("source_email_id"),

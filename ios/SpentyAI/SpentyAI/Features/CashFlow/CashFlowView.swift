@@ -26,6 +26,7 @@ struct CashFlowView: View {
 
     @State private var viewModel = CashFlowViewModel()
     @State private var activeDrillDown: CashFlowDrillDown?
+    @State private var showCalendar = false
 
     var body: some View {
         NavigationStack {
@@ -48,6 +49,9 @@ struct CashFlowView: View {
                     viewModel: viewModel
                 )
             }
+            .sheet(isPresented: $showCalendar) {
+                MonthlyCalendarView(viewModel: viewModel)
+            }
         }
     }
 
@@ -68,6 +72,12 @@ struct CashFlowView: View {
                 // Summary stat cards
                 statsGrid
                     .padding(.horizontal, 16)
+
+                // Next month projection button
+                if viewModel.hasData {
+                    nextMonthButton
+                        .padding(.horizontal, 16)
+                }
 
                 // 24-month projection chart
                 CashFlowChartView(projectionMonths: viewModel.projectionMonths)
@@ -141,6 +151,47 @@ struct CashFlowView: View {
             }
             .buttonStyle(.plain)
         }
+    }
+
+    // MARK: - Next Month Button
+
+    private var nextMonthButton: some View {
+        let nextMonth: String = {
+            let formatter = DateFormatter()
+            formatter.dateFormat = "MMMM"
+            let date = Calendar.current.date(byAdding: .month, value: 1, to: Date()) ?? Date()
+            return formatter.string(from: date)
+        }()
+
+        return Button {
+            showCalendar = true
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "calendar.badge.clock")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(.spentyPrimary)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(nextMonth) Projection")
+                        .font(SpentyFonts.headline)
+                        .foregroundColor(.spentyTextPrimary)
+                    Text("View day-wise cash flow calendar")
+                        .font(SpentyFonts.caption1)
+                        .foregroundColor(.spentyTextSecondary)
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.spentyTextSecondary)
+            }
+            .padding(16)
+            .background(Color.spentyCardBg)
+            .cornerRadius(16)
+            .shadow(color: .black.opacity(0.04), radius: 8, x: 0, y: 2)
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Monthly Breakdown Table
