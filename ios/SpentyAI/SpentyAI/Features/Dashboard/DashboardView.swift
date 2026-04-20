@@ -12,6 +12,8 @@ struct DashboardView: View {
     @State private var showExpenseList = false
     @State private var showAllPending = false
     @State private var selectedTransaction: Transaction?
+    @State private var showCalendarProjection = false
+    @State private var cashFlowViewModel = CashFlowViewModel()
 
     var body: some View {
         NavigationStack {
@@ -101,6 +103,9 @@ struct DashboardView: View {
                     onComplete: { Task { await viewModel.refresh() } }
                 )
             }
+            .sheet(isPresented: $showCalendarProjection) {
+                MonthlyCalendarView(viewModel: cashFlowViewModel)
+            }
         }
     }
 
@@ -121,6 +126,12 @@ struct DashboardView: View {
                 // Stat cards grid
                 statsGrid
                     .padding(.horizontal, 16)
+
+                // Next Month Projection tile
+                if viewModel.hasProjectionData {
+                    nextMonthProjectionTile
+                        .padding(.horizontal, 16)
+                }
 
                 // Accounts section
                 if !viewModel.accounts.isEmpty {
@@ -199,6 +210,88 @@ struct DashboardView: View {
             }
             .buttonStyle(.plain)
         }
+    }
+
+    // MARK: - Next Month Projection Tile
+
+    private var nextMonthProjectionTile: some View {
+        let nextMonth: String = {
+            let formatter = DateFormatter()
+            formatter.dateFormat = "MMMM"
+            let date = Calendar.current.date(byAdding: .month, value: 1, to: Date()) ?? Date()
+            return formatter.string(from: date)
+        }()
+
+        return Button {
+            Task {
+                await cashFlowViewModel.loadAll()
+                showCalendarProjection = true
+            }
+        } label: {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 10) {
+                    Image(systemName: "calendar.badge.clock")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundColor(.spentyPrimary)
+                        .frame(width: 36, height: 36)
+                        .background(Color.spentyPrimary.opacity(0.1))
+                        .cornerRadius(10)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("\(nextMonth) Projection")
+                            .font(SpentyFonts.headline)
+                            .foregroundColor(.spentyTextPrimary)
+                        Text("Upcoming outflows next month")
+                            .font(SpentyFonts.caption1)
+                            .foregroundColor(.spentyTextSecondary)
+                    }
+
+                    Spacer()
+
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.spentyTextSecondary)
+                }
+
+                // Breakdown row
+                HStack(spacing: 0) {
+                    projectionMiniStat(label: "Expenses", amount: viewModel.nextMonthExpense, color: .spentyAccent1)
+                    projectionMiniStat(label: "Mandates", amount: viewModel.nextMonthMandates, color: .spentyAccent1)
+                    projectionMiniStat(label: "EMIs", amount: viewModel.nextMonthEMI, color: .spentyAccent3)
+                }
+
+                // Total bar
+                HStack {
+                    Text("Total Outflow")
+                        .font(SpentyFonts.caption1)
+                        .foregroundColor(.spentyTextSecondary)
+                    Spacer()
+                    Text(formatCurrency(viewModel.nextMonthTotalOutflow))
+                        .font(SpentyFonts.amountSmall)
+                        .foregroundColor(.spentyAccent1)
+                }
+                .padding(.top, 4)
+            }
+            .padding(16)
+            .background(Color.spentyCardBg)
+            .cornerRadius(16)
+            .shadow(color: .black.opacity(0.04), radius: 8, x: 0, y: 2)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func projectionMiniStat(label: String, amount: Double, color: Color) -> some View {
+        VStack(spacing: 4) {
+            Text(formatCurrency(amount))
+                .font(SpentyFonts.caption1.bold())
+                .foregroundColor(color)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+            Text(label)
+                .font(SpentyFonts.caption2)
+                .foregroundColor(.spentyTextSecondary)
+        }
+        .frame(maxWidth: .infinity)
     }
 
     // MARK: - Accounts Section

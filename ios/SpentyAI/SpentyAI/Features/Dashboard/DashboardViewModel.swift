@@ -20,16 +20,22 @@ final class DashboardViewModel {
     var showNewTransaction = false
     var showAIChat = false
 
+    // MARK: - Cash Flow Projection State
+
+    var cashFlowProjection: CashFlowProjection?
+
     // MARK: - Dependencies
 
     private let repository: DashboardRepository
     private let emailRepository: EmailSyncRepository
+    private let cashFlowRepository: CashFlowRepository
 
     // MARK: - Init
 
-    init(repository: DashboardRepository = .shared, emailRepository: EmailSyncRepository = .shared) {
+    init(repository: DashboardRepository = .shared, emailRepository: EmailSyncRepository = .shared, cashFlowRepository: CashFlowRepository = .shared) {
         self.repository = repository
         self.emailRepository = emailRepository
+        self.cashFlowRepository = cashFlowRepository
     }
 
     // MARK: - Load
@@ -47,8 +53,9 @@ final class DashboardViewModel {
 
         isLoading = false
 
-        // Load pending transactions in background
+        // Load pending transactions and cash flow projection in background
         await loadPendingTransactions()
+        await loadCashFlowProjection()
     }
 
     // MARK: - Refresh (pull-to-refresh)
@@ -61,6 +68,7 @@ final class DashboardViewModel {
             handleError(error)
         }
         await loadPendingTransactions()
+        await loadCashFlowProjection()
     }
 
     // MARK: - Pending Transactions
@@ -95,6 +103,42 @@ final class DashboardViewModel {
         } catch {
             handleError(error)
         }
+    }
+
+    // MARK: - Cash Flow Projection
+
+    @MainActor
+    func loadCashFlowProjection() async {
+        do {
+            cashFlowProjection = try await cashFlowRepository.getProjection()
+        } catch {
+            // Non-fatal — dashboard still works without projection
+            cashFlowProjection = nil
+        }
+    }
+
+    /// Total next month outflow: recurring expenses + mandates + EMIs
+    var nextMonthTotalOutflow: Double {
+        let expense = cashFlowProjection?.monthlyRecurringExpense ?? 0
+        let mandate = cashFlowProjection?.monthlyMandateExpense ?? 0
+        let emi = cashFlowProjection?.monthlyEmiTotal ?? 0
+        return expense + mandate + emi
+    }
+
+    var nextMonthExpense: Double {
+        cashFlowProjection?.monthlyRecurringExpense ?? 0
+    }
+
+    var nextMonthMandates: Double {
+        cashFlowProjection?.monthlyMandateExpense ?? 0
+    }
+
+    var nextMonthEMI: Double {
+        cashFlowProjection?.monthlyEmiTotal ?? 0
+    }
+
+    var hasProjectionData: Bool {
+        cashFlowProjection != nil
     }
 
     // MARK: - Helpers
