@@ -364,10 +364,12 @@ struct StatementDetailView: View {
                     actionLabel(icon: "arrow.clockwise", text: "Re-audit", color: .spentyWarning)
                 }
 
-                Button {
-                    viewModel.showUnlockSheet = true
-                } label: {
-                    actionLabel(icon: "lock.open", text: "Unlock", color: .spentyTextSecondary)
+                if statementStatus == "password_required" {
+                    Button {
+                        viewModel.showUnlockSheet = true
+                    } label: {
+                        actionLabel(icon: "lock.open", text: "Unlock", color: .spentyTextSecondary)
+                    }
                 }
             }
 
@@ -512,7 +514,7 @@ struct StatementDetailView: View {
                                     HStack(spacing: 4) {
                                         Image(systemName: "checkmark.circle.fill")
                                             .font(.system(size: 10))
-                                        Text("Match: \(Int(score * 100))%")
+                                        Text("Match: \(Int(score))%")
                                             .font(SpentyFonts.caption2)
                                     }
                                     .foregroundColor(.spentySuccess)
