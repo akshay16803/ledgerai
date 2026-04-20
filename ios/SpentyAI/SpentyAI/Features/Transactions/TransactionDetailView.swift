@@ -15,7 +15,23 @@ struct TransactionDetailView: View {
     @State private var showReceiptSheet = false
     @State private var isPerformingAction = false
 
+    // Source document state
+    @State private var sourceContent: SourceContent?
+    @State private var isLoadingSource = false
+    @State private var sourceError: String?
+    @State private var isSourceExpanded = false
+
+    // Archive / attachments state
+    @State private var archiveRecord: RecordPreviewResponse?
+    @State private var isLoadingArchive = false
+    @State private var downloadingAttachmentIndex: Int?
+    @State private var showShareSheet = false
+    @State private var shareData: Data?
+    @State private var shareFilename: String?
+
     private let repository = TransactionRepository.shared
+    private let emailSyncRepo = EmailSyncRepository.shared
+    private let recordsRepo = RecordsRepository.shared
 
     // MARK: - Init
 
@@ -86,6 +102,10 @@ struct TransactionDetailView: View {
         transaction.originalCurrency != nil && transaction.originalAmount != nil
     }
 
+    private var hasSourceDocument: Bool {
+        transaction.sourceId != nil
+    }
+
     // MARK: - Body
 
     var body: some View {
@@ -101,6 +121,9 @@ struct TransactionDetailView: View {
                             amountSection
                             statusSection
                             detailCard
+                            if hasSourceDocument {
+                                sourceDocumentCard
+                            }
                             supportingDocumentCard
                             actionButtons
                         }
@@ -124,6 +147,8 @@ struct TransactionDetailView: View {
             }
             .task {
                 await loadTransaction()
+                await loadSourceDocument()
+                await loadArchiveRecord()
             }
             .sheet(isPresented: $showEditSheet) {
                 TransactionFormView(
@@ -272,12 +297,197 @@ struct TransactionDetailView: View {
         }
     }
 
-    // MARK: - Supporting Document
+    // MARK: - Source Document Card
+
+    private var sourceDocumentCard: some View {
+        VStack(spacing: 12) {
+            // Header with expand/collapse
+            Button {
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    isSourceExpanded.toggle()
+                }
+            } label: {
+                HStack {
+                    Image(systemName: "envelope.open")
+                        .font(SpentyFonts.body)
+                        .foregroundColor(.spentyPrimary)
+                    Text("Source Document")
+                        .font(SpentyFonts.headline)
+                        .foregroundColor(.spentyTextPrimary)
+                    Spacer()
+                    if isLoadingSource || isLoadingArchive {
+                        ProgressView()
+                            .tint(.spentyPrimary)
+                    } else {
+                        Image(systemName: isSourceExpanded ? "chevron.up" : "chevron.down")
+                            .font(SpentyFonts.footnote)
+                            .foregroundColor(.spentyTextSecondary)
+                    }
+                }
+            }
+
+            // Source badge
+            if let source = transaction.source, !source.isEmpty {
+                HStack {
+                    HStack(spacing: 4) {
+                        Image(systemName: source.lowercased() == "email" ? "envelope.fill" : "message.fill")
+                            .font(.system(size: 10))
+                        Text("Via \(source.capitalized)")
+                            .font(SpentyFonts.caption)
+                    }
+                    .foregroundColor(.spentyAccent3)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.spentyAccent3.opacity(0.12))
+                    .cornerRadius(6)
+                    Spacer()
+                }
+            }
+
+            if isSourceExpanded {
+                if let error = sourceError {
+                    HStack(spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle")
+                            .font(SpentyFonts.footnote)
+                        Text(error)
+                            .font(SpentyFonts.footnote)
+                    }
+                    .foregroundColor(.spentyError)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                } else if let content = sourceContent {
+                    sourceContentView(content)
+                } else if !isLoadingSource {
+                    Text("No source content available")
+                        .font(SpentyFonts.footnote)
+                        .foregroundColor(.spentyTextSecondary)
+                }
+
+                // Attachments section
+                if let archive = archiveRecord, let attachments = archive.attachments, !attachments.isEmpty {
+                    Divider().background(Color.spentyBorder)
+                    attachmentsSection(attachments, archiveId: archive.id)
+                }
+            }
+        }
+        .cardStyle()
+    }
+
+    @ViewBuilder
+    private func sourceContentView(_ content: SourceContent) -> some View {
+        VStack(spacing: 8) {
+            if content.type == "email" {
+                if let subject = content.subject, !subject.isEmpty {
+                    sourceRow(label: "Subject", value: subject)
+                }
+                if let from = content.from, !from.isEmpty {
+                    sourceRow(label: "From", value: from)
+                }
+                if let date = content.date, !date.isEmpty {
+                    sourceRow(label: "Date", value: date)
+                }
+                if let body = content.body, !body.isEmpty {
+                    Divider().background(Color.spentyBorder)
+                    Text(stripHTML(body))
+                        .font(SpentyFonts.footnote)
+                        .foregroundColor(.spentyTextSecondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .lineLimit(20)
+                }
+            } else if content.type == "sms" {
+                if let sender = content.sender, !sender.isEmpty {
+                    sourceRow(label: "Sender", value: sender)
+                }
+                if let date = content.date, !date.isEmpty {
+                    sourceRow(label: "Date", value: date)
+                }
+                if let body = content.body, !body.isEmpty {
+                    Divider().background(Color.spentyBorder)
+                    Text(body)
+                        .font(SpentyFonts.footnote)
+                        .foregroundColor(.spentyTextSecondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+        }
+    }
+
+    private func sourceRow(label: String, value: String) -> some View {
+        HStack(alignment: .top) {
+            Text(label)
+                .font(SpentyFonts.caption)
+                .foregroundColor(.spentyTextSecondary)
+                .frame(width: 60, alignment: .leading)
+            Text(value)
+                .font(SpentyFonts.caption)
+                .foregroundColor(.spentyTextPrimary)
+                .textSelection(.enabled)
+            Spacer()
+        }
+    }
+
+    @ViewBuilder
+    private func attachmentsSection(_ attachments: [RecordAttachment], archiveId: String) -> some View {
+        VStack(spacing: 8) {
+            HStack {
+                Image(systemName: "paperclip")
+                    .font(SpentyFonts.footnote)
+                    .foregroundColor(.spentyTextSecondary)
+                Text("Attachments (\(attachments.count))")
+                    .font(SpentyFonts.subheadline)
+                    .foregroundColor(.spentyTextPrimary)
+                Spacer()
+            }
+
+            ForEach(attachments) { attachment in
+                Button {
+                    Task { await downloadAttachment(archiveId: archiveId, attachment: attachment) }
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: attachmentIcon(for: attachment.mimeType))
+                            .font(SpentyFonts.body)
+                            .foregroundColor(.spentyPrimary)
+                            .frame(width: 28)
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(attachment.filename ?? "Attachment \(attachment.index + 1)")
+                                .font(SpentyFonts.subheadline)
+                                .foregroundColor(.spentyTextPrimary)
+                                .lineLimit(1)
+
+                            if let size = attachment.size, size > 0 {
+                                Text(formatFileSize(size))
+                                    .font(SpentyFonts.caption)
+                                    .foregroundColor(.spentyTextSecondary)
+                            }
+                        }
+
+                        Spacer()
+
+                        if downloadingAttachmentIndex == attachment.index {
+                            ProgressView()
+                                .tint(.spentyPrimary)
+                        } else {
+                            Image(systemName: "arrow.down.circle")
+                                .font(SpentyFonts.body)
+                                .foregroundColor(.spentyPrimary)
+                        }
+                    }
+                    .padding(.vertical, 8)
+                    .padding(.horizontal, 12)
+                    .background(Color.spentyBgSecondary)
+                    .cornerRadius(8)
+                }
+                .disabled(downloadingAttachmentIndex != nil)
+            }
+        }
+    }
+
+    // MARK: - Supporting Document (Receipt)
 
     private var supportingDocumentCard: some View {
         VStack(spacing: 12) {
             HStack {
-                Text("Supporting Document")
+                Text("Receipt")
                     .font(SpentyFonts.headline)
                     .foregroundColor(.spentyTextPrimary)
                 Spacer()
@@ -290,7 +500,7 @@ struct TransactionDetailView: View {
                     HStack(spacing: 10) {
                         Image(systemName: "doc.text.image")
                             .font(SpentyFonts.body)
-                        Text("View Supporting Document")
+                        Text("View Receipt")
                             .font(SpentyFonts.subheadline)
                     }
                     .foregroundColor(.spentyPrimary)
@@ -304,7 +514,7 @@ struct TransactionDetailView: View {
                     Image(systemName: "doc.text.image")
                         .font(SpentyFonts.footnote)
                         .foregroundColor(.spentyTextSecondary)
-                    Text("No supporting document attached")
+                    Text("No receipt attached")
                         .font(SpentyFonts.footnote)
                         .foregroundColor(.spentyTextSecondary)
                 }
@@ -325,7 +535,7 @@ struct TransactionDetailView: View {
                         .font(.system(size: 48))
                         .foregroundColor(.spentyPrimary)
 
-                    Text("Supporting Document")
+                    Text("Receipt")
                         .font(SpentyFonts.title3)
                         .foregroundColor(.spentyTextPrimary)
 
@@ -336,14 +546,14 @@ struct TransactionDetailView: View {
                             .textSelection(.enabled)
                     }
 
-                    Text("Full document preview will be available in a future update.")
+                    Text("Full receipt preview will be available in a future update.")
                         .font(SpentyFonts.subheadline)
                         .foregroundColor(.spentyTextSecondary)
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 32)
                 }
             }
-            .navigationTitle("Document")
+            .navigationTitle("Receipt")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -426,6 +636,62 @@ struct TransactionDetailView: View {
     }
 
     @MainActor
+    private func loadSourceDocument() async {
+        guard let sourceId = transaction.sourceId else { return }
+        isLoadingSource = true
+        defer { isLoadingSource = false }
+        do {
+            sourceContent = try await emailSyncRepo.sourceContent(id: sourceId)
+            isSourceExpanded = true
+        } catch {
+            sourceError = "Could not load source document"
+        }
+    }
+
+    @MainActor
+    private func loadArchiveRecord() async {
+        // Only try for email-sourced transactions
+        guard transaction.sourceEmailId != nil else { return }
+        isLoadingArchive = true
+        defer { isLoadingArchive = false }
+        do {
+            archiveRecord = try await recordsRepo.fetchRecordByTransaction(transactionId: transactionId)
+        } catch {
+            // Archive may not exist yet (not all emails are archived) — fail silently
+        }
+    }
+
+    @MainActor
+    private func downloadAttachment(archiveId: String, attachment: RecordAttachment) async {
+        downloadingAttachmentIndex = attachment.index
+        defer { downloadingAttachmentIndex = nil }
+        do {
+            let data = try await recordsRepo.downloadAttachment(id: archiveId, index: attachment.index)
+            let filename = attachment.filename ?? "attachment_\(attachment.index)"
+            // Save to temp and share
+            let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
+            try data.write(to: tempURL)
+            await MainActor.run {
+                let activityVC = UIActivityViewController(activityItems: [tempURL], applicationActivities: nil)
+                if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                   let root = windowScene.windows.first?.rootViewController {
+                    var topVC = root
+                    while let presented = topVC.presentedViewController {
+                        topVC = presented
+                    }
+                    if let popover = activityVC.popoverPresentationController {
+                        popover.sourceView = topVC.view
+                        popover.sourceRect = CGRect(x: topVC.view.bounds.midX, y: topVC.view.bounds.midY, width: 0, height: 0)
+                    }
+                    topVC.present(activityVC, animated: true)
+                }
+            }
+        } catch {
+            sourceError = "Failed to download attachment"
+        }
+    }
+
+    @MainActor
     private func deleteTransaction() async {
         isPerformingAction = true
         defer { isPerformingAction = false }
@@ -461,6 +727,39 @@ struct TransactionDetailView: View {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    // MARK: - Helpers
+
+    private func stripHTML(_ html: String) -> String {
+        guard let data = html.data(using: .utf8),
+              let attributed = try? NSAttributedString(
+                data: data,
+                options: [.documentType: NSAttributedString.DocumentType.html,
+                          .characterEncoding: String.Encoding.utf8.rawValue],
+                documentAttributes: nil
+              ) else {
+            return html.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
+        }
+        return attributed.string.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func attachmentIcon(for mimeType: String?) -> String {
+        guard let mime = mimeType?.lowercased() else { return "doc" }
+        if mime.contains("pdf") { return "doc.richtext" }
+        if mime.contains("image") { return "photo" }
+        if mime.contains("spreadsheet") || mime.contains("excel") || mime.contains("csv") { return "tablecells" }
+        if mime.contains("word") || mime.contains("document") { return "doc.text" }
+        if mime.contains("zip") || mime.contains("archive") { return "doc.zipper" }
+        return "doc"
+    }
+
+    private func formatFileSize(_ bytes: Int) -> String {
+        if bytes < 1024 { return "\(bytes) B" }
+        let kb = Double(bytes) / 1024.0
+        if kb < 1024 { return String(format: "%.1f KB", kb) }
+        let mb = kb / 1024.0
+        return String(format: "%.1f MB", mb)
     }
 }
 

@@ -7942,6 +7942,42 @@ async def preview_record(archive_id: str, user: dict = Depends(get_current_user)
 
 
 
+@app.get("/api/records/by-transaction/{transaction_id}")
+async def get_record_by_transaction(transaction_id: str, user: dict = Depends(get_current_user)):
+    """Find the archive record linked to a given transaction."""
+    record = await db.email_archives.find_one(
+        {"transaction_id": transaction_id, "user_id": user["user_id"]},
+        {"_id": 0, "raw_eml": 0, "attachments.data": 0}
+    )
+    if not record:
+        raise HTTPException(status_code=404, detail="No archive found for this transaction")
+
+    archived_at = record.get("archived_at")
+    if isinstance(archived_at, datetime):
+        archived_at = archived_at.isoformat()
+
+    attachments = []
+    for i, att in enumerate(record.get("attachments") or []):
+        attachments.append({
+            "index": i,
+            "filename": att.get("filename"),
+            "mime_type": att.get("mime_type"),
+            "size": att.get("size"),
+        })
+
+    return {
+        "archive_id": record.get("archive_id"),
+        "subject": record.get("subject"),
+        "from_email": record.get("from_email"),
+        "archived_at": archived_at,
+        "source": record.get("source_provider"),
+        "body": record.get("body_text"),
+        "body_html": record.get("body_html"),
+        "attachments": attachments,
+        "transaction_id": record.get("transaction_id"),
+    }
+
+
 @app.get("/api/records/{archive_id}")
 async def get_record(archive_id: str, user: dict = Depends(get_current_user)):
     """Get a single email record by ID."""

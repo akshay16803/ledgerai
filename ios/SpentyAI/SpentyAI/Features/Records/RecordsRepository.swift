@@ -167,6 +167,10 @@ final class RecordsRepository: Sendable {
         return try await api.get(APIEndpoints.recordPreview(id))
     }
 
+    func fetchRecordByTransaction(transactionId: String) async throws -> RecordPreviewResponse {
+        return try await api.get(APIEndpoints.recordByTransaction(transactionId))
+    }
+
     func deleteRecord(id: String) async throws -> MessageResponse {
         return try await api.delete(APIEndpoints.record(id))
     }

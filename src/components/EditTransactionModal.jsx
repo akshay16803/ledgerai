@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { api } from '../lib/api';
-import { X, ArrowDown, ArrowUp, ArrowsLeftRight, Plus, Check, CheckCircle, Receipt, UploadSimple, SpinnerGap, Trash, Robot, FileText, Package } from '@phosphor-icons/react';
+import { X, ArrowDown, ArrowUp, ArrowsLeftRight, Plus, Check, CheckCircle, Receipt, UploadSimple, SpinnerGap, Trash, Robot, FileText, Package, Eye, EnvelopeSimple, ChatText, Paperclip, DownloadSimple, CaretDown, CaretUp } from '@phosphor-icons/react';
 
 export function EditTransactionModal({ transaction, accounts, categories, onSave, onClose, isPendingReview = false, onSwitchToInvoice }) {
   const isEdit = !!transaction;
@@ -44,6 +44,14 @@ export function EditTransactionModal({ transaction, accounts, categories, onSave
   const [existingReceipt, setExistingReceipt] = useState(null);
   const receiptInputRef = useRef(null);
 
+  // Source document state
+  const [sourceContent, setSourceContent] = useState(null);
+  const [sourceExpanded, setSourceExpanded] = useState(false);
+  const [loadingSource, setLoadingSource] = useState(false);
+  const [archiveRecord, setArchiveRecord] = useState(null);
+  const [loadingArchive, setLoadingArchive] = useState(false);
+  const [downloadingAtt, setDownloadingAtt] = useState(null);
+
   useEffect(() => { setLocalAccounts(accounts); }, [accounts]);
   useEffect(() => { setLocalCategories(categories); }, [categories]);
 
@@ -55,6 +63,26 @@ export function EditTransactionModal({ transaction, accounts, categories, onSave
         setReceiptId(r.receipt_id);
       }).catch(() => {});
     }
+  }, [transaction]);
+
+  // Load source document content
+  useEffect(() => {
+    const sourceId = transaction?.source_email_id || transaction?.source_sms_id;
+    if (!sourceId) return;
+    setLoadingSource(true);
+    api.get(`/api/source/${sourceId}`).then(data => {
+      setSourceContent(data);
+      setSourceExpanded(true);
+    }).catch(() => {}).finally(() => setLoadingSource(false));
+  }, [transaction]);
+
+  // Load archive record (for attachments)
+  useEffect(() => {
+    if (!transaction?.source_email_id || !transaction?.transaction_id) return;
+    setLoadingArchive(true);
+    api.get(`/api/records/by-transaction/${transaction.transaction_id}`).then(data => {
+      setArchiveRecord(data);
+    }).catch(() => {}).finally(() => setLoadingArchive(false));
   }, [transaction]);
 
   // Memoize expensive filter operations
@@ -275,6 +303,21 @@ export function EditTransactionModal({ transaction, accounts, categories, onSave
         </div>
 
         <div style={{ padding: '24px 28px' }}>
+          {/* Source Document Section */}
+          {(transaction?.source_email_id || transaction?.source_sms_id) && (
+            <SourceDocumentSection
+              sourceContent={sourceContent}
+              sourceExpanded={sourceExpanded}
+              setSourceExpanded={setSourceExpanded}
+              loadingSource={loadingSource}
+              archiveRecord={archiveRecord}
+              loadingArchive={loadingArchive}
+              downloadingAtt={downloadingAtt}
+              setDownloadingAtt={setDownloadingAtt}
+              transaction={transaction}
+            />
+          )}
+
           {/* Type Tabs */}
           <div style={{ display: 'flex', gap: 0, marginBottom: 24, borderBottom: '1px solid var(--border-subtle)', flexWrap: 'wrap' }}>
             {[
@@ -600,6 +643,188 @@ function QuickAddInput({ value, onChange, onSave, placeholder }) {
         style={{ padding: '6px 12px', background: 'var(--success)', color: '#fff', border: 'none', borderRadius: 2, fontSize: 11, cursor: 'pointer', fontFamily: 'var(--font-body)', display: 'flex', alignItems: 'center', gap: 3 }}>
         <Check size={12} /> Save
       </button>
+    </div>
+  );
+}
+
+function SourceDocumentSection({ sourceContent, sourceExpanded, setSourceExpanded, loadingSource, archiveRecord, loadingArchive, downloadingAtt, setDownloadingAtt, transaction }) {
+  const isEmail = sourceContent?.type === 'email';
+  const isSms = sourceContent?.type === 'sms';
+  const attachments = archiveRecord?.attachments || [];
+
+  const handleDownloadAttachment = async (archiveId, att) => {
+    setDownloadingAtt(att.index);
+    try {
+      const res = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/records/${archiveId}/attachments/${att.index}/download`, {
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` },
+      });
+      if (!res.ok) throw new Error('Download failed');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = att.filename || `attachment_${att.index}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch { /* silent */ }
+    finally { setDownloadingAtt(null); }
+  };
+
+  const formatSize = (bytes) => {
+    if (!bytes) return '';
+    if (bytes < 1024) return `${bytes} B`;
+    const kb = bytes / 1024;
+    if (kb < 1024) return `${kb.toFixed(1)} KB`;
+    return `${(kb / 1024).toFixed(1)} MB`;
+  };
+
+  const stripHtml = (html) => {
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    return doc.body.textContent || '';
+  };
+
+  return (
+    <div style={{
+      border: '1px solid var(--border-subtle)', borderRadius: 2, marginBottom: 20,
+      background: 'var(--bg-primary)',
+    }}>
+      {/* Header */}
+      <button
+        type="button"
+        onClick={() => setSourceExpanded(!sourceExpanded)}
+        style={{
+          width: '100%', display: 'flex', alignItems: 'center', gap: 8,
+          padding: '12px 16px', background: 'none', border: 'none', cursor: 'pointer',
+          fontFamily: 'var(--font-body)',
+        }}
+      >
+        {isEmail ? <EnvelopeSimple size={16} weight="fill" style={{ color: 'var(--brand-primary)' }} /> :
+         isSms ? <ChatText size={16} weight="fill" style={{ color: 'var(--brand-primary)' }} /> :
+         <Eye size={16} style={{ color: 'var(--brand-primary)' }} />}
+        <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', flex: 1, textAlign: 'left' }}>
+          Source Document
+        </span>
+        {transaction?.source && (
+          <span style={{
+            fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 10,
+            background: 'var(--info-bg, rgba(59,130,246,0.1))', color: 'var(--info, #3b82f6)',
+          }}>
+            via {transaction.source}
+          </span>
+        )}
+        {(loadingSource || loadingArchive) ? (
+          <SpinnerGap size={14} className="spin" style={{ color: 'var(--brand-primary)' }} />
+        ) : (
+          sourceExpanded ? <CaretUp size={14} style={{ color: 'var(--text-muted)' }} /> :
+          <CaretDown size={14} style={{ color: 'var(--text-muted)' }} />
+        )}
+      </button>
+
+      {sourceExpanded && sourceContent && (
+        <div style={{ padding: '0 16px 16px', borderTop: '1px solid var(--border-subtle)' }}>
+          {/* Email content */}
+          {isEmail && (
+            <div style={{ paddingTop: 12 }}>
+              {sourceContent.subject && (
+                <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
+                  <span style={{ fontSize: 11, color: 'var(--text-muted)', minWidth: 50 }}>Subject</span>
+                  <span style={{ fontSize: 12, color: 'var(--text-primary)', fontWeight: 500 }}>{sourceContent.subject}</span>
+                </div>
+              )}
+              {sourceContent.from && (
+                <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
+                  <span style={{ fontSize: 11, color: 'var(--text-muted)', minWidth: 50 }}>From</span>
+                  <span style={{ fontSize: 12, color: 'var(--text-primary)' }}>{sourceContent.from}</span>
+                </div>
+              )}
+              {sourceContent.date && (
+                <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
+                  <span style={{ fontSize: 11, color: 'var(--text-muted)', minWidth: 50 }}>Date</span>
+                  <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{sourceContent.date}</span>
+                </div>
+              )}
+              {sourceContent.body && (
+                <div style={{
+                  marginTop: 10, padding: 12, background: 'var(--bg-secondary)', borderRadius: 2,
+                  fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5,
+                  maxHeight: 200, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                }}>
+                  {stripHtml(sourceContent.body)}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* SMS content */}
+          {isSms && (
+            <div style={{ paddingTop: 12 }}>
+              {sourceContent.sender && (
+                <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
+                  <span style={{ fontSize: 11, color: 'var(--text-muted)', minWidth: 50 }}>Sender</span>
+                  <span style={{ fontSize: 12, color: 'var(--text-primary)', fontWeight: 500 }}>{sourceContent.sender}</span>
+                </div>
+              )}
+              {sourceContent.date && (
+                <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
+                  <span style={{ fontSize: 11, color: 'var(--text-muted)', minWidth: 50 }}>Date</span>
+                  <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{sourceContent.date}</span>
+                </div>
+              )}
+              {sourceContent.body && (
+                <div style={{
+                  marginTop: 10, padding: 12, background: 'var(--bg-secondary)', borderRadius: 2,
+                  fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5, whiteSpace: 'pre-wrap',
+                }}>
+                  {sourceContent.body}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Attachments */}
+          {attachments.length > 0 && (
+            <div style={{ marginTop: 12, borderTop: '1px solid var(--border-subtle)', paddingTop: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                <Paperclip size={13} style={{ color: 'var(--text-muted)' }} />
+                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>
+                  Attachments ({attachments.length})
+                </span>
+              </div>
+              {attachments.map(att => (
+                <button
+                  key={att.index}
+                  type="button"
+                  onClick={() => handleDownloadAttachment(archiveRecord.archive_id, att)}
+                  disabled={downloadingAtt !== null}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 10, width: '100%',
+                    padding: '8px 12px', marginBottom: 4, background: 'var(--bg-secondary)',
+                    border: '1px solid var(--border-subtle)', borderRadius: 2, cursor: 'pointer',
+                    fontFamily: 'var(--font-body)', textAlign: 'left',
+                  }}
+                >
+                  <FileText size={16} style={{ color: 'var(--brand-primary)', flexShrink: 0 }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {att.filename || `Attachment ${att.index + 1}`}
+                    </div>
+                    {att.size > 0 && (
+                      <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{formatSize(att.size)}</div>
+                    )}
+                  </div>
+                  {downloadingAtt === att.index ? (
+                    <SpinnerGap size={14} className="spin" style={{ color: 'var(--brand-primary)' }} />
+                  ) : (
+                    <DownloadSimple size={14} style={{ color: 'var(--brand-primary)' }} />
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

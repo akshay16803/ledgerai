@@ -118,6 +118,7 @@ struct APIEndpoints {
     static func recordPreview(_ id: String) -> String { "/api/records/\(id)/preview" }
     static func recordDownloadEml(_ id: String) -> String { "/api/records/\(id)/download-eml" }
     static func recordAttachment(_ id: String, _ index: Int) -> String { "/api/records/\(id)/attachments/\(index)/download" }
+    static func recordByTransaction(_ txnId: String) -> String { "/api/records/by-transaction/\(txnId)" }
     static let recordsDownloadZip = "/api/records/download-zip"
 
     // MARK: - Receipts

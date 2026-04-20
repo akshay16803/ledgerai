@@ -21,6 +21,13 @@ struct Transaction: Codable, Identifiable {
     var originalAmount: Double?
     var exchangeRate: Double?
     var isEstimatedRate: Bool?
+    var sourceEmailId: String?
+    var sourceSmsId: String?
+
+    /// Convenience: returns whichever source ID is present (email first).
+    var sourceId: String? {
+        sourceEmailId ?? sourceSmsId
+    }
 
     // Resolved names (populated by backend enrichment)
     var categoryName: String?
@@ -49,6 +56,8 @@ struct Transaction: Codable, Identifiable {
         case originalAmount
         case exchangeRate
         case isEstimatedRate
+        case sourceEmailId = "source_email_id"
+        case sourceSmsId = "source_sms_id"
         case categoryName
         case subcategoryName
         case accountName
@@ -78,6 +87,8 @@ struct Transaction: Codable, Identifiable {
         self.originalAmount = try? container.decodeIfPresent(Double.self, forKey: .originalAmount)
         self.exchangeRate = try? container.decodeIfPresent(Double.self, forKey: .exchangeRate)
         self.isEstimatedRate = try? container.decodeIfPresent(Bool.self, forKey: .isEstimatedRate)
+        self.sourceEmailId = try? container.decodeIfPresent(String.self, forKey: .sourceEmailId)
+        self.sourceSmsId = try? container.decodeIfPresent(String.self, forKey: .sourceSmsId)
         self.categoryName = try? container.decodeIfPresent(String.self, forKey: .categoryName)
         self.subcategoryName = try? container.decodeIfPresent(String.self, forKey: .subcategoryName)
         self.accountName = try? container.decodeIfPresent(String.self, forKey: .accountName)
@@ -106,6 +117,8 @@ struct Transaction: Codable, Identifiable {
         originalAmount: Double? = nil,
         exchangeRate: Double? = nil,
         isEstimatedRate: Bool? = nil,
+        sourceEmailId: String? = nil,
+        sourceSmsId: String? = nil,
         categoryName: String? = nil,
         subcategoryName: String? = nil,
         accountName: String? = nil,
@@ -131,6 +144,8 @@ struct Transaction: Codable, Identifiable {
         self.originalAmount = originalAmount
         self.exchangeRate = exchangeRate
         self.isEstimatedRate = isEstimatedRate
+        self.sourceEmailId = sourceEmailId
+        self.sourceSmsId = sourceSmsId
         self.categoryName = categoryName
         self.subcategoryName = subcategoryName
         self.accountName = accountName
