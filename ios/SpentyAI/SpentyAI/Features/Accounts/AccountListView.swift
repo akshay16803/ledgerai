@@ -176,7 +176,7 @@ struct AccountListView: View {
                 .fill(AccountsViewModel.colorForAccountType(account.accountType ?? "").opacity(0.12))
                 .frame(width: 40, height: 40)
                 .overlay {
-                    Image(systemName: AccountsViewModel.iconForAccountType(account.accountType ?? ""))
+                    Image(systemName: Self.iconForSubType(account.subType))
                         .font(.system(size: 16, weight: .medium))
                         .foregroundColor(AccountsViewModel.colorForAccountType(account.accountType ?? ""))
                 }
@@ -189,12 +189,12 @@ struct AccountListView: View {
                     .lineLimit(1)
 
                 if let subType = account.subType, !subType.isEmpty {
-                    Text(subType)
-                        .font(SpentyFonts.caption1)
+                    Text(Self.friendlySubType(subType))
+                        .font(SpentyFonts.caption2)
                         .foregroundColor(.spentyTextSecondary)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 2)
-                        .background(Color.spentyBgPrimary)
+                        .background(Color.spentyBgSecondary)
                         .cornerRadius(4)
                 }
             }
@@ -210,6 +210,35 @@ struct AccountListView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
         .contentShape(Rectangle())
+    }
+    private static func friendlySubType(_ subType: String) -> String {
+        switch subType.lowercased() {
+        case "bank": return "Bank"
+        case "cash": return "Cash"
+        case "credit_card", "credit card": return "Credit Card"
+        case "digital_wallet", "wallet": return "Digital Wallet"
+        case "overdraft", "od": return "Overdraft"
+        case "demat": return "Demat"
+        case "loan": return "Loan"
+        case "savings": return "Savings"
+        case "current": return "Current"
+        case "fixed_deposit", "fd": return "Fixed Deposit"
+        default: return subType.replacingOccurrences(of: "_", with: " ").capitalized
+        }
+    }
+
+    private static func iconForSubType(_ subType: String?) -> String {
+        switch subType?.lowercased() {
+        case "bank", "savings", "current": return "building.columns.fill"
+        case "credit_card", "credit card": return "creditcard.fill"
+        case "cash": return "banknote.fill"
+        case "wallet", "digital_wallet": return "wallet.pass.fill"
+        case "investment", "demat": return "chart.line.uptrend.xyaxis"
+        case "loan": return "percent"
+        case "overdraft", "od": return "arrow.triangle.2.circlepath"
+        case "fixed_deposit", "fd": return "lock.fill"
+        default: return "building.columns.fill"
+        }
     }
 }
 

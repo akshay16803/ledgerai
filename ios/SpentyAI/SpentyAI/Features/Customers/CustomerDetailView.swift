@@ -69,7 +69,7 @@ struct CustomerDetailView: View {
             }
         }
         .padding(16)
-        .background(.white, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .background(Color.spentyCardBg, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .shadow(color: .black.opacity(0.04), radius: 6, y: 2)
     }
 
@@ -88,7 +88,7 @@ struct CustomerDetailView: View {
             }
         }
         .padding(16)
-        .background(.white, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .background(Color.spentyCardBg, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .shadow(color: .black.opacity(0.04), radius: 6, y: 2)
     }
 
@@ -126,7 +126,7 @@ struct CustomerDetailView: View {
             }
         }
         .padding(16)
-        .background(.white, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .background(Color.spentyCardBg, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .shadow(color: .black.opacity(0.04), radius: 6, y: 2)
     }
 

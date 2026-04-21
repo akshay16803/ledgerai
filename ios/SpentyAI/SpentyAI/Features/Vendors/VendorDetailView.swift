@@ -104,7 +104,7 @@ struct VendorDetailView: View {
                 }
             }
         }
-        .background(.white, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .background(Color.spentyCardBg, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .shadow(color: .black.opacity(0.04), radius: 8, y: 2)
     }
 
@@ -176,7 +176,7 @@ struct VendorDetailView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 14)
-        .background(.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(Color.spentyCardBg, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .shadow(color: .black.opacity(0.04), radius: 6, y: 2)
     }
 
@@ -210,7 +210,7 @@ struct VendorDetailView: View {
                     Spacer()
                 }
                 .padding(.vertical, 24)
-                .background(.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .background(Color.spentyCardBg, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .shadow(color: .black.opacity(0.04), radius: 6, y: 2)
             } else {
                 VStack(spacing: 0) {
@@ -222,7 +222,7 @@ struct VendorDetailView: View {
                         }
                     }
                 }
-                .background(.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .background(Color.spentyCardBg, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .shadow(color: .black.opacity(0.04), radius: 6, y: 2)
             }
         }

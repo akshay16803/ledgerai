@@ -36,9 +36,17 @@ struct DashboardView: View {
                     Button {
                         viewModel.showAIChat = true
                     } label: {
-                        Image(systemName: "sparkles")
-                            .font(.system(size: 18, weight: .medium))
-                            .foregroundColor(.spentyPrimary)
+                        HStack(spacing: 4) {
+                            Image(systemName: "sparkles")
+                                .font(.system(size: 14, weight: .medium))
+                            Text("AI")
+                                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        }
+                        .foregroundColor(.spentyPrimary)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(Color.spentyPrimary.opacity(0.1))
+                        .cornerRadius(16)
                     }
                 }
             }
@@ -328,12 +336,12 @@ struct DashboardView: View {
     private func accountRow(_ account: Account) -> some View {
         HStack(spacing: 12) {
             Circle()
-                .fill(Color.spentyPrimary.opacity(0.1))
+                .fill(colorForAccountSubType(account.subType).opacity(0.12))
                 .frame(width: 36, height: 36)
                 .overlay(
                     Image(systemName: iconForAccountType(account.subType))
                         .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(.spentyPrimary)
+                        .foregroundColor(colorForAccountSubType(account.subType))
                 )
 
             VStack(alignment: .leading, spacing: 2) {
@@ -342,9 +350,9 @@ struct DashboardView: View {
                     .foregroundColor(.spentyTextPrimary)
                     .lineLimit(1)
 
-                if let accountType = account.accountType {
-                    Text(accountType.capitalized)
-                        .font(SpentyFonts.caption1)
+                if let subType = account.subType, !subType.isEmpty {
+                    Text(Self.friendlySubType(subType))
+                        .font(SpentyFonts.caption2)
                         .foregroundColor(.spentyTextSecondary)
                 }
             }
@@ -584,21 +592,23 @@ struct DashboardView: View {
 
     private func formatCurrency(_ value: Double) -> String {
         let absValue = abs(value)
+        let sign = value < 0 ? "-" : ""
         if absValue >= 1_00_00_000 {
-            // 1 Cr+ : show compact like "₹1.2Cr"
-            let crores = value / 1_00_00_000
-            return String(format: "₹%.1fCr", crores)
+            let crores = absValue / 1_00_00_000
+            return "\(sign)₹\(String(format: "%.1f", crores))Cr"
         } else if absValue >= 1_00_000 {
-            // 1L+ : show compact like "₹12.3L"
-            let lakhs = value / 1_00_000
-            return String(format: "₹%.1fL", lakhs)
+            let lakhs = absValue / 1_00_000
+            return "\(sign)₹\(String(format: "%.1f", lakhs))L"
+        } else if absValue >= 1_000 {
+            let thousands = absValue / 1_000
+            return "\(sign)₹\(String(format: "%.1f", thousands))K"
         }
         let formatter = NumberFormatter()
         formatter.numberStyle = .currency
         formatter.currencyCode = "INR"
-        formatter.maximumFractionDigits = 2
-        formatter.minimumFractionDigits = 2
-        return formatter.string(from: NSNumber(value: value)) ?? "\(value)"
+        formatter.maximumFractionDigits = 0
+        formatter.minimumFractionDigits = 0
+        return formatter.string(from: NSNumber(value: value)) ?? "₹\(Int(value))"
     }
 
     private func iconForAccountType(_ type: String?) -> String {
@@ -610,6 +620,34 @@ struct DashboardView: View {
         case "investment", "demat": return "chart.line.uptrend.xyaxis"
         case "loan": return "percent"
         default: return "building.columns.fill"
+        }
+    }
+
+    private static func friendlySubType(_ subType: String) -> String {
+        switch subType.lowercased() {
+        case "bank": return "Bank Account"
+        case "cash": return "Cash"
+        case "credit_card", "credit card": return "Credit Card"
+        case "digital_wallet", "wallet": return "Digital Wallet"
+        case "overdraft", "od": return "Overdraft"
+        case "demat": return "Demat Account"
+        case "loan": return "Loan"
+        case "savings": return "Savings"
+        case "current": return "Current Account"
+        case "fixed_deposit", "fd": return "Fixed Deposit"
+        default: return subType.replacingOccurrences(of: "_", with: " ").capitalized
+        }
+    }
+
+    private func colorForAccountSubType(_ subType: String?) -> Color {
+        switch subType?.lowercased() {
+        case "bank", "savings", "current": return .spentyPrimary
+        case "cash": return .spentyWarning
+        case "credit_card", "credit card": return .spentyAccent1
+        case "wallet", "digital_wallet": return .spentyInfo
+        case "investment", "demat": return .spentyInfo
+        case "loan", "overdraft", "od": return .spentyError
+        default: return .spentyPrimary
         }
     }
 
