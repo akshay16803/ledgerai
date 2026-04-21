@@ -59,7 +59,7 @@ struct SettingsView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This will erase all your transactions, accounts, invoices, bills, customers, vendors, receipts, and reports.\n\nYour account and settings will stay — but everything else goes back to zero, as if you just signed up.\n\nThis cannot be undone.")
+            Text("This will erase all your transactions, accounts, invoices, bills, customers, vendors, receipts, and reports.\n\nAny connected email accounts (Gmail, Outlook) will be disconnected and all synced data removed.\n\nYour account and settings will stay — but everything else goes back to zero, as if you just signed up.\n\nThis cannot be undone.")
         }
         // Step 2: Type RESET to confirm
         .alert("Type RESET to Confirm", isPresented: $viewModel.showResetConfirmInput) {

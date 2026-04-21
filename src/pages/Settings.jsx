@@ -641,6 +641,7 @@ export default function Settings() {
                 <li>All customers and vendors</li>
                 <li>All receipts, records, and reports</li>
                 <li>All AI chat history</li>
+                <li>All connected email accounts (Gmail, Outlook) and synced data</li>
               </ul>
               <p style={{ marginBottom: 0 }}>
                 <strong>What stays:</strong> Your account, login, and settings. It'll be like you just signed up — fresh start with default accounts and categories.

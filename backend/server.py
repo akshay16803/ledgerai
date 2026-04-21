@@ -9148,6 +9148,13 @@ async def reset_data(request: Request, user: dict = Depends(get_current_user)):
     await db.payment_orders.delete_many({"user_id": user_id})
     await db.ai_chat_history.delete_many({"user_id": user_id})
 
+    # Disconnect and remove all email sync data (Gmail + Outlook)
+    await db.gmail_tokens.delete_many({"user_id": user_id})
+    await db.outlook_tokens.delete_many({"user_id": user_id})
+    await db.synced_emails.delete_many({"user_id": user_id})
+    await db.email_sync_config.delete_many({"user_id": user_id})
+    await db.outlook_sync_config.delete_many({"user_id": user_id})
+
     # Re-seed default accounts and categories
     await seed_default_data(user_id)
 
