@@ -90,6 +90,13 @@ final class EmailSyncViewModel {
         _ = await (gmailTask, outlookTask, statsTask, smsTask)
 
         isLoading = false
+
+        // After every full load, check whether any connected account still
+        // needs a sync-start date (first-time connect, or post-Reset reconnect).
+        // This ensures the date picker appears even if the OAuth callback's
+        // prompt was missed due to timing, network issues, or the user
+        // navigating away and back.
+        promptForSyncDateIfNeeded()
     }
 
     // MARK: - Gmail
@@ -196,11 +203,19 @@ final class EmailSyncViewModel {
 
     @MainActor
     func startSync(forAccount account: EmailAccount? = nil) async {
-        // Resolve the account the user is about to sync (explicit > first Gmail account).
-        let resolved: EmailAccount? = account ?? gmailAccounts.first
+        // Resolve the account the user is about to sync (explicit > first Gmail > first Outlook).
+        let resolved: EmailAccount? = account ?? gmailAccounts.first ?? outlookAccounts.first
         guard let email = resolved?.email else {
-            handleError(NSError(domain: "", code: 0, userInfo: [NSLocalizedDescriptionKey: "No Gmail account available to sync"]))
+            handleError(NSError(domain: "", code: 0, userInfo: [NSLocalizedDescriptionKey: "No email account available to sync"]))
             return
+        }
+
+        // Determine the provider for this account
+        let provider: String
+        if gmailAccounts.contains(where: { $0.email == email }) {
+            provider = "gmail"
+        } else {
+            provider = "outlook"
         }
 
         // First-time sync (or post-Reset reconnect): no saved start date.
@@ -208,7 +223,7 @@ final class EmailSyncViewModel {
         // silently defaulting.
         guard let existingDate = resolved?.syncFromDate else {
             pendingSyncAccount = resolved
-            pendingSyncProvider = "gmail"
+            pendingSyncProvider = provider
             pendingSyncDate = Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date()
             showSyncDatePicker = true
             return
@@ -237,9 +252,9 @@ final class EmailSyncViewModel {
     /// Fires the sync with the picked date and clears the pending state.
     @MainActor
     func confirmSyncDate() async {
-        guard let email = pendingSyncAccount?.email ?? gmailAccounts.first?.email else {
+        guard let email = pendingSyncAccount?.email ?? gmailAccounts.first?.email ?? outlookAccounts.first?.email else {
             showSyncDatePicker = false
-            handleError(NSError(domain: "", code: 0, userInfo: [NSLocalizedDescriptionKey: "No Gmail account available to sync"]))
+            handleError(NSError(domain: "", code: 0, userInfo: [NSLocalizedDescriptionKey: "No email account available to sync"]))
             return
         }
 
@@ -272,18 +287,27 @@ final class EmailSyncViewModel {
         pendingSyncAccount = nil
     }
 
-    /// Proactively opens the sync-date picker if any Gmail account has
+    /// Proactively opens the sync-date picker if any connected account has
     /// no saved start date (first-time connect, or reconnect after Reset).
-    /// Called right after a successful Gmail OAuth so the user can choose
+    /// Called right after a successful OAuth so the user can choose
     /// the backfill start date before the first sync runs.
+    /// Also called at the end of `loadAll()` as a safety net.
     @MainActor
     func promptForSyncDateIfNeeded() {
         guard !showSyncDatePicker else { return }
-        guard let account = gmailAccounts.first(where: { $0.syncFromDate == nil }) else { return }
-        pendingSyncAccount = account
-        pendingSyncProvider = "gmail"
-        pendingSyncDate = Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date()
-        showSyncDatePicker = true
+
+        // Check Gmail accounts first, then Outlook
+        if let account = gmailAccounts.first(where: { $0.syncFromDate == nil }) {
+            pendingSyncAccount = account
+            pendingSyncProvider = "gmail"
+            pendingSyncDate = Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date()
+            showSyncDatePicker = true
+        } else if let account = outlookAccounts.first(where: { $0.syncFromDate == nil }) {
+            pendingSyncAccount = account
+            pendingSyncProvider = "outlook"
+            pendingSyncDate = Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date()
+            showSyncDatePicker = true
+        }
     }
 
     @MainActor
@@ -515,13 +539,18 @@ final class EmailSyncViewModel {
                             self?.showSuccessMessage("\(provider.capitalized) connected successfully")
                             if provider == "gmail" {
                                 await self?.loadGmailStatus()
-                                // Immediately prompt for sync-start date if this is a
-                                // first-time connect or a post-Reset reconnect.
-                                self?.promptForSyncDateIfNeeded()
                             } else {
                                 await self?.loadOutlookStatus()
                             }
                             await self?.loadSyncStats()
+
+                            // Small delay so the ASWebAuthenticationSession web view
+                            // finishes dismissing before we try to present the
+                            // sync-date picker sheet. Without this, SwiftUI may
+                            // silently drop the sheet because another presentation
+                            // (the OAuth web view) is still animating away.
+                            try? await Task.sleep(nanoseconds: 600_000_000) // 0.6s
+                            self?.promptForSyncDateIfNeeded()
                         }
                     }
                 }

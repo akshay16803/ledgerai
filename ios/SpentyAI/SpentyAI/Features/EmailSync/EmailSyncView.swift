@@ -35,7 +35,7 @@ struct EmailSyncView: View {
             viewModel.cancelSyncDatePicker()
         }) {
             SyncDatePickerSheet(viewModel: viewModel)
-                .presentationDetents([.medium])
+                .presentationDetents([.large])
         }
     }
 
@@ -520,48 +520,82 @@ private struct SyncDatePickerSheet: View {
 
     var body: some View {
         NavigationStack {
-            VStack(alignment: .leading, spacing: 20) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Start syncing emails from")
-                        .font(SpentyFonts.headline)
-                        .foregroundColor(.spentyTextPrimary)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
 
-                    Text("SpentyAI will scan emails on or after this date for transactions — income, expenses, transfers, recurring payments and mandates.")
-                        .font(SpentyFonts.footnote)
-                        .foregroundColor(.spentyTextSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                    // Account info
+                    if let email = viewModel.pendingSyncAccount?.email {
+                        HStack(spacing: 10) {
+                            Image(systemName: viewModel.pendingSyncProvider == "outlook" ? "envelope.fill" : "envelope.fill")
+                                .font(.system(size: 16))
+                                .foregroundColor(viewModel.pendingSyncProvider == "outlook" ? .spentyInfo : .spentyError)
+                                .frame(width: 32, height: 32)
+                                .background((viewModel.pendingSyncProvider == "outlook" ? Color.spentyInfo : Color.spentyError).opacity(0.1))
+                                .clipShape(Circle())
 
-                DatePicker(
-                    "Sync start date",
-                    selection: $viewModel.pendingSyncDate,
-                    in: ...Date(),
-                    displayedComponents: .date
-                )
-                .datePickerStyle(.graphical)
-                .tint(Color.spentyPrimary)
-
-                Spacer(minLength: 0)
-
-                Button {
-                    Task { await viewModel.confirmSyncDate() }
-                } label: {
-                    HStack(spacing: 8) {
-                        if viewModel.isSyncing {
-                            ProgressView()
-                                .controlSize(.small)
-                                .tint(.white)
-                        } else {
-                            Image(systemName: "arrow.triangle.2.circlepath")
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(email)
+                                    .font(SpentyFonts.subheadline)
+                                    .foregroundColor(.spentyTextPrimary)
+                                Text(viewModel.pendingSyncProvider.capitalized)
+                                    .font(SpentyFonts.caption1)
+                                    .foregroundColor(.spentyTextSecondary)
+                            }
                         }
-                        Text(viewModel.isSyncing ? "Starting Sync..." : "Start Sync")
+                        .padding(12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.spentyBgSecondary)
+                        .cornerRadius(10)
                     }
-                    .primaryButtonStyle()
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Choose a start date")
+                            .font(SpentyFonts.headline)
+                            .foregroundColor(.spentyTextPrimary)
+
+                        Text("SpentyAI will scan your emails from this date onward and use AI to detect transactions — income, expenses, transfers, recurring payments and mandates.")
+                            .font(SpentyFonts.footnote)
+                            .foregroundColor(.spentyTextSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    // Quick-select preset buttons
+                    HStack(spacing: 8) {
+                        presetButton("7 days", days: 7)
+                        presetButton("30 days", days: 30)
+                        presetButton("90 days", days: 90)
+                        presetButton("6 months", days: 180)
+                    }
+
+                    DatePicker(
+                        "Sync start date",
+                        selection: $viewModel.pendingSyncDate,
+                        in: ...Date(),
+                        displayedComponents: .date
+                    )
+                    .datePickerStyle(.graphical)
+                    .tint(Color.spentyPrimary)
+
+                    Button {
+                        Task { await viewModel.confirmSyncDate() }
+                    } label: {
+                        HStack(spacing: 8) {
+                            if viewModel.isSyncing {
+                                ProgressView()
+                                    .controlSize(.small)
+                                    .tint(.white)
+                            } else {
+                                Image(systemName: "arrow.triangle.2.circlepath")
+                            }
+                            Text(viewModel.isSyncing ? "Starting Sync..." : "Start Sync")
+                        }
+                        .primaryButtonStyle()
+                    }
+                    .disabled(viewModel.isSyncing)
+                    .opacity(viewModel.isSyncing ? 0.6 : 1.0)
                 }
-                .disabled(viewModel.isSyncing)
-                .opacity(viewModel.isSyncing ? 0.6 : 1.0)
+                .padding(16)
             }
-            .padding(16)
             .background(Color.spentyBgPrimary)
             .navigationTitle("Sync Start Date")
             .navigationBarTitleDisplayMode(.inline)
@@ -574,6 +608,25 @@ private struct SyncDatePickerSheet: View {
                     .foregroundColor(.spentyTextSecondary)
                 }
             }
+        }
+    }
+
+    private func presetButton(_ label: String, days: Int) -> some View {
+        let target = Calendar.current.date(byAdding: .day, value: -days, to: Date()) ?? Date()
+        let isSelected = Calendar.current.isDate(viewModel.pendingSyncDate, inSameDayAs: target)
+
+        return Button {
+            viewModel.pendingSyncDate = target
+        } label: {
+            Text(label)
+                .font(SpentyFonts.caption1)
+                .fontWeight(isSelected ? .semibold : .regular)
+                .foregroundColor(isSelected ? .white : .spentyPrimary)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity)
+                .background(isSelected ? Color.spentyPrimary : Color.spentyPrimary.opacity(0.1))
+                .cornerRadius(8)
         }
     }
 }
