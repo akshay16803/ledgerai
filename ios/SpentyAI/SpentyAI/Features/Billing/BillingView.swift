@@ -290,7 +290,7 @@ struct BillingView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(order.plan ?? "Unknown")
                     .font(.subheadline.weight(.medium))
-                Text(order.createdAt ?? "")
+                Text(Self.formatPaymentDate(order.createdAt))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -298,7 +298,7 @@ struct BillingView: View {
             Spacer()
 
             VStack(alignment: .trailing, spacing: 2) {
-                Text("\(order.currency ?? "") \(String(format: "%.0f", order.amount ?? 0))")
+                Text(Self.formatPaymentAmount(order.amount, currency: order.currency))
                     .font(.subheadline.weight(.semibold))
                 Text((order.status ?? "").capitalized)
                     .font(.caption2)
@@ -306,6 +306,40 @@ struct BillingView: View {
             }
         }
         .padding(.vertical, 4)
+    }
+
+    // MARK: - Payment Formatting Helpers
+
+    static func formatPaymentAmount(_ amount: Double?, currency: String?) -> String {
+        guard let amount = amount else { return "—" }
+        let rupees = amount / 100.0
+        let formatted = rupees.truncatingRemainder(dividingBy: 1) == 0
+            ? String(format: "₹%.0f", rupees)
+            : String(format: "₹%.2f", rupees)
+        return formatted
+    }
+
+    static func formatPaymentDate(_ dateString: String?) -> String {
+        guard let dateString = dateString, !dateString.isEmpty else { return "" }
+        let isoFormatter = ISO8601DateFormatter()
+        isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = isoFormatter.date(from: dateString) {
+            let displayFormatter = DateFormatter()
+            displayFormatter.dateFormat = "dd MMM yyyy"
+            return displayFormatter.string(from: date)
+        }
+        // Fallback: try without fractional seconds
+        isoFormatter.formatOptions = [.withInternetDateTime]
+        if let date = isoFormatter.date(from: dateString) {
+            let displayFormatter = DateFormatter()
+            displayFormatter.dateFormat = "dd MMM yyyy"
+            return displayFormatter.string(from: date)
+        }
+        // Last fallback: return first 10 chars (date part)
+        if dateString.count >= 10 {
+            return String(dateString.prefix(10))
+        }
+        return dateString
     }
 
     // MARK: - Cancel

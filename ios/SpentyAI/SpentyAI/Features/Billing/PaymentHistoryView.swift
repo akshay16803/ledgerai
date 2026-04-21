@@ -63,7 +63,7 @@ struct PaymentHistoryView: View {
                         .font(.subheadline.weight(.medium))
 
                     HStack(spacing: 6) {
-                        Text(order.createdAt ?? "")
+                        Text(BillingView.formatPaymentDate(order.createdAt))
                         Text("·")
                         Text((order.paymentProvider ?? "").capitalized)
                     }
@@ -75,7 +75,7 @@ struct PaymentHistoryView: View {
 
                 // Amount + Status
                 VStack(alignment: .trailing, spacing: 3) {
-                    Text("\(order.currency ?? "") \(String(format: "%.0f", order.amount ?? 0))")
+                    Text(BillingView.formatPaymentAmount(order.amount, currency: order.currency))
                         .font(.subheadline.weight(.semibold))
 
                     Text((order.status ?? "").capitalized)
