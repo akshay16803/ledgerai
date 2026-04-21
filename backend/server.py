@@ -3783,6 +3783,16 @@ async def debug_reconcile_statement(statement_id: str):
 
     results = reconcile_entries(parsed, ledger_txns, account_id)
 
+    # Save results to database
+    await db.statements.update_one(
+        {"statement_id": statement_id},
+        {"$set": {
+            "reconciliation": results,
+            "status": "reconciled",
+            "reconciled_at": datetime.now(timezone.utc),
+        }}
+    )
+
     # Add debug info
     results["debug"] = {
         "total_parsed": len(parsed),
