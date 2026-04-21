@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Brand -->
+    <color name="spenty_primary">#FF34C759</color>
+    <color name="spenty_success">#FF34C759</color>
+    <color name="spenty_error">#FFFF3B30</color>
+    <color name="spenty_warning">#FFC28C3C</color>
+    <color name="spenty_info">#FF4A6E7D</color>
+    <color name="spenty_accent1">#FFE07B6A</color>
+    <color name="spenty_accent3">#FF4A6E7D</color>
+
+    <!-- Light mode -->
+    <color name="spenty_bg_primary_light">#FFF8F6F3</color>
+    <color name="spenty_bg_secondary_light">#FFF0EEEB</color>
+    <color name="spenty_card_bg_light">#FFFFFFFF</color>
+    <color name="spenty_border_light">#FFE5E7EB</color>
+    <color name="spenty_text_primary_light">#FF2D2D2D</color>
+    <color name="spenty_text_secondary_light">#FF6B7280</color>
+
+    <!-- Dark mode -->
+    <color name="spenty_bg_primary_dark">#FF1C1C1E</color>
+    <color name="spenty_bg_secondary_dark">#FF2C2C2E</color>
+    <color name="spenty_card_bg_dark">#FF2C2C2E</color>
+    <color name="spenty_border_dark">#FF38383A</color>
+    <color name="spenty_text_primary_dark">#FFF2F2F7</color>
+    <color name="spenty_text_secondary_dark">#FF8E8E93</color>
+</resources>

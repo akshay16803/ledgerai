@@ -1,0 +1,558 @@
+package com.spentyai.app.navigation
+
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.ui.Alignment
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Modifier
+import androidx.navigation.NavType
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
+import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
+import com.spentyai.app.SpentyApp
+import com.spentyai.app.core.auth.AuthManager
+import com.spentyai.app.core.theme.SpentyType
+import com.spentyai.app.features.accounts.AccountDetailScreen
+import com.spentyai.app.features.accounts.AccountListScreen
+import com.spentyai.app.features.accounts.AccountsViewModel
+import com.spentyai.app.features.aichat.AIChatRepository
+import com.spentyai.app.features.aichat.AIChatScreen
+import com.spentyai.app.features.aichat.AIChatViewModel
+import com.spentyai.app.features.auth.AuthViewModel
+import com.spentyai.app.features.auth.LoginScreen
+import com.spentyai.app.features.billing.BillingRepository
+import com.spentyai.app.features.billing.BillingScreen
+import com.spentyai.app.features.billing.BillingViewModel
+import com.spentyai.app.features.billing.PaymentHistoryScreen
+import com.spentyai.app.features.cashflow.CashFlowRepository
+import com.spentyai.app.features.cashflow.CashFlowScreen
+import com.spentyai.app.features.cashflow.CashFlowViewModel
+import com.spentyai.app.features.categories.CategoriesViewModel
+import com.spentyai.app.features.categories.CategoryListScreen
+import com.spentyai.app.features.customers.CustomerListScreen
+import com.spentyai.app.features.customers.CustomersViewModel
+import com.spentyai.app.features.dashboard.DashboardScreen
+import com.spentyai.app.features.dashboard.DashboardViewModel
+import com.spentyai.app.features.emailsync.EmailSyncRepository
+import com.spentyai.app.features.emailsync.EmailSyncScreen
+import com.spentyai.app.features.emailsync.EmailSyncViewModel
+import com.spentyai.app.features.featurerequests.FeatureRequestFormScreen
+import com.spentyai.app.features.featurerequests.FeatureRequestsRepository
+import com.spentyai.app.features.featurerequests.FeatureRequestsScreen
+import com.spentyai.app.features.featurerequests.FeatureRequestsViewModel
+import com.spentyai.app.features.invoices.InvoiceListScreen
+import com.spentyai.app.features.invoices.InvoicesViewModel
+import com.spentyai.app.features.more.MoreMenuScreen
+import com.spentyai.app.features.onboarding.SubscriptionPaywallScreen
+import com.spentyai.app.features.pastinsights.PastInsightDetailScreen
+import com.spentyai.app.features.pastinsights.PastInsightsRepository
+import com.spentyai.app.features.pastinsights.PastInsightsScreen
+import com.spentyai.app.features.pastinsights.PastInsightsViewModel
+import com.spentyai.app.features.purchases.PurchaseListScreen
+import com.spentyai.app.features.purchases.PurchasesViewModel
+import com.spentyai.app.features.reconciliation.ReconciliationRepository
+import com.spentyai.app.features.reconciliation.ReconciliationScreen
+import com.spentyai.app.features.reconciliation.ReconciliationViewModel
+import com.spentyai.app.features.reconciliation.StatementDetailScreen
+import com.spentyai.app.features.records.RecordPreviewScreen
+import com.spentyai.app.features.records.RecordsRepository
+import com.spentyai.app.features.records.RecordsScreen
+import com.spentyai.app.features.records.RecordsViewModel
+import com.spentyai.app.features.reports.ReportsScreen
+import com.spentyai.app.features.reports.ReportsViewModel
+import com.spentyai.app.features.settings.BusinessProfileScreen
+import com.spentyai.app.features.settings.CurrencySettingsScreen
+import com.spentyai.app.features.settings.SettingsRepository
+import com.spentyai.app.features.settings.SettingsScreen
+import com.spentyai.app.features.settings.SettingsViewModel
+import com.spentyai.app.features.support.SupportRepository
+import com.spentyai.app.features.support.SupportScreen
+import com.spentyai.app.features.support.SupportViewModel
+import com.spentyai.app.features.transactions.TransactionListScreen
+import com.spentyai.app.features.transactions.TransactionsViewModel
+import com.spentyai.app.features.vendors.VendorListScreen
+import com.spentyai.app.features.vendors.VendorsViewModel
+
+@Composable
+fun AppNavigation(
+    isAuthenticated: Boolean,
+    authManager: AuthManager,
+    onGoogleSignInRequest: () -> Unit = {}
+) {
+    val navController = rememberNavController()
+
+    if (!isAuthenticated) {
+        val authViewModel = remember { AuthViewModel(authManager) }
+        LoginScreen(
+            viewModel = authViewModel,
+            onGoogleSignInRequest = onGoogleSignInRequest
+        )
+        return
+    }
+
+    val apiClient = remember { SpentyApp.instance.apiClient }
+
+    // ── Shared ViewModels ──
+    val dashboardViewModel = remember { DashboardViewModel(apiClient) }
+    val transactionsViewModel = remember { TransactionsViewModel(apiClient) }
+    val accountsViewModel = remember { AccountsViewModel(apiClient) }
+    val reportsViewModel = remember { ReportsViewModel(apiClient) }
+    val categoriesViewModel = remember { CategoriesViewModel(apiClient) }
+    val invoicesViewModel = remember { InvoicesViewModel(apiClient) }
+    val purchasesViewModel = remember { PurchasesViewModel(apiClient) }
+    val customersViewModel = remember { CustomersViewModel(apiClient) }
+    val vendorsViewModel = remember { VendorsViewModel(apiClient) }
+
+    val cashFlowRepository = remember { CashFlowRepository(apiClient) }
+    val cashFlowViewModel = remember { CashFlowViewModel(cashFlowRepository) }
+
+    val reconciliationRepository = remember { ReconciliationRepository(apiClient) }
+    val reconciliationViewModel = remember { ReconciliationViewModel(reconciliationRepository) }
+
+    val emailSyncRepository = remember { EmailSyncRepository(apiClient) }
+    val emailSyncViewModel = remember { EmailSyncViewModel(emailSyncRepository) }
+
+    val recordsRepository = remember { RecordsRepository(apiClient) }
+    val recordsViewModel = remember { RecordsViewModel(recordsRepository) }
+
+    val settingsRepository = remember { SettingsRepository(apiClient) }
+    val settingsViewModel = remember { SettingsViewModel(settingsRepository, authManager) }
+
+    val billingRepository = remember { BillingRepository(apiClient) }
+    val billingViewModel = remember { BillingViewModel(billingRepository) }
+
+    val pastInsightsRepository = remember { PastInsightsRepository(apiClient) }
+    val pastInsightsViewModel = remember { PastInsightsViewModel(pastInsightsRepository) }
+
+    val featureRequestsRepository = remember { FeatureRequestsRepository(apiClient) }
+    val featureRequestsViewModel = remember { FeatureRequestsViewModel(featureRequestsRepository) }
+
+    val aiChatRepository = remember { AIChatRepository(apiClient) }
+    val aiChatViewModel = remember { AIChatViewModel(aiChatRepository) }
+
+    val supportRepository = remember { SupportRepository(apiClient) }
+    val supportViewModel = remember { SupportViewModel(supportRepository) }
+
+    val navBackStackEntry by navController.currentBackStackEntryAsState()
+    val currentRoute = navBackStackEntry?.destination?.route
+
+    // Routes where the bottom bar should be hidden
+    val hideBottomBarRoutes = listOf(
+        Screen.TransactionDetail.route,
+        Screen.AccountDetail.route,
+        Screen.InvoiceDetail.route,
+        Screen.BillDetail.route,
+        Screen.CustomerDetail.route,
+        Screen.VendorDetail.route,
+        Screen.AiChat.route,
+        Screen.SubscriptionPaywall.route
+    )
+    val showBottomBar = currentRoute !in hideBottomBarRoutes
+
+    Scaffold(
+        bottomBar = {
+            if (showBottomBar) {
+                BottomNavBar(navController = navController)
+            }
+        }
+    ) { innerPadding ->
+        NavHost(
+            navController = navController,
+            startDestination = Screen.Dashboard.route,
+            modifier = Modifier.padding(innerPadding)
+        ) {
+            // ═══════════════════════════════════════════
+            // Main Tabs
+            // ═══════════════════════════════════════════
+
+            composable(Screen.Dashboard.route) {
+                DashboardScreen(
+                    viewModel = dashboardViewModel,
+                    onAccountClick = { id ->
+                        navController.navigate(Screen.AccountDetail.createRoute(id))
+                    },
+                    onTransactionClick = { id ->
+                        navController.navigate(Screen.TransactionDetail.createRoute(id))
+                    },
+                    onNewTransactionClick = {
+                        navController.navigate(Screen.Transactions.route)
+                    },
+                    onAIChatClick = {
+                        navController.navigate(Screen.AiChat.route)
+                    },
+                    onProjectionClick = {
+                        navController.navigate(Screen.Mandates.route)
+                    }
+                )
+            }
+
+            composable(Screen.Transactions.route) {
+                TransactionListScreen(
+                    viewModel = transactionsViewModel,
+                    onTransactionClick = { transaction ->
+                        navController.navigate(
+                            Screen.TransactionDetail.createRoute(transaction.id)
+                        )
+                    }
+                )
+            }
+
+            composable(Screen.Accounts.route) {
+                AccountListScreen(
+                    viewModel = accountsViewModel,
+                    onAccountClick = { id ->
+                        navController.navigate(Screen.AccountDetail.createRoute(id))
+                    },
+                    onSubTypeManager = {
+                        // Sub-type manager is handled internally via bottom sheet
+                    }
+                )
+            }
+
+            composable(Screen.Reports.route) {
+                ReportsScreen(viewModel = reportsViewModel)
+            }
+
+            composable(Screen.More.route) {
+                MoreMenuScreen(
+                    onNavigate = { route -> navController.navigate(route) }
+                )
+            }
+
+            // ═══════════════════════════════════════════
+            // Detail Screens
+            // ═══════════════════════════════════════════
+
+            composable(
+                route = Screen.TransactionDetail.route,
+                arguments = listOf(navArgument("id") { type = NavType.StringType })
+            ) { backStackEntry ->
+                val id = backStackEntry.arguments?.getString("id") ?: ""
+                PlaceholderScreen("Transaction: $id")
+                // TransactionDetailScreen is invoked via bottom sheet from list screens
+            }
+
+            composable(
+                route = Screen.AccountDetail.route,
+                arguments = listOf(navArgument("id") { type = NavType.StringType })
+            ) { backStackEntry ->
+                val id = backStackEntry.arguments?.getString("id") ?: ""
+                AccountDetailScreen(
+                    accountId = id,
+                    viewModel = accountsViewModel,
+                    onBack = { navController.popBackStack() }
+                )
+            }
+
+            // ═══════════════════════════════════════════
+            // Finance Section
+            // ═══════════════════════════════════════════
+
+            composable(Screen.Invoices.route) {
+                InvoiceListScreen(
+                    viewModel = invoicesViewModel,
+                    onNavigateToForm = { /* handled internally */ },
+                    onNavigateToPreview = { /* handled internally */ },
+                    onNavigateToRecordPayment = { /* handled internally */ }
+                )
+            }
+
+            composable(
+                route = Screen.InvoiceDetail.route,
+                arguments = listOf(navArgument("id") { type = NavType.StringType })
+            ) { backStackEntry ->
+                val id = backStackEntry.arguments?.getString("id") ?: ""
+                PlaceholderScreen("Invoice: $id")
+            }
+
+            composable(Screen.Bills.route) {
+                PurchaseListScreen(
+                    viewModel = purchasesViewModel,
+                    onNavigateToForm = { /* handled internally */ },
+                    onNavigateToPreview = { /* handled internally */ },
+                    onNavigateToRecordPayment = { /* handled internally */ },
+                    onNavigateToUpload = { /* handled internally */ }
+                )
+            }
+
+            composable(
+                route = Screen.BillDetail.route,
+                arguments = listOf(navArgument("id") { type = NavType.StringType })
+            ) { backStackEntry ->
+                val id = backStackEntry.arguments?.getString("id") ?: ""
+                PlaceholderScreen("Bill: $id")
+            }
+
+            composable(Screen.Categories.route) {
+                CategoryListScreen(viewModel = categoriesViewModel)
+            }
+
+            composable(Screen.Mandates.route) {
+                CashFlowScreen(viewModel = cashFlowViewModel)
+            }
+
+            composable(Screen.PaymentPlans.route) {
+                PlaceholderScreen("Payment Plans")
+            }
+
+            composable(Screen.TaxSummary.route) {
+                PastInsightsScreen(
+                    viewModel = pastInsightsViewModel,
+                    onNavigateBack = { navController.popBackStack() },
+                    onNavigateToDetail = { id ->
+                        navController.navigate(Screen.PastInsightDetail.createRoute(id))
+                    }
+                )
+            }
+
+            // ═══════════════════════════════════════════
+            // People Section
+            // ═══════════════════════════════════════════
+
+            composable(Screen.Customers.route) {
+                CustomerListScreen(
+                    viewModel = customersViewModel,
+                    onNavigateToDetail = { customer ->
+                        navController.navigate(Screen.CustomerDetail.createRoute(customer.id))
+                    },
+                    onNavigateToForm = { /* handled internally */ }
+                )
+            }
+
+            composable(
+                route = Screen.CustomerDetail.route,
+                arguments = listOf(navArgument("id") { type = NavType.StringType })
+            ) { backStackEntry ->
+                val id = backStackEntry.arguments?.getString("id") ?: ""
+                PlaceholderScreen("Customer: $id")
+            }
+
+            composable(Screen.Vendors.route) {
+                VendorListScreen(
+                    viewModel = vendorsViewModel,
+                    onNavigateToDetail = { vendor ->
+                        navController.navigate(Screen.VendorDetail.createRoute(vendor.id))
+                    },
+                    onNavigateToForm = { /* handled internally */ }
+                )
+            }
+
+            composable(
+                route = Screen.VendorDetail.route,
+                arguments = listOf(navArgument("id") { type = NavType.StringType })
+            ) { backStackEntry ->
+                val id = backStackEntry.arguments?.getString("id") ?: ""
+                PlaceholderScreen("Vendor: $id")
+            }
+
+            // ═══════════════════════════════════════════
+            // Data Section
+            // ═══════════════════════════════════════════
+
+            composable(Screen.Records.route) {
+                RecordsScreen(
+                    viewModel = recordsViewModel,
+                    onNavigateToPreview = { id ->
+                        navController.navigate("record_preview/$id")
+                    },
+                    onBack = { navController.popBackStack() }
+                )
+            }
+
+            composable(
+                route = "record_preview/{id}",
+                arguments = listOf(navArgument("id") { type = NavType.StringType })
+            ) { backStackEntry ->
+                val id = backStackEntry.arguments?.getString("id") ?: ""
+                RecordPreviewScreen(
+                    recordId = id,
+                    viewModel = recordsViewModel,
+                    onBack = { navController.popBackStack() }
+                )
+            }
+
+            composable(Screen.Statements.route) {
+                ReconciliationScreen(
+                    viewModel = reconciliationViewModel,
+                    onStatementClick = { id ->
+                        navController.navigate("statement_detail/$id")
+                    }
+                )
+            }
+
+            composable(
+                route = "statement_detail/{id}",
+                arguments = listOf(navArgument("id") { type = NavType.StringType })
+            ) { backStackEntry ->
+                val id = backStackEntry.arguments?.getString("id") ?: ""
+                StatementDetailScreen(
+                    viewModel = reconciliationViewModel,
+                    statementId = id,
+                    onBack = { navController.popBackStack() }
+                )
+            }
+
+            composable(Screen.EmailSync.route) {
+                EmailSyncScreen(
+                    viewModel = emailSyncViewModel,
+                    onNavigateToPendingReview = {
+                        navController.navigate("pending_review")
+                    },
+                    onBack = { navController.popBackStack() }
+                )
+            }
+
+            composable("pending_review") {
+                com.spentyai.app.features.emailsync.PendingReviewScreen(
+                    viewModel = emailSyncViewModel,
+                    onBack = { navController.popBackStack() }
+                )
+            }
+
+            // ═══════════════════════════════════════════
+            // Past Insights
+            // ═══════════════════════════════════════════
+
+            composable(Screen.PastInsights.route) {
+                PastInsightsScreen(
+                    viewModel = pastInsightsViewModel,
+                    onNavigateBack = { navController.popBackStack() },
+                    onNavigateToDetail = { id ->
+                        navController.navigate(Screen.PastInsightDetail.createRoute(id))
+                    }
+                )
+            }
+
+            composable(
+                route = Screen.PastInsightDetail.route,
+                arguments = listOf(navArgument("id") { type = NavType.StringType })
+            ) { backStackEntry ->
+                val id = backStackEntry.arguments?.getString("id") ?: ""
+                PastInsightDetailScreen(
+                    viewModel = pastInsightsViewModel,
+                    summaryId = id,
+                    onNavigateBack = { navController.popBackStack() }
+                )
+            }
+
+            // ═══════════════════════════════════════════
+            // Tools
+            // ═══════════════════════════════════════════
+
+            composable(Screen.AiChat.route) {
+                AIChatScreen(
+                    viewModel = aiChatViewModel,
+                    onClose = { navController.popBackStack() }
+                )
+            }
+
+            composable(Screen.FeatureRequests.route) {
+                FeatureRequestsScreen(
+                    viewModel = featureRequestsViewModel,
+                    onNavigateBack = { navController.popBackStack() },
+                    onNavigateToForm = { navController.navigate(Screen.FeatureRequestForm.route) }
+                )
+            }
+
+            composable(Screen.FeatureRequestForm.route) {
+                FeatureRequestFormScreen(
+                    onSubmit = { title, description, category ->
+                        featureRequestsViewModel.submitRequest(title, description, category)
+                        navController.popBackStack()
+                    },
+                    onNavigateBack = { navController.popBackStack() }
+                )
+            }
+
+            composable(Screen.Support.route) {
+                SupportScreen(
+                    viewModel = supportViewModel,
+                    onNavigateBack = { navController.popBackStack() }
+                )
+            }
+
+            // ═══════════════════════════════════════════
+            // Account — Settings
+            // ═══════════════════════════════════════════
+
+            composable(Screen.Settings.route) {
+                SettingsScreen(
+                    viewModel = settingsViewModel,
+                    onNavigateBack = { navController.popBackStack() },
+                    onNavigateToBusinessProfile = { navController.navigate(Screen.BusinessProfile.route) },
+                    onNavigateToCurrencySettings = { navController.navigate(Screen.CurrencySettings.route) }
+                )
+            }
+
+            composable(Screen.BusinessProfile.route) {
+                BusinessProfileScreen(
+                    viewModel = settingsViewModel,
+                    onNavigateBack = { navController.popBackStack() }
+                )
+            }
+
+            composable(Screen.CurrencySettings.route) {
+                CurrencySettingsScreen(
+                    viewModel = settingsViewModel,
+                    onNavigateBack = { navController.popBackStack() }
+                )
+            }
+
+            composable(Screen.Profile.route) {
+                PlaceholderScreen("Profile")
+            }
+
+            // ═══════════════════════════════════════════
+            // Account — Billing
+            // ═══════════════════════════════════════════
+
+            composable(Screen.Billing.route) {
+                BillingScreen(
+                    viewModel = billingViewModel,
+                    onNavigateBack = { navController.popBackStack() },
+                    onNavigateToPaymentHistory = { navController.navigate(Screen.PaymentHistory.route) }
+                )
+            }
+
+            composable(Screen.PaymentHistory.route) {
+                PaymentHistoryScreen(
+                    orders = billingViewModel.uiState.value.paymentHistory,
+                    onNavigateBack = { navController.popBackStack() }
+                )
+            }
+
+            composable(Screen.Subscription.route) {
+                PlaceholderScreen("Subscription")
+            }
+
+            // Subscription Paywall
+            composable(Screen.SubscriptionPaywall.route) {
+                SubscriptionPaywallScreen(
+                    viewModel = billingViewModel,
+                    onDismiss = { navController.popBackStack() },
+                    onSubscribed = { navController.popBackStack() }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun PlaceholderScreen(title: String) {
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = title,
+            style = SpentyType.Title2
+        )
+    }
+}
