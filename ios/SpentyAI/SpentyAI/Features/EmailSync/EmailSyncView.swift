@@ -31,6 +31,12 @@ struct EmailSyncView: View {
                 LoadingView(message: "Loading sync status...")
             }
         }
+        .sheet(isPresented: $viewModel.showSyncDatePicker, onDismiss: {
+            viewModel.cancelSyncDatePicker()
+        }) {
+            SyncDatePickerSheet(viewModel: viewModel)
+                .presentationDetents([.medium])
+        }
     }
 
     // MARK: - Error / Success
@@ -502,6 +508,72 @@ struct EmailSyncView: View {
                 .cardStyle()
             }
             .buttonStyle(.plain)
+        }
+    }
+}
+
+// MARK: - Sync Date Picker Sheet
+
+private struct SyncDatePickerSheet: View {
+    @Bindable var viewModel: EmailSyncViewModel
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Start syncing emails from")
+                        .font(SpentyFonts.headline)
+                        .foregroundColor(.spentyTextPrimary)
+
+                    Text("SpentyAI will scan emails on or after this date for transactions — income, expenses, transfers, recurring payments and mandates.")
+                        .font(SpentyFonts.footnote)
+                        .foregroundColor(.spentyTextSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                DatePicker(
+                    "Sync start date",
+                    selection: $viewModel.pendingSyncDate,
+                    in: ...Date(),
+                    displayedComponents: .date
+                )
+                .datePickerStyle(.graphical)
+                .tint(Color.spentyPrimary)
+
+                Spacer(minLength: 0)
+
+                Button {
+                    Task { await viewModel.confirmSyncDate() }
+                } label: {
+                    HStack(spacing: 8) {
+                        if viewModel.isSyncing {
+                            ProgressView()
+                                .controlSize(.small)
+                                .tint(.white)
+                        } else {
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                        }
+                        Text(viewModel.isSyncing ? "Starting Sync..." : "Start Sync")
+                    }
+                    .primaryButtonStyle()
+                }
+                .disabled(viewModel.isSyncing)
+                .opacity(viewModel.isSyncing ? 0.6 : 1.0)
+            }
+            .padding(16)
+            .background(Color.spentyBgPrimary)
+            .navigationTitle("Sync Start Date")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Cancel") {
+                        viewModel.cancelSyncDatePicker()
+                        dismiss()
+                    }
+                    .foregroundColor(.spentyTextSecondary)
+                }
+            }
         }
     }
 }
