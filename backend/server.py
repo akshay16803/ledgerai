@@ -5357,6 +5357,75 @@ def _parse_date_flexible(date_str: str):
     return None
 
 
+def _extract_payee_from_description(desc: str) -> str:
+    """Extract the merchant/payee name from bank statement descriptions.
+
+    Bank statements use formats like:
+    - UPI/407115789532/SWIGGY/ORDER/FOOD DELIVERY → swiggy
+    - NEFT CR-ZERODHA BROKING LIMITED-NEFTCR123456 → zerodha broking limited
+    - ATM/CASH WITHDRAWAL/SAMARQAND/ATM-001 → atm cash withdrawal
+    - IMPS/TRANSFER/TO SAVINGS/ACCOUNT-987654 → transfer to savings
+    - NEFT DR-HDFC BANK/TRANSFER/OWN ACCOUNT → hdfc bank transfer
+    """
+    if not desc:
+        return ""
+    d = desc.lower().strip()
+
+    # UPI format: UPI/ref_number/MERCHANT/purpose/detail
+    upi_match = re.match(r'upi/\d+/(.+)', d)
+    if upi_match:
+        parts = upi_match.group(1).split('/')
+        # First part after ref is the merchant/payee name
+        merchant = parts[0].strip() if parts else ""
+        # Also include purpose keywords for better matching
+        purpose_parts = [p.strip() for p in parts[1:] if p.strip() and not re.match(r'^\d+$', p.strip())]
+        return f"{merchant} {' '.join(purpose_parts)}".strip()
+
+    # NEFT CR format: NEFT CR-NAME-REFERENCE
+    neft_cr_match = re.match(r'neft\s+cr[- ]+(.+?)(?:-[A-Z0-9]+\d{3,})?$', d, re.IGNORECASE)
+    if neft_cr_match:
+        name = neft_cr_match.group(1).strip()
+        # Remove trailing reference numbers
+        name = re.sub(r'[-\s]+[a-z]*\d{4,}$', '', name)
+        return name
+
+    # NEFT DR format: NEFT DR-NAME/purpose
+    neft_dr_match = re.match(r'neft\s+dr[- ]+(.+)', d, re.IGNORECASE)
+    if neft_dr_match:
+        parts = neft_dr_match.group(1).split('/')
+        return ' '.join(p.strip() for p in parts if p.strip() and not re.match(r'^\d+$', p.strip()))
+
+    # ATM format
+    if d.startswith('atm'):
+        parts = d.split('/')
+        return ' '.join(p.strip() for p in parts[:2] if p.strip())
+
+    # IMPS format
+    imps_match = re.match(r'imps/(.+)', d)
+    if imps_match:
+        parts = imps_match.group(1).split('/')
+        return ' '.join(p.strip() for p in parts if p.strip() and not re.match(r'^\d+$', p.strip()) and not re.match(r'^account', p.strip()))
+
+    return d
+
+
+def _normalize_description(desc: str) -> set:
+    """Return a set of normalized significant tokens from a description."""
+    if not desc:
+        return set()
+    d = desc.lower()
+    # Split on common delimiters
+    tokens = set(re.split(r'[\s\-_./,;:@()\[\]]+', d))
+    # Filter out short tokens, pure numbers, and common noise words
+    noise = {'upi', 'neft', 'imps', 'atm', 'ref', 'cr', 'dr', 'the', 'for',
+             'and', 'via', 'from', 'payment', 'transfer', 'transaction',
+             'bill', 'order', 'merchant', 'purchase', 'p2p', 'autopay',
+             'subscription', 'recharge', 'prepaid', 'food', 'delivery',
+             'online', 'charges', 'trip', 'ride', 'store', 'agreement',
+             'top', 'shop', 'premium'}
+    return {t for t in tokens if len(t) >= 3 and not re.match(r'^\d+$', t) and t not in noise}
+
+
 def _score_date_match(entry_date: str, ledger_date: str) -> int:
     """Score date similarity between a statement entry and ledger transaction."""
     if ledger_date == entry_date:
@@ -5368,80 +5437,231 @@ def _score_date_match(entry_date: str, ledger_date: str) -> int:
         if diff == 0:
             return 40
         if diff <= 1:
-            return 30
+            return 35
+        if diff <= 2:
+            return 25
         if diff <= 3:
             return 15
+        if diff <= 5:
+            return 8
     return 0
 
 
 def _score_amount_match(entry_amt: float, ledger_amt: float) -> int:
     """Score amount similarity. Compares absolute values to handle sign
     differences between statement (always positive after post-processing)
-    and ledger transactions (which may store as positive or negative)."""
+    and ledger transactions (which may store as positive or negative).
+
+    Exact match is worth 40 points. Near-exact (within 5%) gets partial
+    credit scaled by closeness."""
     a = abs(entry_amt)
     b = abs(ledger_amt)
     if abs(a - b) < 0.01:
         return 40
-    if max(a, b, 1) > 0 and abs(a - b) / max(a, b, 1) < 0.02:
-        return 25
+    # Within 1% difference
+    denom = max(a, b, 1)
+    pct_diff = abs(a - b) / denom
+    if pct_diff < 0.01:
+        return 35
+    # Within 5% difference (handles rounding, fees, taxes)
+    if pct_diff < 0.05:
+        return 20
+    # Within 10% — very weak signal but still non-zero
+    if pct_diff < 0.10:
+        return 10
     return 0
 
 
 def _score_description_match(entry_desc: str, ledger_desc: str) -> int:
-    """Score description similarity using word overlap and substring matching.
+    """Score description similarity using multiple strategies:
+
+    1. Word overlap between normalized tokens
+    2. Payee extraction and comparison
+    3. Substring containment
+    4. Key merchant name matching
 
     Bank statement descriptions are often verbose with transaction IDs, bank
     codes, and reference numbers (e.g. ``UPI/407115789532/SWIGGY/...``) while
-    ledger descriptions are clean (``UPI SWIGGY``). Standard word-overlap
-    alone would miss many matches because one side has tokens the other lacks.
-    We add a substring bonus: if one description contains the other as a
-    substring, that's a strong signal even when word overlap is low."""
+    ledger descriptions are clean (``UPI SWIGGY`` or ``Swiggy Food Order``).
+    """
     if not entry_desc or not ledger_desc:
         return 0
     el = entry_desc.lower()
     ll = ledger_desc.lower()
 
-    # Word-overlap scoring
+    best_score = 0
+
+    # Strategy 1: Extract payee and compare
+    entry_payee = _extract_payee_from_description(entry_desc)
+    ledger_payee = _extract_payee_from_description(ledger_desc)
+
+    if entry_payee and ledger_payee:
+        ep_tokens = _normalize_description(entry_payee)
+        lp_tokens = _normalize_description(ledger_payee)
+        if ep_tokens and lp_tokens:
+            overlap = ep_tokens & lp_tokens
+            if overlap:
+                # Strong payee match
+                score = min(20, len(overlap) * 7)
+                best_score = max(best_score, score)
+            # Check if one payee contains the other
+            if entry_payee in ledger_payee or ledger_payee in entry_payee:
+                best_score = max(best_score, 20)
+
+    # Strategy 2: Normalized token overlap
+    entry_tokens = _normalize_description(entry_desc)
+    ledger_tokens = _normalize_description(ledger_desc)
+    if entry_tokens and ledger_tokens:
+        overlap = entry_tokens & ledger_tokens
+        if overlap:
+            score = min(20, len(overlap) * 5)
+            best_score = max(best_score, score)
+
+    # Strategy 3: Raw word overlap (less filtering)
     entry_words = set(re.split(r'[\s\-_./,;:@()]+', el))
     ledger_words = set(re.split(r'[\s\-_./,;:@()]+', ll))
     significant = {w for w in (entry_words & ledger_words) if len(w) >= 3}
-    word_score = min(20, len(significant) * 5) if significant else 0
+    if significant:
+        word_score = min(20, len(significant) * 5)
+        best_score = max(best_score, word_score)
 
-    # Substring bonus: if all significant words of the shorter description
-    # appear in the longer one, add extra credit
+    # Strategy 4: Substring containment — all significant words of shorter
+    # description appear in the longer one
     shorter_words = ledger_words if len(ll) <= len(el) else entry_words
     longer_text = el if len(ll) <= len(el) else ll
     sig_shorter = {w for w in shorter_words if len(w) >= 3}
     if sig_shorter and all(w in longer_text for w in sig_shorter):
-        word_score = max(word_score, min(20, len(sig_shorter) * 7))
+        best_score = max(best_score, min(20, len(sig_shorter) * 7))
 
-    return word_score
+    # Strategy 5: Direct substring match of key merchant names
+    # If the ledger description (typically short) appears directly in the entry
+    # description or vice versa
+    if len(ll) >= 4 and ll in el:
+        best_score = 20
+    if len(el) >= 4 and el in ll:
+        best_score = 20
+
+    return best_score
 
 
-def _find_best_match(entry: dict, candidates: list) -> tuple:
-    """Find the best matching ledger transaction for a statement entry. Returns (match, score)."""
+def _determine_entry_type(entry: dict) -> str:
+    """Determine if a statement entry is a debit or credit.
+    Uses transaction_type field if available, otherwise infers from context."""
+    txn_type = entry.get("transaction_type", "").lower()
+    if txn_type in ("credit", "income", "cr"):
+        return "credit"
+    if txn_type in ("debit", "expense", "dr"):
+        return "debit"
+    # If the entry has explicit debit/credit fields from parsing
+    if entry.get("credit") and not entry.get("debit"):
+        return "credit"
+    if entry.get("debit") and not entry.get("credit"):
+        return "debit"
+    return "unknown"
+
+
+def _determine_ledger_type(ltxn: dict, account_id: str) -> str:
+    """Determine if a ledger transaction is a debit or credit relative to the account."""
+    txn_type = ltxn.get("transaction_type", "").lower()
+    # If this is a transfer TO this account, it's a credit
+    if ltxn.get("to_account_id") == account_id and ltxn.get("account_id") != account_id:
+        return "credit"
+    if txn_type in ("income", "credit"):
+        return "credit"
+    if txn_type in ("expense", "debit", "transfer"):
+        # Transfer FROM this account is a debit
+        return "debit"
+    return "unknown"
+
+
+def _find_best_match(entry: dict, candidates: list, account_id: str = "") -> tuple:
+    """Find the best matching ledger transaction for a statement entry.
+
+    Uses a 3-factor scoring system: date (40pts) + amount (40pts) + description (20pts).
+    Threshold is 40 (date+amount exact is enough; amount alone with description is enough).
+
+    Also applies transaction type filtering: prevents matching a debit entry with a
+    credit ledger transaction unless types are unknown."""
     best_match = None
     best_score = 0
+    entry_type = _determine_entry_type(entry)
+
     for ltxn in candidates:
+        # Transaction type filter: skip obvious mismatches
+        ledger_type = _determine_ledger_type(ltxn, account_id)
+        if entry_type != "unknown" and ledger_type != "unknown" and entry_type != ledger_type:
+            continue
+
         score = (
             _score_date_match(entry["date"], ltxn["date"])
             + _score_amount_match(entry["amount"], ltxn["amount"])
             + _score_description_match(entry.get("description", ""), ltxn.get("description", ""))
         )
-        if score > best_score and score >= 50:
+
+        # Lower threshold: 40 means date-match(40) alone works, or amount(40) alone,
+        # or date-close(35) + any description(5+), etc.
+        if score > best_score and score >= 40:
             best_score = score
             best_match = ltxn
     return best_match, best_score
 
 
 def reconcile_entries(parsed: list, ledger_txns: list, account_id: str) -> dict:
+    """Reconcile statement entries against ledger transactions.
+
+    Uses a two-pass approach:
+    Pass 1: Match high-confidence pairs (score >= 60) greedily
+    Pass 2: Match remaining entries with lower threshold (score >= 40)
+
+    This prevents low-confidence matches from stealing candidates from
+    entries that would have matched them at high confidence."""
     matched = []
     missing_from_ledger = []
     conflicts = []
     ledger_unmatched = list(ledger_txns)
 
-    for entry in parsed:
-        best_match, best_score = _find_best_match(entry, ledger_unmatched)
+    # Build all match scores first for optimal assignment
+    # Each entry gets a list of (candidate, score) pairs
+    unmatched_entries = list(parsed)
+
+    # Pass 1: High-confidence matches (score >= 60)
+    still_unmatched = []
+    for entry in unmatched_entries:
+        best_match = None
+        best_score = 0
+        for ltxn in ledger_unmatched:
+            entry_type = _determine_entry_type(entry)
+            ledger_type = _determine_ledger_type(ltxn, account_id)
+            if entry_type != "unknown" and ledger_type != "unknown" and entry_type != ledger_type:
+                continue
+            score = (
+                _score_date_match(entry["date"], ltxn["date"])
+                + _score_amount_match(entry["amount"], ltxn["amount"])
+                + _score_description_match(entry.get("description", ""), ltxn.get("description", ""))
+            )
+            if score > best_score and score >= 60:
+                best_score = score
+                best_match = ltxn
+
+        if best_match:
+            amt_match = abs(abs(entry["amount"]) - abs(best_match["amount"])) < 0.01
+            result_entry = {
+                "statement_entry": entry,
+                "ledger_transaction": best_match,
+                "match_score": best_score,
+            }
+            if amt_match:
+                matched.append(result_entry)
+            else:
+                result_entry["amount_difference"] = round(entry["amount"] - best_match["amount"], 2)
+                conflicts.append(result_entry)
+            ledger_unmatched.remove(best_match)
+        else:
+            still_unmatched.append(entry)
+
+    # Pass 2: Lower-confidence matches (score >= 40) for remaining entries
+    for entry in still_unmatched:
+        best_match, best_score = _find_best_match(entry, ledger_unmatched, account_id)
 
         if best_match:
             amt_match = abs(abs(entry["amount"]) - abs(best_match["amount"])) < 0.01
