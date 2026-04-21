@@ -37,6 +37,13 @@ struct EmailSyncView: View {
             SyncDatePickerSheet(viewModel: viewModel)
                 .presentationDetents([.large])
         }
+        .onChange(of: viewModel.justConnectedProvider) { _, newValue in
+            if newValue != nil {
+                Task {
+                    await viewModel.showSyncPickerForJustConnected()
+                }
+            }
+        }
     }
 
     // MARK: - Error / Success

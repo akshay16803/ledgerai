@@ -64,6 +64,11 @@ final class EmailSyncViewModel {
     var pendingSyncProvider: String = "gmail"
     var pendingSyncDate: Date = Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date()
 
+    /// Set to the provider name ("gmail" / "outlook") right after a successful OAuth.
+    /// The view observes this and shows the sync-date picker once the OAuth web view
+    /// is fully dismissed, avoiding SwiftUI sheet-presentation race conditions.
+    var justConnectedProvider: String?
+
     // MARK: - Dependencies
 
     private let repository: EmailSyncRepository
@@ -123,7 +128,12 @@ final class EmailSyncViewModel {
         do {
             let status = try await repository.gmailStatus()
             gmailAccounts = status.accounts ?? []
+            print("[SyncDatePicker] loadGmailStatus succeeded: \(gmailAccounts.count) accounts")
+            for a in gmailAccounts {
+                print("[SyncDatePicker]   email=\(a.email ?? "nil") syncFromDate=\(String(describing: a.syncFromDate)) provider=\(a.provider ?? "nil")")
+            }
         } catch {
+            print("[SyncDatePicker] loadGmailStatus FAILED: \(error)")
             // Silently handle — may not have Gmail connected
         }
     }
@@ -289,8 +299,6 @@ final class EmailSyncViewModel {
 
     /// Proactively opens the sync-date picker if any connected account has
     /// no saved start date (first-time connect, or reconnect after Reset).
-    /// Called right after a successful OAuth so the user can choose
-    /// the backfill start date before the first sync runs.
     /// Also called at the end of `loadAll()` as a safety net.
     @MainActor
     func promptForSyncDateIfNeeded() {
@@ -298,13 +306,58 @@ final class EmailSyncViewModel {
 
         // Check Gmail accounts first, then Outlook
         if let account = gmailAccounts.first(where: { $0.syncFromDate == nil }) {
+            print("[SyncDatePicker] Found Gmail account without syncFromDate: \(account.email ?? "nil")")
             pendingSyncAccount = account
             pendingSyncProvider = "gmail"
             pendingSyncDate = Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date()
             showSyncDatePicker = true
         } else if let account = outlookAccounts.first(where: { $0.syncFromDate == nil }) {
+            print("[SyncDatePicker] Found Outlook account without syncFromDate: \(account.email ?? "nil")")
             pendingSyncAccount = account
             pendingSyncProvider = "outlook"
+            pendingSyncDate = Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date()
+            showSyncDatePicker = true
+        } else {
+            print("[SyncDatePicker] No accounts need sync date. Gmail: \(gmailAccounts.count), Outlook: \(outlookAccounts.count)")
+            for a in gmailAccounts {
+                print("[SyncDatePicker]   Gmail \(a.email ?? "nil") syncFromDate=\(String(describing: a.syncFromDate))")
+            }
+        }
+    }
+
+    /// Called by the view when `justConnectedProvider` transitions from nil to a value.
+    /// Uses a generous delay so the ASWebAuthenticationSession web view finishes
+    /// its full dismiss animation before we present the sync-date sheet.
+    @MainActor
+    func showSyncPickerForJustConnected() async {
+        guard let provider = justConnectedProvider else { return }
+        print("[SyncDatePicker] showSyncPickerForJustConnected provider=\(provider)")
+
+        // Clear the flag immediately so we don't fire twice.
+        justConnectedProvider = nil
+
+        // Wait 1.5s for the OAuth web view to fully dismiss.
+        try? await Task.sleep(nanoseconds: 1_500_000_000)
+
+        // First try the standard check (relies on API having returned data).
+        promptForSyncDateIfNeeded()
+
+        // If promptForSyncDateIfNeeded didn't open the picker (e.g., API call
+        // failed or returned unexpected data), force-open it using what we know.
+        if !showSyncDatePicker {
+            print("[SyncDatePicker] Standard prompt didn't fire — force-opening picker for \(provider)")
+            let accounts = provider == "gmail" ? gmailAccounts : outlookAccounts
+            if let account = accounts.first {
+                // Use the first account even if syncFromDate isn't nil —
+                // this handles the edge case where the API already has a date.
+                pendingSyncAccount = account
+            } else {
+                // API call must have failed; create a minimal placeholder.
+                // confirmSyncDate() only needs pendingSyncAccount.email.
+                print("[SyncDatePicker] No accounts found — creating placeholder")
+                pendingSyncAccount = nil  // confirmSyncDate will use gmailAccounts.first
+            }
+            pendingSyncProvider = provider
             pendingSyncDate = Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date()
             showSyncDatePicker = true
         }
@@ -536,21 +589,23 @@ final class EmailSyncViewModel {
                         }
                     } else {
                         Task { @MainActor in
-                            self?.showSuccessMessage("\(provider.capitalized) connected successfully")
-                            if provider == "gmail" {
-                                await self?.loadGmailStatus()
-                            } else {
-                                await self?.loadOutlookStatus()
-                            }
-                            await self?.loadSyncStats()
+                            guard let self else { return }
+                            self.showSuccessMessage("\(provider.capitalized) connected successfully")
 
-                            // Small delay so the ASWebAuthenticationSession web view
-                            // finishes dismissing before we try to present the
-                            // sync-date picker sheet. Without this, SwiftUI may
-                            // silently drop the sheet because another presentation
-                            // (the OAuth web view) is still animating away.
-                            try? await Task.sleep(nanoseconds: 600_000_000) // 0.6s
-                            self?.promptForSyncDateIfNeeded()
+                            // Reload accounts so the UI is up to date.
+                            if provider == "gmail" {
+                                await self.loadGmailStatus()
+                            } else {
+                                await self.loadOutlookStatus()
+                            }
+                            await self.loadSyncStats()
+
+                            // Signal that an OAuth just completed. The view watches
+                            // this flag and shows the sync-date picker after the
+                            // ASWebAuthenticationSession web view finishes
+                            // its dismiss animation (~1-1.5 s).
+                            print("[SyncDatePicker] OAuth succeeded for \(provider). Setting justConnectedProvider.")
+                            self.justConnectedProvider = provider
                         }
                     }
                 }
