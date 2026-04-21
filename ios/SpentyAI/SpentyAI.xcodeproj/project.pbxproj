@@ -325,7 +325,7 @@
 		C3D4E5F6A7B8C9D0E1F2A3B4 /* RecordIncomeIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordIncomeIntent.swift; sourceTree = "<group>"; };
 		D4E5F6A7B8C9D0E1F2A3B4C5 /* CheckBalanceIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CheckBalanceIntent.swift; sourceTree = "<group>"; };
 		E5F6A7B8C9D0E1F2A3B4C5D6 /* AppShortcuts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppShortcuts.swift; sourceTree = "<group>"; };
-		632099D6EDE1972BC0A03128 /* CameraCaptureView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CameraCaptureView.swift; path = Features/Shared/CameraCaptureView.swift; sourceTree = "<group>"; };
+		632099D6EDE1972BC0A03128 /* CameraCaptureView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraCaptureView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -746,6 +746,7 @@
 			children = (
 				D6E9CB20F4FD24CAFA5EA04D /* TransactionFormView.swift */,
 				UNIF0002ABCD1234EFGH5678 /* UnifiedTransactionForm.swift */,
+				632099D6EDE1972BC0A03128 /* CameraCaptureView.swift */,
 				034D70EE0D18AB3D4494B463 /* TransactionLedgerView.swift */,
 				079B03710B655FE5A5C23BF6 /* TransactionListView.swift */,
 				B86A6C3698C149DFB1FBCFF8 /* TransactionDetailView.swift */,
