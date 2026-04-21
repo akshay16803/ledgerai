@@ -316,13 +316,19 @@ struct EmailSyncView: View {
                     if viewModel.isConnecting {
                         ProgressView()
                             .controlSize(.small)
-                            .tint(.white)
+                            .tint(viewModel.gmailAccounts.isEmpty ? .white : .spentyPrimary)
                     } else {
                         Image(systemName: "plus.circle.fill")
                     }
-                    Text("Connect Gmail")
+                    Text(viewModel.gmailAccounts.isEmpty ? "Connect Gmail" : "Add Another Gmail")
                 }
-                .primaryButtonStyle()
+                .font(SpentyFonts.subheadline)
+                .fontWeight(.semibold)
+                .foregroundColor(viewModel.gmailAccounts.isEmpty ? .white : .spentyPrimary)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, viewModel.gmailAccounts.isEmpty ? 14 : 10)
+                .background(viewModel.gmailAccounts.isEmpty ? Color.spentyPrimary : Color.spentyPrimary.opacity(0.1))
+                .cornerRadius(12)
             }
             .disabled(viewModel.isConnecting)
             .opacity(viewModel.isConnecting ? 0.6 : 1.0)
@@ -430,6 +436,8 @@ struct EmailSyncView: View {
                     Text(account.email ?? "Unknown")
                         .font(SpentyFonts.headline)
                         .foregroundColor(.spentyTextPrimary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
 
                     if let connectedAt = account.connectedAt {
                         Text("Connected \(connectedAt, format: .relative(presentation: .named))")
