@@ -328,6 +328,8 @@ final class EmailSyncViewModel {
     /// Called by the view when `justConnectedProvider` transitions from nil to a value.
     /// Uses a generous delay so the ASWebAuthenticationSession web view finishes
     /// its full dismiss animation before we present the sync-date sheet.
+    /// Always force-opens the picker — the backend may return a non-nil syncFromDate
+    /// even for newly connected accounts, so we can't rely on promptForSyncDateIfNeeded().
     @MainActor
     func showSyncPickerForJustConnected() async {
         guard let provider = justConnectedProvider else { return }
@@ -339,28 +341,13 @@ final class EmailSyncViewModel {
         // Wait 1.5s for the OAuth web view to fully dismiss.
         try? await Task.sleep(nanoseconds: 1_500_000_000)
 
-        // First try the standard check (relies on API having returned data).
-        promptForSyncDateIfNeeded()
-
-        // If promptForSyncDateIfNeeded didn't open the picker (e.g., API call
-        // failed or returned unexpected data), force-open it using what we know.
-        if !showSyncDatePicker {
-            print("[SyncDatePicker] Standard prompt didn't fire — force-opening picker for \(provider)")
-            let accounts = provider == "gmail" ? gmailAccounts : outlookAccounts
-            if let account = accounts.first {
-                // Use the first account even if syncFromDate isn't nil —
-                // this handles the edge case where the API already has a date.
-                pendingSyncAccount = account
-            } else {
-                // API call must have failed; create a minimal placeholder.
-                // confirmSyncDate() only needs pendingSyncAccount.email.
-                print("[SyncDatePicker] No accounts found — creating placeholder")
-                pendingSyncAccount = nil  // confirmSyncDate will use gmailAccounts.first
-            }
-            pendingSyncProvider = provider
-            pendingSyncDate = Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date()
-            showSyncDatePicker = true
-        }
+        // Always force-open the picker after a fresh OAuth connection.
+        let accounts = provider == "gmail" ? gmailAccounts : outlookAccounts
+        pendingSyncAccount = accounts.first
+        pendingSyncProvider = provider
+        pendingSyncDate = Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date()
+        showSyncDatePicker = true
+        print("[SyncDatePicker] Force-opened picker for \(provider)")
     }
 
     @MainActor
