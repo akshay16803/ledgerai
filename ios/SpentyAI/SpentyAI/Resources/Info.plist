@@ -79,6 +79,10 @@
         <key>NSAllowsArbitraryLoads</key>
         <false/>
     </dict>
+    <key>NSCameraUsageDescription</key>
+    <string>SpentyAI needs camera access to capture receipt photos for automatic expense tracking.</string>
+    <key>NSPhotoLibraryUsageDescription</key>
+    <string>SpentyAI needs photo library access to select receipt images for expense tracking.</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>SpentyAI needs microphone access for voice commands and live voice conversation with the AI assistant.</string>
     <key>NSSpeechRecognitionUsageDescription</key>

@@ -1,6 +1,7 @@
 import SwiftUI
 import PhotosUI
 import QuickLook
+import UIKit
 
 // MARK: - Mode
 
@@ -37,6 +38,8 @@ struct UnifiedTransactionForm: View {
     @State private var isParsingReceipt = false
     @State private var receiptParseMessage: String?
     @State private var uploadedReceiptId: String?
+    @State private var showCamera = false
+    @State private var capturedReceiptImage: UIImage?
     @State private var isSaving: Bool = false
     @State private var errorMessage: String?
 
@@ -205,6 +208,10 @@ struct UnifiedTransactionForm: View {
                         recurringSection
                         attachmentSection
 
+                        if isCreateMode, let img = capturedReceiptImage {
+                            receiptPreviewCard(image: img)
+                        }
+
                         if hasSourceDocument && !isCreateMode {
                             sourceDocumentCard
                         }
@@ -294,6 +301,14 @@ struct UnifiedTransactionForm: View {
                                     }
                                 }
                             }
+                    }
+                }
+            }
+            .sheet(isPresented: $showCamera) {
+                CameraCaptureView(capturedImage: $capturedReceiptImage) { image in
+                    capturedReceiptImage = image
+                    if let data = image.jpegData(compressionQuality: 0.8) {
+                        Task { await processReceiptImage(data) }
                     }
                 }
             }
@@ -717,70 +732,101 @@ struct UnifiedTransactionForm: View {
 
     private var attachmentSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            sectionLabel("Attachment")
+            sectionLabel("Receipt")
 
-            VStack(spacing: 0) {
-                PhotosPicker(
-                    selection: $selectedPhoto,
-                    matching: .images
-                ) {
-                    HStack(spacing: 12) {
-                        // Icon with badge background
-                        ZStack {
-                            RoundedRectangle(cornerRadius: 10)
-                                .fill(Color.spentyPrimary.opacity(0.12))
-                                .frame(width: 36, height: 36)
+            VStack(spacing: 12) {
+                // Two side-by-side buttons: Camera and Gallery
+                HStack(spacing: 12) {
+                    // Camera button
+                    Button {
+                        showCamera = true
+                    } label: {
+                        VStack(spacing: 8) {
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 10)
+                                    .fill(Color.spentyPrimary.opacity(0.12))
+                                    .frame(width: 40, height: 40)
 
-                            Image(systemName: "doc.viewfinder")
-                                .font(.system(size: 16))
-                                .foregroundColor(.spentyPrimary)
-                        }
+                                Image(systemName: "camera.fill")
+                                    .font(.system(size: 17))
+                                    .foregroundColor(.spentyPrimary)
+                            }
 
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(selectedPhoto == nil ? "Attach Receipt" : "Receipt Selected")
-                                .font(.system(size: 15, weight: .medium))
-                                .foregroundColor(selectedPhoto == nil ? .spentyTextPrimary : .spentySuccess)
-                                .lineLimit(1)
-
-                            Text("Photo or document")
-                                .font(.system(size: 12))
-                                .foregroundColor(.spentyTextSecondary)
+                            Text("Take Photo")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundColor(.spentyTextPrimary)
                                 .lineLimit(1)
                         }
-
-                        Spacer()
-
-                        if selectedPhoto != nil {
-                            Image(systemName: "checkmark.circle.fill")
-                                .font(.system(size: 18))
-                                .foregroundColor(.spentySuccess)
-                        } else {
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundColor(.spentyTextSecondary.opacity(0.5))
-                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(Color.spentyBgSecondary)
+                        .cornerRadius(12)
                     }
-                    .padding(.vertical, 10)
+
+                    // Gallery button
+                    PhotosPicker(
+                        selection: $selectedPhoto,
+                        matching: .images
+                    ) {
+                        VStack(spacing: 8) {
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 10)
+                                    .fill(Color.spentyPrimary.opacity(0.12))
+                                    .frame(width: 40, height: 40)
+
+                                Image(systemName: "photo.on.rectangle")
+                                    .font(.system(size: 17))
+                                    .foregroundColor(.spentyPrimary)
+                            }
+
+                            Text("Choose Photo")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundColor(.spentyTextPrimary)
+                                .lineLimit(1)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(Color.spentyBgSecondary)
+                        .cornerRadius(12)
+                    }
                 }
 
+                // Receipt attached indicator
+                if selectedPhoto != nil || capturedReceiptImage != nil || uploadedReceiptId != nil {
+                    HStack(spacing: 8) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 15))
+                            .foregroundColor(.spentySuccess)
+                        Text("Receipt attached")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(.spentySuccess)
+                        Spacer()
+                    }
+                }
+
+                // Scanning progress
                 if isParsingReceipt {
-                    Divider().padding(.leading, 40)
                     HStack(spacing: 10) {
                         ProgressView()
                             .tint(.spentyPrimary)
                         Text("Scanning receipt...")
                             .font(.system(size: 13))
                             .foregroundColor(.spentyTextSecondary)
+                        Spacer()
                     }
-                    .padding(.vertical, 10)
                 }
 
+                // Parse result message
                 if let receiptParseMessage {
-                    Divider().padding(.leading, 40)
-                    Text(receiptParseMessage)
-                        .font(.system(size: 13))
-                        .foregroundColor(uploadedReceiptId != nil ? .spentySuccess : .spentyError)
-                        .padding(.vertical, 10)
+                    HStack(spacing: 8) {
+                        Image(systemName: uploadedReceiptId != nil ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+                            .font(.system(size: 15))
+                            .foregroundColor(uploadedReceiptId != nil ? .spentySuccess : .spentyError)
+                        Text(receiptParseMessage)
+                            .font(.system(size: 13))
+                            .foregroundColor(uploadedReceiptId != nil ? .spentySuccess : .spentyError)
+                        Spacer()
+                    }
                 }
             }
             .cardStyle()
@@ -975,6 +1021,8 @@ struct UnifiedTransactionForm: View {
 
     // MARK: - Receipt Document Card
 
+    @State private var receiptThumbnail: UIImage?
+
     private func receiptDocumentCard(receiptId: String) -> some View {
         VStack(spacing: 12) {
             HStack {
@@ -987,13 +1035,31 @@ struct UnifiedTransactionForm: View {
                 Spacer()
             }
 
+            // Thumbnail preview if available
+            if let thumbnail = receiptThumbnail {
+                Image(uiImage: thumbnail)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(maxWidth: .infinity, maxHeight: 160)
+                    .clipped()
+                    .cornerRadius(10)
+            }
+
             Button {
                 Task {
                     isLoadingReceipt = true
                     defer { isLoadingReceipt = false }
                     do {
                         let data = try await recordsRepo.downloadReceipt(id: receiptId)
-                        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("receipt_\(receiptId).pdf")
+                        let ext: String
+                        if data.prefix(8).starts(with: [0x89, 0x50, 0x4E, 0x47]) {
+                            ext = "png"
+                        } else if data.prefix(3).starts(with: [0xFF, 0xD8, 0xFF]) {
+                            ext = "jpg"
+                        } else {
+                            ext = "pdf"
+                        }
+                        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("receipt_\(receiptId).\(ext)")
                         try data.write(to: tempURL)
                         previewURL = tempURL
                         showPreview = true
@@ -1019,6 +1085,58 @@ struct UnifiedTransactionForm: View {
                 .cornerRadius(10)
             }
             .disabled(isLoadingReceipt)
+        }
+        .cardStyle()
+        .task {
+            // Load thumbnail for image receipts
+            guard receiptThumbnail == nil else { return }
+            if let data = try? await recordsRepo.downloadReceipt(id: receiptId),
+               let image = UIImage(data: data) {
+                receiptThumbnail = image
+            }
+        }
+    }
+
+    // MARK: - Receipt Preview Card (Create Mode)
+
+    private func receiptPreviewCard(image: UIImage) -> some View {
+        VStack(spacing: 12) {
+            HStack {
+                Image(systemName: "doc.text.image")
+                    .font(SpentyFonts.body)
+                    .foregroundColor(.spentyPrimary)
+                Text("Receipt")
+                    .font(SpentyFonts.headline)
+                    .foregroundColor(.spentyTextPrimary)
+                Spacer()
+                Button {
+                    capturedReceiptImage = nil
+                    selectedPhoto = nil
+                    uploadedReceiptId = nil
+                    receiptParseMessage = nil
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 22))
+                        .foregroundColor(.spentyTextSecondary.opacity(0.6))
+                }
+            }
+
+            Image(uiImage: image)
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+                .frame(maxWidth: .infinity, maxHeight: 160)
+                .clipped()
+                .cornerRadius(10)
+
+            HStack(spacing: 8) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 15))
+                    .foregroundColor(.spentySuccess)
+                Text("Receipt attached")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(.spentySuccess)
+                Spacer()
+            }
         }
         .cardStyle()
     }
@@ -1246,16 +1364,24 @@ struct UnifiedTransactionForm: View {
 
     @MainActor
     private func handleReceiptUpload(_ item: PhotosPickerItem) async {
-        isParsingReceipt = true
-        receiptParseMessage = nil
-        defer { isParsingReceipt = false }
-
         do {
             guard let imageData = try await item.loadTransferable(type: Data.self) else {
                 receiptParseMessage = "Could not load image data"
                 return
             }
+            await processReceiptImage(imageData)
+        } catch {
+            receiptParseMessage = "Failed to process receipt: \(error.localizedDescription)"
+        }
+    }
 
+    @MainActor
+    private func processReceiptImage(_ imageData: Data) async {
+        isParsingReceipt = true
+        receiptParseMessage = nil
+        defer { isParsingReceipt = false }
+
+        do {
             let response = try await recordsRepo.uploadReceipt(
                 imageData: imageData,
                 filename: "receipt.jpg",

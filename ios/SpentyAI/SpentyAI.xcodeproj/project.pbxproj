@@ -163,6 +163,7 @@
 		B8C9D0E1F2A3B4C5D6E7F8A9 /* RecordIncomeIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3D4E5F6A7B8C9D0E1F2A3B4 /* RecordIncomeIntent.swift */; };
 		C9D0E1F2A3B4C5D6E7F8A9B0 /* CheckBalanceIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4E5F6A7B8C9D0E1F2A3B4C5 /* CheckBalanceIntent.swift */; };
 		D0E1F2A3B4C5D6E7F8A9B0C1 /* AppShortcuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5F6A7B8C9D0E1F2A3B4C5D6 /* AppShortcuts.swift */; };
+		E80EFD4798143458DF8F11E1 /* CameraCaptureView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 632099D6EDE1972BC0A03128 /* CameraCaptureView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -324,6 +325,7 @@
 		C3D4E5F6A7B8C9D0E1F2A3B4 /* RecordIncomeIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordIncomeIntent.swift; sourceTree = "<group>"; };
 		D4E5F6A7B8C9D0E1F2A3B4C5 /* CheckBalanceIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CheckBalanceIntent.swift; sourceTree = "<group>"; };
 		E5F6A7B8C9D0E1F2A3B4C5D6 /* AppShortcuts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppShortcuts.swift; sourceTree = "<group>"; };
+		632099D6EDE1972BC0A03128 /* CameraCaptureView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraCaptureView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -1014,6 +1016,7 @@
 				B8C9D0E1F2A3B4C5D6E7F8A9 /* RecordIncomeIntent.swift in Sources */,
 				C9D0E1F2A3B4C5D6E7F8A9B0 /* CheckBalanceIntent.swift in Sources */,
 				D0E1F2A3B4C5D6E7F8A9B0C1 /* AppShortcuts.swift in Sources */,
+				E80EFD4798143458DF8F11E1 /* CameraCaptureView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
