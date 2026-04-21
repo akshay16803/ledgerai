@@ -194,6 +194,7 @@ struct APIEndpoints {
     static let settingsDateFormats = "/api/settings/date-formats"
     static let settingsLogo = "/api/settings/logo"
     static let settingsSignature = "/api/settings/signature"
+    static let settingsResetData = "/api/settings/reset-data"
 
     // MARK: - Demat
     static let dematUpload = "/api/demat/upload-statement"

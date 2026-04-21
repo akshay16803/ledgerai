@@ -52,6 +52,39 @@ struct SettingsView: View {
         } message: {
             Text("This action is permanent. All your data will be erased and cannot be recovered.")
         }
+        // Step 1: Reset Data warning — explains what will happen
+        .alert("Reset All Data?", isPresented: $viewModel.showResetWarning) {
+            Button("I Understand, Continue", role: .destructive) {
+                viewModel.showResetConfirmInput = true
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This will erase all your transactions, accounts, invoices, bills, customers, vendors, receipts, and reports.\n\nYour account and settings will stay — but everything else goes back to zero, as if you just signed up.\n\nThis cannot be undone.")
+        }
+        // Step 2: Type RESET to confirm
+        .alert("Type RESET to Confirm", isPresented: $viewModel.showResetConfirmInput) {
+            TextField("Type RESET", text: $viewModel.resetConfirmText)
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.characters)
+            Button("Reset My Data", role: .destructive) {
+                Task { await viewModel.resetData() }
+            }
+            .disabled(viewModel.resetConfirmText != "RESET")
+            Button("Cancel", role: .cancel) {
+                viewModel.resetConfirmText = ""
+            }
+        } message: {
+            Text("To make sure this isn't an accident, type RESET in the box above.")
+        }
+        // Success confirmation
+        .alert("Data Reset Complete", isPresented: $viewModel.showResetSuccess) {
+            Button("OK") {
+                viewModel.showResetSuccess = false
+                Task { await viewModel.loadSettings() }
+            }
+        } message: {
+            Text("All your data has been cleared. Default accounts and categories have been set up for you — you're starting fresh!")
+        }
     }
 
     // MARK: - Settings Form
@@ -336,6 +369,26 @@ struct SettingsView: View {
                 .padding(.vertical, 4)
             }
 
+            // Reset Data — escalating severity between Sign Out and Delete
+            Button(role: .destructive) {
+                viewModel.showResetWarning = true
+            } label: {
+                HStack(spacing: 14) {
+                    sectionIcon("arrow.counterclockwise.circle.fill", color: .orange)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Reset Data")
+                            .font(SpentyFonts.body)
+                            .foregroundColor(.orange)
+                        Text("Start fresh — removes all your data")
+                            .font(SpentyFonts.caption2)
+                            .foregroundColor(.spentyTextSecondary)
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+            .disabled(viewModel.isResetting)
+
             Button(role: .destructive) {
                 viewModel.showDeleteConfirm = true
             } label: {
@@ -355,7 +408,7 @@ struct SettingsView: View {
                 .foregroundColor(.spentyPrimary)
                 .textCase(nil)
         } footer: {
-            Text("Permanently deletes your account and all associated data.")
+            Text("Reset Data wipes your transactions and records but keeps your account. Delete Account removes everything permanently.")
                 .font(SpentyFonts.caption2)
                 .foregroundColor(.spentyTextSecondary)
         }

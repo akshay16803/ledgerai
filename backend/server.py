@@ -9117,6 +9117,43 @@ async def delete_signature(user: dict = Depends(get_current_user)):
     return {"message": "Signature deleted"}
 
 
+@app.post("/api/settings/reset-data")
+async def reset_data(request: Request, user: dict = Depends(get_current_user)):
+    """Reset all user data — wipes transactions, accounts, categories, invoices, etc.
+    Keeps the user account, settings, and active sessions intact.
+    Re-seeds default accounts and categories so the user starts fresh."""
+    user_id = user["user_id"]
+
+    body = await request.json()
+    confirmation = body.get("confirmation", "")
+    if confirmation != "RESET":
+        raise HTTPException(status_code=400, detail="You must send confirmation: 'RESET' to proceed.")
+
+    # Delete all user data from every collection (but keep user account, settings, sessions)
+    await db.transactions.delete_many({"user_id": user_id})
+    await db.accounts.delete_many({"user_id": user_id})
+    await db.categories.delete_many({"user_id": user_id})
+    await db.invoices.delete_many({"user_id": user_id})
+    await db.bills.delete_many({"user_id": user_id})
+    await db.customers.delete_many({"user_id": user_id})
+    await db.vendors.delete_many({"user_id": user_id})
+    await db.mandates.delete_many({"user_id": user_id})
+    await db.statements.delete_many({"user_id": user_id})
+    await db.synced_sms.delete_many({"user_id": user_id})
+    await db.receipts.delete_many({"user_id": user_id})
+    await db.email_archives.delete_many({"user_id": user_id})
+    await db.feature_requests.delete_many({"user_id": user_id})
+    await db.tax_summaries.delete_many({"user_id": user_id})
+    await db.tax_summary_transactions.delete_many({"user_id": user_id})
+    await db.payment_orders.delete_many({"user_id": user_id})
+    await db.ai_chat_history.delete_many({"user_id": user_id})
+
+    # Re-seed default accounts and categories
+    await seed_default_data(user_id)
+
+    return {"message": "All data has been reset. Your account is now fresh — default accounts and categories have been restored."}
+
+
 async def get_user_base_currency(user_id: str) -> str:
     settings = await db.user_settings.find_one({"user_id": user_id}, {"_id": 0, "base_currency": 1})
     return (settings or {}).get("base_currency", "INR")

@@ -14,6 +14,11 @@ final class SettingsViewModel {
     var errorMessage = ""
     var showError = false
     var showDeleteConfirm = false
+    var showResetWarning = false
+    var showResetConfirmInput = false
+    var resetConfirmText = ""
+    var isResetting = false
+    var showResetSuccess = false
     var showSaveSuccess = false
 
     // Image upload state
@@ -151,6 +156,24 @@ final class SettingsViewModel {
         }
 
         isDeletingSignature = false
+    }
+
+    // MARK: - Reset Data
+
+    @MainActor
+    func resetData() async {
+        isResetting = true
+        showError = false
+
+        do {
+            _ = try await repository.resetData()
+            showResetSuccess = true
+            resetConfirmText = ""
+        } catch {
+            handleError(error)
+        }
+
+        isResetting = false
     }
 
     // MARK: - Delete Account

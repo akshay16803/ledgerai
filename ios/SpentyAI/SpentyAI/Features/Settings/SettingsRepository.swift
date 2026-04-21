@@ -98,4 +98,11 @@ final class SettingsRepository {
     func deleteSignature() async throws -> EmptyResponse {
         try await APIClient.shared.delete(APIEndpoints.settingsSignature)
     }
+
+    // MARK: - Reset Data
+
+    func resetData() async throws -> EmptyResponse {
+        struct ResetBody: Encodable { let confirmation: String }
+        return try await APIClient.shared.post(APIEndpoints.settingsResetData, body: ResetBody(confirmation: "RESET"))
+    }
 }

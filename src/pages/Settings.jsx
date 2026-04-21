@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
-import { Check, Globe, CalendarBlank, Buildings, Bank, Warning, ArrowLeft, Receipt, MapPin } from '@phosphor-icons/react';
+import { Check, Globe, CalendarBlank, Buildings, Bank, Warning, ArrowLeft, Receipt, MapPin, ArrowCounterClockwise, Trash } from '@phosphor-icons/react';
 import { COUNTRIES } from '../lib/countryConfig';
 
 const INDIAN_STATES = [
@@ -109,6 +109,12 @@ export default function Settings() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [loading, setLoading] = useState(true);
+  // Reset data state
+  const [showResetWarning, setShowResetWarning] = useState(false);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [resetConfirmText, setResetConfirmText] = useState('');
+  const [isResetting, setIsResetting] = useState(false);
+  const [resetSuccess, setResetSuccess] = useState(false);
 
   useEffect(() => {
     api.get('/api/settings').then(s => {
@@ -187,6 +193,23 @@ export default function Settings() {
       }
       setTimeout(() => setSaved(false), 3000);
     } catch (err) { alert(err.message); } finally { setSaving(false); }
+  };
+
+  const handleResetData = async () => {
+    if (resetConfirmText !== 'RESET') return;
+    setIsResetting(true);
+    try {
+      await api.post('/api/settings/reset-data', { confirmation: 'RESET' });
+      setResetSuccess(true);
+      setShowResetConfirm(false);
+      setResetConfirmText('');
+      // Refresh settings after reset
+      setTimeout(() => window.location.reload(), 2000);
+    } catch (err) {
+      alert(err.message || 'Failed to reset data');
+    } finally {
+      setIsResetting(false);
+    }
   };
 
   const selectedCurrency = CURRENCIES.find(c => c.code === baseCurrency);
@@ -546,6 +569,160 @@ export default function Settings() {
           </span>
         )}
       </div>
+
+      {/* Danger Zone */}
+      {!setupMode && (
+        <div style={{
+          background: '#fff', border: '1px solid rgba(220,53,69,0.3)', borderRadius: 2,
+          padding: 28, marginTop: 40,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+            <Warning size={18} weight="duotone" style={{ color: '#dc3545' }} />
+            <h2 style={{ fontSize: 16, fontWeight: 600, color: '#dc3545' }}>Danger Zone</h2>
+          </div>
+          <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 20 }}>
+            These actions are irreversible. Please be certain before proceeding.
+          </p>
+
+          {/* Reset Data */}
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '16px 20px', border: '1px solid var(--border-subtle)', borderRadius: 4,
+          }}>
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4 }}>Reset All Data</div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', maxWidth: 400 }}>
+                Wipe all transactions, accounts, invoices, bills, customers, vendors, and reports. Your account and settings stay — everything else goes back to zero.
+              </div>
+            </div>
+            <button
+              onClick={() => setShowResetWarning(true)}
+              disabled={isResetting}
+              style={{
+                background: 'none', color: '#dc3545', border: '1px solid #dc3545',
+                padding: '8px 20px', borderRadius: 2, fontSize: 13, fontWeight: 600,
+                cursor: isResetting ? 'not-allowed' : 'pointer', fontFamily: 'var(--font-body)',
+                opacity: isResetting ? 0.5 : 1, whiteSpace: 'nowrap',
+                display: 'flex', alignItems: 'center', gap: 6,
+              }}
+            >
+              <ArrowCounterClockwise size={14} weight="bold" />
+              {isResetting ? 'Resetting...' : 'Reset Data'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Reset Warning Modal — Step 1 */}
+      {showResetWarning && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex',
+          alignItems: 'center', justifyContent: 'center', zIndex: 9999,
+        }} onClick={() => setShowResetWarning(false)}>
+          <div style={{
+            background: '#fff', borderRadius: 8, padding: 32, maxWidth: 480, width: '90%',
+            boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+          }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+              <div style={{
+                width: 40, height: 40, borderRadius: '50%', background: 'rgba(220,53,69,0.1)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                <Warning size={22} weight="fill" style={{ color: '#dc3545' }} />
+              </div>
+              <h3 style={{ fontSize: 18, fontWeight: 600, color: 'var(--text-primary)' }}>Reset All Data?</h3>
+            </div>
+            <div style={{ fontSize: 14, color: 'var(--text-secondary)', lineHeight: 1.7, marginBottom: 24 }}>
+              <p style={{ marginBottom: 12 }}>This will permanently erase:</p>
+              <ul style={{ margin: '0 0 12px 20px', padding: 0 }}>
+                <li>All transactions and ledger entries</li>
+                <li>All accounts and balances</li>
+                <li>All invoices and purchase bills</li>
+                <li>All customers and vendors</li>
+                <li>All receipts, records, and reports</li>
+                <li>All AI chat history</li>
+              </ul>
+              <p style={{ marginBottom: 0 }}>
+                <strong>What stays:</strong> Your account, login, and settings. It'll be like you just signed up — fresh start with default accounts and categories.
+              </p>
+            </div>
+            <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
+              <button onClick={() => setShowResetWarning(false)} style={{
+                background: 'none', border: '1px solid var(--border-strong)', padding: '10px 20px',
+                borderRadius: 4, fontSize: 13, fontWeight: 500, cursor: 'pointer', fontFamily: 'var(--font-body)',
+              }}>Cancel</button>
+              <button onClick={() => { setShowResetWarning(false); setShowResetConfirm(true); }} style={{
+                background: '#dc3545', color: '#fff', border: 'none', padding: '10px 20px',
+                borderRadius: 4, fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font-body)',
+              }}>I Understand, Continue</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reset Confirm Modal — Step 2: Type RESET */}
+      {showResetConfirm && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex',
+          alignItems: 'center', justifyContent: 'center', zIndex: 9999,
+        }} onClick={() => { setShowResetConfirm(false); setResetConfirmText(''); }}>
+          <div style={{
+            background: '#fff', borderRadius: 8, padding: 32, maxWidth: 420, width: '90%',
+            boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+          }} onClick={e => e.stopPropagation()}>
+            <h3 style={{ fontSize: 18, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 12 }}>
+              Type RESET to Confirm
+            </h3>
+            <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 20, lineHeight: 1.6 }}>
+              To make sure this isn't an accident, type <strong style={{ color: '#dc3545' }}>RESET</strong> in the box below.
+            </p>
+            <input
+              value={resetConfirmText}
+              onChange={e => setResetConfirmText(e.target.value.toUpperCase())}
+              placeholder="Type RESET here"
+              autoFocus
+              style={{
+                width: '100%', padding: '12px 16px', border: '2px solid var(--border-strong)',
+                borderRadius: 4, fontSize: 15, fontFamily: 'var(--font-mono, monospace)',
+                textAlign: 'center', letterSpacing: '0.15em', fontWeight: 700,
+                boxSizing: 'border-box', marginBottom: 20,
+                borderColor: resetConfirmText === 'RESET' ? '#dc3545' : 'var(--border-strong)',
+              }}
+            />
+            <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
+              <button onClick={() => { setShowResetConfirm(false); setResetConfirmText(''); }} style={{
+                background: 'none', border: '1px solid var(--border-strong)', padding: '10px 20px',
+                borderRadius: 4, fontSize: 13, fontWeight: 500, cursor: 'pointer', fontFamily: 'var(--font-body)',
+              }}>Cancel</button>
+              <button
+                onClick={handleResetData}
+                disabled={resetConfirmText !== 'RESET' || isResetting}
+                style={{
+                  background: resetConfirmText === 'RESET' ? '#dc3545' : '#ccc',
+                  color: '#fff', border: 'none', padding: '10px 20px',
+                  borderRadius: 4, fontSize: 13, fontWeight: 600,
+                  cursor: resetConfirmText === 'RESET' && !isResetting ? 'pointer' : 'not-allowed',
+                  fontFamily: 'var(--font-body)', opacity: isResetting ? 0.6 : 1,
+                }}
+              >
+                {isResetting ? 'Resetting...' : 'Reset My Data'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reset Success Toast */}
+      {resetSuccess && (
+        <div style={{
+          position: 'fixed', bottom: 32, left: '50%', transform: 'translateX(-50%)',
+          background: 'var(--success)', color: '#fff', padding: '14px 28px', borderRadius: 8,
+          fontSize: 14, fontWeight: 600, zIndex: 10000, boxShadow: '0 8px 24px rgba(0,0,0,0.2)',
+          display: 'flex', alignItems: 'center', gap: 8,
+        }}>
+          <Check size={18} weight="bold" /> Data reset complete — starting fresh!
+        </div>
+      )}
     </div>
   );
 }
