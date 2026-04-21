@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Dollar sign "$" centred in the safe zone (24-84) -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M52,32 L52,36.5 C47.5,37.2 44,40.5 44,44.8 C44,49.8 48,52 52,53.5 L56,55
+            C58.5,56 60,57.5 60,59.5 C60,62 57.8,64 54,64 C50.5,64 48,62.5 46.5,60.5
+            L42.5,64 C44.5,66.8 47.8,68.5 52,69 L52,73 L56,73 L56,69
+            C60.8,68.2 64,64.8 64,60 C64,55 60,52.5 56,51 L52,49.5
+            C49.5,48.5 48,47 48,45 C48,42.8 50,41 53,41 C55.8,41 58,42.2 59.5,44
+            L63,40.5 C61,38 58,36.8 56,36.5 L56,32 Z" />
+</vector>
