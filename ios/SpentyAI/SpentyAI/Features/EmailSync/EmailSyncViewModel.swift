@@ -724,6 +724,7 @@ final class EmailSyncViewModel {
     }
 
     var isAnySyncing: Bool {
+        isSyncing ||
         gmailAccounts.contains { $0.syncing == true } ||
         outlookAccounts.contains { $0.syncing == true } ||
         syncStatsResponse?.isProcessing == true
