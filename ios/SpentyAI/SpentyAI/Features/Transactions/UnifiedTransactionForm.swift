@@ -34,6 +34,9 @@ struct UnifiedTransactionForm: View {
     @State private var recurringFrequency: String = "monthly"
     @State private var recurrenceDate: String = ""
     @State private var selectedPhoto: PhotosPickerItem?
+    @State private var isParsingReceipt = false
+    @State private var receiptParseMessage: String?
+    @State private var uploadedReceiptId: String?
     @State private var isSaving: Bool = false
     @State private var errorMessage: String?
 
@@ -62,6 +65,7 @@ struct UnifiedTransactionForm: View {
     @State private var downloadingAttachmentIndex: Int?
     @State private var previewURL: URL?
     @State private var showPreview = false
+    @State private var isLoadingReceipt = false
 
     // Delete confirmation
     @State private var showDeleteConfirm: Bool = false
@@ -205,6 +209,10 @@ struct UnifiedTransactionForm: View {
                             sourceDocumentCard
                         }
 
+                        if let receiptId = (resolvedTransaction ?? existingTransaction)?.receiptId, !receiptId.isEmpty, !isCreateMode {
+                            receiptDocumentCard(receiptId: receiptId)
+                        }
+
                         if let errorMessage {
                             Text(errorMessage)
                                 .font(SpentyFonts.footnote)
@@ -255,6 +263,10 @@ struct UnifiedTransactionForm: View {
                 if newId != nil {
                     populateFields()
                 }
+            }
+            .onChange(of: selectedPhoto) { _, newItem in
+                guard let newItem else { return }
+                Task { await handleReceiptUpload(newItem) }
             }
             .alert("Delete Transaction", isPresented: $showDeleteConfirm) {
                 Button("Cancel", role: .cancel) {}
@@ -707,47 +719,69 @@ struct UnifiedTransactionForm: View {
         VStack(alignment: .leading, spacing: 8) {
             sectionLabel("Attachment")
 
-            PhotosPicker(
-                selection: $selectedPhoto,
-                matching: .images
-            ) {
-                HStack(spacing: 12) {
-                    // Icon with badge background
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 10)
-                            .fill(Color.spentyPrimary.opacity(0.12))
-                            .frame(width: 36, height: 36)
+            VStack(spacing: 0) {
+                PhotosPicker(
+                    selection: $selectedPhoto,
+                    matching: .images
+                ) {
+                    HStack(spacing: 12) {
+                        // Icon with badge background
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 10)
+                                .fill(Color.spentyPrimary.opacity(0.12))
+                                .frame(width: 36, height: 36)
 
-                        Image(systemName: "doc.viewfinder")
-                            .font(.system(size: 16))
-                            .foregroundColor(.spentyPrimary)
+                            Image(systemName: "doc.viewfinder")
+                                .font(.system(size: 16))
+                                .foregroundColor(.spentyPrimary)
+                        }
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(selectedPhoto == nil ? "Attach Receipt" : "Receipt Selected")
+                                .font(.system(size: 15, weight: .medium))
+                                .foregroundColor(selectedPhoto == nil ? .spentyTextPrimary : .spentySuccess)
+                                .lineLimit(1)
+
+                            Text("Photo or document")
+                                .font(.system(size: 12))
+                                .foregroundColor(.spentyTextSecondary)
+                                .lineLimit(1)
+                        }
+
+                        Spacer()
+
+                        if selectedPhoto != nil {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 18))
+                                .foregroundColor(.spentySuccess)
+                        } else {
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundColor(.spentyTextSecondary.opacity(0.5))
+                        }
                     }
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(selectedPhoto == nil ? "Attach Receipt" : "Receipt Selected")
-                            .font(.system(size: 15, weight: .medium))
-                            .foregroundColor(selectedPhoto == nil ? .spentyTextPrimary : .spentySuccess)
-                            .lineLimit(1)
-
-                        Text("Photo or document")
-                            .font(.system(size: 12))
-                            .foregroundColor(.spentyTextSecondary)
-                            .lineLimit(1)
-                    }
-
-                    Spacer()
-
-                    if selectedPhoto != nil {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 18))
-                            .foregroundColor(.spentySuccess)
-                    } else {
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundColor(.spentyTextSecondary.opacity(0.5))
-                    }
+                    .padding(.vertical, 10)
                 }
-                .padding(.vertical, 10)
+
+                if isParsingReceipt {
+                    Divider().padding(.leading, 40)
+                    HStack(spacing: 10) {
+                        ProgressView()
+                            .tint(.spentyPrimary)
+                        Text("Scanning receipt...")
+                            .font(.system(size: 13))
+                            .foregroundColor(.spentyTextSecondary)
+                    }
+                    .padding(.vertical, 10)
+                }
+
+                if let receiptParseMessage {
+                    Divider().padding(.leading, 40)
+                    Text(receiptParseMessage)
+                        .font(.system(size: 13))
+                        .foregroundColor(uploadedReceiptId != nil ? .spentySuccess : .spentyError)
+                        .padding(.vertical, 10)
+                }
             }
             .cardStyle()
         }
@@ -937,6 +971,56 @@ struct UnifiedTransactionForm: View {
                 .disabled(downloadingAttachmentIndex != nil)
             }
         }
+    }
+
+    // MARK: - Receipt Document Card
+
+    private func receiptDocumentCard(receiptId: String) -> some View {
+        VStack(spacing: 12) {
+            HStack {
+                Image(systemName: "doc.text.image")
+                    .font(SpentyFonts.body)
+                    .foregroundColor(.spentyPrimary)
+                Text("Receipt")
+                    .font(SpentyFonts.headline)
+                    .foregroundColor(.spentyTextPrimary)
+                Spacer()
+            }
+
+            Button {
+                Task {
+                    isLoadingReceipt = true
+                    defer { isLoadingReceipt = false }
+                    do {
+                        let data = try await recordsRepo.downloadReceipt(id: receiptId)
+                        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("receipt_\(receiptId).pdf")
+                        try data.write(to: tempURL)
+                        previewURL = tempURL
+                        showPreview = true
+                    } catch {
+                        sourceError = "Failed to load receipt"
+                    }
+                }
+            } label: {
+                HStack(spacing: 10) {
+                    if isLoadingReceipt {
+                        ProgressView().tint(.spentyPrimary)
+                    } else {
+                        Image(systemName: "eye.circle")
+                            .font(SpentyFonts.body)
+                    }
+                    Text("View Receipt")
+                        .font(SpentyFonts.subheadline)
+                }
+                .foregroundColor(.spentyPrimary)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .background(Color.spentyPrimary.opacity(0.08))
+                .cornerRadius(10)
+            }
+            .disabled(isLoadingReceipt)
+        }
+        .cardStyle()
     }
 
     // MARK: - Approve / Reject Buttons
@@ -1158,6 +1242,54 @@ struct UnifiedTransactionForm: View {
         }
     }
 
+    // MARK: - Receipt Upload
+
+    @MainActor
+    private func handleReceiptUpload(_ item: PhotosPickerItem) async {
+        isParsingReceipt = true
+        receiptParseMessage = nil
+        defer { isParsingReceipt = false }
+
+        do {
+            guard let imageData = try await item.loadTransferable(type: Data.self) else {
+                receiptParseMessage = "Could not load image data"
+                return
+            }
+
+            let response = try await recordsRepo.uploadReceipt(
+                imageData: imageData,
+                filename: "receipt.jpg",
+                mimeType: "image/jpeg"
+            )
+            uploadedReceiptId = response.id
+
+            let parseResponse = try await recordsRepo.parseReceipt(id: response.id)
+            if let parsedData = parseResponse.parsedData {
+                if let total = parsedData.total ?? parsedData.amount {
+                    amount = String(format: "%.2f", total)
+                }
+                if let desc = parsedData.description ?? parsedData.vendor {
+                    descriptionText = desc
+                }
+                let normalizedPayment = Self.normalizePaymentMethod(parsedData.paymentMethod ?? "")
+                if !normalizedPayment.isEmpty {
+                    paymentMethod = normalizedPayment
+                }
+                if let catName = parsedData.categoryName, !catName.isEmpty {
+                    let lowered = catName.lowercased()
+                    if let match = categories.first(where: { ($0.name ?? "").lowercased() == lowered }) {
+                        categoryId = match.id
+                    }
+                }
+                receiptParseMessage = "Receipt scanned successfully"
+            } else {
+                receiptParseMessage = parseResponse.error ?? "Receipt uploaded but could not extract data"
+            }
+        } catch {
+            receiptParseMessage = "Failed to process receipt: \(error.localizedDescription)"
+        }
+    }
+
     // MARK: - Save
 
     private func save() async {
@@ -1209,7 +1341,7 @@ struct UnifiedTransactionForm: View {
             recurringFrequency: isRecurring ? recurringFrequency : nil,
             recurrenceDate: isRecurring ? Int(recurrenceDate) : nil,
             source: existingTransaction?.source ?? "manual",
-            receiptId: existingTransaction?.receiptId,
+            receiptId: uploadedReceiptId ?? existingTransaction?.receiptId,
             originalCurrency: existingTransaction?.originalCurrency,
             originalAmount: existingTransaction?.originalAmount,
             exchangeRate: existingTransaction?.exchangeRate,
@@ -1218,7 +1350,10 @@ struct UnifiedTransactionForm: View {
 
         do {
             if isCreateMode {
-                _ = try await transactionRepo.createTransaction(txn)
+                let created = try await transactionRepo.createTransaction(txn)
+                if let receiptId = uploadedReceiptId, let txnId = created.id as String? {
+                    try? await recordsRepo.linkReceipt(id: receiptId, transactionId: txnId)
+                }
             } else {
                 _ = try await transactionRepo.updateTransaction(id: txn.id, txn)
             }
