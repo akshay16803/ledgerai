@@ -37,5 +37,5 @@ class CashFlowRepository(private val apiClient: ApiClient) {
         apiClient.safeApiCall { apiClient.endpoints.getRecurringList() }
 
     suspend fun toggleRecurring(transactionId: String, body: ToggleRecurringBody): ApiResult<Transaction> =
-        apiClient.safeApiCall { apiClient.endpoints.toggleRecurring(transactionId, body) }
+        apiClient.safeApiCall { apiClient.endpoints.toggleRecurringCashFlow(transactionId, body) }
 }

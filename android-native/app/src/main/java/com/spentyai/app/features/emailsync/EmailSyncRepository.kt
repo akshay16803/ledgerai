@@ -41,16 +41,16 @@ class EmailSyncRepository(private val apiClient: ApiClient) {
         apiClient.safeApiCall { apiClient.endpoints.getPendingReview() }
 
     suspend fun approveTransaction(id: String): ApiResult<GenericMessageResponse> =
-        apiClient.safeApiCall { apiClient.endpoints.approveTransaction(id) }
+        apiClient.safeApiCall { apiClient.endpoints.approveEmailTransaction(id) }
 
     suspend fun rejectTransaction(id: String): ApiResult<GenericMessageResponse> =
-        apiClient.safeApiCall { apiClient.endpoints.rejectTransaction(id) }
+        apiClient.safeApiCall { apiClient.endpoints.rejectEmailTransaction(id) }
 
     suspend fun bulkApproveTransactions(ids: List<String>): ApiResult<GenericMessageResponse> =
-        apiClient.safeApiCall { apiClient.endpoints.bulkApproveTransactions(BulkTransactionRequest(transactionIds = ids)) }
+        apiClient.safeApiCall { apiClient.endpoints.bulkApproveEmailTransactions(BulkTransactionRequest(transactionIds = ids)) }
 
     suspend fun bulkRejectTransactions(ids: List<String>): ApiResult<GenericMessageResponse> =
-        apiClient.safeApiCall { apiClient.endpoints.bulkRejectTransactions(BulkTransactionRequest(transactionIds = ids)) }
+        apiClient.safeApiCall { apiClient.endpoints.bulkRejectEmailTransactions(BulkTransactionRequest(transactionIds = ids)) }
 
     suspend fun updateTransaction(id: String, body: PendingTransactionUpdate): ApiResult<Transaction> =
         apiClient.safeApiCall { apiClient.endpoints.patchTransaction(id, body) }

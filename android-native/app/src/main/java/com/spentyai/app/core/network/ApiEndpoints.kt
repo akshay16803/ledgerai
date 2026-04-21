@@ -103,10 +103,6 @@ interface ApiEndpoints {
         @Body body: JsonObject
     ): Response<Transaction>
 
-    // --- Email Sync (pending review) ---
-    @GET("api/email/pending-review")
-    suspend fun getEmailPendingReview(): Response<List<Transaction>>
-
     // --- Accounts ---
     @GET("api/accounts")
     suspend fun getAccounts(): Response<AccountListResponse>
@@ -354,7 +350,7 @@ interface ApiEndpoints {
     suspend fun getRecurringList(): Response<RecurringListResponse>
 
     @POST("api/transactions/{id}/toggle-recurring")
-    suspend fun toggleRecurring(
+    suspend fun toggleRecurringCashFlow(
         @Path("id") id: String,
         @Body body: ToggleRecurringBody
     ): Response<Transaction>
@@ -432,7 +428,7 @@ interface ApiEndpoints {
     suspend fun rejectStatement(@Path("id") id: String): Response<MessageResponse>
 
     @GET("api/accounts/sub-types")
-    suspend fun getAccountSubTypes(): Response<List<AccountSubType>>
+    suspend fun getAccountSubTypesList(): Response<List<AccountSubType>>
 
     // --- Email Sync (full) ---
     @GET("api/email/gmail/connect")
@@ -466,16 +462,16 @@ interface ApiEndpoints {
     suspend fun getPendingReview(): Response<PendingReviewResponse>
 
     @POST("api/transactions/{id}/approve")
-    suspend fun approveTransaction(@Path("id") id: String): Response<GenericMessageResponse>
+    suspend fun approveEmailTransaction(@Path("id") id: String): Response<GenericMessageResponse>
 
     @POST("api/transactions/{id}/reject")
-    suspend fun rejectTransaction(@Path("id") id: String): Response<GenericMessageResponse>
+    suspend fun rejectEmailTransaction(@Path("id") id: String): Response<GenericMessageResponse>
 
     @POST("api/transactions/bulk-approve")
-    suspend fun bulkApproveTransactions(@Body body: BulkTransactionRequest): Response<GenericMessageResponse>
+    suspend fun bulkApproveEmailTransactions(@Body body: BulkTransactionRequest): Response<GenericMessageResponse>
 
     @POST("api/transactions/bulk-reject")
-    suspend fun bulkRejectTransactions(@Body body: BulkTransactionRequest): Response<GenericMessageResponse>
+    suspend fun bulkRejectEmailTransactions(@Body body: BulkTransactionRequest): Response<GenericMessageResponse>
 
     @PATCH("api/transactions/{id}")
     suspend fun patchTransaction(

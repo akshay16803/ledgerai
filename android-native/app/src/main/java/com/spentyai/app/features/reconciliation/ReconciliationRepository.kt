@@ -51,7 +51,7 @@ class ReconciliationRepository(private val apiClient: ApiClient) {
         apiClient.safeApiCall { apiClient.endpoints.getAccounts() }
 
     suspend fun fetchAccountSubTypes(): ApiResult<List<AccountSubType>> =
-        apiClient.safeApiCall { apiClient.endpoints.getAccountSubTypes() }
+        apiClient.safeApiCall { apiClient.endpoints.getAccountSubTypesList() }
 
     suspend fun fetchCategories(): ApiResult<List<Category>> =
         apiClient.safeApiCall { apiClient.endpoints.getCategories() }
