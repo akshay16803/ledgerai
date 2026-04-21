@@ -482,7 +482,7 @@ private fun DatePickerField(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun SpentyDatePickerDialog(
+internal fun SpentyDatePickerDialog(
     initialDate: String,
     onDateSelected: (String) -> Unit,
     onDismiss: () -> Unit

@@ -307,7 +307,7 @@ private fun AccountInfoCard(
                         Text("Opening Balance", style = SpentyType.Caption1, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         if (account.openingBalance != null) {
                             Text(
-                                text = formatCurrency(account.openingBalance, account.currency),
+                                text = formatCurrency(account.openingBalance, account.currency ?: "INR"),
                                 style = SpentyType.Subheadline.copy(fontWeight = FontWeight.Medium),
                                 color = MaterialTheme.colorScheme.onSurface
                             )
@@ -333,16 +333,16 @@ private fun AccountInfoCard(
 @Composable
 private fun DetailGrid(account: Account) {
     val items = buildList {
-        if (!account.accountNumber.isNullOrEmpty()) add("Account No." to account.accountNumber)
+        if (!account.accountNumber.isNullOrEmpty()) add("Account No." to account.accountNumber!!)
         account.currency?.let { add("Currency" to it) }
         if (account.accountType?.lowercase() == "liability") {
             account.loanInterestRate?.let { add("Interest Rate" to "${it}%") }
             account.loanTenureMonths?.let { add("Tenure" to "$it months") }
-            account.loanEmiAmount?.let { add("EMI" to formatCurrency(it, account.currency)) }
+            account.loanEmiAmount?.let { add("EMI" to formatCurrency(it, account.currency ?: "INR")) }
             account.loanEmiDay?.let { add("EMI Day" to "$it") }
-            account.loanSanctionedAmount?.let { add("Sanctioned" to formatCurrency(it, account.currency)) }
+            account.loanSanctionedAmount?.let { add("Sanctioned" to formatCurrency(it, account.currency ?: "INR")) }
         }
-        if (!account.brokerName.isNullOrEmpty()) add("Broker" to account.brokerName)
+        if (!account.brokerName.isNullOrEmpty()) add("Broker" to account.brokerName!!)
     }
 
     if (items.isNotEmpty()) {
@@ -555,7 +555,7 @@ private fun TransactionsSection(
 
 @Composable
 private fun TransactionRow(txn: Transaction) {
-    val isIncome = txn.type == TransactionType.INCOME
+    val isIncome = txn.transactionType?.lowercase() == "income"
 
     Row(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
@@ -580,21 +580,21 @@ private fun TransactionRow(txn: Transaction) {
 
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = txn.description,
+                text = txn.description ?: "--",
                 style = SpentyType.Callout,
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1
             )
             Text(
-                text = txn.date,
+                text = txn.date?.take(10) ?: "--",
                 style = SpentyType.Caption1,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
 
         CurrencyText(
-            amount = if (isIncome) txn.amount else -txn.amount,
-            currencyCode = txn.currency,
+            amount = if (isIncome) (txn.amount ?: 0.0) else -(txn.amount ?: 0.0),
+            currencyCode = txn.originalCurrency ?: "INR",
             size = CurrencySize.SMALL,
             colorBySign = true
         )
@@ -755,12 +755,12 @@ private fun ODInterestSection(
                 colors = SpentyStyle.cardColors()
             ) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    ODResultRow("Interest Amount", formatCurrency(result.interest, account.currency), SpentyError)
+                    ODResultRow("Interest Amount", formatCurrency(result.interest, account.currency ?: "INR"), SpentyError)
                     HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
                     ODResultRow("Number of Days", "${result.days}", MaterialTheme.colorScheme.onSurface)
                     result.averageBalance?.let {
                         HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
-                        ODResultRow("Average Balance", formatCurrency(it, account.currency), SpentyInfo)
+                        ODResultRow("Average Balance", formatCurrency(it, account.currency ?: "INR"), SpentyInfo)
                     }
                     result.rate?.let {
                         HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))

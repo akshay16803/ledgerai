@@ -177,7 +177,7 @@ fun RecordBillPaymentScreen(
                         ExposedDropdownMenu(expanded = accountExpanded, onDismissRequest = { accountExpanded = false }) {
                             DropdownMenuItem(text = { Text("None") }, onClick = { selectedAccountId = null; accountExpanded = false })
                             state.accounts.forEach { account ->
-                                DropdownMenuItem(text = { Text(account.name) }, onClick = { selectedAccountId = account.id; accountExpanded = false })
+                                DropdownMenuItem(text = { Text(account.name ?: "Unnamed") }, onClick = { selectedAccountId = account.id; accountExpanded = false })
                             }
                         }
                     }

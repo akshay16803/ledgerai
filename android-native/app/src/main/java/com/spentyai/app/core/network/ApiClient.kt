@@ -3,7 +3,9 @@ package com.spentyai.app.core.network
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import com.spentyai.app.BuildConfig
 import com.spentyai.app.core.auth.TokenStore
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNamingStrategy
 import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -14,12 +16,13 @@ import java.util.concurrent.TimeUnit
 
 class ApiClient(private val tokenStore: TokenStore) {
 
+    @OptIn(ExperimentalSerializationApi::class)
     private val json = Json {
         ignoreUnknownKeys = true
         coerceInputValues = true
         isLenient = true
         encodeDefaults = true
-        namingStrategy = kotlinx.serialization.json.JsonNamingStrategy.SnakeCase
+        namingStrategy = JsonNamingStrategy.SnakeCase
     }
 
     private val authInterceptor = Interceptor { chain ->

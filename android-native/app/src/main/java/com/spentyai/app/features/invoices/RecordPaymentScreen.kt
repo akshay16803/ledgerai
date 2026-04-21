@@ -274,7 +274,7 @@ fun RecordPaymentScreen(
                             )
                             state.accounts.forEach { account ->
                                 DropdownMenuItem(
-                                    text = { Text(account.name) },
+                                    text = { Text(account.name ?: "Unnamed") },
                                     onClick = {
                                         selectedAccountId = account.id
                                         accountExpanded = false
