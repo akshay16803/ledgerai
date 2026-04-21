@@ -9,7 +9,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.*
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -67,8 +66,6 @@ fun TransactionLedgerScreen(
     }
 
     val horizontalScrollState = rememberScrollState()
-    var isRefreshing by remember { mutableStateOf(false) }
-
     Column(modifier = Modifier.fillMaxSize()) {
         // Account filter hint
         if (!isFilteredByAccount) {
@@ -145,15 +142,7 @@ fun TransactionLedgerScreen(
         }
 
         // Ledger rows
-        PullToRefreshBox(
-            isRefreshing = isRefreshing,
-            onRefresh = {
-                isRefreshing = true
-                viewModel.refresh()
-                isRefreshing = false
-            },
-            modifier = Modifier.fillMaxSize()
-        ) {
+        Box(modifier = Modifier.fillMaxSize()) {
             LazyColumn(modifier = Modifier.fillMaxSize()) {
                 itemsIndexed(
                     items = sortedTransactions,

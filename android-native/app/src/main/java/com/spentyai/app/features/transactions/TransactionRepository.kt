@@ -107,7 +107,7 @@ class TransactionRepository(private val apiClient: ApiClient) {
         }
     }
 
-    suspend fun bulkUpdate(ids: List<String>, fields: JsonObject): ApiResult<JsonObject> {
+    suspend fun bulkUpdate(ids: List<String>, fields: JsonObject): ApiResult<Transaction> {
         val body = JsonObject(
             mapOf(
                 "transaction_ids" to kotlinx.serialization.json.JsonArray(ids.map { JsonPrimitive(it) }),

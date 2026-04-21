@@ -21,7 +21,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -150,7 +149,7 @@ fun RecordBillPaymentScreen(
                         value = selectedMethod, onValueChange = {}, readOnly = true,
                         label = { Text("Payment Method") },
                         trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(methodExpanded) },
-                        modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryNotEditable),
+                        modifier = Modifier.fillMaxWidth().menuAnchor(),
                         shape = SpentyStyle.inputShape, colors = SpentyStyle.inputColors()
                     )
                     ExposedDropdownMenu(expanded = methodExpanded, onDismissRequest = { methodExpanded = false }) {
@@ -171,7 +170,7 @@ fun RecordBillPaymentScreen(
                             value = state.accounts.find { it.id == selectedAccountId }?.name ?: "Select Account",
                             onValueChange = {}, readOnly = true, label = { Text("Account") },
                             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(accountExpanded) },
-                            modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryNotEditable),
+                            modifier = Modifier.fillMaxWidth().menuAnchor(),
                             shape = SpentyStyle.inputShape, colors = SpentyStyle.inputColors()
                         )
                         ExposedDropdownMenu(expanded = accountExpanded, onDismissRequest = { accountExpanded = false }) {

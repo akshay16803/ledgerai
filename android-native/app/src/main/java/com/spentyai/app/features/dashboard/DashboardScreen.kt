@@ -55,8 +55,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
-import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -308,17 +306,7 @@ fun DashboardScreen(
                 modifier = Modifier.padding(paddingValues)
             )
         } else {
-            val pullRefreshState = rememberPullToRefreshState()
-            var isRefreshing by remember { mutableStateOf(false) }
-
-            PullToRefreshBox(
-                isRefreshing = isRefreshing,
-                onRefresh = {
-                    isRefreshing = true
-                    viewModel.refresh()
-                    isRefreshing = false
-                },
-                state = pullRefreshState,
+            Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(paddingValues)

@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -28,7 +30,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -413,7 +414,7 @@ private fun CustomerPickerField(
             readOnly = customers.isNotEmpty(),
             modifier = Modifier
                 .fillMaxWidth()
-                .menuAnchor(MenuAnchorType.PrimaryNotEditable),
+                .menuAnchor(),
             label = { Text("Customer") },
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
             shape = SpentyStyle.inputShape,
@@ -699,18 +700,8 @@ private fun Modifier.clickableNoRipple(onClick: () -> Unit): Modifier {
     return this.then(
         Modifier.clickable(
             indication = null,
-            interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+            interactionSource = remember { MutableInteractionSource() },
             onClick = onClick
         )
     )
 }
-
-private fun Modifier.clickable(
-    indication: androidx.compose.foundation.Indication?,
-    interactionSource: androidx.compose.foundation.interaction.MutableInteractionSource,
-    onClick: () -> Unit
-): Modifier = androidx.compose.foundation.clickable(
-    interactionSource = interactionSource,
-    indication = indication,
-    onClick = onClick
-).let { this.then(it) }

@@ -13,7 +13,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.StorefrontOutlined
+import androidx.compose.material.icons.outlined.Storefront
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
@@ -26,7 +26,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -85,16 +85,14 @@ fun VendorListScreen(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
-        PullToRefreshBox(
-            isRefreshing = state.isLoading,
-            onRefresh = { viewModel.loadVendors() },
+        Box(
             modifier = Modifier.fillMaxSize().padding(padding)
         ) {
             if (state.isLoading && state.vendors.isEmpty()) {
                 LoadingView(message = "Loading vendors...")
             } else if (filtered.isEmpty()) {
                 EmptyStateView(
-                    icon = Icons.Filled.StorefrontOutlined,
+                    icon = Icons.Outlined.Storefront,
                     title = "No Vendors Yet",
                     subtitle = if (state.searchText.isEmpty()) "Tap the + button to add your first vendor."
                               else "No vendors match your search."

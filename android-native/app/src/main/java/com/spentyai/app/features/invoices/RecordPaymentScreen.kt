@@ -19,7 +19,6 @@ import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
@@ -215,7 +214,7 @@ fun RecordPaymentScreen(
                         trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(methodExpanded) },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .menuAnchor(MenuAnchorType.PrimaryNotEditable),
+                            .menuAnchor(),
                         shape = SpentyStyle.inputShape,
                         colors = SpentyStyle.inputColors()
                     )
@@ -257,7 +256,7 @@ fun RecordPaymentScreen(
                             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(accountExpanded) },
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .menuAnchor(MenuAnchorType.PrimaryNotEditable),
+                                .menuAnchor(),
                             shape = SpentyStyle.inputShape,
                             colors = SpentyStyle.inputColors()
                         )

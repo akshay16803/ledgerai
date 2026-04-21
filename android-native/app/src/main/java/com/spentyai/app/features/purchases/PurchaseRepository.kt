@@ -91,6 +91,7 @@ class PurchaseRepository(private val apiClient: ApiClient) {
 
     suspend fun fetchAccounts(): ApiResult<List<Account>> =
         apiClient.safeApiCall { apiClient.endpoints.getAccounts() }
+            .map { it.accounts }
 }
 
 fun buildBillPayload(

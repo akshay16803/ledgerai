@@ -21,7 +21,7 @@ import androidx.compose.material.icons.filled.ArrowCircleDown
 import androidx.compose.material.icons.filled.ArrowCircleUp
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Email
-import androidx.compose.material.icons.filled.EqualRounded
+import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.Inbox
 import androidx.compose.material.icons.filled.ListAlt
 import androidx.compose.material.icons.filled.TableChart
@@ -189,7 +189,7 @@ fun PastInsightDetailScreen(
                         DetailStatCard(
                             title = "Net",
                             value = formatCurrency(summary.net ?: 0.0),
-                            icon = Icons.Default.EqualRounded,
+                            icon = Icons.Default.DragHandle,
                             color = SpentyPrimary,
                             modifier = Modifier.weight(1f)
                         )
