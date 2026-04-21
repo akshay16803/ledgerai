@@ -73,18 +73,27 @@ final class EmailSyncViewModel {
     var showSyncConfirmation = false
 
     // MARK: - Sync Date Picker
-    // When an account has no syncFromDate yet (first-time sync, or after Reset Data),
-    // we ask the user to pick a start date instead of silently defaulting.
 
     var showSyncDatePicker = false
     var pendingSyncAccount: EmailAccount?
     var pendingSyncProvider: String = "gmail"
     var pendingSyncDate: Date = Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date()
+    var showCustomDatePicker = false
 
     /// Set to the provider name ("gmail" / "outlook") right after a successful OAuth.
-    /// The view observes this and shows the sync-date picker once the OAuth web view
-    /// is fully dismissed, avoiding SwiftUI sheet-presentation race conditions.
     var justConnectedProvider: String?
+
+    // MARK: - Connection Animation
+    var showConnectionSuccess = false
+    var connectionSuccessProvider = ""
+
+    // MARK: - Toast Auto-Dismiss
+    private var toastDismissTask: Task<Void, Never>?
+
+    // MARK: - Polling
+    private var pollingTask: Task<Void, Never>?
+    /// Tracks when the last successful stats refresh happened
+    var lastRefreshedAt: Date?
 
     // MARK: - Dependencies
 
@@ -112,12 +121,8 @@ final class EmailSyncViewModel {
         _ = await (gmailTask, outlookTask, statsTask, smsTask)
 
         isLoading = false
+        lastRefreshedAt = Date()
 
-        // After every full load, check whether any connected account still
-        // needs a sync-start date (first-time connect, or post-Reset reconnect).
-        // This ensures the date picker appears even if the OAuth callback's
-        // prompt was missed due to timing, network issues, or the user
-        // navigating away and back.
         promptForSyncDateIfNeeded()
     }
 
@@ -151,7 +156,6 @@ final class EmailSyncViewModel {
             }
         } catch {
             print("[SyncDatePicker] loadGmailStatus FAILED: \(error)")
-            // Silently handle — may not have Gmail connected
         }
     }
 
@@ -201,7 +205,7 @@ final class EmailSyncViewModel {
             let status = try await repository.outlookStatus()
             outlookAccounts = status.accounts ?? []
         } catch {
-            // Silently handle — may not have Outlook connected
+            // Silently handle
         }
     }
 
@@ -230,14 +234,12 @@ final class EmailSyncViewModel {
 
     @MainActor
     func startSync(forAccount account: EmailAccount? = nil) async {
-        // Resolve the account the user is about to sync (explicit > first Gmail > first Outlook).
         let resolved: EmailAccount? = account ?? gmailAccounts.first ?? outlookAccounts.first
         guard let email = resolved?.email else {
             handleError(NSError(domain: "", code: 0, userInfo: [NSLocalizedDescriptionKey: "No email account available to sync"]))
             return
         }
 
-        // Determine the provider for this account
         let provider: String
         if gmailAccounts.contains(where: { $0.email == email }) {
             provider = "gmail"
@@ -245,13 +247,11 @@ final class EmailSyncViewModel {
             provider = "outlook"
         }
 
-        // First-time sync (or post-Reset reconnect): no saved start date.
-        // Ask the user which date to start scanning emails from, instead of
-        // silently defaulting.
         guard let existingDate = resolved?.syncFromDate else {
             pendingSyncAccount = resolved
             pendingSyncProvider = provider
             pendingSyncDate = Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date()
+            showCustomDatePicker = false
             showSyncDatePicker = true
             return
         }
@@ -265,28 +265,46 @@ final class EmailSyncViewModel {
 
         do {
             syncPhase = .fetchingEmails
+            syncProgressMessage = "Sending request to server..."
             let response = try await repository.startSync(gmailEmail: email, syncFromDate: syncFromDate)
             syncPhase = .processingAI
-            showSuccessMessage(response.message ?? "Sync started")
+            syncProgressMessage = response.message ?? "Backend is processing your emails..."
+            showSuccessMessage(response.message ?? "Email sync started")
+
+            // Start polling for real progress
+            startPolling()
+
+            // Initial refresh
             await loadSyncStats()
-            syncPhase = .creatingTransactions
             await loadGmailStatus()
             await loadOutlookStatus()
-            syncPhase = .complete
-            try? await Task.sleep(nanoseconds: 3_000_000_000)
-            syncPhase = .idle
+            lastRefreshedAt = Date()
+
+            // Check if backend is still processing
+            if syncStatsResponse?.isProcessing == true {
+                syncPhase = .processingAI
+                syncProgressMessage = "Backend is still processing..."
+            } else {
+                syncPhase = .complete
+                syncProgressMessage = "All emails processed"
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                syncPhase = .idle
+                syncProgressMessage = ""
+                stopPolling()
+            }
         } catch {
             syncPhase = .failed
+            syncProgressMessage = ""
             handleError(error)
             try? await Task.sleep(nanoseconds: 3_000_000_000)
             syncPhase = .idle
+            syncProgressMessage = ""
         }
 
         isSyncing = false
     }
 
     /// Called from the sync-date picker sheet once the user confirms their choice.
-    /// Fires the sync with the picked date and clears the pending state.
     @MainActor
     func confirmSyncDate() async {
         guard let email = pendingSyncAccount?.email ?? gmailAccounts.first?.email ?? outlookAccounts.first?.email else {
@@ -295,7 +313,6 @@ final class EmailSyncViewModel {
             return
         }
 
-        // Close the sheet first so the sync progress UI becomes visible.
         syncPhase = .connecting
         showSyncDatePicker = false
         let formatter = ISO8601DateFormatter()
@@ -306,21 +323,39 @@ final class EmailSyncViewModel {
 
         do {
             syncPhase = .fetchingEmails
+            syncProgressMessage = "Sending request to server..."
             let response = try await repository.startSync(gmailEmail: email, syncFromDate: syncFromDate)
             syncPhase = .processingAI
-            showSuccessMessage(response.message ?? "Sync started")
+            syncProgressMessage = response.message ?? "Backend is processing your emails..."
+            showSuccessMessage(response.message ?? "Email sync started")
+
+            // Start polling for real progress
+            startPolling()
+
+            // Initial refresh
             await loadSyncStats()
-            syncPhase = .creatingTransactions
             await loadGmailStatus()
             await loadOutlookStatus()
-            syncPhase = .complete
-            try? await Task.sleep(nanoseconds: 3_000_000_000)
-            syncPhase = .idle
+            lastRefreshedAt = Date()
+
+            if syncStatsResponse?.isProcessing == true {
+                syncPhase = .processingAI
+                syncProgressMessage = "Backend is still processing..."
+            } else {
+                syncPhase = .complete
+                syncProgressMessage = "All emails processed"
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                syncPhase = .idle
+                syncProgressMessage = ""
+                stopPolling()
+            }
         } catch {
             syncPhase = .failed
+            syncProgressMessage = ""
             handleError(error)
             try? await Task.sleep(nanoseconds: 3_000_000_000)
             syncPhase = .idle
+            syncProgressMessage = ""
         }
 
         isSyncing = false
@@ -332,57 +367,58 @@ final class EmailSyncViewModel {
     func cancelSyncDatePicker() {
         showSyncDatePicker = false
         pendingSyncAccount = nil
+        showCustomDatePicker = false
     }
 
-    /// Proactively opens the sync-date picker if any connected account has
-    /// no saved start date (first-time connect, or reconnect after Reset).
-    /// Also called at the end of `loadAll()` as a safety net.
+    /// Proactively opens the sync-date picker if any connected account has no saved start date.
     @MainActor
     func promptForSyncDateIfNeeded() {
         guard !showSyncDatePicker else { return }
 
-        // Check Gmail accounts first, then Outlook
         if let account = gmailAccounts.first(where: { $0.syncFromDate == nil }) {
             print("[SyncDatePicker] Found Gmail account without syncFromDate: \(account.email ?? "nil")")
             pendingSyncAccount = account
             pendingSyncProvider = "gmail"
             pendingSyncDate = Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date()
+            showCustomDatePicker = false
             showSyncDatePicker = true
         } else if let account = outlookAccounts.first(where: { $0.syncFromDate == nil }) {
             print("[SyncDatePicker] Found Outlook account without syncFromDate: \(account.email ?? "nil")")
             pendingSyncAccount = account
             pendingSyncProvider = "outlook"
             pendingSyncDate = Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date()
+            showCustomDatePicker = false
             showSyncDatePicker = true
         } else {
             print("[SyncDatePicker] No accounts need sync date. Gmail: \(gmailAccounts.count), Outlook: \(outlookAccounts.count)")
-            for a in gmailAccounts {
-                print("[SyncDatePicker]   Gmail \(a.email ?? "nil") syncFromDate=\(String(describing: a.syncFromDate))")
-            }
         }
     }
 
     /// Called by the view when `justConnectedProvider` transitions from nil to a value.
-    /// Uses a generous delay so the ASWebAuthenticationSession web view finishes
-    /// its full dismiss animation before we present the sync-date sheet.
-    /// Always force-opens the picker — the backend may return a non-nil syncFromDate
-    /// even for newly connected accounts, so we can't rely on promptForSyncDateIfNeeded().
     @MainActor
     func showSyncPickerForJustConnected() async {
         guard let provider = justConnectedProvider else { return }
         print("[SyncDatePicker] showSyncPickerForJustConnected provider=\(provider)")
 
-        // Clear the flag immediately so we don't fire twice.
         justConnectedProvider = nil
 
-        // Wait 1.5s for the OAuth web view to fully dismiss.
-        try? await Task.sleep(nanoseconds: 1_500_000_000)
+        // Show connection success animation
+        connectionSuccessProvider = provider
+        showConnectionSuccess = true
 
-        // Always force-open the picker after a fresh OAuth connection.
+        // Wait for animation to show + OAuth web view to dismiss
+        try? await Task.sleep(nanoseconds: 2_000_000_000)
+
+        showConnectionSuccess = false
+
+        // Small gap before showing date picker
+        try? await Task.sleep(nanoseconds: 500_000_000)
+
         let accounts = provider == "gmail" ? gmailAccounts : outlookAccounts
         pendingSyncAccount = accounts.first
         pendingSyncProvider = provider
         pendingSyncDate = Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date()
+        showCustomDatePicker = false
         showSyncDatePicker = true
         print("[SyncDatePicker] Force-opened picker for \(provider)")
     }
@@ -397,12 +433,51 @@ final class EmailSyncViewModel {
             let response = try await repository.retryPending(gmailEmail: gmailEmail)
             let msg = response.message ?? "Processing \(response.count ?? 0) pending emails"
             showSuccessMessage(msg)
+            startPolling()
             await loadSyncStats()
         } catch {
             handleError(error)
         }
 
         isRetrying = false
+    }
+
+    // MARK: - Polling
+
+    @MainActor
+    func startPolling() {
+        stopPolling()
+        pollingTask = Task { [weak self] in
+            guard let self else { return }
+            // Poll every 10 seconds for up to 5 minutes
+            for _ in 0..<30 {
+                try? await Task.sleep(nanoseconds: 10_000_000_000)
+                if Task.isCancelled { break }
+
+                await self.loadSyncStats()
+                await self.loadGmailStatus()
+                await self.loadOutlookStatus()
+                self.lastRefreshedAt = Date()
+
+                // Stop polling if backend is done processing
+                if self.syncStatsResponse?.isProcessing != true && !self.isAnySyncing {
+                    if self.syncPhase == .processingAI || self.syncPhase == .fetchingEmails || self.syncPhase == .creatingTransactions {
+                        self.syncPhase = .complete
+                        self.syncProgressMessage = "All emails processed"
+                        try? await Task.sleep(nanoseconds: 3_000_000_000)
+                        self.syncPhase = .idle
+                        self.syncProgressMessage = ""
+                    }
+                    break
+                }
+            }
+        }
+    }
+
+    @MainActor
+    func stopPolling() {
+        pollingTask?.cancel()
+        pollingTask = nil
     }
 
     // MARK: - Stats
@@ -527,7 +602,6 @@ final class EmailSyncViewModel {
             showEditSheet = false
             editingTransaction = nil
 
-            // Update the local array in-place instead of refetching the entire list
             if let index = pendingTransactions.firstIndex(where: { $0.id == txn.id }) {
                 var updated = pendingTransactions[index]
                 if let desc = update.description { updated.description = desc }
@@ -595,7 +669,6 @@ final class EmailSyncViewModel {
                 callbackURLScheme: "spentyai"
             ) { [weak self] callbackURL, error in
                 if let error {
-                    // User explicitly cancelled — don't show an error
                     if (error as NSError).code != ASWebAuthenticationSessionError.canceledLogin.rawValue {
                         Task { @MainActor in
                             self?.errorMessage = "Authentication failed. Please try again."
@@ -603,7 +676,6 @@ final class EmailSyncViewModel {
                         }
                     }
                 } else if let callbackURL {
-                    // Check callback URL for error param from backend
                     let components = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false)
                     let errorParam = components?.queryItems?.first(where: { $0.name == "error" })?.value
                     if let errorParam, !errorParam.isEmpty {
@@ -614,9 +686,8 @@ final class EmailSyncViewModel {
                     } else {
                         Task { @MainActor in
                             guard let self else { return }
-                            self.showSuccessMessage("\(provider.capitalized) connected successfully")
 
-                            // Reload accounts so the UI is up to date.
+                            // Reload accounts
                             if provider == "gmail" {
                                 await self.loadGmailStatus()
                             } else {
@@ -624,10 +695,7 @@ final class EmailSyncViewModel {
                             }
                             await self.loadSyncStats()
 
-                            // Signal that an OAuth just completed. The view watches
-                            // this flag and shows the sync-date picker after the
-                            // ASWebAuthenticationSession web view finishes
-                            // its dismiss animation (~1-1.5 s).
+                            // Signal connection success — triggers animation then date picker
                             print("[SyncDatePicker] OAuth succeeded for \(provider). Setting justConnectedProvider.")
                             self.justConnectedProvider = provider
                         }
@@ -661,6 +729,14 @@ final class EmailSyncViewModel {
         syncStatsResponse?.isProcessing == true
     }
 
+    var allStatsZero: Bool {
+        guard let stats = syncStatsResponse else { return true }
+        return (stats.totalSynced ?? 0) == 0 &&
+               (stats.transactionsCreated ?? 0) == 0 &&
+               (stats.pendingReview ?? 0) == 0 &&
+               (stats.aiFailed ?? 0) == 0
+    }
+
     // MARK: - Helpers
 
     @MainActor
@@ -674,8 +750,17 @@ final class EmailSyncViewModel {
     }
 
     @MainActor
-    private func showSuccessMessage(_ message: String) {
+    func showSuccessMessage(_ message: String) {
         successMessage = message
         showSuccess = true
+
+        // Auto-dismiss toast after 3 seconds
+        toastDismissTask?.cancel()
+        toastDismissTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            if !Task.isCancelled {
+                self?.showSuccess = false
+            }
+        }
     }
 }
