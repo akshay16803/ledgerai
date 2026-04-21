@@ -6,9 +6,19 @@ struct AccountDetailView: View {
     @State private var viewModel = AccountsViewModel()
     let accountId: String
 
-    @State private var showEditSheet = false
+    enum ActiveSheet: Identifiable {
+        case editAccount
+        case editTransaction(Transaction)
+        var id: String {
+            switch self {
+            case .editAccount: return "editAccount"
+            case .editTransaction(let txn): return "editTransaction-\(txn.id)"
+            }
+        }
+    }
+
+    @State private var activeSheet: ActiveSheet?
     @State private var selectedTab = 0
-    @State private var selectedTransaction: Transaction?
     @State private var isEditingOpeningBalance = false
     @State private var editOpeningBalance = ""
     @State private var editAsOfDate = Date()
@@ -50,7 +60,7 @@ struct AccountDetailView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     viewModel.editingAccount = account
-                    showEditSheet = true
+                    activeSheet = .editAccount
                 } label: {
                     Image(systemName: "pencil.circle")
                         .font(.system(size: 18))
@@ -58,14 +68,16 @@ struct AccountDetailView: View {
                 }
             }
         }
-        .sheet(isPresented: $showEditSheet) {
-            AccountFormView(viewModel: viewModel, account: account)
-        }
-        .sheet(item: $selectedTransaction) { txn in
-            UnifiedTransactionForm(
-                mode: .edit(txn),
-                onComplete: { Task { await viewModel.loadAccountDetail(accountId) } }
-            )
+        .sheet(item: $activeSheet) { sheet in
+            switch sheet {
+            case .editAccount:
+                AccountFormView(viewModel: viewModel, account: account)
+            case .editTransaction(let txn):
+                UnifiedTransactionForm(
+                    mode: .edit(txn),
+                    onComplete: { Task { await viewModel.loadAccountDetail(accountId) } }
+                )
+            }
         }
         .task {
             await viewModel.loadAccountDetail(accountId)
@@ -591,7 +603,7 @@ struct AccountDetailView: View {
                 LazyVStack(spacing: 0) {
                     ForEach(viewModel.accountTransactions) { txn in
                         Button {
-                            selectedTransaction = txn
+                            activeSheet = .editTransaction(txn)
                         } label: {
                             transactionRow(txn)
                         }
