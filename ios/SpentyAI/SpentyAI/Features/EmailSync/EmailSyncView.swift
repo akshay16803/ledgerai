@@ -9,6 +9,7 @@ struct EmailSyncView: View {
             VStack(spacing: 20) {
                 errorSection
                 successSection
+                syncProgressSection
                 overviewStatsSection
                 gmailSection
                 outlookSection
@@ -83,6 +84,55 @@ struct EmailSyncView: View {
             .background(Color.spentySuccess)
             .cornerRadius(10)
             .transition(.move(edge: .top).combined(with: .opacity))
+        }
+    }
+
+    // MARK: - Sync Progress
+
+    @ViewBuilder
+    private var syncProgressSection: some View {
+        if viewModel.syncPhase != .idle {
+            HStack(spacing: 14) {
+                if viewModel.syncPhase == .complete {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 28))
+                        .foregroundColor(.spentySuccess)
+                } else if viewModel.syncPhase == .failed {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 28))
+                        .foregroundColor(.spentyError)
+                } else {
+                    ProgressView()
+                        .controlSize(.regular)
+                        .tint(Color.spentyPrimary)
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(viewModel.syncPhase.rawValue)
+                        .font(SpentyFonts.headline)
+                        .foregroundColor(
+                            viewModel.syncPhase == .complete ? .spentySuccess :
+                            viewModel.syncPhase == .failed ? .spentyError :
+                            .spentyTextPrimary
+                        )
+
+                    if !viewModel.syncProgressMessage.isEmpty {
+                        Text(viewModel.syncProgressMessage)
+                            .font(SpentyFonts.caption1)
+                            .foregroundColor(.spentyTextSecondary)
+                    }
+                }
+
+                Spacer()
+            }
+            .padding(16)
+            .background(
+                viewModel.syncPhase == .complete ? Color.spentySuccess.opacity(0.08) :
+                viewModel.syncPhase == .failed ? Color.spentyError.opacity(0.08) :
+                Color.spentyPrimary.opacity(0.08)
+            )
+            .cornerRadius(12)
+            .animation(.easeInOut, value: viewModel.syncPhase.rawValue)
         }
     }
 
@@ -276,6 +326,12 @@ struct EmailSyncView: View {
                             .font(SpentyFonts.caption1)
                             .foregroundColor(.spentyTextSecondary)
                     }
+
+                    if let syncFromDate = account.syncFromDate {
+                        Text("Syncing from \(syncFromDate, format: .dateTime.month(.abbreviated).day().year())")
+                            .font(SpentyFonts.caption1)
+                            .foregroundColor(.spentyTextSecondary)
+                    }
                 }
 
                 Spacer()
@@ -285,14 +341,37 @@ struct EmailSyncView: View {
                         ProgressView()
                             .controlSize(.mini)
                             .tint(Color.spentyPrimary)
-                        Text("Syncing")
+                        Text("Syncing...")
                             .font(SpentyFonts.caption2)
                             .foregroundColor(.spentyPrimary)
                     }
                 } else if account.needsReconnect == true {
-                    StatusBadge(status: "failed")
+                    HStack(spacing: 4) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 12))
+                            .foregroundColor(.spentyWarning)
+                        Text("Needs Reconnect")
+                            .font(SpentyFonts.caption2)
+                            .foregroundColor(.spentyWarning)
+                    }
+                } else if account.syncFromDate != nil {
+                    HStack(spacing: 4) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 12))
+                            .foregroundColor(.spentySuccess)
+                        Text("Up to date")
+                            .font(SpentyFonts.caption2)
+                            .foregroundColor(.spentySuccess)
+                    }
                 } else {
-                    StatusBadge(status: "connected")
+                    HStack(spacing: 4) {
+                        Image(systemName: "clock")
+                            .font(.system(size: 12))
+                            .foregroundColor(.spentyTextSecondary)
+                        Text("Never synced")
+                            .font(SpentyFonts.caption2)
+                            .foregroundColor(.spentyTextSecondary)
+                    }
                 }
             }
 
@@ -584,7 +663,7 @@ private struct SyncDatePickerSheet: View {
                     .tint(Color.spentyPrimary)
 
                     Button {
-                        Task { await viewModel.confirmSyncDate() }
+                        viewModel.showSyncConfirmation = true
                     } label: {
                         HStack(spacing: 8) {
                             if viewModel.isSyncing {
@@ -614,6 +693,15 @@ private struct SyncDatePickerSheet: View {
                     }
                     .foregroundColor(.spentyTextSecondary)
                 }
+            }
+            .alert("Start Email Sync?", isPresented: $viewModel.showSyncConfirmation) {
+                Button("Cancel", role: .cancel) { }
+                Button("Start Sync") {
+                    Task { await viewModel.confirmSyncDate() }
+                    dismiss()
+                }
+            } message: {
+                Text("SpentyAI will scan all your emails from \(viewModel.pendingSyncDate, format: .dateTime.month(.abbreviated).day().year()) onward and automatically detect transactions. New emails will continue syncing until you disconnect this account.")
             }
         }
     }

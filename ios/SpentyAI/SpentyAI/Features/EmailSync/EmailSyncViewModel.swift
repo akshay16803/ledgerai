@@ -1,6 +1,16 @@
 import Foundation
 import AuthenticationServices
 
+enum SyncPhase: String {
+    case idle
+    case connecting = "Connecting to email server..."
+    case fetchingEmails = "Fetching emails..."
+    case processingAI = "AI is analyzing your emails..."
+    case creatingTransactions = "Creating transactions..."
+    case complete = "Sync complete!"
+    case failed = "Sync failed"
+}
+
 /// Lightweight presentation anchor for ASWebAuthenticationSession
 private final class AuthPresentationContext: NSObject, ASWebAuthenticationPresentationContextProviding {
     func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
@@ -54,6 +64,13 @@ final class EmailSyncViewModel {
     // MARK: - Selection for bulk actions
 
     var selectedTransactionIds: Set<String> = []
+
+    // MARK: - Sync Progress
+    var syncPhase: SyncPhase = .idle
+    var syncProgressMessage: String = ""
+
+    // MARK: - Sync Confirmation
+    var showSyncConfirmation = false
 
     // MARK: - Sync Date Picker
     // When an account has no syncFromDate yet (first-time sync, or after Reset Data),
@@ -242,17 +259,27 @@ final class EmailSyncViewModel {
         let formatter = ISO8601DateFormatter()
         let syncFromDate = formatter.string(from: existingDate)
 
+        syncPhase = .connecting
         isSyncing = true
         showError = false
 
         do {
+            syncPhase = .fetchingEmails
             let response = try await repository.startSync(gmailEmail: email, syncFromDate: syncFromDate)
+            syncPhase = .processingAI
             showSuccessMessage(response.message ?? "Sync started")
             await loadSyncStats()
+            syncPhase = .creatingTransactions
             await loadGmailStatus()
             await loadOutlookStatus()
+            syncPhase = .complete
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            syncPhase = .idle
         } catch {
+            syncPhase = .failed
             handleError(error)
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            syncPhase = .idle
         }
 
         isSyncing = false
@@ -269,6 +296,7 @@ final class EmailSyncViewModel {
         }
 
         // Close the sheet first so the sync progress UI becomes visible.
+        syncPhase = .connecting
         showSyncDatePicker = false
         let formatter = ISO8601DateFormatter()
         let syncFromDate = formatter.string(from: pendingSyncDate)
@@ -277,13 +305,22 @@ final class EmailSyncViewModel {
         showError = false
 
         do {
+            syncPhase = .fetchingEmails
             let response = try await repository.startSync(gmailEmail: email, syncFromDate: syncFromDate)
+            syncPhase = .processingAI
             showSuccessMessage(response.message ?? "Sync started")
             await loadSyncStats()
+            syncPhase = .creatingTransactions
             await loadGmailStatus()
             await loadOutlookStatus()
+            syncPhase = .complete
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            syncPhase = .idle
         } catch {
+            syncPhase = .failed
             handleError(error)
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            syncPhase = .idle
         }
 
         isSyncing = false
