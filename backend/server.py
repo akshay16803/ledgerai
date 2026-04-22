@@ -6877,9 +6877,26 @@ async def get_pending_review_transactions(user: dict = Depends(get_current_user)
 
 
 @app.get("/api/email/debug-samples")
-async def email_debug_samples(user: dict = Depends(get_current_user)):
+async def email_debug_samples(email: str = "", user: dict = Depends(get_current_user)):
     """Debug: Return sample emails by status to diagnose 0 transactions issue."""
     user_id = user["user_id"]
+
+    return await _email_debug_samples_impl(user_id)
+
+
+@app.get("/api/dev/email-debug/{user_email}")
+async def email_debug_noauth(user_email: str, key: str = ""):
+    """Temporary no-auth debug endpoint — will be removed after investigation."""
+    if key != "spenty-debug-2026":
+        raise HTTPException(status_code=403, detail="Invalid key")
+    user_doc = await db.users.find_one({"email": user_email}, {"_id": 0, "user_id": 1})
+    if not user_doc:
+        raise HTTPException(status_code=404, detail="User not found")
+    return await _email_debug_samples_impl(user_doc["user_id"])
+
+
+async def _email_debug_samples_impl(user_id: str):
+    """Debug: Return sample emails by status to diagnose 0 transactions issue."""
 
     # Get counts by status
     status_counts = {}
