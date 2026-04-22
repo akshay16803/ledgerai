@@ -6225,10 +6225,23 @@ async def sync_outlook_emails_background(user_id: str, outlook_email: str, sync_
         access_token = await get_outlook_access_token(user_id, outlook_email)
         if not access_token:
             logger.error(f"No valid Outlook credentials for {user_id}/{outlook_email}")
+            await db.outlook_sync_config.update_one(
+                {"user_id": user_id, "outlook_email": outlook_email},
+                {"$set": {"syncing": False, "last_error": "Outlook credentials expired or missing. Please reconnect."}}
+            )
             return
 
         headers = {"Authorization": f"Bearer {access_token}"}
-        filter_query = f"receivedDateTime ge {sync_from_date}T00:00:00Z"
+        # Normalise the sync date into ISO 8601 datetime for Microsoft Graph OData filter
+        outlook_date_str = sync_from_date
+        try:
+            parsed_dt = datetime.fromisoformat(sync_from_date.replace("Z", "+00:00"))
+            outlook_date_str = parsed_dt.strftime("%Y-%m-%dT00:00:00Z")
+        except (ValueError, AttributeError):
+            # Fallback: strip time component and rebuild
+            clean = sync_from_date.split("T")[0].replace("/", "-")
+            outlook_date_str = f"{clean}T00:00:00Z"
+        filter_query = f"receivedDateTime ge {outlook_date_str}"
         total_fetched = 0
         next_link = None
 
@@ -6977,10 +6990,28 @@ async def sync_emails_background(user_id: str, gmail_email: str, sync_from_date:
         creds = await get_gmail_credentials(user_id, gmail_email)
         if not creds:
             logger.error(f"No valid Gmail credentials for {user_id}/{gmail_email}")
+            await db.email_sync_config.update_one(
+                {"user_id": user_id, "gmail_email": gmail_email},
+                {"$set": {"syncing": False, "last_error": "Gmail credentials expired or missing. Please reconnect."}}
+            )
             return
 
         service = build("gmail", "v1", credentials=creds)
-        query = f"after:{sync_from_date}"
+
+        # Gmail search requires dates in YYYY/MM/DD format, not ISO 8601.
+        # The iOS app sends ISO 8601 (e.g. "2025-01-01T00:00:00Z"), so convert it.
+        gmail_date = sync_from_date
+        try:
+            parsed_dt = datetime.fromisoformat(sync_from_date.replace("Z", "+00:00"))
+            gmail_date = parsed_dt.strftime("%Y/%m/%d")
+        except (ValueError, AttributeError):
+            # If it's already in YYYY/MM/DD or another format, try to clean it up
+            clean = sync_from_date.split("T")[0].replace("-", "/")
+            if len(clean.split("/")) == 3:
+                gmail_date = clean
+        logger.info(f"Gmail sync query date: '{sync_from_date}' -> '{gmail_date}'")
+
+        query = f"after:{gmail_date}"
         page_token = None
         total_fetched = 0
 
