@@ -6927,6 +6927,8 @@ async def dev_reset_data(user_email: str, key: str = ""):
     await db.synced_emails.delete_many({"user_id": user_id})
     await db.email_sync_config.delete_many({"user_id": user_id})
     await db.outlook_sync_config.delete_many({"user_id": user_id})
+    # Clean up processing locks so stuck emails don't block future processing
+    await db.processing_locks.delete_many({"lock_key": {"$regex": f"^{user_id}:"}})
     await seed_default_data(user_id)
 
     return {"message": "All data reset successfully."}
@@ -7209,6 +7211,14 @@ async def sync_emails_background(user_id: str, gmail_email: str, sync_from_date:
             if not page_token:
                 break
 
+            # Safety: check if tokens were revoked mid-sync (e.g. user reset data)
+            token_still_valid = await db.gmail_tokens.find_one(
+                {"user_id": user_id, "gmail_email": gmail_email, "connected": True}
+            )
+            if not token_still_valid:
+                logger.info(f"Gmail token removed mid-sync for {user_id}/{gmail_email} — aborting")
+                break
+
         logger.info(f"Synced {total_fetched} emails for {user_id}/{gmail_email}")
 
         await db.email_sync_config.update_one(
@@ -7252,6 +7262,22 @@ def extract_email_body(payload):
 
 
 async def process_pending_emails(user_id: str, gmail_email: str = ""):
+    # Guard: don't process if Gmail is not connected (e.g. after reset)
+    if gmail_email:
+        token_exists = await db.gmail_tokens.find_one(
+            {"user_id": user_id, "gmail_email": gmail_email, "connected": True}
+        )
+        if not token_exists:
+            logger.info(f"Gmail not connected for {user_id}/{gmail_email} — skipping email processing")
+            return
+    else:
+        # If no specific email, check if ANY gmail token exists for this user
+        any_token = await db.gmail_tokens.find_one({"user_id": user_id, "connected": True})
+        any_outlook = await db.outlook_tokens.find_one({"user_id": user_id, "connected": True})
+        if not any_token and not any_outlook:
+            logger.info(f"No email accounts connected for {user_id} — skipping email processing")
+            return
+
     query = {"user_id": user_id, "ai_status": {"$in": ["pending", "failed"]}, "source_provider": {"$ne": "outlook"}}
     if gmail_email:
         query["gmail_email"] = gmail_email
@@ -9369,6 +9395,8 @@ async def reset_data(request: Request, user: dict = Depends(get_current_user)):
     await db.synced_emails.delete_many({"user_id": user_id})
     await db.email_sync_config.delete_many({"user_id": user_id})
     await db.outlook_sync_config.delete_many({"user_id": user_id})
+    # Clean up processing locks so stuck emails don't block future processing
+    await db.processing_locks.delete_many({"lock_key": {"$regex": f"^{user_id}:"}})
 
     # Re-seed default accounts and categories
     await seed_default_data(user_id)
