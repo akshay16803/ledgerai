@@ -6610,7 +6610,7 @@ async def _create_mandate_from_ai_result(
         "debit_day": result.get("mandate_debit_day"),
         "account_id": account_id,
         "detected_bank_name": detected_bank_name,
-        "status": "active",
+        "status": "pending_review",
         "source": f"email:{source_provider}",
         "source_email_id": email_doc.get("email_id"),
         "source_email_subject": email_doc.get("subject"),
