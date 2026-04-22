@@ -6281,6 +6281,10 @@ async def sync_outlook_emails_background(user_id: str, outlook_email: str, sync_
                 if not next_link:
                     break
 
+                # Start AI processing in parallel after first batch
+                if total_fetched >= 50:
+                    asyncio.create_task(process_outlook_pending_emails(user_id, outlook_email))
+
         logger.info(f"Synced {total_fetched} Outlook emails for {user_id}/{outlook_email}")
 
         await db.outlook_sync_config.update_one(
@@ -6288,6 +6292,7 @@ async def sync_outlook_emails_background(user_id: str, outlook_email: str, sync_
             {"$set": {"syncing": False, "last_sync_at": datetime.now(timezone.utc), "last_sync_count": total_fetched, "last_error": None}}
         )
 
+        # Process any remaining pending emails after fetch completes
         await process_outlook_pending_emails(user_id, outlook_email)
 
     except Exception as e:
@@ -7211,6 +7216,16 @@ async def sync_emails_background(user_id: str, gmail_email: str, sync_from_date:
             if not page_token:
                 break
 
+            # Start AI processing in parallel after first batch of emails
+            # The lock mechanism inside process_pending_emails prevents duplicates
+            if total_fetched >= 50:
+                existing_lock = await db.processing_locks.find_one(
+                    {"lock_key": f"{user_id}:{gmail_email or 'all'}", "active": True}
+                )
+                if not existing_lock:
+                    logger.info(f"Starting concurrent AI processing while still fetching ({total_fetched} emails fetched so far)")
+                    asyncio.create_task(process_pending_emails(user_id, gmail_email))
+
             # Safety: check if tokens were revoked mid-sync (e.g. user reset data)
             token_still_valid = await db.gmail_tokens.find_one(
                 {"user_id": user_id, "gmail_email": gmail_email, "connected": True}
@@ -7226,6 +7241,7 @@ async def sync_emails_background(user_id: str, gmail_email: str, sync_from_date:
             {"$set": {"syncing": False, "last_sync_at": datetime.now(timezone.utc), "last_sync_count": total_fetched, "last_error": None}}
         )
 
+        # Process any remaining pending emails after fetch completes
         await process_pending_emails(user_id, gmail_email)
 
     except Exception as e:
