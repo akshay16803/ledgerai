@@ -2932,8 +2932,8 @@ async def dashboard_summary(user: dict = Depends(get_current_user)):
     user_id = user["user_id"]
     accounts = await db.accounts.find({"user_id": user_id}, {"_id": 0}).to_list(100)
 
-    total_assets = sum(a["balance"] for a in accounts if a["account_type"] in ("asset", "investment"))
-    total_liabilities = sum(a["balance"] for a in accounts if a["account_type"] == "liability")
+    total_assets = sum(a.get("balance", 0) for a in accounts if a.get("account_type") in ("asset", "investment"))
+    total_liabilities = sum(a.get("balance", 0) for a in accounts if a.get("account_type") == "liability")
     net_worth = total_assets - total_liabilities
 
     now = datetime.now(timezone.utc)
@@ -9828,8 +9828,8 @@ async def ai_chat(body: dict = Body(...), user: dict = Depends(get_current_user)
     month_start = now.replace(day=1).strftime("%Y-%m-%d")
     today_str = now.strftime("%Y-%m-%d")
 
-    total_assets = sum(a["balance"] for a in accounts if a["account_type"] in ("asset", "investment"))
-    total_liabilities = sum(a["balance"] for a in accounts if a["account_type"] == "liability")
+    total_assets = sum(a.get("balance", 0) for a in accounts if a.get("account_type") in ("asset", "investment"))
+    total_liabilities = sum(a.get("balance", 0) for a in accounts if a.get("account_type") == "liability")
     net_worth = total_assets - total_liabilities
 
     income_this_month = sum(t["amount"] for t in recent_txns if t["transaction_type"] == "income" and t["date"] >= month_start)
