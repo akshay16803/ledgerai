@@ -7634,13 +7634,21 @@ CRITICAL RULES — READ CAREFULLY:
    - It is from a well-known subscription service (Netflix, Spotify, Google Play, Apple, Amazon Prime, gym, insurance, SaaS platform, telecom carrier)
    - The email mentions a billing period or next renewal date
    Do NOT mark as recurring just because it is a UPI payment, bank debit, or generic expense. One-time purchases, P2P transfers, grocery deliveries, and ad-hoc payments are NOT recurring even if the user makes them frequently.
-10. CATEGORY ACCURACY: CRITICAL RULES for category assignment:
+10. CATEGORY ACCURACY — ZERO ASSUMPTION RULE:
+   - ONLY assign a category when the email EXPLICITLY states or clearly implies the purpose of the transaction. If the email only says "payment to X" without saying what the payment is for, set category_id to null.
+   - NEVER assume or guess a category. The user will assign the correct category during review.
    - NEVER use an income category (Salary, Business Income, Investment Income, Rental Income, Other Income) for an expense transaction. Income categories are ONLY for transaction_type "income".
    - NEVER use an expense category for an income transaction.
-   - If the email does not clearly indicate what the payment is for (e.g., a generic bank debit alert like "Debited by UPI" with no merchant/purpose info), set category_id and subcategory_id to null. Do NOT guess.
-   - For P2P transfers (UPI to a person's name), set category_id to null unless the purpose is clearly stated.
-   - For software/API/cloud service payments (OpenAI, AWS, Azure, Anthropic, GitHub, Vercel, etc.), use "Subscriptions" category if available, NOT "Business Income".
-   - For credit card bill payments (transaction_type "transfer"), category is not needed — set to null.
+   - For generic bank debit alerts (e.g., "Debited by UPI" with no merchant/purpose info), set category_id and subcategory_id to null.
+   - For P2P transfers (UPI to a person's name), set category_id to null — you cannot know why the person was paid.
+   - For API/cloud service top-ups (OpenAI, AWS, etc.), do NOT assume "Subscriptions" unless the email explicitly says "subscription" or "recurring". A one-time top-up or credit purchase is not a subscription.
+   - For credit card bill payments (transaction_type "transfer"), set category_id to null.
+   - Only assign a category when you are confident based on EXPLICIT information in the email. Examples of clear categories:
+     * "Your Swiggy order" → Food & Dining > Restaurants
+     * "Electricity bill payment" → Bills & Utilities > Electricity
+     * "Netflix subscription renewed" → Subscriptions
+     * "Salary credited" → Salary
+   - When in doubt, leave category_id as null. It is better to leave it empty than to assign a wrong category.
 
 Respond ONLY with valid JSON (no markdown, no explanation):
 {{
