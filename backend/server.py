@@ -6895,6 +6895,61 @@ async def email_debug_noauth(user_email: str, key: str = ""):
     return await _email_debug_samples_impl(user_doc["user_id"])
 
 
+@app.post("/api/dev/reset-data/{user_email}")
+async def dev_reset_data(user_email: str, key: str = ""):
+    """Temporary no-auth reset endpoint — will be removed after testing."""
+    if key != "spenty-debug-2026":
+        raise HTTPException(status_code=403, detail="Invalid key")
+    user_doc = await db.users.find_one({"email": user_email}, {"_id": 0, "user_id": 1})
+    if not user_doc:
+        raise HTTPException(status_code=404, detail="User not found")
+    user_id = user_doc["user_id"]
+
+    await db.transactions.delete_many({"user_id": user_id})
+    await db.accounts.delete_many({"user_id": user_id})
+    await db.categories.delete_many({"user_id": user_id})
+    await db.invoices.delete_many({"user_id": user_id})
+    await db.bills.delete_many({"user_id": user_id})
+    await db.customers.delete_many({"user_id": user_id})
+    await db.vendors.delete_many({"user_id": user_id})
+    await db.mandates.delete_many({"user_id": user_id})
+    await db.statements.delete_many({"user_id": user_id})
+    await db.synced_sms.delete_many({"user_id": user_id})
+    await db.receipts.delete_many({"user_id": user_id})
+    await db.email_archives.delete_many({"user_id": user_id})
+    await db.feature_requests.delete_many({"user_id": user_id})
+    await db.tax_summaries.delete_many({"user_id": user_id})
+    await db.tax_summary_transactions.delete_many({"user_id": user_id})
+    await db.payment_orders.delete_many({"user_id": user_id})
+    await db.ai_chat_history.delete_many({"user_id": user_id})
+    await db.gmail_tokens.delete_many({"user_id": user_id})
+    await db.outlook_tokens.delete_many({"user_id": user_id})
+    await db.synced_emails.delete_many({"user_id": user_id})
+    await db.email_sync_config.delete_many({"user_id": user_id})
+    await db.outlook_sync_config.delete_many({"user_id": user_id})
+    await seed_default_data(user_id)
+
+    return {"message": "All data reset successfully."}
+
+
+@app.post("/api/dev/retry-emails/{user_email}")
+async def dev_retry_emails(user_email: str, key: str = ""):
+    """Temporary no-auth endpoint to trigger email retry processing."""
+    if key != "spenty-debug-2026":
+        raise HTTPException(status_code=403, detail="Invalid key")
+    user_doc = await db.users.find_one({"email": user_email}, {"_id": 0, "user_id": 1})
+    if not user_doc:
+        raise HTTPException(status_code=404, detail="User not found")
+    user_id = user_doc["user_id"]
+
+    # Reset failed emails back to pending so they get reprocessed
+    result = await db.synced_emails.update_many(
+        {"user_id": user_id, "ai_status": "failed"},
+        {"$set": {"ai_status": "pending"}, "$unset": {"ai_error": ""}}
+    )
+    return {"message": f"Reset {result.modified_count} failed emails to pending for reprocessing."}
+
+
 async def _email_debug_samples_impl(user_id: str):
     """Debug: Return sample emails by status to diagnose 0 transactions issue."""
 
