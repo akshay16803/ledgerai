@@ -622,10 +622,10 @@ struct EmailSyncView: View {
             HStack(spacing: 4) {
                 ProgressView()
                     .controlSize(.mini)
-                    .tint(Color.spentyAccent)
+                    .tint(Color.spentyAccent3)
                 Text("Processing \(account.stats?.aiPending ?? 0) emails...")
                     .font(SpentyFonts.caption2)
-                    .foregroundColor(.spentyAccent)
+                    .foregroundColor(.spentyAccent3)
             }
         } else if account.syncFromDate != nil && (account.stats?.totalSynced ?? 0) > 0 {
             HStack(spacing: 4) {
