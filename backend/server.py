@@ -3222,7 +3222,7 @@ async def reports_by_account(
 
     txns = await db.transactions.find(query, {"_id": 0}).to_list(5000)
     accounts = await db.accounts.find({"user_id": user_id}, {"_id": 0}).to_list(100)
-    acc_map = {a["account_id"]: a["name"] for a in accounts}
+    acc_map = {a["account_id"]: a.get("name", "Unknown") for a in accounts}
 
     by_account = {}
     for t in txns:
@@ -9919,8 +9919,8 @@ async def ai_chat(body: dict = Body(...), user: dict = Depends(get_current_user)
     has_bank = bool(user_settings.get("invoice_bank_name") or user_settings.get("invoice_bank_account_no"))
 
     # Build compact recent transactions
-    acc_map = {a["account_id"]: a["name"] for a in accounts}
-    cat_map = {c["category_id"]: c["name"] for c in categories}
+    acc_map = {a["account_id"]: a.get("name", "Unknown") for a in accounts}
+    cat_map = {c["category_id"]: c.get("name", "Unknown") for c in categories}
     txn_lines = []
     for t in recent_txns[:200]:
         acc_name = acc_map.get(t.get("account_id"), "?")
