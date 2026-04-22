@@ -62,6 +62,7 @@ final class DashboardViewModel {
 
     @MainActor
     func refresh() async {
+        showError = false
         do {
             summary = try await repository.getSummary()
         } catch {
