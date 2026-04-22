@@ -217,7 +217,7 @@ struct SMSSyncView: View {
                 ], spacing: 12) {
                     StatCard(label: "Total Synced", value: "\(stats.totalSynced ?? 0)", icon: "envelope.fill", color: .spentyPrimary)
                     StatCard(label: "Transactions", value: "\(stats.transactionsCreated ?? 0)", icon: "banknote.fill", color: .spentySuccess)
-                    StatCard(label: "Pending Review", value: "\(stats.pendingReview ?? 0)", icon: "clock.fill", color: .spentyWarning)
+                    StatCard(label: "Pending Approval", value: "\(stats.pendingReview ?? 0)", icon: "clock.fill", color: .spentyWarning)
                     StatCard(label: "Failed", value: "\(stats.aiFailed ?? 0)", icon: "xmark.circle.fill", color: .spentyError)
                 }
 

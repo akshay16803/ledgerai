@@ -210,7 +210,7 @@ struct DashboardView: View {
 
             Button { showAllPending = true } label: {
                 StatCard(
-                    label: "Pending Review",
+                    label: "Pending Approval",
                     value: "\(viewModel.pendingReview)",
                     icon: "clock.fill",
                     color: .spentyWarning

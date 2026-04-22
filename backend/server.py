@@ -7621,12 +7621,26 @@ CRITICAL RULES — READ CAREFULLY:
    - Insurance premium debits
    - Refunds credited to bank
    - Actual dividend CREDITS to bank account
-4. For transaction_type: "income" for money received, "expense" for money spent, "transfer" for money moved between your own accounts.
+4. For transaction_type:
+   - "income" for money received INTO your accounts from external sources (salary, freelance payment, refund, dividend credit, interest credit)
+   - "expense" for money spent/paid OUT to external parties (purchases, subscriptions, bills, food, services)
+   - "transfer" for money moved BETWEEN YOUR OWN ACCOUNTS. CRITICAL: Credit card bill PAYMENTS (paying off your CC balance) are ALWAYS "transfer" — the money moves from your bank account to your credit card account. Set account_id to the bank/source account and to_account_id to the credit card account. This is NOT an expense because the individual charges were already expenses.
 5. For account_id: IMPORTANT — try hard to match from AVAILABLE ACCOUNTS by comparing bank name in the email (sender domain, subject, body mentions) against account names. For example, if the email is from HDFC Bank and there is an account named "HDFC" or "HDFC Savings", use that account_id. Match by bank keyword (e.g., "hdfc" in email → account with "HDFC" in name). If you can detect a SPECIFIC bank account name from the email but none of the AVAILABLE ACCOUNTS match, include it in detected_bank_name — we will auto-create it.
 6. For payment_method: Detect how the payment was made. Common methods: "upi", "credit_card", "debit_card", "net_banking", "cash", "wallet", "cheque", "neft", "rtgs", "imps", "other".
 7. Extract date in YYYY-MM-DD format. If not clear, use the email date.
 8. CURRENCY: Detect the currency of the transaction from the email. Look for currency symbols ($, USD, EUR, GBP, etc.) or currency codes. If the email is from an Indian bank or UPI, use "INR". If unclear, default to "INR".
-9. RECURRING DETECTION: If the charge is from a known subscription/recurring service (Netflix, Spotify, Google Play, Apple, Amazon Prime, gym, insurance, SaaS, telecom, etc.) OR the email mentions "subscription", "recurring", "renewal", "billing cycle", "auto-renewal", "monthly plan", etc., set is_recurring to true. Also detect the billing frequency and the recurrence day if mentioned (e.g., "renews on the 15th" -> recurrence_date: 15).
+9. RECURRING DETECTION: ONLY set is_recurring to true when there is CLEAR EVIDENCE of a recurring/subscription charge. Valid evidence includes:
+   - The email explicitly says "subscription", "recurring", "renewal", "billing cycle", "auto-renewal", "monthly plan", "annual plan"
+   - It is from a well-known subscription service (Netflix, Spotify, Google Play, Apple, Amazon Prime, gym, insurance, SaaS platform, telecom carrier)
+   - The email mentions a billing period or next renewal date
+   Do NOT mark as recurring just because it is a UPI payment, bank debit, or generic expense. One-time purchases, P2P transfers, grocery deliveries, and ad-hoc payments are NOT recurring even if the user makes them frequently.
+10. CATEGORY ACCURACY: CRITICAL RULES for category assignment:
+   - NEVER use an income category (Salary, Business Income, Investment Income, Rental Income, Other Income) for an expense transaction. Income categories are ONLY for transaction_type "income".
+   - NEVER use an expense category for an income transaction.
+   - If the email does not clearly indicate what the payment is for (e.g., a generic bank debit alert like "Debited by UPI" with no merchant/purpose info), set category_id and subcategory_id to null. Do NOT guess.
+   - For P2P transfers (UPI to a person's name), set category_id to null unless the purpose is clearly stated.
+   - For software/API/cloud service payments (OpenAI, AWS, Azure, Anthropic, GitHub, Vercel, etc.), use "Subscriptions" category if available, NOT "Business Income".
+   - For credit card bill payments (transaction_type "transfer"), category is not needed — set to null.
 
 Respond ONLY with valid JSON (no markdown, no explanation):
 {{

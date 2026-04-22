@@ -231,7 +231,7 @@ struct EmailSyncView: View {
                             color: .spentySuccess
                         )
                         StatCard(
-                            label: "Pending Review",
+                            label: "Pending Approval",
                             value: "\(stats.pendingReview ?? 0)",
                             icon: "clock.fill",
                             color: .spentyWarning
@@ -752,7 +752,7 @@ struct EmailSyncView: View {
                         .foregroundColor(.spentyWarning)
 
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Pending Review")
+                        Text("Pending Approval")
                             .font(SpentyFonts.headline)
                             .foregroundColor(.spentyTextPrimary)
 

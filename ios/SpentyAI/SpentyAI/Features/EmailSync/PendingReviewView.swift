@@ -29,7 +29,7 @@ struct PendingReviewView: View {
             }
         }
         .background(Color.spentyBgPrimary)
-        .navigationTitle("Pending Review")
+        .navigationTitle("Pending Approval")
         .navigationBarTitleDisplayMode(.large)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
