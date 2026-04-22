@@ -2742,7 +2742,7 @@ async def cashflow_projection(user: dict = Depends(get_current_user)):
 
     accounts = await db.accounts.find({"user_id": user_id}, {"_id": 0}).to_list(100)
     current_balance = sum(
-        a["balance"] if a["account_type"] in ("asset", "investment") else -a["balance"]
+        a.get("balance", 0) if a.get("account_type") in ("asset", "investment") else -a.get("balance", 0)
         for a in accounts
     )
 
