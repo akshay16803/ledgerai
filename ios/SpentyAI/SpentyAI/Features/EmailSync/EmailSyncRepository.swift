@@ -223,11 +223,17 @@ struct EmailRetryResponse: Decodable {
 struct EmailSyncStatsResponse: Decodable {
     let totalSynced: Int?
     let processedByAi: Int?
+    let noTransaction: Int?
     let transactionsCreated: Int?
     let pendingReview: Int?
     let aiFailed: Int?
     let aiPending: Int?
     let isProcessing: Bool?
+
+    /// Total emails AI has finished analyzing (processed + no_transaction)
+    var aiAnalyzed: Int {
+        (processedByAi ?? 0) + (noTransaction ?? 0)
+    }
 }
 
 struct GenericMessageResponse: Decodable {

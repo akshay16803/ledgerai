@@ -206,8 +206,90 @@ struct EmailSyncView: View {
                     }
                 }
 
-                if viewModel.allStatsZero && (viewModel.syncStatsResponse?.aiPending ?? 0) == 0 {
-                    // Improvement #7: Better empty state
+                if let stats = viewModel.syncStatsResponse, (stats.totalSynced ?? 0) > 0 || viewModel.isAnySyncing {
+                    // Always show the stat grid when we have emails or are syncing
+                    LazyVGrid(columns: [
+                        GridItem(.flexible(), spacing: 12),
+                        GridItem(.flexible(), spacing: 12)
+                    ], spacing: 12) {
+                        StatCard(
+                            label: "Total Emails",
+                            value: "\(stats.totalSynced ?? 0)",
+                            icon: "envelope.fill",
+                            color: .spentyPrimary
+                        )
+                        StatCard(
+                            label: "AI Analyzed",
+                            value: "\(stats.aiAnalyzed)",
+                            icon: "cpu.fill",
+                            color: .blue
+                        )
+                        StatCard(
+                            label: "Transactions",
+                            value: "\(stats.transactionsCreated ?? 0)",
+                            icon: "banknote.fill",
+                            color: .spentySuccess
+                        )
+                        StatCard(
+                            label: "Pending Review",
+                            value: "\(stats.pendingReview ?? 0)",
+                            icon: "clock.fill",
+                            color: .spentyWarning
+                        )
+                    }
+
+                    // AI Processing progress bar
+                    if (stats.totalSynced ?? 0) > 0 {
+                        let total = stats.totalSynced ?? 0
+                        let analyzed = stats.aiAnalyzed
+                        let progress = total > 0 ? Double(analyzed) / Double(total) : 0
+
+                        VStack(spacing: 6) {
+                            HStack {
+                                if stats.isProcessing == true || (stats.aiPending ?? 0) > 0 {
+                                    HStack(spacing: 4) {
+                                        ProgressView()
+                                            .controlSize(.mini)
+                                            .tint(Color.spentyPrimary)
+                                        Text("AI analyzing emails...")
+                                            .font(SpentyFonts.caption1)
+                                            .foregroundColor(.spentyPrimary)
+                                    }
+                                } else if analyzed == total {
+                                    HStack(spacing: 4) {
+                                        Image(systemName: "checkmark.circle.fill")
+                                            .font(.system(size: 11))
+                                            .foregroundColor(.spentySuccess)
+                                        Text("AI analysis complete")
+                                            .font(SpentyFonts.caption1)
+                                            .foregroundColor(.spentySuccess)
+                                    }
+                                }
+
+                                Spacer()
+
+                                Text("\(analyzed)/\(total)")
+                                    .font(SpentyFonts.caption2)
+                                    .foregroundColor(.spentyTextSecondary)
+                            }
+
+                            ProgressView(value: progress)
+                                .tint(analyzed == total ? Color.spentySuccess : Color.spentyPrimary)
+                        }
+                    }
+
+                    if (stats.aiFailed ?? 0) > 0 {
+                        HStack(spacing: 4) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(.system(size: 11))
+                                .foregroundColor(.spentyError)
+                            Text("\(stats.aiFailed ?? 0) emails failed AI processing")
+                                .font(SpentyFonts.caption1)
+                                .foregroundColor(.spentyError)
+                        }
+                    }
+                } else if viewModel.syncStatsResponse != nil {
+                    // No emails yet — show empty state
                     VStack(spacing: 12) {
                         Image(systemName: "envelope.open")
                             .font(.system(size: 36))
@@ -231,64 +313,6 @@ struct EmailSyncView: View {
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 16)
-                } else if viewModel.allStatsZero && (viewModel.syncStatsResponse?.aiPending ?? 0) > 0 {
-                    // Emails fetched but still being processed by AI
-                    VStack(spacing: 12) {
-                        ProgressView()
-                            .controlSize(.large)
-                            .tint(Color.spentyPrimary)
-
-                        Text("Analyzing \(viewModel.syncStatsResponse?.aiPending ?? 0) emails...")
-                            .font(SpentyFonts.subheadline)
-                            .foregroundColor(.spentyTextPrimary)
-
-                        Text("SpentyAI is reading your emails and extracting transactions. This may take a few minutes.")
-                            .font(SpentyFonts.caption1)
-                            .foregroundColor(.spentyTextSecondary)
-                            .multilineTextAlignment(.center)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 16)
-                } else if let stats = viewModel.syncStatsResponse {
-                    LazyVGrid(columns: [
-                        GridItem(.flexible(), spacing: 12),
-                        GridItem(.flexible(), spacing: 12)
-                    ], spacing: 12) {
-                        StatCard(
-                            label: "Total Emails",
-                            value: "\(stats.totalSynced ?? 0)",
-                            icon: "envelope.fill",
-                            color: .spentyPrimary
-                        )
-                        StatCard(
-                            label: "Transactions",
-                            value: "\(stats.transactionsCreated ?? 0)",
-                            icon: "banknote.fill",
-                            color: .spentySuccess
-                        )
-                        StatCard(
-                            label: "Pending Review",
-                            value: "\(stats.pendingReview ?? 0)",
-                            icon: "clock.fill",
-                            color: .spentyWarning
-                        )
-                        StatCard(
-                            label: "AI Failed",
-                            value: "\(stats.aiFailed ?? 0)",
-                            icon: "xmark.circle.fill",
-                            color: .spentyError
-                        )
-                    }
-
-                    if let processed = stats.processedByAi, processed > 0 {
-                        HStack(spacing: 4) {
-                            Image(systemName: "cpu")
-                                .font(.system(size: 11))
-                            Text("\(processed) processed by AI")
-                                .font(SpentyFonts.caption1)
-                        }
-                        .foregroundColor(.spentyTextSecondary)
-                    }
                 }
             }
             .cardStyle()
@@ -665,8 +689,8 @@ struct EmailSyncView: View {
             GridItem(.flexible(), spacing: 8)
         ], spacing: 8) {
             miniStat(label: "Emails", value: "\(stats.totalSynced ?? 0)", color: .spentyPrimary)
+            miniStat(label: "Analyzed", value: "\(stats.processedByAi.map { $0 + (stats.noTransaction ?? 0) } ?? 0)", color: .blue)
             miniStat(label: "Transactions", value: "\(stats.transactionsCreated ?? 0)", color: .spentySuccess)
-            miniStat(label: "Review", value: "\(stats.pendingReview ?? 0)", color: .spentyWarning)
         }
     }
 
