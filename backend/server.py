@@ -7126,10 +7126,10 @@ async def process_pending_emails(user_id: str, gmail_email: str = ""):
     )
 
     try:
-        pending_emails = await db.synced_emails.find(query, {"_id": 0}).limit(200).to_list(200)
+        pending_emails = await db.synced_emails.find(query, {"_id": 0}).limit(500).to_list(500)
 
-        if not openai_client:
-            logger.error("OpenAI client not configured — cannot process emails")
+        if not async_openai_client:
+            logger.error("OpenAI async client not configured — cannot process emails")
             return
 
         if not pending_emails:
@@ -7157,10 +7157,29 @@ async def process_pending_emails(user_id: str, gmail_email: str = ""):
             {"user_id": user_id}, {"_id": 0}
         ).sort("confidence_count", -1).limit(50).to_list(50)
 
+        # Process emails with rate limiting to avoid OpenAI API throttling
+        consecutive_failures = 0
         for i, email_doc in enumerate(pending_emails):
             try:
                 logger.info(f"Processing email {i+1}/{len(pending_emails)}: {email_doc.get('subject', '')[:50]}")
-                result = await analyze_email_with_ai(email_doc, account_names, category_info, sender_mappings=sender_mappings)
+
+                # Retry logic with exponential backoff for rate limit errors
+                result = None
+                max_retries = 3
+                for attempt in range(max_retries):
+                    try:
+                        result = await analyze_email_with_ai(email_doc, account_names, category_info, sender_mappings=sender_mappings)
+                        consecutive_failures = 0
+                        break
+                    except Exception as retry_err:
+                        err_str = str(retry_err).lower()
+                        is_rate_limit = "rate" in err_str or "429" in err_str or "quota" in err_str or "limit" in err_str
+                        if is_rate_limit and attempt < max_retries - 1:
+                            wait_time = (2 ** attempt) * 5  # 5s, 10s, 20s
+                            logger.warning(f"Rate limited on email {email_doc['email_id']}, waiting {wait_time}s (attempt {attempt+1}/{max_retries})")
+                            await asyncio.sleep(wait_time)
+                        else:
+                            raise
 
                 if result and result.get("is_mandate"):
                     await _create_mandate_from_ai_result(user_id, email_doc, result, "gmail")
@@ -7172,12 +7191,29 @@ async def process_pending_emails(user_id: str, gmail_email: str = ""):
                         {"$set": {"ai_status": "no_transaction", "ai_result": result}}
                     )
 
+                # Small delay between calls to avoid rate limiting (100ms)
+                if i < len(pending_emails) - 1:
+                    await asyncio.sleep(0.15)
+
             except Exception as e:
+                consecutive_failures += 1
                 logger.error(f"Failed to process email {email_doc['email_id']}: {e}")
                 await db.synced_emails.update_one(
                     {"email_id": email_doc["email_id"]},
                     {"$set": {"ai_status": "failed", "ai_error": str(e)}}
                 )
+                # If we get 10+ consecutive failures, likely a systemic issue — back off heavily
+                if consecutive_failures >= 10:
+                    logger.warning(f"10 consecutive failures — backing off 30s before continuing")
+                    await asyncio.sleep(30)
+                    consecutive_failures = 0
+
+        # If there are more pending emails beyond this batch, schedule another run
+        remaining = await db.synced_emails.count_documents(
+            {"user_id": user_id, "ai_status": {"$in": ["pending", "failed"]}, "source_provider": {"$ne": "outlook"}}
+        )
+        if remaining > 0:
+            logger.info(f"{remaining} emails still pending — scheduling next batch")
 
         logger.info(f"Finished processing emails for {user_id}/{gmail_email}")
 
@@ -7446,6 +7482,9 @@ def _parse_ai_json_response(content: str) -> dict:
 
 
 async def analyze_email_with_ai(email_doc: dict, account_names: list, category_info: list, sender_mappings: list = None):
+    if not async_openai_client:
+        raise RuntimeError("OpenAI async client not configured — check OPENAI_API_KEY env var")
+
     prompt = _build_email_analysis_prompt(email_doc, account_names, category_info, sender_mappings=sender_mappings)
 
     try:
@@ -7457,11 +7496,12 @@ async def analyze_email_with_ai(email_doc: dict, account_names: list, category_i
             ],
             temperature=0.1,
             max_tokens=500,
+            timeout=30,
         )
         return _parse_ai_json_response(response.choices[0].message.content)
 
     except Exception as e:
-        logger.error(f"AI analysis failed: {e}")
+        logger.error(f"AI analysis failed for email {email_doc.get('email_id', 'unknown')}: {type(e).__name__}: {e}")
         raise
 
 

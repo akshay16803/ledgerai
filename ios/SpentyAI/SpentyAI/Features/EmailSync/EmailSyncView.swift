@@ -206,7 +206,7 @@ struct EmailSyncView: View {
                     }
                 }
 
-                if viewModel.allStatsZero {
+                if viewModel.allStatsZero && (viewModel.syncStatsResponse?.aiPending ?? 0) == 0 {
                     // Improvement #7: Better empty state
                     VStack(spacing: 12) {
                         Image(systemName: "envelope.open")
@@ -228,6 +228,24 @@ struct EmailSyncView: View {
                                 .foregroundColor(.spentyTextSecondary)
                                 .multilineTextAlignment(.center)
                         }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 16)
+                } else if viewModel.allStatsZero && (viewModel.syncStatsResponse?.aiPending ?? 0) > 0 {
+                    // Emails fetched but still being processed by AI
+                    VStack(spacing: 12) {
+                        ProgressView()
+                            .controlSize(.large)
+                            .tint(Color.spentyPrimary)
+
+                        Text("Analyzing \(viewModel.syncStatsResponse?.aiPending ?? 0) emails...")
+                            .font(SpentyFonts.subheadline)
+                            .foregroundColor(.spentyTextPrimary)
+
+                        Text("SpentyAI is reading your emails and extracting transactions. This may take a few minutes.")
+                            .font(SpentyFonts.caption1)
+                            .foregroundColor(.spentyTextSecondary)
+                            .multilineTextAlignment(.center)
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 16)
@@ -589,7 +607,27 @@ struct EmailSyncView: View {
                     .font(SpentyFonts.caption2)
                     .foregroundColor(.spentyWarning)
             }
-        } else if account.syncFromDate != nil {
+        } else if account.stats?.aiFailed ?? 0 > 0 && (account.stats?.processedByAi ?? 0) == 0 {
+            // All AI processing failed — likely a backend issue
+            HStack(spacing: 4) {
+                Image(systemName: "exclamationmark.circle.fill")
+                    .font(.system(size: 12))
+                    .foregroundColor(.spentyError)
+                Text("Processing failed")
+                    .font(SpentyFonts.caption2)
+                    .foregroundColor(.spentyError)
+            }
+        } else if account.stats?.aiPending ?? 0 > 0 {
+            // AI is still processing emails
+            HStack(spacing: 4) {
+                ProgressView()
+                    .controlSize(.mini)
+                    .tint(Color.spentyAccent)
+                Text("Processing \(account.stats?.aiPending ?? 0) emails...")
+                    .font(SpentyFonts.caption2)
+                    .foregroundColor(.spentyAccent)
+            }
+        } else if account.syncFromDate != nil && (account.stats?.totalSynced ?? 0) > 0 {
             HStack(spacing: 4) {
                 Image(systemName: "checkmark.circle.fill")
                     .font(.system(size: 12))
@@ -597,6 +635,16 @@ struct EmailSyncView: View {
                 Text("Up to date")
                     .font(SpentyFonts.caption2)
                     .foregroundColor(.spentySuccess)
+            }
+        } else if account.syncFromDate != nil {
+            // Has sync date but 0 emails — tap Sync to start
+            HStack(spacing: 4) {
+                Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 12))
+                    .foregroundColor(.spentyPrimary)
+                Text("Tap Sync to start")
+                    .font(SpentyFonts.caption2)
+                    .foregroundColor(.spentyPrimary)
             }
         } else {
             HStack(spacing: 4) {
