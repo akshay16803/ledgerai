@@ -6876,6 +6876,56 @@ async def get_pending_review_transactions(user: dict = Depends(get_current_user)
     return {"transactions": txns, "total": total}
 
 
+@app.get("/api/email/debug-samples")
+async def email_debug_samples(user: dict = Depends(get_current_user)):
+    """Debug: Return sample emails by status to diagnose 0 transactions issue."""
+    user_id = user["user_id"]
+
+    # Get counts by status
+    status_counts = {}
+    for status in ["processed", "no_transaction", "failed", "pending", "processing"]:
+        count = await db.synced_emails.count_documents({"user_id": user_id, "ai_status": status})
+        status_counts[status] = count
+
+    # Get 3 sample failed emails (subject + error)
+    failed_samples = await db.synced_emails.find(
+        {"user_id": user_id, "ai_status": "failed"},
+        {"_id": 0, "email_id": 1, "subject": 1, "from_email": 1, "ai_error": 1, "date": 1}
+    ).limit(5).to_list(5)
+
+    # Get 3 sample no_transaction emails (subject + AI reason)
+    no_txn_samples = await db.synced_emails.find(
+        {"user_id": user_id, "ai_status": "no_transaction"},
+        {"_id": 0, "email_id": 1, "subject": 1, "from_email": 1, "ai_result.reason": 1, "ai_result.is_transaction": 1, "date": 1}
+    ).limit(5).to_list(5)
+
+    # Get 3 sample processed emails (these should be transactions)
+    processed_samples = await db.synced_emails.find(
+        {"user_id": user_id, "ai_status": "processed"},
+        {"_id": 0, "email_id": 1, "subject": 1, "from_email": 1, "ai_result.is_transaction": 1, "ai_result.amount": 1, "ai_result.description": 1, "date": 1}
+    ).limit(5).to_list(5)
+
+    # Check for any financial-looking subjects in failed emails
+    financial_keywords = ["debit", "credit", "payment", "upi", "transfer", "salary", "refund", "emi", "recharge", "transaction"]
+    financial_failed = await db.synced_emails.find(
+        {"user_id": user_id, "ai_status": "failed"},
+        {"_id": 0, "subject": 1, "from_email": 1, "ai_error": 1}
+    ).to_list(300)
+    financial_in_failed = [
+        e for e in financial_failed
+        if any(kw in (e.get("subject") or "").lower() for kw in financial_keywords)
+    ]
+
+    return {
+        "status_counts": status_counts,
+        "failed_samples": failed_samples,
+        "no_transaction_samples": no_txn_samples,
+        "processed_samples": processed_samples,
+        "financial_emails_in_failed_count": len(financial_in_failed),
+        "financial_emails_in_failed_samples": financial_in_failed[:10],
+    }
+
+
 @app.get("/api/source/{source_id}")
 async def get_source_content(source_id: str, user: dict = Depends(get_current_user)):
     """Return the original email or SMS content for a given source_email_id or source_sms_id."""
