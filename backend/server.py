@@ -6950,6 +6950,28 @@ async def dev_retry_emails(user_email: str, key: str = ""):
     return {"message": f"Reset {result.modified_count} failed emails to pending for reprocessing."}
 
 
+@app.post("/api/dev/process-emails/{user_email}")
+async def dev_process_emails(user_email: str, key: str = ""):
+    """Temporary no-auth endpoint to trigger AI processing of pending emails."""
+    if key != "spenty-debug-2026":
+        raise HTTPException(status_code=403, detail="Invalid key")
+    user_doc = await db.users.find_one({"email": user_email}, {"_id": 0, "user_id": 1})
+    if not user_doc:
+        raise HTTPException(status_code=404, detail="User not found")
+    user_id = user_doc["user_id"]
+
+    # Clear any stale processing locks
+    await db.processing_locks.delete_many({"lock_key": {"$regex": f"^{user_id}:"}})
+
+    # Count pending emails
+    pending_count = await db.synced_emails.count_documents({"user_id": user_id, "ai_status": {"$in": ["pending", "failed"]}})
+
+    # Trigger processing in background
+    asyncio.create_task(process_pending_emails(user_id, user_email))
+
+    return {"message": f"Started AI processing for {pending_count} pending emails."}
+
+
 async def _email_debug_samples_impl(user_id: str):
     """Debug: Return sample emails by status to diagnose 0 transactions issue."""
 
