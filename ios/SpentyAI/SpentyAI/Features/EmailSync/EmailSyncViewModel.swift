@@ -123,6 +123,18 @@ final class EmailSyncViewModel {
         isLoading = false
         lastRefreshedAt = Date()
 
+        // If backend is actively syncing or processing, start polling automatically
+        if isAnySyncing {
+            if syncStatsResponse?.isProcessing == true {
+                syncPhase = .processingAI
+                syncProgressMessage = "AI is analyzing your emails..."
+            } else if gmailAccounts.contains(where: { $0.syncing == true }) || outlookAccounts.contains(where: { $0.syncing == true }) {
+                syncPhase = .fetchingEmails
+                syncProgressMessage = "Fetching emails from server..."
+            }
+            startPolling()
+        }
+
         promptForSyncDateIfNeeded()
     }
 
@@ -338,9 +350,16 @@ final class EmailSyncViewModel {
             await loadOutlookStatus()
             lastRefreshedAt = Date()
 
-            if syncStatsResponse?.isProcessing == true {
-                syncPhase = .processingAI
-                syncProgressMessage = "Backend is still processing..."
+            // Keep showing progress as long as backend is fetching or processing
+            if isAnySyncing {
+                if syncStatsResponse?.isProcessing == true {
+                    syncPhase = .processingAI
+                    syncProgressMessage = "AI is analyzing your emails..."
+                } else {
+                    syncPhase = .fetchingEmails
+                    syncProgressMessage = "Fetching emails from server..."
+                }
+                // Polling will handle completion — don't stop here
             } else {
                 syncPhase = .complete
                 syncProgressMessage = "All emails processed"
@@ -449,9 +468,9 @@ final class EmailSyncViewModel {
         stopPolling()
         pollingTask = Task { [weak self] in
             guard let self else { return }
-            // Poll every 10 seconds for up to 5 minutes
-            for _ in 0..<30 {
-                try? await Task.sleep(nanoseconds: 10_000_000_000)
+            // Poll every 5 seconds for up to 15 minutes (180 iterations)
+            for _ in 0..<180 {
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
                 if Task.isCancelled { break }
 
                 await self.loadSyncStats()
@@ -459,8 +478,21 @@ final class EmailSyncViewModel {
                 await self.loadOutlookStatus()
                 self.lastRefreshedAt = Date()
 
+                // Update phase based on current state
+                let totalSynced = self.syncStatsResponse?.totalSynced ?? 0
+                let aiPending = self.syncStatsResponse?.aiPending ?? 0
+                let accountSyncing = self.gmailAccounts.contains { $0.syncing == true } || self.outlookAccounts.contains { $0.syncing == true }
+
+                if accountSyncing {
+                    self.syncPhase = .fetchingEmails
+                    self.syncProgressMessage = "Fetching emails... \(totalSynced) found so far"
+                } else if self.syncStatsResponse?.isProcessing == true || aiPending > 0 {
+                    self.syncPhase = .processingAI
+                    self.syncProgressMessage = "AI is analyzing \(aiPending) emails..."
+                }
+
                 // Stop polling if backend is done processing
-                if self.syncStatsResponse?.isProcessing != true && !self.isAnySyncing {
+                if self.syncStatsResponse?.isProcessing != true && !self.isAnySyncing && aiPending == 0 {
                     if self.syncPhase == .processingAI || self.syncPhase == .fetchingEmails || self.syncPhase == .creatingTransactions {
                         self.syncPhase = .complete
                         self.syncProgressMessage = "All emails processed"
