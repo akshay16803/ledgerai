@@ -73,9 +73,9 @@ final class AuthManager {
 
     func checkSession() async {
         #if targetEnvironment(simulator)
-        // If no valid token exists on the simulator, auto-login via the dev endpoint
-        // so we can test all screens without Google OAuth.
-        if KeychainHelper.read(key: KeychainHelper.sessionTokenKey) == nil {
+        let existingToken = KeychainHelper.read(key: KeychainHelper.sessionTokenKey)
+        // If no valid token exists, or we have an offline fallback token, auto-login via dev endpoint
+        if existingToken == nil || existingToken?.hasPrefix("sim-offline-token-") == true {
             isLoading = true
             defer { isLoading = false }
             do {
@@ -122,6 +122,7 @@ final class AuthManager {
 
     #if targetEnvironment(simulator)
     /// Calls the dev-only backend endpoint to mint a session token without Google OAuth.
+    /// Falls back to a hardcoded offline user if the network call fails (common in simulator).
     private func simulatorAutoLogin() async throws {
         struct SimulatorLoginRequest: Encodable {
             let email: String
@@ -133,18 +134,42 @@ final class AuthManager {
             let user: User
         }
 
-        let response: SimulatorLoginResponse = try await APIClient.shared.post(
-            APIEndpoints.authDevSimulatorLogin,
-            body: SimulatorLoginRequest(
-                email: "akshaychouhan16803@gmail.com",
-                devSecret: "spenty-sim-bypass-2026"
+        // Try the real endpoint first
+        do {
+            let response: SimulatorLoginResponse = try await APIClient.shared.post(
+                APIEndpoints.authDevSimulatorLogin,
+                body: SimulatorLoginRequest(
+                    email: "akshaychouhan16803@gmail.com",
+                    devSecret: "spenty-sim-bypass-2026"
+                )
             )
-        )
 
-        KeychainHelper.save(key: KeychainHelper.sessionTokenKey, value: response.sessionToken)
-        self.user = response.user
+            KeychainHelper.save(key: KeychainHelper.sessionTokenKey, value: response.sessionToken)
+            self.user = response.user
+            self.isAuthenticated = true
+            print("[SimulatorBypass] Auto-login successful via API for \(response.user.email ?? "unknown")")
+            return
+        } catch {
+            print("[SimulatorBypass] API auto-login failed: \(error). Falling back to offline bypass...")
+        }
+
+        // Offline fallback: create a hardcoded user and fake session token
+        // This lets us test the full UI on the simulator even when the backend is unreachable.
+        let offlineToken = "sim-offline-token-\(UUID().uuidString)"
+        let offlineUser = User(
+            id: "user_simulator_offline",
+            email: "akshaychouhan16803@gmail.com",
+            name: "Akshay Chouhan",
+            picture: nil,
+            subscriptionPlan: "lifetime",
+            subscriptionStatus: "active",
+            subscriptionExpiry: nil,
+            subscriptionProvider: "simulator"
+        )
+        KeychainHelper.save(key: KeychainHelper.sessionTokenKey, value: offlineToken)
+        self.user = offlineUser
         self.isAuthenticated = true
-        print("[SimulatorBypass] Auto-login successful for \(response.user.email ?? "unknown")")
+        print("[SimulatorBypass] Offline fallback login successful for \(offlineUser.email ?? "unknown")")
     }
     #endif
 
