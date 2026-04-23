@@ -49,6 +49,7 @@ export default function Landing() {
           SpentyAI
         </h1>
         <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
+          <Link to="/features" style={{ fontSize: 14, color: 'var(--text-secondary)', fontWeight: 500 }}>Features</Link>
           <Link to="/pricing" style={{ fontSize: 14, color: 'var(--text-secondary)', fontWeight: 500 }}>Pricing</Link>
           {user ? (
             <button data-testid="nav-dashboard-btn" onClick={() => navigate('/dashboard')} style={{
@@ -247,6 +248,7 @@ export default function Landing() {
           SpentyAI {new Date().getFullYear()}. Autonomous accounting software.
         </p>
         <div style={{ display: 'flex', justifyContent: 'center', gap: 16 }}>
+          <a href="/features" style={{ fontSize: 12, color: 'var(--text-muted)', textDecoration: 'underline' }}>Features</a>
           <a href="/privacy" style={{ fontSize: 12, color: 'var(--text-muted)', textDecoration: 'underline' }}>Privacy Policy</a>
           <a href="/terms" style={{ fontSize: 12, color: 'var(--text-muted)', textDecoration: 'underline' }}>Terms of Service</a>
         </div>

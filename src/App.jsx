@@ -3,6 +3,7 @@ import { useEffect } from 'react';
 import { useAuth } from './contexts/AuthContext.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
 import Landing from './pages/Landing.jsx';
+import Features from './pages/Features.jsx';
 import Login from './pages/Login.jsx';
 import Dashboard from './pages/Dashboard.jsx';
 import Transactions from './pages/Transactions.jsx';
@@ -79,6 +80,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/" element={<Landing />} />
+      <Route path="/features" element={<Features />} />
       <Route path="/login" element={<Login />} />
       <Route path="/pricing" element={<Pricing />} />
       <Route path="/billing" element={<ProtectedRoute requireSubscription={false}><Billing /></ProtectedRoute>} />
