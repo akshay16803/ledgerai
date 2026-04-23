@@ -15,58 +15,56 @@ struct ReconciliationView: View {
     }()
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                Color.spentyBgPrimary.ignoresSafeArea()
+        ZStack {
+            Color.spentyBgPrimary.ignoresSafeArea()
 
-                VStack(spacing: 0) {
-                    if viewModel.isLoading && viewModel.statements.isEmpty {
-                        LoadingView()
-                    } else if viewModel.statements.isEmpty {
-                        EmptyStateView(
-                            icon: "doc.text.magnifyingglass",
-                            title: "No Statements",
-                            subtitle: "Upload a bank statement to start reconciling.",
-                            buttonTitle: "Upload Statement"
-                        ) {
-                            viewModel.showUploadSheet = true
-                        }
-                    } else {
-                        statementList
-                    }
-                }
-            }
-            .navigationTitle("Reconciliation")
-            .navigationBarTitleDisplayMode(.large)
-            .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
+            VStack(spacing: 0) {
+                if viewModel.isLoading && viewModel.statements.isEmpty {
+                    LoadingView()
+                } else if viewModel.statements.isEmpty {
+                    EmptyStateView(
+                        icon: "doc.text.magnifyingglass",
+                        title: "No Statements",
+                        subtitle: "Upload a bank statement to start reconciling.",
+                        buttonTitle: "Upload Statement"
+                    ) {
                         viewModel.showUploadSheet = true
-                    } label: {
-                        Image(systemName: "plus.circle.fill")
-                            .foregroundColor(.spentyPrimary)
-                            .font(.system(size: 22))
                     }
+                } else {
+                    statementList
                 }
             }
-            .sheet(isPresented: $viewModel.showUploadSheet) {
-                StatementUploadView(viewModel: viewModel)
-            }
-            .confirmationDialog(
-                "Delete Statement",
-                isPresented: $showDeleteConfirm,
-                titleVisibility: .visible
-            ) {
-                Button("Delete", role: .destructive) {
-                    if let id = deleteTargetId {
-                        Task { await viewModel.deleteStatement(id: id) }
-                    }
-                }
-            } message: {
-                Text("This action cannot be undone.")
-            }
-            .task { await viewModel.loadInitial() }
         }
+        .navigationTitle("Reconciliation")
+        .navigationBarTitleDisplayMode(.large)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    viewModel.showUploadSheet = true
+                } label: {
+                    Image(systemName: "plus.circle.fill")
+                        .foregroundColor(.spentyPrimary)
+                        .font(.system(size: 22))
+                }
+            }
+        }
+        .sheet(isPresented: $viewModel.showUploadSheet) {
+            StatementUploadView(viewModel: viewModel)
+        }
+        .confirmationDialog(
+            "Delete Statement",
+            isPresented: $showDeleteConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                if let id = deleteTargetId {
+                    Task { await viewModel.deleteStatement(id: id) }
+                }
+            }
+        } message: {
+            Text("This action cannot be undone.")
+        }
+        .task { await viewModel.loadInitial() }
     }
 
     // MARK: - Statement List
@@ -163,5 +161,7 @@ struct ReconciliationView: View {
 }
 
 #Preview {
-    ReconciliationView()
+    NavigationStack {
+        ReconciliationView()
+    }
 }

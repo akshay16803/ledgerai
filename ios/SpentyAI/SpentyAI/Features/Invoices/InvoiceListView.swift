@@ -12,55 +12,53 @@ struct InvoiceListView: View {
     // MARK: - Body
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                Color.spentyBgPrimary.ignoresSafeArea()
+        ZStack {
+            Color.spentyBgPrimary.ignoresSafeArea()
 
-                Group {
-                    if viewModel.isLoading && viewModel.invoices.isEmpty {
-                        LoadingView(message: "Loading invoices...")
-                    } else if viewModel.filteredInvoices.isEmpty && viewModel.invoices.isEmpty {
-                        emptyState
-                    } else {
-                        invoiceContent
-                    }
+            Group {
+                if viewModel.isLoading && viewModel.invoices.isEmpty {
+                    LoadingView(message: "Loading invoices...")
+                } else if viewModel.filteredInvoices.isEmpty && viewModel.invoices.isEmpty {
+                    emptyState
+                } else {
+                    invoiceContent
                 }
             }
-            .navigationTitle("Invoices")
-            .searchable(text: $viewModel.searchText, prompt: "Search by number or customer")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        viewModel.startCreate()
-                    } label: {
-                        Image(systemName: "plus")
-                            .fontWeight(.semibold)
-                            .foregroundStyle(Color.spentyPrimary)
-                    }
+        }
+        .navigationTitle("Invoices")
+        .searchable(text: $viewModel.searchText, prompt: "Search by number or customer")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    viewModel.startCreate()
+                } label: {
+                    Image(systemName: "plus")
+                        .fontWeight(.semibold)
+                        .foregroundStyle(Color.spentyPrimary)
                 }
             }
-            .refreshable {
-                await viewModel.loadAll()
-            }
-            .sheet(isPresented: $viewModel.showForm) {
-                InvoiceFormView(viewModel: viewModel)
-            }
-            .sheet(item: $paymentInvoice) { invoice in
-                RecordPaymentView(viewModel: viewModel, invoice: invoice)
-            }
-            .alert("Error", isPresented: .init(
-                get: { viewModel.errorMessage != nil },
-                set: { if !$0 { viewModel.errorMessage = nil } }
-            )) {
-                Button("OK") { viewModel.errorMessage = nil }
-            } message: {
-                Text(viewModel.errorMessage ?? "")
-            }
-            .task {
-                await viewModel.loadAll()
-                await viewModel.loadCustomers()
-                await viewModel.loadAccounts()
-            }
+        }
+        .refreshable {
+            await viewModel.loadAll()
+        }
+        .sheet(isPresented: $viewModel.showForm) {
+            InvoiceFormView(viewModel: viewModel)
+        }
+        .sheet(item: $paymentInvoice) { invoice in
+            RecordPaymentView(viewModel: viewModel, invoice: invoice)
+        }
+        .alert("Error", isPresented: .init(
+            get: { viewModel.errorMessage != nil },
+            set: { if !$0 { viewModel.errorMessage = nil } }
+        )) {
+            Button("OK") { viewModel.errorMessage = nil }
+        } message: {
+            Text(viewModel.errorMessage ?? "")
+        }
+        .task {
+            await viewModel.loadAll()
+            await viewModel.loadCustomers()
+            await viewModel.loadAccounts()
         }
     }
 
@@ -420,5 +418,7 @@ struct InvoiceListView: View {
 // MARK: - Preview
 
 #Preview {
-    InvoiceListView()
+    NavigationStack {
+        InvoiceListView()
+    }
 }

@@ -29,29 +29,27 @@ struct CashFlowView: View {
     @State private var showCalendar = false
 
     var body: some View {
-        NavigationStack {
-            Group {
-                if viewModel.isLoading && !viewModel.hasData {
-                    LoadingView(message: "Loading cash flow...")
-                } else {
-                    mainContent
-                }
+        Group {
+            if viewModel.isLoading && !viewModel.hasData {
+                LoadingView(message: "Loading cash flow...")
+            } else {
+                mainContent
             }
-            .background(Color.spentyBgPrimary)
-            .navigationTitle("Cash Flow")
-            .navigationBarTitleDisplayMode(.large)
-            .task {
-                await viewModel.loadAll()
-            }
-            .sheet(item: $activeDrillDown) { drillDown in
-                CashFlowDrillDownSheet(
-                    drillDown: drillDown,
-                    viewModel: viewModel
-                )
-            }
-            .sheet(isPresented: $showCalendar) {
-                MonthlyCalendarView(viewModel: viewModel)
-            }
+        }
+        .background(Color.spentyBgPrimary)
+        .navigationTitle("Cash Flow")
+        .navigationBarTitleDisplayMode(.large)
+        .task {
+            await viewModel.loadAll()
+        }
+        .sheet(item: $activeDrillDown) { drillDown in
+            CashFlowDrillDownSheet(
+                drillDown: drillDown,
+                viewModel: viewModel
+            )
+        }
+        .sheet(isPresented: $showCalendar) {
+            MonthlyCalendarView(viewModel: viewModel)
         }
     }
 
@@ -1366,5 +1364,7 @@ struct CashFlowDrillDownSheet: View {
 // MARK: - Preview
 
 #Preview {
-    CashFlowView()
+    NavigationStack {
+        CashFlowView()
+    }
 }

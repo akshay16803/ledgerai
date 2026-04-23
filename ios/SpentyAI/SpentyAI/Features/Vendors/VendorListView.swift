@@ -9,44 +9,42 @@ struct VendorListView: View {
     // MARK: - Body
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                Color.spentyBgPrimary.ignoresSafeArea()
+        ZStack {
+            Color.spentyBgPrimary.ignoresSafeArea()
 
-                Group {
-                    if viewModel.isLoading && viewModel.vendors.isEmpty {
-                        LoadingView(message: "Loading vendors...")
-                    } else if viewModel.filteredVendors.isEmpty && !viewModel.isLoading {
-                        emptyState
-                    } else {
-                        vendorList
-                    }
+            Group {
+                if viewModel.isLoading && viewModel.vendors.isEmpty {
+                    LoadingView(message: "Loading vendors...")
+                } else if viewModel.filteredVendors.isEmpty && !viewModel.isLoading {
+                    emptyState
+                } else {
+                    vendorList
                 }
             }
-            .navigationTitle("Vendors")
-            .searchable(text: $viewModel.searchText, prompt: "Search vendors")
-            .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        viewModel.startCreate()
-                    } label: {
-                        Image(systemName: "plus")
-                            .fontWeight(.semibold)
-                    }
-                    .tint(Color.spentyPrimary)
+        }
+        .navigationTitle("Vendors")
+        .searchable(text: $viewModel.searchText, prompt: "Search vendors")
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    viewModel.startCreate()
+                } label: {
+                    Image(systemName: "plus")
+                        .fontWeight(.semibold)
                 }
+                .tint(Color.spentyPrimary)
             }
-            .sheet(isPresented: $viewModel.showForm) {
-                VendorFormView(viewModel: viewModel)
-            }
-            .alert("Error", isPresented: $viewModel.showError) {
-                Button("OK") { viewModel.dismissError() }
-            } message: {
-                Text(viewModel.errorMessage)
-            }
-            .task {
-                await viewModel.loadVendors()
-            }
+        }
+        .sheet(isPresented: $viewModel.showForm) {
+            VendorFormView(viewModel: viewModel)
+        }
+        .alert("Error", isPresented: $viewModel.showError) {
+            Button("OK") { viewModel.dismissError() }
+        } message: {
+            Text(viewModel.errorMessage)
+        }
+        .task {
+            await viewModel.loadVendors()
         }
     }
 
@@ -125,5 +123,7 @@ struct VendorListView: View {
 // MARK: - Preview
 
 #Preview {
-    VendorListView()
+    NavigationStack {
+        VendorListView()
+    }
 }

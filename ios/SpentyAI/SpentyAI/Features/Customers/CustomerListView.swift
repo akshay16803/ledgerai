@@ -9,50 +9,48 @@ struct CustomerListView: View {
     // MARK: - Body
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                Color.spentyBgPrimary.ignoresSafeArea()
+        ZStack {
+            Color.spentyBgPrimary.ignoresSafeArea()
 
-                Group {
-                    if viewModel.isLoading && viewModel.customers.isEmpty {
-                        LoadingView(message: "Loading customers...")
-                    } else if viewModel.filteredCustomers.isEmpty {
-                        emptyState
-                    } else {
-                        customerList
-                    }
+            Group {
+                if viewModel.isLoading && viewModel.customers.isEmpty {
+                    LoadingView(message: "Loading customers...")
+                } else if viewModel.filteredCustomers.isEmpty {
+                    emptyState
+                } else {
+                    customerList
                 }
             }
-            .navigationTitle("Customers")
-            .searchable(text: $viewModel.searchText, prompt: "Search by name or email")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        viewModel.startCreate()
-                    } label: {
-                        Image(systemName: "plus")
-                            .fontWeight(.semibold)
-                            .foregroundStyle(Color.spentyPrimary)
-                    }
+        }
+        .navigationTitle("Customers")
+        .searchable(text: $viewModel.searchText, prompt: "Search by name or email")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    viewModel.startCreate()
+                } label: {
+                    Image(systemName: "plus")
+                        .fontWeight(.semibold)
+                        .foregroundStyle(Color.spentyPrimary)
                 }
             }
-            .refreshable {
-                await viewModel.loadCustomers()
-            }
-            .sheet(isPresented: $viewModel.showForm) {
-                CustomerFormView(viewModel: viewModel)
-            }
-            .alert("Error", isPresented: .init(
-                get: { viewModel.errorMessage != nil },
-                set: { if !$0 { viewModel.errorMessage = nil } }
-            )) {
-                Button("OK") { viewModel.errorMessage = nil }
-            } message: {
-                Text(viewModel.errorMessage ?? "")
-            }
-            .task {
-                await viewModel.loadCustomers()
-            }
+        }
+        .refreshable {
+            await viewModel.loadCustomers()
+        }
+        .sheet(isPresented: $viewModel.showForm) {
+            CustomerFormView(viewModel: viewModel)
+        }
+        .alert("Error", isPresented: .init(
+            get: { viewModel.errorMessage != nil },
+            set: { if !$0 { viewModel.errorMessage = nil } }
+        )) {
+            Button("OK") { viewModel.errorMessage = nil }
+        } message: {
+            Text(viewModel.errorMessage ?? "")
+        }
+        .task {
+            await viewModel.loadCustomers()
         }
     }
 
@@ -136,5 +134,7 @@ struct CustomerListView: View {
 // MARK: - Preview
 
 #Preview {
-    CustomerListView()
+    NavigationStack {
+        CustomerListView()
+    }
 }

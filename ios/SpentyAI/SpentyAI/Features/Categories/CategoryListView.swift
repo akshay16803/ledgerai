@@ -9,52 +9,50 @@ struct CategoryListView: View {
     // MARK: - Body
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                Color.spentyBgPrimary.ignoresSafeArea()
+        ZStack {
+            Color.spentyBgPrimary.ignoresSafeArea()
 
-                VStack(spacing: 0) {
-                    // -- Segmented Control --
-                    segmentedControl
-                        .padding(.horizontal, 16)
-                        .padding(.top, 8)
-                        .padding(.bottom, 4)
+            VStack(spacing: 0) {
+                // -- Segmented Control --
+                segmentedControl
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+                    .padding(.bottom, 4)
 
-                    // -- Content --
-                    if viewModel.isLoading && viewModel.categories.isEmpty {
-                        Spacer()
-                        LoadingView(message: "Loading categories...")
-                        Spacer()
-                    } else if viewModel.categoryTree.isEmpty {
-                        emptyState
-                    } else {
-                        categoryList
-                    }
+                // -- Content --
+                if viewModel.isLoading && viewModel.categories.isEmpty {
+                    Spacer()
+                    LoadingView(message: "Loading categories...")
+                    Spacer()
+                } else if viewModel.categoryTree.isEmpty {
+                    emptyState
+                } else {
+                    categoryList
                 }
             }
-            .navigationTitle("Categories")
-            .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        viewModel.beginCreate()
-                    } label: {
-                        Image(systemName: "plus")
-                            .fontWeight(.semibold)
-                    }
-                    .tint(Color.spentyPrimary)
+        }
+        .navigationTitle("Categories")
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    viewModel.beginCreate()
+                } label: {
+                    Image(systemName: "plus")
+                        .fontWeight(.semibold)
                 }
+                .tint(Color.spentyPrimary)
             }
-            .sheet(isPresented: $viewModel.showForm) {
-                CategoryFormView(viewModel: viewModel)
-            }
-            .alert("Error", isPresented: $viewModel.showError) {
-                Button("OK") { viewModel.dismissError() }
-            } message: {
-                Text(viewModel.errorMessage)
-            }
-            .task {
-                await viewModel.loadCategories()
-            }
+        }
+        .sheet(isPresented: $viewModel.showForm) {
+            CategoryFormView(viewModel: viewModel)
+        }
+        .alert("Error", isPresented: $viewModel.showError) {
+            Button("OK") { viewModel.dismissError() }
+        } message: {
+            Text(viewModel.errorMessage)
+        }
+        .task {
+            await viewModel.loadCategories()
         }
     }
 
@@ -252,5 +250,7 @@ private struct CategoryTreeRow: View {
 // MARK: - Preview
 
 #Preview {
-    CategoryListView()
+    NavigationStack {
+        CategoryListView()
+    }
 }

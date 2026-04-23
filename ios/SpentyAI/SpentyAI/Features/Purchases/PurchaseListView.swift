@@ -11,84 +11,82 @@ struct PurchaseListView: View {
     // MARK: - Body
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                Color.spentyBgPrimary.ignoresSafeArea()
+        ZStack {
+            Color.spentyBgPrimary.ignoresSafeArea()
 
-                Group {
-                    if viewModel.isLoading && viewModel.bills.isEmpty {
-                        ProgressView()
-                            .tint(Color.spentyPrimary)
-                    } else if viewModel.filteredBills.isEmpty {
-                        emptyState
-                    } else {
-                        billsList
-                    }
+            Group {
+                if viewModel.isLoading && viewModel.bills.isEmpty {
+                    ProgressView()
+                        .tint(Color.spentyPrimary)
+                } else if viewModel.filteredBills.isEmpty {
+                    emptyState
+                } else {
+                    billsList
                 }
             }
-            .navigationTitle("Purchases")
-            .searchable(text: $viewModel.searchText, prompt: "Search bills...")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    HStack(spacing: 12) {
-                        Button {
-                            viewModel.startUpload()
-                        } label: {
-                            Image(systemName: "doc.text.viewfinder")
-                                .foregroundStyle(Color.spentyPrimary)
-                        }
+        }
+        .navigationTitle("Purchases")
+        .searchable(text: $viewModel.searchText, prompt: "Search bills...")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                HStack(spacing: 12) {
+                    Button {
+                        viewModel.startUpload()
+                    } label: {
+                        Image(systemName: "doc.text.viewfinder")
+                            .foregroundStyle(Color.spentyPrimary)
+                    }
 
-                        Button {
-                            viewModel.startCreate()
-                        } label: {
-                            Image(systemName: "plus")
-                                .fontWeight(.semibold)
-                                .foregroundStyle(Color.spentyPrimary)
-                        }
+                    Button {
+                        viewModel.startCreate()
+                    } label: {
+                        Image(systemName: "plus")
+                            .fontWeight(.semibold)
+                            .foregroundStyle(Color.spentyPrimary)
                     }
                 }
             }
-            .refreshable {
-                await viewModel.loadAll()
+        }
+        .refreshable {
+            await viewModel.loadAll()
+        }
+        .sheet(isPresented: $viewModel.showForm) {
+            PurchaseFormView(viewModel: viewModel)
+        }
+        .sheet(isPresented: $viewModel.showPaymentSheet) {
+            if let bill = viewModel.paymentBill {
+                RecordBillPaymentView(viewModel: viewModel, bill: bill)
             }
-            .sheet(isPresented: $viewModel.showForm) {
-                PurchaseFormView(viewModel: viewModel)
+        }
+        .sheet(isPresented: $viewModel.showPreview) {
+            if let id = viewModel.previewBillId {
+                PurchasePreviewView(viewModel: viewModel, billId: id)
             }
-            .sheet(isPresented: $viewModel.showPaymentSheet) {
-                if let bill = viewModel.paymentBill {
-                    RecordBillPaymentView(viewModel: viewModel, bill: bill)
+        }
+        .sheet(isPresented: $viewModel.showUploadParser) {
+            BillUploadParserView(viewModel: viewModel)
+        }
+        .alert("Error", isPresented: .init(
+            get: { viewModel.errorMessage != nil },
+            set: { if !$0 { viewModel.errorMessage = nil } }
+        )) {
+            Button("OK") { viewModel.errorMessage = nil }
+        } message: {
+            Text(viewModel.errorMessage ?? "")
+        }
+        .alert("Delete Bill", isPresented: $showDeleteConfirm) {
+            Button("Cancel", role: .cancel) { billToDelete = nil }
+            Button("Delete", role: .destructive) {
+                if let bill = billToDelete {
+                    Task { await viewModel.deleteBill(id: bill.id) }
                 }
+                billToDelete = nil
             }
-            .sheet(isPresented: $viewModel.showPreview) {
-                if let id = viewModel.previewBillId {
-                    PurchasePreviewView(viewModel: viewModel, billId: id)
-                }
-            }
-            .sheet(isPresented: $viewModel.showUploadParser) {
-                BillUploadParserView(viewModel: viewModel)
-            }
-            .alert("Error", isPresented: .init(
-                get: { viewModel.errorMessage != nil },
-                set: { if !$0 { viewModel.errorMessage = nil } }
-            )) {
-                Button("OK") { viewModel.errorMessage = nil }
-            } message: {
-                Text(viewModel.errorMessage ?? "")
-            }
-            .alert("Delete Bill", isPresented: $showDeleteConfirm) {
-                Button("Cancel", role: .cancel) { billToDelete = nil }
-                Button("Delete", role: .destructive) {
-                    if let bill = billToDelete {
-                        Task { await viewModel.deleteBill(id: bill.id) }
-                    }
-                    billToDelete = nil
-                }
-            } message: {
-                Text("Are you sure you want to delete this bill? This cannot be undone.")
-            }
-            .task {
-                await viewModel.loadAll()
-            }
+        } message: {
+            Text("Are you sure you want to delete this bill? This cannot be undone.")
+        }
+        .task {
+            await viewModel.loadAll()
         }
     }
 
@@ -426,5 +424,7 @@ struct PurchaseListView: View {
 // MARK: - Preview
 
 #Preview {
-    PurchaseListView()
+    NavigationStack {
+        PurchaseListView()
+    }
 }

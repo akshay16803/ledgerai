@@ -9,44 +9,42 @@ struct PastInsightsView: View {
     // MARK: - Body
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                Color.spentyBgPrimary.ignoresSafeArea()
+        ZStack {
+            Color.spentyBgPrimary.ignoresSafeArea()
 
-                Group {
-                    if viewModel.isLoading && viewModel.summaries.isEmpty {
-                        LoadingView(message: "Loading past insight summaries...")
-                    } else if viewModel.summaries.isEmpty && !viewModel.isLoading {
-                        emptyState
-                    } else {
-                        summaryList
-                    }
+            Group {
+                if viewModel.isLoading && viewModel.summaries.isEmpty {
+                    LoadingView(message: "Loading past insight summaries...")
+                } else if viewModel.summaries.isEmpty && !viewModel.isLoading {
+                    emptyState
+                } else {
+                    summaryList
                 }
             }
-            .navigationTitle("Past Insights")
-            .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        viewModel.startCreate()
-                        Task { await viewModel.loadAvailableEmails() }
-                    } label: {
-                        Image(systemName: "plus")
-                            .fontWeight(.semibold)
-                    }
-                    .tint(Color.spentyPrimary)
+        }
+        .navigationTitle("Past Insights")
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    viewModel.startCreate()
+                    Task { await viewModel.loadAvailableEmails() }
+                } label: {
+                    Image(systemName: "plus")
+                        .fontWeight(.semibold)
                 }
+                .tint(Color.spentyPrimary)
             }
-            .sheet(isPresented: $viewModel.showCreateForm) {
-                createFormSheet
-            }
-            .alert("Error", isPresented: $viewModel.showError) {
-                Button("OK") { viewModel.dismissError() }
-            } message: {
-                Text(viewModel.errorMessage)
-            }
-            .task {
-                await viewModel.loadSummaries()
-            }
+        }
+        .sheet(isPresented: $viewModel.showCreateForm) {
+            createFormSheet
+        }
+        .alert("Error", isPresented: $viewModel.showError) {
+            Button("OK") { viewModel.dismissError() }
+        } message: {
+            Text(viewModel.errorMessage)
+        }
+        .task {
+            await viewModel.loadSummaries()
         }
     }
 
@@ -250,5 +248,7 @@ struct PastInsightsView: View {
 // MARK: - Preview
 
 #Preview {
-    PastInsightsView()
+    NavigationStack {
+        PastInsightsView()
+    }
 }
