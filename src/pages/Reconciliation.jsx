@@ -1,3 +1,4 @@
+import { s, getCurrentLanguage } from '../lib/localization';
 import { useState, useEffect, useCallback, Fragment } from 'react';
 import { api } from '../lib/api';
 import { getCached, setCache } from '../lib/cache';
@@ -160,6 +161,8 @@ function QuickCategoryModal({ mode, parentId, parentName, categoryType, onClose,
 }
 
 export default function Reconciliation() {
+  const [lang, setLang] = useState(getCurrentLanguage());
+  useEffect(() => { const h = () => setLang(getCurrentLanguage()); window.addEventListener('languageChanged', h); return () => window.removeEventListener('languageChanged', h); }, []);
   const cached = getCached('reconciliation');
   const [statements, setStatements] = useState(cached?.statements || []);
   const [accounts, setAccounts] = useState(cached?.accounts || []);
@@ -485,7 +488,7 @@ export default function Reconciliation() {
     );
   };
 
-  const getAccountName = (id) => accounts.find(a => a.account_id === id)?.name || 'Unknown';
+  const getAccountName = (id) => accounts.find(a => a.account_id === id)?.name || 'Unidentified Account';
 
   if (loading) {
     return <div className="mono" style={{ color: 'var(--text-muted)', padding: 40 }}>Loading...</div>;
@@ -496,7 +499,7 @@ export default function Reconciliation() {
   return (
     <div data-testid="reconciliation-page">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 16, gap: 16, flexWrap: 'wrap' }}>
-        <h1 style={{ fontSize: 22, fontWeight: 500, letterSpacing: '-0.02em' }}>Statement Reconciliation</h1>
+        <h1 style={{ fontSize: 22, fontWeight: 500, letterSpacing: '-0.02em' }}>{s('reconciliation')}</h1>
         <p className="mono" style={{ fontSize: 11.5, color: 'var(--text-muted)', margin: 0 }}>
           Upload bank or credit card statements to detect missing entries, duplicates, and conflicts
         </p>
@@ -539,7 +542,7 @@ export default function Reconciliation() {
             </select>
           </div>
           <div>
-            <label className="mono" style={{ fontSize: 10.5, color: 'var(--text-muted)', display: 'block', marginBottom: 3 }}>Account</label>
+            <label className="mono" style={{ fontSize: 10.5, color: 'var(--text-muted)', display: 'block', marginBottom: 3 }}>{s('account_label')}</label>
             <select data-testid="account-select" value={selectedAccountId}
               onChange={e => setSelectedAccountId(e.target.value)}
               disabled={filteredAccounts.length === 0}
@@ -553,13 +556,13 @@ export default function Reconciliation() {
             </select>
           </div>
           <div>
-            <label className="mono" style={{ fontSize: 10.5, color: 'var(--text-muted)', display: 'block', marginBottom: 3 }}>Period From</label>
+            <label className="mono" style={{ fontSize: 10.5, color: 'var(--text-muted)', display: 'block', marginBottom: 3 }}>{s('period_from')}</label>
             <input data-testid="period-from" type="date" value={periodFrom}
               onChange={e => setPeriodFrom(e.target.value)} max={periodTo}
               style={{ padding: '6px 10px', border: '1px solid var(--border-strong)', borderRadius: 2, fontSize: 12.5, fontFamily: 'var(--font-body)', background: '#fff' }} />
           </div>
           <div>
-            <label className="mono" style={{ fontSize: 10.5, color: 'var(--text-muted)', display: 'block', marginBottom: 3 }}>Period To</label>
+            <label className="mono" style={{ fontSize: 10.5, color: 'var(--text-muted)', display: 'block', marginBottom: 3 }}>{s('period_to')}</label>
             <input data-testid="period-to" type="date" value={periodTo}
               onChange={e => setPeriodTo(e.target.value)} min={periodFrom}
               style={{ padding: '6px 10px', border: '1px solid var(--border-strong)', borderRadius: 2, fontSize: 12.5, fontFamily: 'var(--font-body)', background: '#fff' }} />
@@ -589,7 +592,7 @@ export default function Reconciliation() {
           <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-secondary)' }}>
             <h3 style={{ fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
               <FileText size={15} weight="duotone" style={{ color: 'var(--text-secondary)' }} />
-              Uploaded Statements
+              {s('upload_statement')}
               <span className="mono" style={{ fontSize: 11, padding: '1px 6px', background: 'var(--bg-primary)', borderRadius: 2, color: 'var(--text-muted)' }}>
                 {statements.length}
               </span>
@@ -599,7 +602,7 @@ export default function Reconciliation() {
             <thead>
               <tr style={{ borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-secondary)' }}>
                 <th style={thStyleCompact}>File</th>
-                <th style={thStyleCompact}>Account</th>
+                <th style={thStyleCompact}>{s('account_label')}</th>
                 <th style={thStyleCompact}>Type</th>
                 <th style={thStyleCompact}>Entries</th>
                 <th style={thStyleCompact}>Period</th>

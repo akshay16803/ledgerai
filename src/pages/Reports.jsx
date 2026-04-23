@@ -1,10 +1,13 @@
+import { s, getCurrentLanguage } from '../lib/localization';
 import { useState, useEffect, useCallback, Fragment } from 'react';
 import { api } from '../lib/api';
 import { getCached, setCache } from '../lib/cache';
 import {
   TrendUp, TrendDown, ArrowsLeftRight, FunnelSimple,
-  CurrencyInr, ChartBar, ChartPie, CaretDown, CaretRight, X, ArrowRight
+  CurrencyInr, ChartBar, ChartPie, CaretDown, CaretRight, X, ArrowRight, DownloadSimple
 } from '@phosphor-icons/react';
+
+const API = import.meta.env.REACT_APP_BACKEND_URL || '';
 
 function formatCurrency(amount) {
   if (amount == null) return '—';
@@ -12,16 +15,16 @@ function formatCurrency(amount) {
 }
 
 const COLORS = [
-  '#C26D5C', '#3A5C4A', '#4A6E7D', '#C28C3C', '#7C3AED',
+  '#34C759', '#2EB34D', '#4A6E7D', '#C28C3C', '#7C3AED',
   '#E53E3E', '#38A169', '#3182CE', '#D69E2E', '#9F7AEA',
   '#ED8936', '#48BB78', '#4299E1', '#ECC94B', '#B794F4',
 ];
 
 const PERIOD_PRESETS = [
-  { label: 'This Month', getRange: () => { const n = new Date(); return { start: `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}-01`, end: n.toISOString().split('T')[0] }; } },
-  { label: 'Last 3 Months', getRange: () => { const n = new Date(); const s = new Date(n); s.setMonth(s.getMonth()-3); return { start: s.toISOString().split('T')[0], end: n.toISOString().split('T')[0] }; } },
-  { label: 'Last 6 Months', getRange: () => { const n = new Date(); const s = new Date(n); s.setMonth(s.getMonth()-6); return { start: s.toISOString().split('T')[0], end: n.toISOString().split('T')[0] }; } },
-  { label: 'This Year', getRange: () => { const n = new Date(); return { start: `${n.getFullYear()}-01-01`, end: n.toISOString().split('T')[0] }; } },
+  { label: s('this_month'), getRange: () => { const n = new Date(); return { start: `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}-01`, end: n.toISOString().split('T')[0] }; } },
+  { label: s('last_3_months'), getRange: () => { const n = new Date(); const s = new Date(n); s.setMonth(s.getMonth()-3); return { start: s.toISOString().split('T')[0], end: n.toISOString().split('T')[0] }; } },
+  { label: s('last_6_months'), getRange: () => { const n = new Date(); const s = new Date(n); s.setMonth(s.getMonth()-6); return { start: s.toISOString().split('T')[0], end: n.toISOString().split('T')[0] }; } },
+  { label: s('this_year'), getRange: () => { const n = new Date(); return { start: `${n.getFullYear()}-01-01`, end: n.toISOString().split('T')[0] }; } },
   { label: 'All Time', getRange: () => ({ start: '', end: '' }) },
 ];
 
@@ -289,7 +292,7 @@ function TransactionDrillDown({ drillDown, onClose, startDate, endDate, catType 
               <tr style={{ borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-secondary)' }}>
                 <th style={{ ...thStyle, fontSize: 10 }}>Date</th>
                 <th style={{ ...thStyle, fontSize: 10 }}>Description</th>
-                <th style={{ ...thStyle, fontSize: 10, textAlign: 'right' }}>Amount</th>
+                <th style={{ ...thStyle, fontSize: 10, textAlign: 'right' }}>{s('amount')}</th>
               </tr>
             </thead>
             <tbody>
@@ -331,6 +334,8 @@ function Overlay({ onClick }) {
 /* ── Main Reports Page ──────────────────────────────────────────── */
 
 export default function Reports() {
+  const [lang, setLang] = useState(getCurrentLanguage());
+  useEffect(() => { const h = () => setLang(getCurrentLanguage()); window.addEventListener('languageChanged', h); return () => window.removeEventListener('languageChanged', h); }, []);
   const cached = getCached('reports');
   const [summary, setSummary] = useState(cached?.summary || null);
   const [periods, setPeriods] = useState(cached?.periods || []);
@@ -415,6 +420,26 @@ export default function Reports() {
     });
   };
 
+  const handleExport = async (format) => {
+    try {
+      const res = await fetch(`${API}/api/reports/export/${format}`, {
+        credentials: 'include',
+      });
+      if (!res.ok) throw new Error('Export failed');
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `spentyai-report.${format}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      alert(err.message || `Failed to export ${format.toUpperCase()}`);
+    }
+  };
+
   const catData = categories?.[catType] || [];
   const catTotal = catData.reduce((s, c) => s + (catType === 'expense' ? c.expense : c.income), 0);
 
@@ -426,10 +451,26 @@ export default function Reports() {
     <div data-testid="reports-page">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
         <div>
-          <h1 style={{ fontSize: 28, fontWeight: 500, letterSpacing: '-0.02em' }}>Reports</h1>
+          <h1 style={{ fontSize: 28, fontWeight: 500, letterSpacing: '-0.02em' }}>{s('reports')}</h1>
           <p className="mono" style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
             Income, expense, and category breakdowns
           </p>
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button data-testid="export-csv-btn" onClick={() => handleExport('csv')} style={{
+            background: '#fff', color: 'var(--brand-primary)', border: '1px solid var(--brand-primary)',
+            padding: '8px 16px', borderRadius: 2, fontSize: 12, fontWeight: 600,
+            cursor: 'pointer', fontFamily: 'var(--font-body)', display: 'flex', alignItems: 'center', gap: 6,
+          }}>
+            <DownloadSimple size={14} weight="bold" /> {s('export_csv')}
+          </button>
+          <button data-testid="export-pdf-btn" onClick={() => handleExport('pdf')} style={{
+            background: 'var(--brand-primary)', color: '#fff', border: '1px solid var(--brand-primary)',
+            padding: '8px 16px', borderRadius: 2, fontSize: 12, fontWeight: 600,
+            cursor: 'pointer', fontFamily: 'var(--font-body)', display: 'flex', alignItems: 'center', gap: 6,
+          }}>
+            <DownloadSimple size={14} weight="bold" /> {s('export_pdf')}
+          </button>
         </div>
       </div>
 
@@ -462,10 +503,10 @@ export default function Reports() {
 
       {/* Summary Cards */}
       <div data-testid="reports-summary" style={{ display: 'flex', gap: 16, marginBottom: 32, flexWrap: 'wrap' }}>
-        <SummaryCard label="Total Income" value={summary?.total_income} color="var(--success)" icon={TrendUp} />
-        <SummaryCard label="Total Expense" value={summary?.total_expense} color="var(--error)" icon={TrendDown} />
-        <SummaryCard label="Net" value={summary?.net} color={summary?.net >= 0 ? 'var(--success)' : 'var(--error)'} icon={ArrowsLeftRight} />
-        <SummaryCard label="Transactions" value={summary?.transaction_count} color="var(--text-primary)" icon={ChartBar} />
+        <SummaryCard label={s('total_income')} value={summary?.total_income} color="var(--success)" icon={TrendUp} />
+        <SummaryCard label={s('total_expense')} value={summary?.total_expense} color="var(--error)" icon={TrendDown} />
+        <SummaryCard label={s('net')} value={summary?.net} color={summary?.net >= 0 ? 'var(--success)' : 'var(--error)'} icon={ArrowsLeftRight} />
+        <SummaryCard label={s('transactions')} value={summary?.transaction_count} color="var(--text-primary)" icon={ChartBar} />
       </div>
 
       {/* Period Chart */}
@@ -531,8 +572,8 @@ export default function Reports() {
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-secondary)' }}>
                   <th style={thStyle}></th>
-                  <th style={thStyle}>Category</th>
-                  <th style={{ ...thStyle, textAlign: 'right' }}>Amount</th>
+                  <th style={thStyle}>{s('category')}</th>
+                  <th style={{ ...thStyle, textAlign: 'right' }}>{s('amount')}</th>
                   <th style={{ ...thStyle, textAlign: 'right' }}>% of Total</th>
                   <th style={{ ...thStyle, textAlign: 'center' }}>Txns</th>
                 </tr>
@@ -636,15 +677,15 @@ export default function Reports() {
           background: '#fff', border: '1px solid var(--border-subtle)', borderRadius: 2, overflow: 'hidden'
         }}>
           <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-secondary)' }}>
-            <h2 style={{ fontSize: 16, fontWeight: 500 }}>Monthly Details</h2>
+            <h2 style={{ fontSize: 16, fontWeight: 500 }}>{s('monthly_breakdown')}</h2>
           </div>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 650 }}>
             <thead>
               <tr style={{ borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-secondary)' }}>
-                <th style={thStyle}>Month</th>
-                <th style={{ ...thStyle, textAlign: 'right' }}>Income</th>
-                <th style={{ ...thStyle, textAlign: 'right' }}>Expense</th>
-                <th style={{ ...thStyle, textAlign: 'right' }}>Net</th>
+                <th style={thStyle}>{s('month_header')}</th>
+                <th style={{ ...thStyle, textAlign: 'right' }}>{s('income')}</th>
+                <th style={{ ...thStyle, textAlign: 'right' }}>{s('expense')}</th>
+                <th style={{ ...thStyle, textAlign: 'right' }}>{s('net')}</th>
                 <th style={{ ...thStyle, textAlign: 'center' }}>Txns</th>
               </tr>
             </thead>

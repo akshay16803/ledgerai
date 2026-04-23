@@ -1,3 +1,4 @@
+import { s, getCurrentLanguage } from '../lib/localization';
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../lib/api';
 import { useNavigate } from 'react-router-dom';
@@ -15,6 +16,8 @@ function formatCurrency(amount) {
 
 export default function Records() {
   const navigate = useNavigate();
+  const [lang, setLang] = useState(getCurrentLanguage());
+  useEffect(() => { const h = () => setLang(getCurrentLanguage()); window.addEventListener('languageChanged', h); return () => window.removeEventListener('languageChanged', h); }, []);
   const [records, setRecords] = useState([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -155,7 +158,7 @@ export default function Records() {
     <div data-testid="records-page">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <div>
-          <h1 style={{ fontSize: 28, fontWeight: 500, letterSpacing: '-0.02em' }}>Records</h1>
+          <h1 style={{ fontSize: 28, fontWeight: 500, letterSpacing: '-0.02em' }}>{s('records')}</h1>
           <p className="mono" style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
             Emails & receipts — {activeTab === 'emails' ? total : receiptsTotal} records
           </p>
@@ -184,8 +187,8 @@ export default function Records() {
       {/* Tabs */}
       <div style={{ display: 'flex', gap: 0, marginBottom: 20, borderBottom: '1px solid var(--border-subtle)' }}>
         {[
-          { key: 'emails', label: 'Email Records', icon: EnvelopeSimple },
-          { key: 'receipts', label: 'Receipts & Bills', icon: Receipt },
+          { key: 'emails', label: s('records'), icon: EnvelopeSimple },
+          { key: 'receipts', label: s('receipt'), icon: Receipt },
         ].map(({ key, label, icon: Icon }) => (
           <button key={key} onClick={() => { setActiveTab(key); setPage(0); }}
             style={{
@@ -213,7 +216,7 @@ export default function Records() {
               border: '1px solid var(--border-subtle)', borderRadius: 2,
             }}>
               <Receipt size={40} weight="duotone" style={{ color: 'var(--text-muted)', marginBottom: 16 }} />
-              <h3 style={{ fontSize: 18, fontWeight: 600, marginBottom: 8 }}>No receipts uploaded yet</h3>
+              <h3 style={{ fontSize: 18, fontWeight: 600, marginBottom: 8 }}>{s('no_receipts')}</h3>
               <p style={{ color: 'var(--text-muted)', fontSize: 14, maxWidth: 420, margin: '0 auto' }}>
                 Upload a receipt when creating a transaction and it will appear here.
               </p>
@@ -330,7 +333,7 @@ export default function Records() {
             maxHeight: '90vh', overflow: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.2)',
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 24px', borderBottom: '1px solid var(--border-subtle)' }}>
-              <h2 style={{ fontSize: 16, fontWeight: 600 }}>Receipt Preview</h2>
+              <h2 style={{ fontSize: 16, fontWeight: 600 }}>{s('receipt')}</h2>
               <button onClick={() => { setReceiptPreviewUrl(null); setReceiptPreviewData(null); }}
                 style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4 }}>
                 <X size={20} />
@@ -609,7 +612,7 @@ export default function Records() {
             ) : previewRecord && (
               <>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 24px', borderBottom: '1px solid var(--border-subtle)' }}>
-                  <h2 style={{ fontSize: 16, fontWeight: 600 }}>Email Preview</h2>
+                  <h2 style={{ fontSize: 16, fontWeight: 600 }}>{s('original_email')}</h2>
                   <button data-testid="close-preview" onClick={() => setPreviewRecord(null)}
                     style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4 }}>
                     <X size={20} />

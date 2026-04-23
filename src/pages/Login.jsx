@@ -1,7 +1,8 @@
+import { s, getCurrentLanguage } from '../lib/localization';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { GoogleLogo } from '@phosphor-icons/react';
-import { useEffect } from 'react';
 
 export default function Login() {
   const { user } = useAuth();
@@ -29,10 +30,10 @@ export default function Login() {
           fontFamily: 'var(--font-heading)', fontSize: 28, fontWeight: 600,
           color: 'var(--brand-primary)', marginBottom: 8
         }}>
-          SpentyAI
+          {s('spentyai')}
         </h1>
         <p style={{ color: 'var(--text-muted)', fontSize: 14, marginBottom: 40 }}>
-          Sign in to manage your accounts
+          {s('smart_spending')}
         </p>
 
         <div style={{
@@ -53,7 +54,7 @@ export default function Login() {
             onMouseLeave={e => { e.currentTarget.style.background = '#fff'; e.currentTarget.style.boxShadow = 'none'; }}
           >
             <GoogleLogo size={20} weight="bold" />
-            Continue with Google
+            {s('sign_in_google')}
           </button>
 
           <p style={{ marginTop: 24, fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5 }}>

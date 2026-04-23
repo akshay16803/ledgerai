@@ -1,9 +1,12 @@
+import { s, getCurrentLanguage } from '../lib/localization';
 import { useState, useEffect } from 'react';
 import { api } from '../lib/api';
 import { getCached, setCache } from '../lib/cache';
 import { Plus, Trash, CaretRight } from '@phosphor-icons/react';
 
 export default function Categories() {
+  const [lang, setLang] = useState(getCurrentLanguage());
+  useEffect(() => { const h = () => setLang(getCurrentLanguage()); window.addEventListener('languageChanged', h); return () => window.removeEventListener('languageChanged', h); }, []);
   const [categories, setCategories] = useState(() => getCached('categories') || []);
   const [loading, setLoading] = useState(!getCached('categories'));
   const [activeTab, setActiveTab] = useState('expense');
@@ -67,15 +70,15 @@ export default function Categories() {
     <div data-testid="categories-page">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 32 }}>
         <div>
-          <h1 style={{ fontSize: 28, fontWeight: 500, letterSpacing: '-0.02em' }}>Categories</h1>
-          <p className="mono" style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>Manage income and expense categories</p>
+          <h1 style={{ fontSize: 28, fontWeight: 500, letterSpacing: '-0.02em' }}>{s('categories')}</h1>
+          <p className="mono" style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>{s('categories')}</p>
         </div>
         <button data-testid="add-category-btn" onClick={() => { if (showForm) closeForm(); else { setForm({ name: '', parent_id: '' }); setShowForm(true); } }} style={{
           background: 'var(--brand-primary)', color: '#fff', border: 'none',
           padding: '10px 20px', borderRadius: 2, fontSize: 13, fontWeight: 600,
           cursor: 'pointer', fontFamily: 'var(--font-body)', display: 'flex', alignItems: 'center', gap: 6
         }}>
-          <Plus size={14} weight="bold" /> Add Category
+          <Plus size={14} weight="bold" /> {s('new_category')}
         </button>
       </div>
 
@@ -95,7 +98,7 @@ export default function Categories() {
               color: activeTab === tab ? 'var(--text-primary)' : 'var(--text-muted)',
               fontFamily: 'var(--font-body)', textTransform: 'capitalize', transition: 'all 0.15s'
             }}>
-            {tab} Categories
+            {s(tab === 'expense' ? 'expense_tab' : 'income_tab')} {s('categories')}
           </button>
         ))}
       </div>
@@ -113,15 +116,15 @@ export default function Categories() {
           <form onSubmit={handleSubmit}>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
               <div>
-                <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 6 }}>Name *</label>
+                <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 6 }}>{s('name')} *</label>
                 <input data-testid="category-name-input" value={form.name} onChange={e => setForm(f => ({...f, name: e.target.value}))}
                   style={inputStyle} placeholder="Category name" />
               </div>
               <div>
-                <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 6 }}>Parent Category (leave empty for top-level)</label>
+                <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 6 }}>{s('parent')} ({s('leave_empty_info')})</label>
                 <select data-testid="category-parent-select" value={form.parent_id} onChange={e => setForm(f => ({...f, parent_id: e.target.value}))}
                   style={inputStyle}>
-                  <option value="">None (Top-level)</option>
+                  <option value="">{s('none_top_level')}</option>
                   {parentCats.map(c => <option key={c.category_id} value={c.category_id}>{c.name}</option>)}
                 </select>
               </div>
@@ -145,7 +148,7 @@ export default function Categories() {
       {loading ? (
         <div className="mono" style={{ color: 'var(--text-muted)' }}>Loading...</div>
       ) : parentCats.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>No categories yet</div>
+        <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>{s('no_categories_display')}</div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {parentCats.map(cat => {
@@ -171,7 +174,7 @@ export default function Categories() {
                         padding: '4px 10px', borderRadius: 2, fontSize: 11, fontWeight: 600, cursor: 'pointer',
                         fontFamily: 'var(--font-body)', display: 'inline-flex', alignItems: 'center', gap: 4
                       }}>
-                      <Plus size={11} weight="bold" /> Sub
+                      <Plus size={11} weight="bold" /> {s('add_subcategory')}
                     </button>
                     <button data-testid={`delete-category-${cat.category_id}`} data-guard onClick={() => handleDelete(cat.category_id)}
                       style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4 }}>

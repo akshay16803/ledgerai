@@ -1,3 +1,4 @@
+import { s, getCurrentLanguage } from '../lib/localization';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext.jsx';
@@ -65,6 +66,8 @@ const includedFeatures = [
 
 export default function Billing() {
   const navigate = useNavigate();
+  const [lang, setLang] = useState(getCurrentLanguage());
+  useEffect(() => { const h = () => setLang(getCurrentLanguage()); window.addEventListener('languageChanged', h); return () => window.removeEventListener('languageChanged', h); }, []);
   const { user, checkAuth } = useAuth();
   const [loadingPlan, setLoadingPlan] = useState(null);
   const [paymentSuccess, setPaymentSuccess] = useState(null);
@@ -155,11 +158,14 @@ export default function Billing() {
     }
   };
 
-  // If user already has subscription, redirect to dashboard
-  if (user?.subscription_status === 'active') {
+  // If user already has an active subscription (non-lifetime), redirect to dashboard
+  if (user?.subscription_status === 'active' && user?.subscription_plan !== 'lifetime') {
     navigate('/dashboard', { replace: true });
     return null;
   }
+
+  // Lifetime users see a confirmation instead of plan selection
+  const isLifetime = user?.subscription_status === 'active' && user?.subscription_plan === 'lifetime';
 
   return (
     <div style={{ background: 'var(--bg-primary)', minHeight: '100vh' }}>
@@ -200,7 +206,7 @@ export default function Billing() {
         padding: '0 40px', height: 64, display: 'flex', alignItems: 'center', justifyContent: 'space-between',
       }}>
         <span style={{ fontFamily: 'var(--font-heading)', fontSize: 20, fontWeight: 600, color: 'var(--brand-primary)' }}>
-          SpentyAI
+          {s('spentyai')}
         </span>
         {user && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -215,23 +221,50 @@ export default function Billing() {
         {/* Welcome header */}
         <div style={{ textAlign: 'center', marginBottom: 40 }}>
           <h1 style={{ fontSize: 'clamp(1.6rem, 3.5vw, 2.4rem)', fontWeight: 500, letterSpacing: '-0.02em', marginBottom: 12 }}>
-            Welcome to SpentyAI{user?.name ? `, ${user.name.split(' ')[0]}` : ''}
+            {isLifetime ? 'Lifetime Access' : `Welcome to SpentyAI${user?.name ? `, ${user.name.split(' ')[0]}` : ''}`}
           </h1>
-          <p style={{ fontSize: 15, color: 'var(--text-secondary)', maxWidth: 480, margin: '0 auto 20px', lineHeight: 1.6 }}>
-            Choose a plan to get started. Every plan includes all features — pick the billing cycle that works for you.
-          </p>
-          <div className="mono" style={{
-            display: 'inline-flex', alignItems: 'center', gap: 8,
-            background: 'rgba(194, 109, 92, 0.1)',
-            color: 'var(--accent-1)',
-            padding: '8px 16px', borderRadius: 2,
-            fontSize: 11, fontWeight: 600, letterSpacing: '0.15em', textTransform: 'uppercase',
-          }}>
-            <Sparkle size={12} weight="fill" />
-            7-day free trial · No charge until trial ends
-          </div>
+          {isLifetime ? (
+            <>
+              <div style={{
+                display: 'inline-flex', alignItems: 'center', gap: 10,
+                background: 'rgba(58,92,74,0.08)', border: '1px solid var(--success)',
+                padding: '16px 32px', borderRadius: 2, marginBottom: 20,
+              }}>
+                <CheckCircle size={22} weight="fill" style={{ color: 'var(--success)' }} />
+                <span style={{ fontSize: 18, fontWeight: 600, color: 'var(--success)' }}>Lifetime — Active</span>
+              </div>
+              <p style={{ fontSize: 15, color: 'var(--text-secondary)', maxWidth: 480, margin: '0 auto 20px', lineHeight: 1.6 }}>
+                You have lifetime access to all SpentyAI features. No further payments required.
+              </p>
+              <button onClick={() => navigate('/dashboard')} style={{
+                background: 'var(--brand-primary)', color: '#fff', border: 'none',
+                padding: '12px 28px', borderRadius: 2, fontSize: 14, fontWeight: 600,
+                cursor: 'pointer', fontFamily: 'var(--font-body)',
+                display: 'inline-flex', alignItems: 'center', gap: 8,
+              }}>
+                <ArrowRight size={16} weight="bold" /> Go to Dashboard
+              </button>
+            </>
+          ) : (
+            <>
+              <p style={{ fontSize: 15, color: 'var(--text-secondary)', maxWidth: 480, margin: '0 auto 20px', lineHeight: 1.6 }}>
+                Choose a plan to get started. Every plan includes all features — pick the billing cycle that works for you.
+              </p>
+              <div className="mono" style={{
+                display: 'inline-flex', alignItems: 'center', gap: 8,
+                background: 'rgba(194, 109, 92, 0.1)',
+                color: 'var(--accent-1)',
+                padding: '8px 16px', borderRadius: 2,
+                fontSize: 11, fontWeight: 600, letterSpacing: '0.15em', textTransform: 'uppercase',
+              }}>
+                <Sparkle size={12} weight="fill" />
+                7-day free trial · No charge until trial ends
+              </div>
+            </>
+          )}
         </div>
 
+        {!isLifetime && <>
         {/* Promo code section */}
         <div style={{
           maxWidth: 520, margin: '0 auto 40px',
@@ -240,7 +273,7 @@ export default function Billing() {
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
             <Ticket size={16} style={{ color: 'var(--accent-1)' }} />
-            <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>Have a promo code?</span>
+            <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>{s('have_promo')}</span>
           </div>
           <div style={{ display: 'flex', gap: 10 }}>
             <input
@@ -248,7 +281,7 @@ export default function Billing() {
               type="text"
               value={promoCode}
               onChange={e => { setPromoCode(e.target.value.toUpperCase()); setPromoValid(null); }}
-              placeholder="Enter promo code"
+              placeholder={s('enter_code')}
               style={{
                 flex: 1, padding: '10px 14px', border: '1px solid var(--border-strong)', borderRadius: 2,
                 fontSize: 13, fontFamily: 'var(--font-mono)', letterSpacing: '0.08em',
@@ -417,6 +450,7 @@ export default function Billing() {
             </div>
           ))}
         </div>
+        </>}
 
         {/* Everything included */}
         <div style={{

@@ -12,6 +12,7 @@ import { SalesInvoiceModal } from '../components/SalesInvoiceModal';
 import { PurchaseBillModal } from '../components/PurchaseBillModal';
 import { InternationalInvoiceModal } from '../components/InternationalInvoiceModal';
 import { usesExistingForms } from '../lib/countryConfig';
+import { s, toggleLanguage, getCurrentLanguage } from '../lib/localization';
 
 function ViewSourceModal({ source, onClose }) {
   if (!source) return null;
@@ -107,7 +108,7 @@ function StatCard({ testId, label, value, icon: Icon, color, accent }) {
       padding: '24px 28px', borderRadius: 2,
       transition: 'transform 0.2s ease, box-shadow 0.2s ease',
     }}
-    onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 4px 16px rgba(26,54,45,0.06)'; }}
+    onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 4px 16px rgba(52,199,89,0.06)'; }}
     onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = 'none'; }}
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
@@ -244,15 +245,15 @@ function AIChatPanel() {
       <button onClick={() => setOpen(!open)} style={{
         position: 'fixed', bottom: 24, right: 24, zIndex: 1000,
         height: 48, borderRadius: 24,
-        background: 'linear-gradient(135deg, var(--brand-primary) 0%, #2d6a4f 100%)',
+        background: 'linear-gradient(135deg, var(--brand-primary) 0%, #2EB34D 100%)',
         color: '#fff', border: 'none',
-        boxShadow: '0 4px 20px rgba(26,54,45,0.3)',
+        boxShadow: '0 4px 20px rgba(52,199,89,0.3)',
         cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
         transition: 'transform 0.2s, box-shadow 0.2s',
         padding: open ? '0 16px' : '0 18px 0 14px',
       }}
-      onMouseEnter={e => { e.currentTarget.style.transform = 'scale(1.04)'; e.currentTarget.style.boxShadow = '0 6px 28px rgba(26,54,45,0.4)'; }}
-      onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.boxShadow = '0 4px 20px rgba(26,54,45,0.3)'; }}
+      onMouseEnter={e => { e.currentTarget.style.transform = 'scale(1.04)'; e.currentTarget.style.boxShadow = '0 6px 28px rgba(52,199,89,0.4)'; }}
+      onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.boxShadow = '0 4px 20px rgba(52,199,89,0.3)'; }}
       >
         {open ? (
           <X size={20} />
@@ -269,7 +270,7 @@ function AIChatPanel() {
           position: 'fixed', bottom: 92, right: 24, zIndex: 999,
           width: 420, height: 560, maxHeight: '70vh',
           background: '#fff', border: '1px solid var(--border-subtle)',
-          boxShadow: '0 8px 32px rgba(26,54,45,0.12)',
+          boxShadow: '0 8px 32px rgba(52,199,89,0.12)',
           borderRadius: 8, display: 'flex', flexDirection: 'column',
         }}>
           {/* Header */}
@@ -304,7 +305,7 @@ function AIChatPanel() {
                       cursor: 'pointer', fontFamily: 'var(--font-body)',
                       transition: 'background 0.15s, border-color 0.15s',
                     }}
-                    onMouseEnter={e => { e.currentTarget.style.background = 'rgba(58,92,74,0.06)'; e.currentTarget.style.borderColor = 'var(--brand-primary)'; e.currentTarget.style.color = 'var(--brand-primary)'; }}
+                    onMouseEnter={e => { e.currentTarget.style.background = 'rgba(52,199,89,0.06)'; e.currentTarget.style.borderColor = 'var(--brand-primary)'; e.currentTarget.style.color = 'var(--brand-primary)'; }}
                     onMouseLeave={e => { e.currentTarget.style.background = 'var(--bg-secondary)'; e.currentTarget.style.borderColor = 'var(--border-subtle)'; e.currentTarget.style.color = 'var(--text-secondary)'; }}
                     >
                       {prompt}
@@ -330,7 +331,7 @@ function AIChatPanel() {
                     }}>
                       {msg.content}
                       {msg.transaction && (
-                        <div style={{ marginTop: 8, padding: '10px 14px', background: 'rgba(45,106,79,0.08)', borderRadius: 6, border: '1px solid rgba(45,106,79,0.15)' }}>
+                        <div style={{ marginTop: 8, padding: '10px 14px', background: 'rgba(52,199,89,0.08)', borderRadius: 6, border: '1px solid rgba(52,199,89,0.15)' }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 600, color: 'var(--success)', marginBottom: 4 }}>
                             <CheckCircle size={14} weight="fill" /> Transaction Posted
                           </div>
@@ -410,7 +411,20 @@ function AIChatPanel() {
 export default function Dashboard() {
   const [summary, setSummary] = useState(() => getCached('dashboard'));
   const [loading, setLoading] = useState(!getCached('dashboard'));
+  const [lang, setLang] = useState(getCurrentLanguage());
   const navigate = useNavigate();
+
+  // Listen for language changes from other components
+  useEffect(() => {
+    const handler = () => setLang(getCurrentLanguage());
+    window.addEventListener('languageChanged', handler);
+    return () => window.removeEventListener('languageChanged', handler);
+  }, []);
+
+  const handleToggleLanguage = () => {
+    toggleLanguage();
+    setLang(getCurrentLanguage());
+  };
 
   // New Transaction modal state
   const [showNewTxn, setShowNewTxn] = useState(false);
@@ -510,59 +524,73 @@ export default function Dashboard() {
   }, [loadData, loadPending]);
 
   if (loading) {
-    return <div className="mono" style={{ color: 'var(--text-muted)', padding: 40 }}>Loading dashboard...</div>;
+    return <div className="mono" style={{ color: 'var(--text-muted)', padding: 40 }}>{s('loading_dashboard')}</div>;
   }
 
   if (!summary) {
-    return <div style={{ color: 'var(--error)', padding: 40 }}>Failed to load dashboard data.</div>;
+    return <div style={{ color: 'var(--error)', padding: 40 }}>{s('failed_load_dashboard')}</div>;
   }
 
   return (
     <div data-testid="dashboard-page">
       <div className="action-bar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 32 }}>
         <div>
-          <h1 className="page-title" style={{ fontSize: 28, fontWeight: 500, letterSpacing: '-0.02em' }}>Dashboard</h1>
+          <h1 className="page-title" style={{ fontSize: 28, fontWeight: 500, letterSpacing: '-0.02em' }}>{s('dashboard')}</h1>
           <p className="mono page-subtitle" style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
-            Financial overview
+            {s('financial_overview')}
           </p>
         </div>
-        <button data-testid="add-transaction-btn" onClick={openNewTxnModal} style={{
-          background: 'var(--brand-primary)', color: '#fff', border: 'none',
-          padding: '10px 20px', borderRadius: 2, fontSize: 13, fontWeight: 600,
-          cursor: 'pointer', fontFamily: 'var(--font-body)',
-          display: 'flex', alignItems: 'center', gap: 6,
-          transition: 'background 0.2s ease'
-        }}
-        onMouseEnter={e => e.currentTarget.style.background = '#2A463D'}
-        onMouseLeave={e => e.currentTarget.style.background = 'var(--brand-primary)'}
-        >
-          <Plus size={14} weight="bold" /> New Transaction
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <button data-testid="language-toggle-btn" onClick={handleToggleLanguage} style={{
+            background: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '1px solid var(--border-strong)',
+            padding: '8px 14px', borderRadius: 2, fontSize: 13, fontWeight: 700,
+            cursor: 'pointer', fontFamily: 'var(--font-body)',
+            transition: 'background 0.2s ease',
+            letterSpacing: '0.02em',
+          }}
+          onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-tertiary)'}
+          onMouseLeave={e => e.currentTarget.style.background = 'var(--bg-secondary)'}
+          >
+            {lang === 'en' ? '\u0939\u093F/En' : 'En/\u0939\u093F'}
+          </button>
+          <button data-testid="add-transaction-btn" onClick={openNewTxnModal} style={{
+            background: 'var(--brand-primary)', color: '#fff', border: 'none',
+            padding: '10px 20px', borderRadius: 2, fontSize: 13, fontWeight: 600,
+            cursor: 'pointer', fontFamily: 'var(--font-body)',
+            display: 'flex', alignItems: 'center', gap: 6,
+            transition: 'background 0.2s ease'
+          }}
+          onMouseEnter={e => e.currentTarget.style.background = '#2EB34D'}
+          onMouseLeave={e => e.currentTarget.style.background = 'var(--brand-primary)'}
+          >
+            <Plus size={14} weight="bold" /> {s('new_transaction')}
+          </button>
+        </div>
       </div>
 
       {/* Stats Grid */}
       <div className="stat-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 32 }}>
-        <StatCard testId="stat-net-worth" label="Net Worth" value={formatCurrency(summary.net_worth)} icon={Scales} color="var(--brand-primary)" accent="var(--accent-3)" />
-        <StatCard testId="stat-income" label="Income This Month" value={formatCurrency(summary.income_this_month)} icon={TrendUp} color="var(--success)" accent="var(--success)" />
-        <StatCard testId="stat-expenses" label="Expenses This Month" value={formatCurrency(summary.expense_this_month)} icon={TrendDown} color="var(--error)" accent="var(--error)" />
-        <StatCard testId="stat-pending" label="Pending Review" value={summary.pending_review} icon={Clock} color="var(--warning)" accent="var(--warning)" />
+        <StatCard testId="stat-net-worth" label={s('net_worth')} value={formatCurrency(summary.net_worth)} icon={Scales} color="var(--brand-primary)" accent="var(--accent-3)" />
+        <StatCard testId="stat-income" label={s('income_this_month')} value={formatCurrency(summary.income_this_month)} icon={TrendUp} color="var(--success)" accent="var(--success)" />
+        <StatCard testId="stat-expenses" label={s('expenses_this_month')} value={formatCurrency(summary.expense_this_month)} icon={TrendDown} color="var(--error)" accent="var(--error)" />
+        <StatCard testId="stat-pending" label={s('pending_review')} value={summary.pending_review} icon={Clock} color="var(--warning)" accent="var(--warning)" />
       </div>
 
       {/* Collapsible sections */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, marginBottom: 24 }}>
         {/* Accounts */}
-        <CollapsibleSection title="Accounts" count={summary.accounts?.length || 0} testId="accounts-overview">
+        <CollapsibleSection title={s('accounts')} count={summary.accounts?.length || 0} testId="accounts-overview">
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
             <button data-testid="view-all-accounts-btn" onClick={() => navigate('/accounts')} style={{
               background: 'none', border: 'none', color: 'var(--accent-1)',
               fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font-body)',
               display: 'flex', alignItems: 'center', gap: 4
             }}>
-              View all <ArrowRight size={12} />
+              {s('view_all')} <ArrowRight size={12} />
             </button>
           </div>
           {summary.accounts?.length === 0 ? (
-            <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>No accounts yet. Create your first account.</p>
+            <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>{s('no_accounts_yet')}</p>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {summary.accounts?.map(acc => (
@@ -573,7 +601,7 @@ export default function Dashboard() {
                   padding: '12px 16px', background: 'var(--bg-secondary)', borderRadius: 2,
                   cursor: 'pointer', transition: 'background 0.15s',
                 }}
-                onMouseEnter={e => { e.currentTarget.style.background = 'rgba(58,92,74,0.08)'; }}
+                onMouseEnter={e => { e.currentTarget.style.background = 'rgba(52,199,89,0.08)'; }}
                 onMouseLeave={e => { e.currentTarget.style.background = 'var(--bg-secondary)'; }}
                 >
                   <div>
@@ -596,18 +624,22 @@ export default function Dashboard() {
         </CollapsibleSection>
 
         {/* Recent Transactions */}
-        <CollapsibleSection title="Recent Transactions" count={summary.recent_transactions?.length || 0} testId="recent-transactions">
+        <CollapsibleSection title={s('recent_transactions')} count={summary.recent_transactions?.length || 0} testId="recent-transactions">
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
             <button data-testid="view-all-transactions-btn" onClick={() => navigate('/transactions')} style={{
               background: 'none', border: 'none', color: 'var(--accent-1)',
               fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font-body)',
               display: 'flex', alignItems: 'center', gap: 4
             }}>
-              View all <ArrowRight size={12} />
+              {s('view_all')} <ArrowRight size={12} />
             </button>
           </div>
           {summary.recent_transactions?.length === 0 ? (
-            <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>No transactions yet. Record your first one!</p>
+            <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+              {pendingItems.length > 0
+                ? `${s('no_approved_transactions')}. ${pendingItems.length} ${s('pending_review')}.`
+                : s('no_transactions_yet')}
+            </p>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {summary.recent_transactions?.map(txn => (
@@ -636,11 +668,11 @@ export default function Dashboard() {
       </div>
 
       {/* Pending Approval — full width */}
-      <CollapsibleSection title="Pending Approval" count={pendingItems.length} testId="pending-approval">
+      <CollapsibleSection title={s('pending_approval')} count={pendingItems.length} testId="pending-approval">
         {pendingLoading ? (
-          <div className="mono" style={{ color: 'var(--text-muted)', padding: '12px 0', fontSize: 13 }}>Loading pending items...</div>
+          <div className="mono" style={{ color: 'var(--text-muted)', padding: '12px 0', fontSize: 13 }}>{s('loading_pending')}</div>
         ) : pendingItems.length === 0 ? (
-          <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>No pending transactions to review.</p>
+          <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>{s('no_pending_review')}</p>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {pendingItems.map(txn => (
@@ -677,10 +709,10 @@ export default function Dashboard() {
                     onMouseEnter={e => { e.currentTarget.style.background = 'rgba(37,99,235,0.06)'; }}
                     onMouseLeave={e => { e.currentTarget.style.background = 'none'; }}
                     >
-                      <Eye size={12} weight="bold" /> Source
+                      <Eye size={12} weight="bold" /> {s('source')}
                     </button>
                   )}
-                  <button onClick={() => handleReject(txn.transactionId)} title="Reject" style={{
+                  <button onClick={() => handleReject(txn.transactionId)} title={s('reject')} style={{
                     background: 'none', border: '1px solid var(--error)', borderRadius: 4,
                     color: 'var(--error)', cursor: 'pointer', padding: '4px 10px',
                     fontSize: 12, fontWeight: 600, fontFamily: 'var(--font-body)',
@@ -690,19 +722,19 @@ export default function Dashboard() {
                   onMouseEnter={e => { e.currentTarget.style.background = 'rgba(200,50,50,0.06)'; }}
                   onMouseLeave={e => { e.currentTarget.style.background = 'none'; }}
                   >
-                    <Prohibit size={12} weight="bold" /> Reject
+                    <Prohibit size={12} weight="bold" /> {s('reject')}
                   </button>
-                  <button onClick={() => handleApprove(txn.transactionId)} title="Approve" style={{
+                  <button onClick={() => handleApprove(txn.transactionId)} title={s('approve')} style={{
                     background: 'var(--success)', border: 'none', borderRadius: 4,
                     color: '#fff', cursor: 'pointer', padding: '4px 10px',
                     fontSize: 12, fontWeight: 600, fontFamily: 'var(--font-body)',
                     display: 'flex', alignItems: 'center', gap: 4,
                     transition: 'background 0.15s',
                   }}
-                  onMouseEnter={e => { e.currentTarget.style.background = '#1a6b3c'; }}
+                  onMouseEnter={e => { e.currentTarget.style.background = '#2EB34D'; }}
                   onMouseLeave={e => { e.currentTarget.style.background = 'var(--success)'; }}
                   >
-                    <Check size={12} weight="bold" /> Approve
+                    <Check size={12} weight="bold" /> {s('approve')}
                   </button>
                 </div>
               </div>

@@ -1,3 +1,4 @@
+import { s, getCurrentLanguage } from '../lib/localization';
 import { useState, useEffect, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
@@ -72,6 +73,8 @@ const DATE_FORMATS = [
 
 export default function Settings() {
   const { user, checkAuth } = useAuth();
+  const [lang, setLang] = useState(getCurrentLanguage());
+  useEffect(() => { const h = () => setLang(getCurrentLanguage()); window.addEventListener('languageChanged', h); return () => window.removeEventListener('languageChanged', h); }, []);
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const invoiceSectionRef = useRef(null);
@@ -234,7 +237,7 @@ export default function Settings() {
 
   return (
     <div data-testid="settings-page">
-      <h1 style={{ fontSize: 28, fontWeight: 500, letterSpacing: '-0.02em', marginBottom: 8 }}>Settings</h1>
+      <h1 style={{ fontSize: 28, fontWeight: 500, letterSpacing: '-0.02em', marginBottom: 8 }}>{s('settings')}</h1>
       <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 32 }}>
         Configure your preferences for SpentyAI.
       </p>
@@ -244,7 +247,7 @@ export default function Settings() {
         background: '#fff', border: '1px solid var(--border-subtle)', borderRadius: 2,
         padding: 28, marginBottom: 20,
       }}>
-        <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16 }}>Profile</h2>
+        <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16 }}>{s('business_profile')}</h2>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
           {user?.picture ? (
             <img src={user.picture} alt="" style={{ width: 48, height: 48, borderRadius: '50%' }} />
@@ -267,7 +270,7 @@ export default function Settings() {
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
           <Globe size={18} weight="duotone" style={{ color: 'var(--info)' }} />
-          <h2 style={{ fontSize: 16, fontWeight: 600 }}>Default Currency</h2>
+          <h2 style={{ fontSize: 16, fontWeight: 600 }}>{s('currency')}</h2>
         </div>
         <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 16 }}>
           All transactions will be recorded in this currency. Foreign currency transactions will be automatically converted.
@@ -300,7 +303,7 @@ export default function Settings() {
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
           <CalendarBlank size={18} weight="duotone" style={{ color: 'var(--info)' }} />
-          <h2 style={{ fontSize: 16, fontWeight: 600 }}>Date Format</h2>
+          <h2 style={{ fontSize: 16, fontWeight: 600 }}>{s('date_format')}</h2>
         </div>
         <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 16 }}>
           Choose how dates are displayed across the app.
@@ -336,7 +339,7 @@ export default function Settings() {
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
           <Buildings size={18} weight="duotone" style={{ color: 'var(--info)' }} />
-          <h2 style={{ fontSize: 16, fontWeight: 600 }}>Invoice Settings</h2>
+          <h2 style={{ fontSize: 16, fontWeight: 600 }}>{s('invoices')}</h2>
         </div>
 
         {/* Country of Business */}
@@ -578,7 +581,7 @@ export default function Settings() {
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
             <Warning size={18} weight="duotone" style={{ color: '#dc3545' }} />
-            <h2 style={{ fontSize: 16, fontWeight: 600, color: '#dc3545' }}>Danger Zone</h2>
+            <h2 style={{ fontSize: 16, fontWeight: 600, color: '#dc3545' }}>{s('settings')}</h2>
           </div>
           <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 20 }}>
             These actions are irreversible. Please be certain before proceeding.
@@ -590,7 +593,7 @@ export default function Settings() {
             padding: '16px 20px', border: '1px solid var(--border-subtle)', borderRadius: 4,
           }}>
             <div>
-              <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4 }}>Reset All Data</div>
+              <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4 }}>{s('reset_all_data')}</div>
               <div style={{ fontSize: 12, color: 'var(--text-muted)', maxWidth: 400 }}>
                 Wipe all transactions, accounts, invoices, bills, customers, vendors, and reports. Your account and settings stay — everything else goes back to zero.
               </div>

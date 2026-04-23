@@ -1,3 +1,4 @@
+import { s, getCurrentLanguage } from '../lib/localization';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
@@ -127,7 +128,7 @@ function InvoicePrintModal({ invoiceId, onClose }) {
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           padding: '12px 24px', borderBottom: '1px solid #e5e7eb',
         }}>
-          <span style={{ fontSize: 14, fontWeight: 600, color: '#374151' }}>Invoice Preview</span>
+          <span style={{ fontSize: 14, fontWeight: 600, color: '#374151' }}>{s('invoice_summary')}</span>
           <div style={{ display: 'flex', gap: 8 }}>
             {invoice && (
               <button onClick={handlePrint} style={{
@@ -249,7 +250,7 @@ function InvoicePrintModal({ invoiceId, onClose }) {
                       <th style={thStyle}>Rate</th>
                       <th style={thStyle}>Disc%</th>
                       {isGST && <th style={thStyle}>Tax%</th>}
-                      <th style={{ ...thStyle, textAlign: 'right' }}>Amount</th>
+                      <th style={{ ...thStyle, textAlign: 'right' }}>{s('amount')}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -487,6 +488,8 @@ function RecordPaymentModal({ invoice, accounts, onClose, onSuccess }) {
 // ─── Main Invoices Page ────────────────────────────────────────────────
 export default function Invoices() {
   const navigate = useNavigate();
+  const [lang, setLang] = useState(getCurrentLanguage());
+  useEffect(() => { const h = () => setLang(getCurrentLanguage()); window.addEventListener('languageChanged', h); return () => window.removeEventListener('languageChanged', h); }, []);
   const [invoices, setInvoices] = useState([]);
   const [accounts, setAccounts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -573,14 +576,14 @@ export default function Invoices() {
           fontFamily: 'var(--font-heading)', margin: 0, display: 'flex', alignItems: 'center', gap: 10,
         }}>
           <Receipt size={26} weight="duotone" style={{ color: 'var(--brand-primary)' }} />
-          Sales Invoice
+          {s('invoices')}
         </h1>
         <button onClick={handleNewInvoice} style={{
           display: 'flex', alignItems: 'center', gap: 6, padding: '10px 20px',
           background: 'var(--brand-primary)', color: '#fff', border: 'none', borderRadius: 2,
           fontSize: 14, fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font-body)',
         }}>
-          <Plus size={18} weight="bold" /> New Invoice
+          <Plus size={18} weight="bold" /> {s('new_invoice')}
         </button>
       </div>
 
@@ -633,12 +636,12 @@ export default function Invoices() {
             <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 700 }}>
               <thead>
                 <tr style={{ background: 'var(--bg-secondary)' }}>
-                  <th style={tableThStyle}>Invoice #</th>
-                  <th style={{ ...tableThStyle, textAlign: 'left' }}>Customer</th>
-                  <th style={tableThStyle}>Date</th>
-                  <th style={tableThStyle}>Amount</th>
-                  <th style={tableThStyle}>Status</th>
-                  <th style={{ ...tableThStyle, textAlign: 'center' }}>Actions</th>
+                  <th style={tableThStyle}>{s('invoice_number')}</th>
+                  <th style={{ ...tableThStyle, textAlign: 'left' }}>{s('customer')}</th>
+                  <th style={tableThStyle}>{s('date')}</th>
+                  <th style={tableThStyle}>{s('amount')}</th>
+                  <th style={tableThStyle}>{s('status')}</th>
+                  <th style={{ ...tableThStyle, textAlign: 'center' }}>{s('actions')}</th>
                 </tr>
               </thead>
               <tbody>

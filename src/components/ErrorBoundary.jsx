@@ -52,7 +52,7 @@ export default class ErrorBoundary extends Component {
           }}>
             <div style={{
               fontSize: 32, marginBottom: 16, lineHeight: 1,
-              color: 'var(--error, #96453A)',
+              color: 'var(--error, #FF3B30)',
             }}>
               Something went wrong
             </div>
@@ -87,7 +87,7 @@ export default class ErrorBoundary extends Component {
               <button onClick={this.handleGoHome} style={{
                 padding: '10px 24px', fontSize: 13, fontWeight: 600,
                 fontFamily: 'var(--font-body, system-ui)', cursor: 'pointer',
-                background: 'var(--brand-primary, #3A5C4A)', color: '#fff',
+                background: 'var(--brand-primary, #34C759)', color: '#fff',
                 border: 'none', borderRadius: 2,
               }}>
                 Go to Dashboard

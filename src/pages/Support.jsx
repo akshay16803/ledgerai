@@ -1,3 +1,4 @@
+import { s, getCurrentLanguage } from '../lib/localization';
 import { useState } from 'react';
 import { api } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
@@ -20,6 +21,8 @@ const PRIORITIES = [
 
 export default function Support() {
   const { user } = useAuth();
+  const [lang, setLang] = useState(getCurrentLanguage());
+  useEffect(() => { const h = () => setLang(getCurrentLanguage()); window.addEventListener('languageChanged', h); return () => window.removeEventListener('languageChanged', h); }, []);
   const [form, setForm] = useState({
     subject: '',
     category: 'general',
@@ -84,7 +87,7 @@ export default function Support() {
           borderRadius: 2,
         }}>
           <CheckCircle size={56} weight="duotone" style={{ color: 'var(--success)', marginBottom: 16 }} />
-          <h2 style={{ fontSize: 22, fontWeight: 600, marginBottom: 8 }}>Ticket Submitted!</h2>
+          <h2 style={{ fontSize: 22, fontWeight: 600, marginBottom: 8 }}>{s('support_submitted')}</h2>
           <p style={{ fontSize: 14, color: 'var(--text-muted)', marginBottom: 24, lineHeight: 1.6 }}>
             We have received your request and will get back to you as soon as possible. 
             You will receive a response at <strong>{user?.email}</strong>.
@@ -104,7 +107,7 @@ export default function Support() {
               fontFamily: 'var(--font-body)',
             }}
           >
-            Submit Another Request
+            {s('submit')}
           </button>
         </div>
       </div>
@@ -115,7 +118,7 @@ export default function Support() {
     <div data-testid="support-page">
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
         <Headset size={28} weight="duotone" style={{ color: 'var(--brand-primary)' }} />
-        <h1 style={{ fontSize: 28, fontWeight: 500, letterSpacing: '-0.02em' }}>Support</h1>
+        <h1 style={{ fontSize: 28, fontWeight: 500, letterSpacing: '-0.02em' }}>{s('support')}</h1>
       </div>
       <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 32 }}>
         Need help? Submit a ticket and we will get back to you as soon as possible.
@@ -156,14 +159,14 @@ export default function Support() {
         {/* Subject */}
         <div style={{ marginBottom: 20 }}>
           <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
-            Subject <span style={{ color: 'var(--danger)' }}>*</span>
+            {s('subject')} <span style={{ color: 'var(--danger)' }}>*</span>
           </label>
           <input
             data-testid="support-subject"
             type="text"
             value={form.subject}
             onChange={(e) => handleChange('subject', e.target.value)}
-            placeholder="Brief summary of your issue or request"
+            placeholder={s('subject_placeholder')}
             style={{
               width: '100%',
               padding: '12px 16px',
@@ -180,7 +183,7 @@ export default function Support() {
           {/* Category */}
           <div>
             <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
-              Category
+              {s('category')}
             </label>
             <div style={{ position: 'relative' }}>
               <select
@@ -224,7 +227,7 @@ export default function Support() {
           {/* Priority */}
           <div>
             <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
-              Priority
+              {s('priority')}
             </label>
             <div style={{ display: 'flex', gap: 8 }}>
               {PRIORITIES.map(p => (
@@ -261,7 +264,7 @@ export default function Support() {
         {/* Message */}
         <div style={{ marginBottom: 24 }}>
           <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
-            Message <span style={{ color: 'var(--danger)' }}>*</span>
+            {s('message')} <span style={{ color: 'var(--danger)' }}>*</span>
           </label>
           <textarea
             data-testid="support-message"
@@ -329,7 +332,7 @@ export default function Support() {
           }}
         >
           <PaperPlaneTilt size={18} weight="fill" />
-          {submitting ? 'Submitting...' : 'Submit Ticket'}
+          {submitting ? s('syncing') : s('submit')}
         </button>
       </form>
     </div>

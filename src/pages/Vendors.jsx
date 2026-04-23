@@ -1,3 +1,4 @@
+import { s, getCurrentLanguage } from '../lib/localization';
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../lib/api';
 import { Storefront, CurrencyInr, Clock, ChartBar, SpinnerGap } from '@phosphor-icons/react';
@@ -118,6 +119,8 @@ const styles = {
 };
 
 export default function Vendors() {
+  const [lang, setLang] = useState(getCurrentLanguage());
+  useEffect(() => { const h = () => setLang(getCurrentLanguage()); window.addEventListener('languageChanged', h); return () => window.removeEventListener('languageChanged', h); }, []);
   const [creditors, setCreditors] = useState([]);
   const [purchasesByVendor, setPurchasesByVendor] = useState([]);
   const [aging, setAging] = useState([]);
@@ -177,7 +180,7 @@ export default function Vendors() {
           <Storefront size={26} weight="duotone" color="var(--brand-primary)" />
           Vendors
         </h1>
-        <p style={styles.headerSub}>Vendor analytics and creditor tracking</p>
+        <p style={styles.headerSub}>{s('vendors')}</p>
       </div>
 
       {error && <div style={styles.error}>{error}</div>}
@@ -194,7 +197,7 @@ export default function Vendors() {
           <table style={styles.table}>
             <thead>
               <tr>
-                <th style={styles.th}>Vendor Name</th>
+                <th style={styles.th}>{s('vendor_name')}</th>
                 <th style={styles.thRight}>Outstanding Amount</th>
                 <th style={styles.thRight}>Bill Count</th>
               </tr>
@@ -208,7 +211,7 @@ export default function Vendors() {
                 </tr>
               ))}
               <tr style={styles.totalRow}>
-                <td style={styles.td}>Total</td>
+                <td style={styles.td}>{s('total')}</td>
                 <td style={styles.tdRight}>{formatCurrency(creditorsTotal)}</td>
                 <td style={styles.tdRight}>{creditorsBillTotal}</td>
               </tr>
@@ -229,7 +232,7 @@ export default function Vendors() {
           <table style={styles.table}>
             <thead>
               <tr>
-                <th style={styles.th}>Vendor Name</th>
+                <th style={styles.th}>{s('vendor_name')}</th>
                 <th style={styles.thRight}>Total Purchases</th>
                 <th style={styles.thRight}>Bills</th>
               </tr>
@@ -243,7 +246,7 @@ export default function Vendors() {
                 </tr>
               ))}
               <tr style={styles.totalRow}>
-                <td style={styles.td}>Total</td>
+                <td style={styles.td}>{s('total')}</td>
                 <td style={styles.tdRight}>{formatCurrency(purchasesTotalAmount)}</td>
                 <td style={styles.tdRight}>{purchasesTotalBills}</td>
               </tr>
@@ -264,7 +267,7 @@ export default function Vendors() {
           <table style={styles.table}>
             <thead>
               <tr>
-                <th style={styles.th}>Vendor</th>
+                <th style={styles.th}>{s('vendor')}</th>
                 <th style={styles.thRight}>Current</th>
                 <th style={styles.thRight}>1-30 Days</th>
                 <th style={styles.thRight}>31-60 Days</th>
@@ -298,7 +301,7 @@ export default function Vendors() {
                 </tr>
               ))}
               <tr style={styles.totalRow}>
-                <td style={styles.td}>Total</td>
+                <td style={styles.td}>{s('total')}</td>
                 <td style={{ ...styles.tdRight, color: 'var(--success)' }}>
                   {formatCurrency(agingTotals.current)}
                 </td>

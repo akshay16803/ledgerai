@@ -1,3 +1,4 @@
+import { s, getCurrentLanguage } from '../lib/localization';
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
@@ -28,6 +29,8 @@ const typeIcons = {
 export default function AccountDetail() {
   const { accountId } = useParams();
   const navigate = useNavigate();
+  const [lang, setLang] = useState(getCurrentLanguage());
+  useEffect(() => { const h = () => setLang(getCurrentLanguage()); window.addEventListener('languageChanged', h); return () => window.removeEventListener('languageChanged', h); }, []);
 
   // Account info
   const [account, setAccount] = useState(null);
@@ -126,14 +129,14 @@ export default function AccountDetail() {
   const totalPages = Math.ceil(total / PAGE_SIZE);
 
   if (loadingAccount) {
-    return <div className="mono" style={{ color: 'var(--text-muted)', padding: 40 }}>Loading account...</div>;
+    return <div className="mono" style={{ color: 'var(--text-muted)', padding: 40 }}>{s('loading_account')}</div>;
   }
 
   if (!account) {
     return (
       <div style={{ padding: 40 }}>
         <button onClick={() => navigate(-1)} style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-secondary)', fontSize: 13, marginBottom: 16 }}>
-          <ArrowLeft size={14} /> Back
+          <ArrowLeft size={14} /> {s('dashboard')}
         </button>
         <p style={{ color: 'var(--error)', fontSize: 14 }}>Account not found.</p>
       </div>
@@ -159,7 +162,7 @@ export default function AccountDetail() {
         onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-secondary)'; }}
         onMouseLeave={e => { e.currentTarget.style.background = 'none'; }}
         >
-          <ArrowLeft size={14} weight="bold" /> Back
+          <ArrowLeft size={14} weight="bold" /> {s('dashboard')}
         </button>
         <div style={{ flex: 1 }}>
           <h1 className="page-title" style={{ fontSize: 24, fontWeight: 500, letterSpacing: '-0.02em' }}>{account.name}</h1>
@@ -228,7 +231,7 @@ export default function AccountDetail() {
               data-testid="filter-search"
               value={search}
               onChange={e => { setSearch(e.target.value); resetAndFilter(); }}
-              placeholder="Search transactions..."
+              placeholder={s('search_transactions')}
               style={{ ...inputStyle, width: '100%', paddingLeft: 30 }}
             />
           </div>
@@ -236,10 +239,10 @@ export default function AccountDetail() {
           {/* Transaction Type */}
           <div style={{ display: 'flex', gap: 0, border: '1px solid var(--border-strong)', borderRadius: 2, overflow: 'hidden' }}>
             {[
-              { value: '', label: 'All' },
-              { value: 'income', label: 'Income' },
-              { value: 'expense', label: 'Expense' },
-              { value: 'transfer', label: 'Transfer' },
+              { value: '', label: s('all') },
+              { value: 'income', label: s('income') },
+              { value: 'expense', label: s('expense') },
+              { value: 'transfer', label: s('transfer') },
             ].map(opt => (
               <button
                 key={opt.value}
@@ -286,7 +289,7 @@ export default function AccountDetail() {
                 display: 'flex', alignItems: 'center', gap: 4,
               }}
             >
-              <X size={12} weight="bold" /> Clear
+              <X size={12} weight="bold" /> {s('clear_filters')}
             </button>
           )}
         </div>
@@ -298,7 +301,7 @@ export default function AccountDetail() {
             marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border-subtle)',
           }}>
             <div>
-              <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Start Date</label>
+              <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>{s('from_date')}</label>
               <input
                 data-testid="filter-start-date"
                 type="date"
@@ -308,7 +311,7 @@ export default function AccountDetail() {
               />
             </div>
             <div>
-              <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>End Date</label>
+              <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>{s('to_date')}</label>
               <input
                 data-testid="filter-end-date"
                 type="date"
@@ -318,21 +321,21 @@ export default function AccountDetail() {
               />
             </div>
             <div>
-              <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Category</label>
+              <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>{s('category')}</label>
               <select
                 data-testid="filter-category"
                 value={categoryId}
                 onChange={e => { setCategoryId(e.target.value); resetAndFilter(); }}
                 style={{ ...inputStyle, width: '100%' }}
               >
-                <option value="">All Categories</option>
+                <option value="">{s('all_categories')}</option>
                 {categories.map(cat => (
                   <option key={cat.category_id} value={cat.category_id}>{cat.name}</option>
                 ))}
               </select>
             </div>
             <div>
-              <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Min Amount</label>
+              <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>{s('min_amount')}</label>
               <input
                 data-testid="filter-min-amount"
                 type="number"
@@ -344,14 +347,14 @@ export default function AccountDetail() {
               />
             </div>
             <div>
-              <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Max Amount</label>
+              <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>{s('max_amount')}</label>
               <input
                 data-testid="filter-max-amount"
                 type="number"
                 step="0.01"
                 value={maxAmount}
                 onChange={e => { setMaxAmount(e.target.value); resetAndFilter(); }}
-                placeholder="No limit"
+                placeholder={s('no_limit')}
                 style={{ ...inputStyle, width: '100%', fontFamily: 'var(--font-mono)' }}
               />
             </div>
@@ -383,7 +386,7 @@ export default function AccountDetail() {
           </div>
         ) : transactions.length === 0 ? (
           <div style={{ padding: '40px 20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
-            {hasActiveFilters ? 'No transactions match your filters.' : 'No transactions found for this account.'}
+            {hasActiveFilters ? s('no_transactions_match_filters') : s('no_transactions_found')}
           </div>
         ) : (
           <>

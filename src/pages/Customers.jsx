@@ -1,3 +1,4 @@
+import { s, getCurrentLanguage } from '../lib/localization';
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../lib/api';
 import { Users, CurrencyInr, Clock, ChartBar, SpinnerGap } from '@phosphor-icons/react';
@@ -118,6 +119,8 @@ const styles = {
 };
 
 export default function Customers() {
+  const [lang, setLang] = useState(getCurrentLanguage());
+  useEffect(() => { const h = () => setLang(getCurrentLanguage()); window.addEventListener('languageChanged', h); return () => window.removeEventListener('languageChanged', h); }, []);
   const [debtors, setDebtors] = useState([]);
   const [salesByCustomer, setSalesByCustomer] = useState([]);
   const [aging, setAging] = useState([]);
@@ -177,7 +180,7 @@ export default function Customers() {
           <Users size={26} weight="duotone" color="var(--brand-primary)" />
           Customers
         </h1>
-        <p style={styles.headerSub}>Customer analytics and debtor tracking</p>
+        <p style={styles.headerSub}>{s('customers')}</p>
       </div>
 
       {error && <div style={styles.error}>{error}</div>}
@@ -194,7 +197,7 @@ export default function Customers() {
           <table style={styles.table}>
             <thead>
               <tr>
-                <th style={styles.th}>Customer Name</th>
+                <th style={styles.th}>{s('customer_name')}</th>
                 <th style={styles.thRight}>Outstanding Amount</th>
                 <th style={styles.thRight}>Invoice Count</th>
               </tr>
@@ -208,7 +211,7 @@ export default function Customers() {
                 </tr>
               ))}
               <tr style={styles.totalRow}>
-                <td style={styles.td}>Total</td>
+                <td style={styles.td}>{s('total')}</td>
                 <td style={styles.tdRight}>{formatCurrency(debtorsTotal)}</td>
                 <td style={styles.tdRight}>{debtorsInvoiceTotal}</td>
               </tr>
@@ -229,7 +232,7 @@ export default function Customers() {
           <table style={styles.table}>
             <thead>
               <tr>
-                <th style={styles.th}>Customer Name</th>
+                <th style={styles.th}>{s('customer_name')}</th>
                 <th style={styles.thRight}>Total Sales</th>
                 <th style={styles.thRight}>Invoices</th>
               </tr>
@@ -243,7 +246,7 @@ export default function Customers() {
                 </tr>
               ))}
               <tr style={styles.totalRow}>
-                <td style={styles.td}>Total</td>
+                <td style={styles.td}>{s('total')}</td>
                 <td style={styles.tdRight}>{formatCurrency(salesTotalAmount)}</td>
                 <td style={styles.tdRight}>{salesTotalInvoices}</td>
               </tr>
@@ -264,7 +267,7 @@ export default function Customers() {
           <table style={styles.table}>
             <thead>
               <tr>
-                <th style={styles.th}>Customer</th>
+                <th style={styles.th}>{s('customer')}</th>
                 <th style={styles.thRight}>Current</th>
                 <th style={styles.thRight}>1-30 Days</th>
                 <th style={styles.thRight}>31-60 Days</th>
@@ -298,7 +301,7 @@ export default function Customers() {
                 </tr>
               ))}
               <tr style={styles.totalRow}>
-                <td style={styles.td}>Total</td>
+                <td style={styles.td}>{s('total')}</td>
                 <td style={{ ...styles.tdRight, color: 'var(--success)' }}>
                   {formatCurrency(agingTotals.current)}
                 </td>

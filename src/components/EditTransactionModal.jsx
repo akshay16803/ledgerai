@@ -1,3 +1,4 @@
+import { s, getCurrentLanguage } from '../lib/localization';
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { api } from '../lib/api';
 import { X, ArrowDown, ArrowUp, ArrowsLeftRight, Plus, Check, CheckCircle, Receipt, UploadSimple, SpinnerGap, Trash, Robot, FileText, Package, Eye, EnvelopeSimple, ChatText, Paperclip, DownloadSimple, CaretDown, CaretUp } from '@phosphor-icons/react';
@@ -295,7 +296,7 @@ export function EditTransactionModal({ transaction, accounts, categories, onSave
           display: 'flex', justifyContent: 'space-between', alignItems: 'center',
           padding: '20px 28px', borderBottom: '1px solid var(--border-subtle)',
         }}>
-          <h2 style={{ fontSize: 18, fontWeight: 600 }}>{isEdit ? 'Edit Transaction' : 'New Transaction'}</h2>
+          <h2 style={{ fontSize: 18, fontWeight: 600 }}>{isEdit ? s('edit_transaction') : s('new_transaction')}</h2>
           <button data-testid="close-edit-modal" onClick={onClose}
             style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4 }}>
             <X size={20} />
@@ -321,12 +322,12 @@ export function EditTransactionModal({ transaction, accounts, categories, onSave
           {/* Type Tabs */}
           <div style={{ display: 'flex', gap: 0, marginBottom: 24, borderBottom: '1px solid var(--border-subtle)', flexWrap: 'wrap' }}>
             {[
-              { key: 'income', label: 'Income', icon: ArrowDown, color: 'var(--success)' },
-              { key: 'expense', label: 'Expense', icon: ArrowUp, color: 'var(--error)' },
-              { key: 'transfer', label: 'Transfer', icon: ArrowsLeftRight, color: 'var(--info)' },
+              { key: 'income', label: s('income'), icon: ArrowDown, color: 'var(--success)' },
+              { key: 'expense', label: s('expense'), icon: ArrowUp, color: 'var(--error)' },
+              { key: 'transfer', label: s('transfer'), icon: ArrowsLeftRight, color: 'var(--info)' },
               ...(isEdit ? [] : [
-                { key: 'sales_invoice', label: 'Sales Invoice', icon: FileText, color: 'var(--info)' },
-                { key: 'purchase_invoice', label: 'Purchase Invoice', icon: Package, color: 'var(--brand-primary)' },
+                { key: 'sales_invoice', label: s('invoices'), icon: FileText, color: 'var(--info)' },
+                { key: 'purchase_invoice', label: s('purchases'), icon: Package, color: 'var(--brand-primary)' },
               ]),
             ].map(({ key, label, icon: Icon, color }) => (
               <button key={key} data-testid={`modal-txn-type-${key}`}
@@ -389,7 +390,7 @@ export function EditTransactionModal({ transaction, accounts, categories, onSave
 
               {/* Amount */}
               <div>
-                <label style={labelStyle}>Amount *</label>
+                <label style={labelStyle}>{s('amount')} *</label>
                 <input data-testid="modal-amount-input" type="number" step="0.01" placeholder="0.00"
                   value={form.amount} onChange={e => setForm(f => ({ ...f, amount: e.target.value }))}
                   style={{ ...inputStyle, fontFamily: 'var(--font-mono)' }} />
@@ -398,7 +399,7 @@ export function EditTransactionModal({ transaction, accounts, categories, onSave
               {/* Transfer destination */}
               {txnType === 'transfer' && (
                 <div>
-                  <label style={labelStyle}>To Account *</label>
+                  <label style={labelStyle}>{s('to_account')} *</label>
                   <select data-testid="modal-to-account-select" value={form.to_account_id}
                     onChange={e => setForm(f => ({ ...f, to_account_id: e.target.value }))}
                     style={inputStyle}>
@@ -413,7 +414,7 @@ export function EditTransactionModal({ transaction, accounts, categories, onSave
               {/* Category */}
               {txnType !== 'transfer' && (
                 <div>
-                  <label style={labelStyle}>Category *</label>
+                  <label style={labelStyle}>{s('category')} *</label>
                   <div style={{ display: 'flex', gap: 6 }}>
                     <select data-testid="modal-category-select" value={form.category_id}
                       onChange={e => setForm(f => ({ ...f, category_id: e.target.value, subcategory_id: '' }))}
@@ -431,7 +432,7 @@ export function EditTransactionModal({ transaction, accounts, categories, onSave
               {/* Subcategory */}
               {txnType !== 'transfer' && (
                 <div>
-                  <label style={labelStyle}>Subcategory</label>
+                  <label style={labelStyle}>{s('subcategory')}</label>
                   <div style={{ display: 'flex', gap: 6 }}>
                     <select data-testid="modal-subcategory-select" value={form.subcategory_id}
                       onChange={e => setForm(f => ({ ...f, subcategory_id: e.target.value }))}
@@ -450,7 +451,7 @@ export function EditTransactionModal({ transaction, accounts, categories, onSave
 
               {/* Date */}
               <div>
-                <label style={labelStyle}>Date *</label>
+                <label style={labelStyle}>{s('date')} *</label>
                 <input data-testid="modal-date-input" type="date" value={form.date}
                   onChange={e => setForm(f => ({ ...f, date: e.target.value }))}
                   style={inputStyle} />
@@ -458,7 +459,7 @@ export function EditTransactionModal({ transaction, accounts, categories, onSave
 
               {/* Payment Method */}
               <div>
-                <label style={labelStyle}>Payment Method</label>
+                <label style={labelStyle}>{s('payment_method')}</label>
                 <select data-testid="modal-payment-method-select" value={form.payment_method}
                   onChange={e => setForm(f => ({ ...f, payment_method: e.target.value }))}
                   style={inputStyle}>
@@ -479,7 +480,7 @@ export function EditTransactionModal({ transaction, accounts, categories, onSave
 
               {/* Recurring */}
               <div style={{ gridColumn: '1 / -1' }}>
-                <label style={labelStyle}>Recurring</label>
+                <label style={labelStyle}>{s('recurring')}</label>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
                   <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer' }}>
                     <input data-testid="modal-recurring-checkbox" type="checkbox" checked={form.is_recurring}
@@ -514,7 +515,7 @@ export function EditTransactionModal({ transaction, accounts, categories, onSave
 
             {/* Description */}
             <div style={{ marginBottom: 20 }}>
-              <label style={labelStyle}>Description</label>
+              <label style={labelStyle}>{s('description')}</label>
               <input data-testid="modal-description-input" value={form.description}
                 onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
                 style={inputStyle} placeholder="Optional description" />
@@ -598,7 +599,7 @@ export function EditTransactionModal({ transaction, accounts, categories, onSave
                   cursor: (saving || approving) ? 'not-allowed' : 'pointer', fontFamily: 'var(--font-body)',
                   opacity: (saving || approving) ? 0.6 : 1,
                 }}>
-                {saving ? 'Saving...' : isEdit ? 'Update Transaction' : 'Save Transaction'}
+                {saving ? s('saving') : isEdit ? s('edit_transaction') : s('save')}
               </button>
 
               {/* Approve Button - only show for pending review transactions */}
@@ -616,7 +617,7 @@ export function EditTransactionModal({ transaction, accounts, categories, onSave
                     display: 'flex', alignItems: 'center', gap: 6,
                   }}>
                   <CheckCircle size={16} weight="fill" />
-                  {approving ? 'Approving...' : 'Save & Approve'}
+                  {approving ? s('syncing') : s('approve')}
                 </button>
               )}
 
@@ -624,7 +625,7 @@ export function EditTransactionModal({ transaction, accounts, categories, onSave
                 style={{
                   background: 'none', border: '1px solid var(--border-strong)', color: 'var(--text-secondary)',
                   padding: '10px 24px', borderRadius: 2, fontSize: 13, cursor: 'pointer', fontFamily: 'var(--font-body)',
-                }}>Cancel</button>
+                }}>{s('cancel')}</button>
             </div>
           </form>
         </div>

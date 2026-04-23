@@ -102,7 +102,7 @@ export default function Landing() {
             display: 'flex', alignItems: 'center', gap: 8,
             transition: 'transform 0.2s ease, background 0.2s ease'
           }}
-          onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.background = '#2A463D'; }}
+          onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.background = '#2EB34D'; }}
           onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.background = 'var(--brand-primary)'; }}
           >
             Get Started Free <ArrowRight size={16} weight="bold" />

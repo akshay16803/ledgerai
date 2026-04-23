@@ -1,3 +1,4 @@
+import { s, getCurrentLanguage } from '../lib/localization';
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../lib/api';
 import { getCached, setCache } from '../lib/cache';
@@ -32,7 +33,10 @@ export default function Transactions() {
   const [showSalesInvoice, setShowSalesInvoice] = useState(false);
   const [showPurchaseInvoice, setShowPurchaseInvoice] = useState(false);
   const [businessCountry, setBusinessCountry] = useState('IN');
+  const [pendingCount, setPendingCount] = useState(0);
   const navigate = useNavigate();
+  const [lang, setLang] = useState(getCurrentLanguage());
+  useEffect(() => { const h = () => setLang(getCurrentLanguage()); window.addEventListener('languageChanged', h); return () => window.removeEventListener('languageChanged', h); }, []);
 
   // Handle switch from transaction modal to invoice modals
   const handleSwitchToInvoice = async (type) => {
@@ -76,20 +80,27 @@ export default function Transactions() {
 
   useEffect(() => { loadData(); }, [loadData]); // eslint-disable-line react-hooks/set-state-in-effect
 
+  // Fetch pending count for empty state messaging
+  useEffect(() => {
+    api.get('/api/transactions?status=pending_review&limit=1').then(res => {
+      setPendingCount(res.total || 0);
+    }).catch(() => {});
+  }, []);
+
   const handleDelete = async (id) => {
     if (!confirm('Delete this transaction?')) return;
     try { await api.del(`/api/transactions/${id}`); loadData(); }
     catch (err) { alert(err.message); }
   };
 
-  const getAccountName = (id) => accounts.find(a => a.account_id === id)?.name || 'Unknown';
+  const getAccountName = (id) => accounts.find(a => a.account_id === id)?.name || 'Unidentified Account';
   const getCategoryName = (id) => categories.find(c => c.category_id === id)?.name || '';
 
   return (
     <div data-testid="transactions-page">
       <div className="action-bar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 32 }}>
         <div>
-          <h1 className="page-title" style={{ fontSize: 28, fontWeight: 500, letterSpacing: '-0.02em' }}>Transactions</h1>
+          <h1 className="page-title" style={{ fontSize: 28, fontWeight: 500, letterSpacing: '-0.02em' }}>{s('transactions')}</h1>
           <p className="mono" style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
             {total} total transactions
           </p>
@@ -99,7 +110,7 @@ export default function Transactions() {
           padding: '10px 20px', borderRadius: 2, fontSize: 13, fontWeight: 600,
           cursor: 'pointer', fontFamily: 'var(--font-body)', display: 'flex', alignItems: 'center', gap: 6
         }}>
-          <Plus size={14} weight="bold" /> New Transaction
+          <Plus size={14} weight="bold" /> {s('new_transaction')}
         </button>
       </div>
 
@@ -111,23 +122,23 @@ export default function Transactions() {
         <Funnel size={16} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
         <select data-testid="filter-type" value={filterType} onChange={e => setFilterType(e.target.value)}
           style={{ padding: '8px 14px', border: '1px solid var(--border-strong)', borderRadius: 2, fontSize: 13, fontFamily: 'var(--font-body)', background: '#fff' }}>
-          <option value="">All Types</option>
-          <option value="income">Income</option>
-          <option value="expense">Expense</option>
-          <option value="transfer">Transfer</option>
+          <option value="">{s('all')}</option>
+          <option value="income">{s('income')}</option>
+          <option value="expense">{s('expense')}</option>
+          <option value="transfer">{s('transfer')}</option>
         </select>
         <select data-testid="filter-account" value={filterAccount} onChange={e => setFilterAccount(e.target.value)}
           style={{ padding: '8px 14px', border: '1px solid var(--border-strong)', borderRadius: 2, fontSize: 13, fontFamily: 'var(--font-body)', background: '#fff' }}>
-          <option value="">All Accounts</option>
+          <option value="">{s('all_accounts')}</option>
           {accounts.map(a => <option key={a.account_id} value={a.account_id}>{a.name}</option>)}
         </select>
         <input data-testid="filter-date-from" type="date" value={filterDateFrom} onChange={e => setFilterDateFrom(e.target.value)}
           style={{ padding: '8px 14px', border: '1px solid var(--border-strong)', borderRadius: 2, fontSize: 13, fontFamily: 'var(--font-body)', background: '#fff' }}
-          title="From date" />
-        <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>to</span>
+          title={s('from_date')} />
+        <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>{s('to')}</span>
         <input data-testid="filter-date-to" type="date" value={filterDateTo} onChange={e => setFilterDateTo(e.target.value)}
           style={{ padding: '8px 14px', border: '1px solid var(--border-strong)', borderRadius: 2, fontSize: 13, fontFamily: 'var(--font-body)', background: '#fff' }}
-          title="To date" />
+          title={s('to_date')} />
         {(filterType || filterAccount || filterDateFrom || filterDateTo) && (
           <button onClick={() => { setFilterType(''); setFilterAccount(''); setFilterDateFrom(''); setFilterDateTo(''); }}
             style={{ background: 'none', border: 'none', color: 'var(--accent-1)', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font-body)' }}>
@@ -142,7 +153,7 @@ export default function Transactions() {
               background: viewMode === 'list' ? 'var(--brand-primary)' : '#fff',
               color: viewMode === 'list' ? '#fff' : 'var(--text-secondary)',
             }}>
-            <ListBullets size={14} /> List
+            <ListBullets size={14} /> {s('list')}
           </button>
           <button data-testid="view-ledger" onClick={() => setViewMode('ledger')}
             style={{
@@ -151,21 +162,36 @@ export default function Transactions() {
               background: viewMode === 'ledger' ? 'var(--brand-primary)' : '#fff',
               color: viewMode === 'ledger' ? '#fff' : 'var(--text-secondary)',
             }}>
-            <BookOpen size={14} /> Ledger
+            <BookOpen size={14} /> {s('ledger')}
           </button>
         </div>
       </div>
 
       {/* Transactions Content */}
       {loading ? (
-        <div className="mono" style={{ color: 'var(--text-muted)' }}>Loading transactions...</div>
+        <div className="mono" style={{ color: 'var(--text-muted)' }}>{s('syncing')}</div>
       ) : transactions.length === 0 ? (
         <div style={{ textAlign: 'center', padding: 60, background: '#fff', border: '1px solid var(--border-subtle)', borderRadius: 2 }}>
-          <p style={{ color: 'var(--text-muted)', fontSize: 14, marginBottom: 16 }}>No transactions found</p>
-          <button onClick={() => setShowNewTxn(true)} style={{
-            background: 'var(--brand-primary)', color: '#fff', border: 'none',
-            padding: '10px 20px', borderRadius: 2, fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font-body)'
-          }}>Record First Transaction</button>
+          {pendingCount > 0 ? (
+            <>
+              <p style={{ color: 'var(--text-primary)', fontSize: 16, fontWeight: 600, marginBottom: 8 }}>{s('no_approved_transactions')}</p>
+              <p style={{ color: 'var(--text-muted)', fontSize: 14, marginBottom: 16 }}>
+                You have {pendingCount} pending for review.
+              </p>
+              <button onClick={() => navigate('/dashboard')} style={{
+                background: 'var(--brand-primary)', color: '#fff', border: 'none',
+                padding: '10px 20px', borderRadius: 2, fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font-body)'
+              }}>{s('pending_review')}</button>
+            </>
+          ) : (
+            <>
+              <p style={{ color: 'var(--text-muted)', fontSize: 14, marginBottom: 16 }}>{s('no_transactions_yet')}</p>
+              <button onClick={() => setShowNewTxn(true)} style={{
+                background: 'var(--brand-primary)', color: '#fff', border: 'none',
+                padding: '10px 20px', borderRadius: 2, fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font-body)'
+              }}>{s('add_transaction')}</button>
+            </>
+          )}
         </div>
       ) : viewMode === 'ledger' ? (
         /* ── Ledger View ── */
@@ -188,15 +214,15 @@ export default function Transactions() {
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 700 }}>
                 <thead>
                   <tr style={{ borderBottom: '2px solid var(--border-strong)', background: 'var(--bg-secondary)' }}>
-                    <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Date</th>
-                    <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Description</th>
-                    <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Account</th>
-                    <th style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--success)' }}>Debit</th>
-                    <th style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--error)' }}>Credit</th>
+                    <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>{s('date')}</th>
+                    <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>{s('description')}</th>
+                    <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>{s('account_label')}</th>
+                    <th style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--success)' }}>{s('debit')}</th>
+                    <th style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--error)' }}>{s('credit')}</th>
                     {filterAccount && (
-                      <th style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Balance</th>
+                      <th style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>{s('balance')}</th>
                     )}
-                    <th style={{ padding: '12px 16px', textAlign: 'center', fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)', width: 80, position: 'sticky', right: 0, background: 'var(--bg-secondary)', zIndex: 2 }}>Actions</th>
+                    <th style={{ padding: '12px 16px', textAlign: 'center', fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)', width: 80, position: 'sticky', right: 0, background: 'var(--bg-secondary)', zIndex: 2 }}>{s('actions')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -285,13 +311,13 @@ export default function Transactions() {
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 700 }}>
             <thead>
               <tr style={{ borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-secondary)' }}>
-                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Date</th>
-                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Type</th>
-                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Description</th>
-                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Account</th>
-                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Category</th>
-                <th style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Amount</th>
-                <th style={{ padding: '12px 16px', textAlign: 'center', fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)', position: 'sticky', right: 0, background: 'var(--bg-secondary)', zIndex: 2 }}>Actions</th>
+                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>{s('date')}</th>
+                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>{s('type')}</th>
+                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>{s('description')}</th>
+                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>{s('account_label')}</th>
+                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>{s('category')}</th>
+                <th style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>{s('amount')}</th>
+                <th style={{ padding: '12px 16px', textAlign: 'center', fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)', position: 'sticky', right: 0, background: 'var(--bg-secondary)', zIndex: 2 }}>{s('actions')}</th>
               </tr>
             </thead>
             <tbody>

@@ -1,3 +1,4 @@
+import { s, getCurrentLanguage } from '../lib/localization';
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../lib/api';
 import { getCached, setCache } from '../lib/cache';
@@ -372,6 +373,8 @@ function EmailAccountCard({ acct, provider, onSetupSync, onRetry, onDisconnect, 
 }
 
 export default function EmailSync() {
+  const [lang, setLang] = useState(getCurrentLanguage());
+  useEffect(() => { const h = () => setLang(getCurrentLanguage()); window.addEventListener('languageChanged', h); return () => window.removeEventListener('languageChanged', h); }, []);
   const cached = getCached('emailsync');
   const [gmailStatus, setGmailStatus] = useState(cached?.gmailStatus || null);
   const [outlookStatus, setOutlookStatus] = useState(cached?.outlookStatus || null);
@@ -608,7 +611,7 @@ export default function EmailSync() {
     }
   };
 
-  const getAccountName = (id) => accounts.find(a => a.account_id === id)?.name || 'Unknown';
+  const getAccountName = (id) => accounts.find(a => a.account_id === id)?.name || 'Unidentified Account';
   const getCategoryName = (id) => categories.find(c => c.category_id === id)?.name || '';
 
   const toggleSyncForm = (email) => {
@@ -622,7 +625,7 @@ export default function EmailSync() {
   };
 
   if (loading) {
-    return <div className="mono" style={{ color: 'var(--text-muted)', padding: 40 }}>Loading sync status...</div>;
+    return <div className="mono" style={{ color: 'var(--text-muted)', padding: 40 }}>{s('syncing')}</div>;
   }
 
   const gmailAccounts = gmailStatus?.accounts || [];
@@ -651,7 +654,7 @@ export default function EmailSync() {
       `}</style>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 32 }}>
         <div>
-          <h1 style={{ fontSize: 28, fontWeight: 500, letterSpacing: '-0.02em' }}>Email & SMS Sync</h1>
+          <h1 style={{ fontSize: 28, fontWeight: 500, letterSpacing: '-0.02em' }}>{s('email_sync')}</h1>
           <p className="mono" style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
             Connect Gmail or Outlook, and sync SMS from your mobile to auto-detect transactions
           </p>
@@ -747,7 +750,7 @@ export default function EmailSync() {
           border: '1px solid var(--border-subtle)', borderRadius: 2
         }}>
           <EnvelopeSimple size={40} weight="duotone" style={{ color: 'var(--text-muted)', marginBottom: 16 }} />
-          <h3 style={{ fontSize: 18, fontFamily: 'var(--font-body)', fontWeight: 600, marginBottom: 8 }}>No accounts connected</h3>
+          <h3 style={{ fontSize: 18, fontFamily: 'var(--font-body)', fontWeight: 600, marginBottom: 8 }}>{s('no_gmail')}</h3>
           <p style={{ color: 'var(--text-muted)', fontSize: 14, marginBottom: 24, maxWidth: 420, margin: '0 auto 24px' }}>
             Connect your Gmail or Outlook account to automatically detect transactions from emails.
             SMS messages are synced automatically from the mobile app.
@@ -828,14 +831,14 @@ export default function EmailSync() {
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 650 }}>
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-secondary)' }}>
-                  <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Source</th>
-                  <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Date</th>
-                  <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Type</th>
-                  <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Description</th>
-                  <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Account</th>
-                  <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Category</th>
-                  <th style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Amount</th>
-                  <th style={{ padding: '10px 16px', textAlign: 'center', fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)', position: 'sticky', right: 0, background: 'var(--bg-secondary)', zIndex: 2 }}>Actions</th>
+                  <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>{s('source')}</th>
+                  <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>{s('date')}</th>
+                  <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>{s('type')}</th>
+                  <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>{s('description')}</th>
+                  <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>{s('account_label')}</th>
+                  <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>{s('category')}</th>
+                  <th style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>{s('amount')}</th>
+                  <th style={{ padding: '10px 16px', textAlign: 'center', fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)', position: 'sticky', right: 0, background: 'var(--bg-secondary)', zIndex: 2 }}>{s('actions')}</th>
                 </tr>
               </thead>
               <tbody>

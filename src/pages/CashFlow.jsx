@@ -1,3 +1,4 @@
+import { s, getCurrentLanguage } from '../lib/localization';
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../lib/api';
 import { getCached, setCache } from '../lib/cache';
@@ -105,6 +106,8 @@ function ProjectionChart({ data }) {
 }
 
 export default function CashFlow() {
+  const [lang, setLang] = useState(getCurrentLanguage());
+  useEffect(() => { const h = () => setLang(getCurrentLanguage()); window.addEventListener('languageChanged', h); return () => window.removeEventListener('languageChanged', h); }, []);
   const cached = getCached('cashflow');
   const [projection, setProjection] = useState(cached?.projection || null);
   const [allTransactions, setAllTransactions] = useState(cached?.transactions || []);
@@ -254,7 +257,7 @@ export default function CashFlow() {
   return (
     <div data-testid="cashflow-page">
       <div style={{ marginBottom: 32 }}>
-        <h1 style={{ fontSize: 28, fontWeight: 500, letterSpacing: '-0.02em' }}>Cash Flow Projection</h1>
+        <h1 style={{ fontSize: 28, fontWeight: 500, letterSpacing: '-0.02em' }}>{s('cash_flow')}</h1>
         <p className="mono" style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
           24-month forecast based on your confirmed recurring transactions
         </p>
@@ -262,21 +265,21 @@ export default function CashFlow() {
 
       {/* Summary Cards */}
       <div data-testid="cashflow-summary" style={{ display: 'flex', gap: 16, marginBottom: 16, flexWrap: 'wrap' }}>
-        <SummaryCard label="Monthly Income" value={proj.monthly_recurring_income} color="var(--success)"
+        <SummaryCard label={s('monthly_income')} value={proj.monthly_recurring_income} color="var(--success)"
           sub={`${recurringItems.filter(r => r.transaction_type === 'income').length} sources`}
           onClick={() => toggleTile('income')} active={expandedTile === 'income'} />
-        <SummaryCard label="Monthly Expense" value={proj.monthly_recurring_expense} color="var(--error)"
+        <SummaryCard label={s('monthly_expense')} value={proj.monthly_recurring_expense} color="var(--error)"
           sub={`${recurringItems.filter(r => r.transaction_type === 'expense').length} sources`}
           onClick={() => toggleTile('expense')} active={expandedTile === 'expense'} />
-        <SummaryCard label="Monthly Mandates" value={proj.monthly_mandate_expense || 0} color="var(--error)"
+        <SummaryCard label={s('mandates')} value={proj.monthly_mandate_expense || 0} color="var(--error)"
           sub={`${(mandates || []).filter(m => m.status === 'active').length} active`}
           onClick={() => toggleTile('mandates')} active={expandedTile === 'mandates'} />
         {(proj.monthly_od_interest || 0) > 0 && (
-          <SummaryCard label="OD Interest" value={proj.monthly_od_interest} color="var(--error)"
+          <SummaryCard label={s('od_interest')} value={proj.monthly_od_interest} color="var(--error)"
             sub={`${(proj.od_interest_items || []).length} OD account${(proj.od_interest_items || []).length !== 1 ? 's' : ''}`}
             onClick={() => toggleTile('odInterest')} active={expandedTile === 'odInterest'} />
         )}
-        <SummaryCard label="Monthly Net" value={proj.monthly_net}
+        <SummaryCard label={s('net_cash_flow')} value={proj.monthly_net}
           color={proj.monthly_net >= 0 ? 'var(--success)' : 'var(--error)'}
           sub="Projected savings"
           onClick={() => toggleTile('net')} active={expandedTile === 'net'} />
@@ -520,7 +523,7 @@ export default function CashFlow() {
         background: '#fff', border: '1px solid var(--border-subtle)', borderRadius: 2,
         padding: '24px', marginBottom: 32
       }}>
-        <h2 style={{ fontSize: 18, fontWeight: 500, marginBottom: 16 }}>24-Month Projection</h2>
+        <h2 style={{ fontSize: 18, fontWeight: 500, marginBottom: 16 }}>{s('projection_24m')}</h2>
         {projectionData.length > 0 ? (
           <ProjectionChart data={projectionData} />
         ) : (
@@ -569,14 +572,14 @@ export default function CashFlow() {
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 650 }}>
             <thead>
               <tr style={{ borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-secondary)' }}>
-                <th style={thStyle}>Description</th>
-                <th style={thStyle}>Type</th>
-                <th style={thStyle}>Amount</th>
-                <th style={thStyle}>Frequency</th>
+                <th style={thStyle}>{s('description')}</th>
+                <th style={thStyle}>{s('type')}</th>
+                <th style={thStyle}>{s('amount')}</th>
+                <th style={thStyle}>{s('frequency')}</th>
                 <th style={thStyle}>Day</th>
                 <th style={thStyle}>Monthly Equiv.</th>
-                <th style={thStyle}>Account</th>
-                <th style={thStyle}>Category</th>
+                <th style={thStyle}>{s('account_label')}</th>
+                <th style={thStyle}>{s('category')}</th>
                 <th style={{ ...thStyle, textAlign: 'center' }}>Actions</th>
               </tr>
             </thead>
@@ -672,14 +675,14 @@ export default function CashFlow() {
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 650 }}>
             <thead>
               <tr style={{ borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-secondary)' }}>
-                <th style={thStyle}>Merchant</th>
-                <th style={thStyle}>Type</th>
-                <th style={{ ...thStyle, textAlign: 'right' }}>Amount</th>
-                <th style={thStyle}>Frequency</th>
+                <th style={thStyle}>{s('merchant_payee')}</th>
+                <th style={thStyle}>{s('type')}</th>
+                <th style={{ ...thStyle, textAlign: 'right' }}>{s('amount')}</th>
+                <th style={thStyle}>{s('frequency')}</th>
                 <th style={{ ...thStyle, textAlign: 'right' }}>Monthly Equiv.</th>
-                <th style={thStyle}>Start</th>
-                <th style={thStyle}>Status</th>
-                <th style={thStyle}>Source</th>
+                <th style={thStyle}>{s('date')}</th>
+                <th style={thStyle}>{s('status')}</th>
+                <th style={thStyle}>{s('source')}</th>
                 <th style={{ ...thStyle, textAlign: 'center' }}>Actions</th>
               </tr>
             </thead>
@@ -807,10 +810,10 @@ export default function CashFlow() {
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-secondary)' }}>
                   <th style={thStyle}>Date</th>
-                  <th style={thStyle}>Type</th>
-                  <th style={thStyle}>Description</th>
-                  <th style={thStyle}>Amount</th>
-                  <th style={thStyle}>Source</th>
+                  <th style={thStyle}>{s('type')}</th>
+                  <th style={thStyle}>{s('description')}</th>
+                  <th style={thStyle}>{s('amount')}</th>
+                  <th style={thStyle}>{s('source')}</th>
                   <th style={{ ...thStyle, textAlign: 'center' }}>Mark Recurring</th>
                 </tr>
               </thead>
@@ -831,17 +834,17 @@ export default function CashFlow() {
           overflow: 'hidden', marginTop: 32
         }}>
           <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-secondary)' }}>
-            <h2 style={{ fontSize: 18, fontWeight: 500 }}>Monthly Breakdown</h2>
+            <h2 style={{ fontSize: 18, fontWeight: 500 }}>{s('monthly_breakdown')}</h2>
           </div>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 650 }}>
             <thead>
               <tr style={{ borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-secondary)' }}>
-                <th style={thStyle}>Month</th>
-                <th style={{ ...thStyle, textAlign: 'right' }}>Income</th>
-                <th style={{ ...thStyle, textAlign: 'right' }}>Expense</th>
-                <th style={{ ...thStyle, textAlign: 'right' }}>Mandates</th>
+                <th style={thStyle}>{s('month_header')}</th>
+                <th style={{ ...thStyle, textAlign: 'right' }}>{s('income')}</th>
+                <th style={{ ...thStyle, textAlign: 'right' }}>{s('expense')}</th>
+                <th style={{ ...thStyle, textAlign: 'right' }}>{s('mandates')}</th>
                 {(proj.monthly_od_interest || 0) > 0 && <th style={{ ...thStyle, textAlign: 'right' }}>OD Interest</th>}
-                <th style={{ ...thStyle, textAlign: 'right' }}>Net</th>
+                <th style={{ ...thStyle, textAlign: 'right' }}>{s('net')}</th>
               </tr>
             </thead>
             <tbody>

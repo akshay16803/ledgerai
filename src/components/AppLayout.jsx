@@ -1,40 +1,44 @@
+import { s, getCurrentLanguage, toggleLanguage } from '../lib/localization';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { api } from '../lib/api';
 import {
   House, ArrowsLeftRight, Bank, Tag,
-  Lightbulb, SignOut, Gear, EnvelopeSimple, TrendUp, Scales, ChartBar, Archive, Receipt, List, X, Headset, Users, Package, Storefront
+  Lightbulb, SignOut, Gear, EnvelopeSimple, TrendUp, Scales, ChartBar, Archive, Receipt, List, X, Headset, Users, Package, Storefront, Repeat
 } from '@phosphor-icons/react';
 
 const baseNavItems = [
-  { to: '/dashboard', icon: House, label: 'Dashboard' },
-  { to: '/transactions', icon: ArrowsLeftRight, label: 'Transactions' },
-  { to: '/accounts', icon: Bank, label: 'Accounts' },
-  { to: '/categories', icon: Tag, label: 'Categories' },
-  { to: '/cashflow', icon: TrendUp, label: 'Cash Flow' },
-  { to: '/reports', icon: ChartBar, label: 'Reports' },
-  { to: '/reconciliation', icon: Scales, label: 'Reconciliation' },
-  { to: '/email-sync', icon: EnvelopeSimple, label: 'Email & SMS' },
-  { to: '/records', icon: Archive, label: 'Records' },
-  { to: '/past-insights', icon: Receipt, label: 'Past Insights' },
-  { to: '/feature-requests', icon: Lightbulb, label: 'Feature Requests' },
-  { to: '/support', icon: Headset, label: 'Support' },
-  { to: '/settings', icon: Gear, label: 'Settings' },
+  { to: '/dashboard', icon: House, label: s('dashboard') },
+  { to: '/transactions', icon: ArrowsLeftRight, label: s('transactions') },
+  { to: '/accounts', icon: Bank, label: s('accounts') },
+  { to: '/categories', icon: Tag, label: s('categories') },
+  { to: '/cashflow', icon: TrendUp, label: s('cash_flow') },
+  { to: '/cashflow?tab=mandates', icon: Repeat, label: s('mandates') },
+  { to: '/reports', icon: ChartBar, label: s('reports') },
+  { to: '/reconciliation', icon: Scales, label: s('reconciliation') },
+  { to: '/email-sync', icon: EnvelopeSimple, label: s('email_sync') },
+  { to: '/records', icon: Archive, label: s('records') },
+  { to: '/past-insights', icon: Receipt, label: s('past_insights') },
+  { to: '/feature-requests', icon: Lightbulb, label: s('feature_requests') },
+  { to: '/support', icon: Headset, label: s('support') },
+  { to: '/settings', icon: Gear, label: s('settings') },
 ];
 
 const invoiceNavItems = [
-  { to: '/invoices', icon: Receipt, label: 'Sales Invoice' },
-  { to: '/customers', icon: Users, label: 'Customers' },
+  { to: '/invoices', icon: Receipt, label: s('invoices') },
+  { to: '/customers', icon: Users, label: s('customers') },
 ];
 
 const billNavItems = [
-  { to: '/purchases', icon: Package, label: 'Purchase Invoice' },
-  { to: '/vendors', icon: Storefront, label: 'Vendors' },
+  { to: '/purchases', icon: Package, label: s('purchases') },
+  { to: '/vendors', icon: Storefront, label: s('vendors') },
 ];
 
 export default function AppLayout({ children }) {
   const { user, logout } = useAuth();
+  const [lang, setLang] = useState(getCurrentLanguage());
+  useEffect(() => { const h = () => setLang(getCurrentLanguage()); window.addEventListener('languageChanged', h); return () => window.removeEventListener('languageChanged', h); }, []);
   const navigate = useNavigate();
   const initializedRef = useRef(false);
 
@@ -212,6 +216,21 @@ export default function AppLayout({ children }) {
             </div>
           </div>
           <button
+            data-testid="language-toggle-btn"
+            onClick={() => { toggleLanguage(); setLang(getCurrentLanguage()); }}
+            style={{
+              width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center',
+              gap: 6, padding: '6px 12px', borderRadius: 4, border: 'none',
+              background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.7)',
+              cursor: 'pointer', fontSize: 12, fontFamily: 'var(--font-body)',
+              transition: 'background 0.15s', marginBottom: 6, fontWeight: 600,
+            }}
+            onMouseEnter={e => e.target.style.background = 'rgba(255,255,255,0.15)'}
+            onMouseLeave={e => e.target.style.background = 'rgba(255,255,255,0.08)'}
+          >
+            {lang === 'en' ? '\u0939\u093F / En' : 'En / \u0939\u093F'}
+          </button>
+          <button
             data-testid="logout-button"
             onClick={handleLogout}
             disabled={loggingOut}
@@ -226,7 +245,7 @@ export default function AppLayout({ children }) {
             onMouseEnter={e => e.target.style.background = 'rgba(255,255,255,0.15)'}
             onMouseLeave={e => e.target.style.background = 'rgba(255,255,255,0.08)'}
           >
-            <SignOut size={16} /> {loggingOut ? 'Signing Out...' : 'Sign Out'}
+            <SignOut size={16} /> {loggingOut ? s('syncing') : s('sign_out')}
           </button>
         </div>
       </aside>

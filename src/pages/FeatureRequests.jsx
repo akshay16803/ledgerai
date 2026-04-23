@@ -1,9 +1,12 @@
+import { s, getCurrentLanguage } from '../lib/localization';
 import { useState, useEffect } from 'react';
 import { api } from '../lib/api';
 import { getCached, setCache } from '../lib/cache';
 import { PaperPlaneRight, Clock, CheckCircle } from '@phosphor-icons/react';
 
 export default function FeatureRequests() {
+  const [lang, setLang] = useState(getCurrentLanguage());
+  useEffect(() => { const h = () => setLang(getCurrentLanguage()); window.addEventListener('languageChanged', h); return () => window.removeEventListener('languageChanged', h); }, []);
   const [requests, setRequests] = useState(() => getCached('featurerequests') || []);
   const [loading, setLoading] = useState(!getCached('featurerequests'));
   const [showForm, setShowForm] = useState(false);
@@ -41,15 +44,15 @@ export default function FeatureRequests() {
     <div data-testid="feature-requests-page">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 32 }}>
         <div>
-          <h1 style={{ fontSize: 28, fontWeight: 500, letterSpacing: '-0.02em' }}>Feature Requests</h1>
-          <p className="mono" style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>Request new features for SpentyAI</p>
+          <h1 style={{ fontSize: 28, fontWeight: 500, letterSpacing: '-0.02em' }}>{s('feature_requests')}</h1>
+          <p className="mono" style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>{s('feature_requests')}</p>
         </div>
         <button data-testid="new-request-btn" onClick={() => setShowForm(!showForm)} style={{
           background: 'var(--brand-primary)', color: '#fff', border: 'none',
           padding: '10px 20px', borderRadius: 2, fontSize: 13, fontWeight: 600,
           cursor: 'pointer', fontFamily: 'var(--font-body)', display: 'flex', alignItems: 'center', gap: 6
         }}>
-          <PaperPlaneRight size={14} weight="bold" /> New Request
+          <PaperPlaneRight size={14} weight="bold" /> {s('new_request')}
         </button>
       </div>
 
@@ -67,10 +70,10 @@ export default function FeatureRequests() {
         <div data-testid="feature-request-form" style={{
           background: '#fff', border: '1px solid var(--border-subtle)', borderRadius: 2, padding: 28, marginBottom: 24
         }}>
-          <h3 style={{ fontSize: 16, fontFamily: 'var(--font-body)', fontWeight: 600, marginBottom: 20 }}>Submit a Feature Request</h3>
+          <h3 style={{ fontSize: 16, fontFamily: 'var(--font-body)', fontWeight: 600, marginBottom: 20 }}>{s('new_request')}</h3>
           <form onSubmit={handleSubmit}>
             <div style={{ marginBottom: 16 }}>
-              <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 6 }}>Title *</label>
+              <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 6 }}>{s('title')} *</label>
               <input data-testid="request-title-input" value={form.title} onChange={e => setForm(f => ({...f, title: e.target.value}))}
                 style={inputStyle} placeholder="Brief title for your feature request" />
             </div>
@@ -87,7 +90,7 @@ export default function FeatureRequests() {
               </select>
             </div>
             <div style={{ marginBottom: 16 }}>
-              <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 6 }}>Description *</label>
+              <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 6 }}>{s('description')} *</label>
               <textarea data-testid="request-description-input" value={form.description} onChange={e => setForm(f => ({...f, description: e.target.value}))}
                 style={{ ...inputStyle, minHeight: 120, resize: 'vertical' }}
                 placeholder="Describe the feature you'd like to see in detail..." />
@@ -101,7 +104,7 @@ export default function FeatureRequests() {
               <button type="button" onClick={() => setShowForm(false)} style={{
                 background: 'none', border: '1px solid var(--border-strong)', color: 'var(--text-secondary)',
                 padding: '10px 24px', borderRadius: 2, fontSize: 13, cursor: 'pointer', fontFamily: 'var(--font-body)'
-              }}>Cancel</button>
+              }}>{s('cancel')}</button>
             </div>
           </form>
         </div>
@@ -112,7 +115,7 @@ export default function FeatureRequests() {
         <div className="mono" style={{ color: 'var(--text-muted)' }}>Loading...</div>
       ) : requests.length === 0 ? (
         <div style={{ textAlign: 'center', padding: 60, background: '#fff', border: '1px solid var(--border-subtle)', borderRadius: 2 }}>
-          <p style={{ color: 'var(--text-muted)', fontSize: 14, marginBottom: 16 }}>No feature requests yet</p>
+          <p style={{ color: 'var(--text-muted)', fontSize: 14, marginBottom: 16 }}>{s('no_requests')}</p>
           <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>Be the first to suggest a new feature!</p>
         </div>
       ) : (

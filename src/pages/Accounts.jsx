@@ -2,11 +2,12 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { getCached, setCache } from '../lib/cache';
+import { s, getCurrentLanguage } from '../lib/localization';
 import { Plus, Trash, PencilSimple, Bank, Wallet, CreditCard, X, Gear, Tag, Check, Warning, CaretRight, CaretDown, CalendarBlank, CurrencyCircleDollar, SpinnerGap, ChartLineUp, UploadSimple, PencilLine, FileText, Robot } from '@phosphor-icons/react';
 
 const accountTypes = [
-  { value: 'asset', label: 'Asset' },
-  { value: 'liability', label: 'Liability' },
+  { value: 'asset', label: s('asset') },
+  { value: 'liability', label: s('liability') },
   { value: 'equity', label: 'Equity' },
   { value: 'investment', label: 'Investment' },
 ];
@@ -1185,6 +1186,8 @@ function DematManualEntryModal({ account, onClose }) {
 // ─── Main Accounts Page ─────────────────────────────────────────────
 export default function Accounts() {
   const navigate = useNavigate();
+  const [lang, setLang] = useState(getCurrentLanguage());
+  useEffect(() => { const h = () => setLang(getCurrentLanguage()); window.addEventListener('languageChanged', h); return () => window.removeEventListener('languageChanged', h); }, []);
   const [accounts, setAccounts] = useState(() => getCached('accounts') || []);
   const [loading, setLoading] = useState(!getCached('accounts'));
   const [showForm, setShowForm] = useState(false);
@@ -1367,7 +1370,7 @@ export default function Accounts() {
     <div data-testid="accounts-page">
       <div className="action-bar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 32, flexWrap: 'wrap', gap: 12 }}>
         <div>
-          <h1 className="page-title" style={{ fontSize: 28, fontWeight: 500, letterSpacing: '-0.02em' }}>Accounts</h1>
+          <h1 className="page-title" style={{ fontSize: 28, fontWeight: 500, letterSpacing: '-0.02em' }}>{s('accounts')}</h1>
           <p className="mono page-subtitle" style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>Manage your financial accounts</p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
@@ -1392,7 +1395,7 @@ export default function Accounts() {
             padding: '10px 20px', borderRadius: 2, fontSize: 13, fontWeight: 600,
             cursor: 'pointer', fontFamily: 'var(--font-body)', display: 'flex', alignItems: 'center', gap: 6
           }}>
-            <Plus size={14} weight="bold" /> Add Account
+            <Plus size={14} weight="bold" /> {s('add_account')}
           </button>
         </div>
       </div>
@@ -1687,7 +1690,7 @@ export default function Accounts() {
         <div className="mono" style={{ color: 'var(--text-muted)' }}>Loading accounts...</div>
       ) : accounts.length === 0 ? (
         <div style={{ textAlign: 'center', padding: 60, background: '#fff', border: '1px solid var(--border-subtle)', borderRadius: 2 }}>
-          <p style={{ color: 'var(--text-muted)', fontSize: 14 }}>No accounts yet. Add your first account to get started.</p>
+          <p style={{ color: 'var(--text-muted)', fontSize: 14 }}>{s('no_accounts_yet')}</p>
         </div>
       ) : (
         <AccountsGroupedList
