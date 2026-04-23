@@ -5,7 +5,7 @@ import { api } from '../lib/api';
 import { PurchaseBillModal } from '../components/PurchaseBillModal';
 import { InternationalInvoiceModal } from '../components/InternationalInvoiceModal';
 import { usesExistingForms, getCountryConfig, formatCountryCurrency } from '../lib/countryConfig';
-import { Plus, Eye, PencilSimple, Trash, Printer, CurrencyInr, Package, X, Gear } from '@phosphor-icons/react';
+import { Plus, Eye, PencilSimple, Trash, Printer, CurrencyInr, Package, X, Gear, UploadSimple, SpinnerGap, Robot } from '@phosphor-icons/react';
 
 const PAYMENT_METHODS = [
   { value: 'upi', label: 'UPI' },
@@ -507,6 +507,10 @@ export default function Purchases() {
   const [editingBill, setEditingBill] = useState(null);
   const [viewingBill, setViewingBill] = useState(null);
   const [recordingPayment, setRecordingPayment] = useState(null);
+  // Bill upload state
+  const [uploadingBill, setUploadingBill] = useState(false);
+  const [prefilledBill, setPrefilledBill] = useState(null);
+  const uploadRef = useRef(null);
 
   const loadBills = useCallback(async () => {
     try {
@@ -548,6 +552,26 @@ export default function Purchases() {
     setShowNewBill(true);
   };
 
+  const handleBillUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    // Reset input so same file can be re-selected
+    if (uploadRef.current) uploadRef.current.value = '';
+
+    setUploadingBill(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await api.upload('/api/bills/upload', formData);
+      setPrefilledBill(res);
+      setShowNewBill(true);
+    } catch (err) {
+      alert(err.message || 'Failed to parse bill');
+    } finally {
+      setUploadingBill(false);
+    }
+  };
+
   const handleDelete = async (b) => {
     const id = b.id || b.bill_id;
     const num = b.bill_number || `#${id}`;
@@ -561,6 +585,7 @@ export default function Purchases() {
   const handleBillSaved = () => {
     setShowNewBill(false);
     setEditingBill(null);
+    setPrefilledBill(null);
     loadBills();
   };
 
@@ -571,6 +596,7 @@ export default function Purchases() {
 
   return (
     <div style={{ padding: '0 0 48px' }}>
+      <style>{`.spin { animation: spin-anim 1s linear infinite; } @keyframes spin-anim { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
       {/* Header */}
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -583,13 +609,44 @@ export default function Purchases() {
           <Package size={26} weight="duotone" style={{ color: 'var(--brand-primary)' }} />
           {s('purchases')}
         </h1>
-        <button onClick={handleNewBill} style={{
-          display: 'flex', alignItems: 'center', gap: 6, padding: '10px 20px',
-          background: 'var(--brand-primary)', color: '#fff', border: 'none', borderRadius: 2,
-          fontSize: 14, fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font-body)',
-        }}>
-          <Plus size={18} weight="bold" /> {s('new_bill')}
-        </button>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <input
+            ref={uploadRef}
+            type="file"
+            accept="image/jpeg,image/png,application/pdf"
+            onChange={handleBillUpload}
+            style={{ display: 'none' }}
+            data-testid="bill-upload-input"
+          />
+          <button
+            onClick={() => uploadRef.current?.click()}
+            disabled={uploadingBill}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6, padding: '10px 20px',
+              background: 'none', color: 'var(--brand-primary)', border: '1px solid var(--brand-primary)', borderRadius: 2,
+              fontSize: 14, fontWeight: 600, cursor: uploadingBill ? 'not-allowed' : 'pointer', fontFamily: 'var(--font-body)',
+              opacity: uploadingBill ? 0.6 : 1,
+            }}
+            data-testid="upload-bill-btn"
+          >
+            {uploadingBill ? (
+              <>
+                <SpinnerGap size={16} className="spin" /> AI is extracting data from your bill...
+              </>
+            ) : (
+              <>
+                <UploadSimple size={18} weight="bold" /> Upload Bill
+              </>
+            )}
+          </button>
+          <button onClick={handleNewBill} style={{
+            display: 'flex', alignItems: 'center', gap: 6, padding: '10px 20px',
+            background: 'var(--brand-primary)', color: '#fff', border: 'none', borderRadius: 2,
+            fontSize: 14, fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font-body)',
+          }}>
+            <Plus size={18} weight="bold" /> {s('new_bill')}
+          </button>
+        </div>
       </div>
 
       {/* Error */}
@@ -701,19 +758,19 @@ export default function Purchases() {
       {showNewBill && (
         usesExistingForms(businessCountry) ? (
           <PurchaseBillModal
-            bill={null}
+            bill={prefilledBill || null}
             accounts={accounts}
             onSave={handleBillSaved}
-            onClose={() => setShowNewBill(false)}
+            onClose={() => { setShowNewBill(false); setPrefilledBill(null); }}
           />
         ) : (
           <InternationalInvoiceModal
             mode="purchase"
-            bill={null}
+            bill={prefilledBill || null}
             accounts={accounts}
             countryCode={businessCountry}
             onSave={handleBillSaved}
-            onClose={() => setShowNewBill(false)}
+            onClose={() => { setShowNewBill(false); setPrefilledBill(null); }}
           />
         )
       )}

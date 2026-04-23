@@ -36,6 +36,12 @@ export default function AccountDetail() {
   const [account, setAccount] = useState(null);
   const [loadingAccount, setLoadingAccount] = useState(true);
 
+  // Opening balance edit state
+  const [editingOB, setEditingOB] = useState(false);
+  const [obAmount, setObAmount] = useState('');
+  const [obDate, setObDate] = useState('');
+  const [obSaving, setObSaving] = useState(false);
+
   // Transactions
   const [transactions, setTransactions] = useState([]);
   const [total, setTotal] = useState(0);
@@ -59,16 +65,39 @@ export default function AccountDetail() {
   const PAGE_SIZE = 50;
 
   // Load account info
-  useEffect(() => {
+  const loadAccount = useCallback(() => {
     setLoadingAccount(true);
     api.get(`/api/accounts/${accountId}`)
       .then(data => {
-        // Backend may return { account: {...} } or bare object
-        setAccount(data.account || data);
+        const acc = data.account || data;
+        setAccount(acc);
+        setObAmount(acc.opening_balance != null ? String(acc.opening_balance) : '');
+        setObDate(acc.balance_as_of_date || '');
       })
       .catch(() => setAccount(null))
       .finally(() => setLoadingAccount(false));
   }, [accountId]);
+
+  useEffect(() => {
+    loadAccount();
+  }, [loadAccount]);
+
+  const handleSaveOB = async () => {
+    setObSaving(true);
+    try {
+      await api.put(`/api/accounts/${accountId}`, {
+        opening_balance: parseFloat(obAmount) || 0,
+        balance_as_of_date: obDate,
+      });
+      setEditingOB(false);
+      loadAccount();
+      loadTransactions();
+    } catch (err) {
+      alert(err.message || 'Failed to update opening balance');
+    } finally {
+      setObSaving(false);
+    }
+  };
 
   // Load categories for filter
   useEffect(() => {
@@ -191,16 +220,87 @@ export default function AccountDetail() {
             {formatCurrency(account.balance || 0)}
           </div>
         </div>
-        {account.opening_balance !== undefined && account.opening_balance !== null && (
-          <div>
-            <div className="mono" style={{ fontSize: 11, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: 600, marginBottom: 6 }}>
-              Opening Balance
-            </div>
-            <div className="mono" style={{ fontSize: 18, fontWeight: 600, color: 'var(--text-primary)' }}>
-              {formatCurrency(account.opening_balance)}
-            </div>
+        <div>
+          <div className="mono" style={{ fontSize: 11, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: 600, marginBottom: 6 }}>
+            Opening Balance
           </div>
-        )}
+          {!editingOB ? (
+            <div>
+              <div className="mono" style={{ fontSize: 18, fontWeight: 600, color: 'var(--text-primary)' }}>
+                {account.opening_balance != null ? formatCurrency(account.opening_balance) : '--'}
+              </div>
+              {account.balance_as_of_date && (
+                <div className="mono" style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+                  as of {account.balance_as_of_date}
+                </div>
+              )}
+              <button
+                data-testid="set-opening-balance-btn"
+                onClick={() => setEditingOB(true)}
+                style={{
+                  marginTop: 8, background: 'none', border: '1px solid var(--border-strong)',
+                  borderRadius: 2, padding: '5px 12px', fontSize: 12, fontWeight: 600,
+                  cursor: 'pointer', color: 'var(--brand-primary)', fontFamily: 'var(--font-body)',
+                }}
+              >
+                Set Opening Balance
+              </button>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Amount</label>
+                <input
+                  data-testid="ob-amount-input"
+                  type="number"
+                  step="0.01"
+                  value={obAmount}
+                  onChange={e => setObAmount(e.target.value)}
+                  style={{ ...inputStyle, width: 160 }}
+                  placeholder="0.00"
+                />
+              </div>
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>As-of Date</label>
+                <input
+                  data-testid="ob-date-input"
+                  type="date"
+                  value={obDate}
+                  onChange={e => setObDate(e.target.value)}
+                  style={{ ...inputStyle, width: 160 }}
+                />
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.5, maxWidth: 300 }}>
+                Balance will be recalculated: opening balance + income - expenses +/- transfers from this date onward.
+              </div>
+              <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                <button
+                  data-testid="save-ob-btn"
+                  onClick={handleSaveOB}
+                  disabled={obSaving}
+                  style={{
+                    background: 'var(--brand-primary)', color: '#fff', border: 'none',
+                    borderRadius: 2, padding: '6px 16px', fontSize: 12, fontWeight: 600,
+                    cursor: obSaving ? 'not-allowed' : 'pointer', fontFamily: 'var(--font-body)',
+                    opacity: obSaving ? 0.6 : 1,
+                  }}
+                >
+                  {obSaving ? 'Saving...' : 'Save'}
+                </button>
+                <button
+                  onClick={() => setEditingOB(false)}
+                  style={{
+                    background: 'none', color: 'var(--text-secondary)', border: '1px solid var(--border-strong)',
+                    borderRadius: 2, padding: '6px 14px', fontSize: 12, fontWeight: 500,
+                    cursor: 'pointer', fontFamily: 'var(--font-body)',
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
         {account.currency && (
           <div>
             <div className="mono" style={{ fontSize: 11, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: 600, marginBottom: 6 }}>

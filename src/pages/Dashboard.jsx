@@ -101,12 +101,13 @@ function ViewSourceModal({ source, onClose }) {
   );
 }
 
-function StatCard({ testId, label, value, icon: Icon, color, accent }) {
+function StatCard({ testId, label, value, icon: Icon, color, accent, onClick }) {
   return (
-    <div data-testid={testId} style={{
+    <div data-testid={testId} onClick={onClick} style={{
       background: '#fff', border: '1px solid var(--border-subtle)',
       padding: '24px 28px', borderRadius: 2,
       transition: 'transform 0.2s ease, box-shadow 0.2s ease',
+      cursor: onClick ? 'pointer' : 'default',
     }}
     onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 4px 16px rgba(52,199,89,0.06)'; }}
     onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = 'none'; }}
@@ -439,6 +440,9 @@ export default function Dashboard() {
   const [pendingLoading, setPendingLoading] = useState(false);
   const [viewingSource, setViewingSource] = useState(null);
 
+  // Next month projection state
+  const [projection, setProjection] = useState(null);
+
   const openNewTxnModal = async () => {
     setShowNewTxn(true);
     try {
@@ -518,10 +522,20 @@ export default function Dashboard() {
     } catch { /* silent */ }
   };
 
+  const loadProjection = useCallback(async () => {
+    try {
+      const data = await api.get('/api/cashflow/projection');
+      setProjection(data);
+    } catch {
+      // Projection is non-critical
+    }
+  }, []);
+
   useEffect(() => {
     loadData();
     loadPending();
-  }, [loadData, loadPending]);
+    loadProjection();
+  }, [loadData, loadPending, loadProjection]);
 
   if (loading) {
     return <div className="mono" style={{ color: 'var(--text-muted)', padding: 40 }}>{s('loading_dashboard')}</div>;
@@ -570,11 +584,62 @@ export default function Dashboard() {
 
       {/* Stats Grid */}
       <div className="stat-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 32 }}>
-        <StatCard testId="stat-net-worth" label={s('net_worth')} value={formatCurrency(summary.net_worth)} icon={Scales} color="var(--brand-primary)" accent="var(--accent-3)" />
-        <StatCard testId="stat-income" label={s('income_this_month')} value={formatCurrency(summary.income_this_month)} icon={TrendUp} color="var(--success)" accent="var(--success)" />
-        <StatCard testId="stat-expenses" label={s('expenses_this_month')} value={formatCurrency(summary.expense_this_month)} icon={TrendDown} color="var(--error)" accent="var(--error)" />
-        <StatCard testId="stat-pending" label={s('pending_review')} value={summary.pending_review} icon={Clock} color="var(--warning)" accent="var(--warning)" />
+        <StatCard testId="stat-net-worth" label={s('net_worth')} value={formatCurrency(summary.net_worth)} icon={Scales} color="var(--brand-primary)" accent="var(--accent-3)" onClick={() => navigate('/accounts')} />
+        <StatCard testId="stat-income" label={s('income_this_month')} value={formatCurrency(summary.income_this_month)} icon={TrendUp} color="var(--success)" accent="var(--success)" onClick={() => navigate('/transactions?type=income')} />
+        <StatCard testId="stat-expenses" label={s('expenses_this_month')} value={formatCurrency(summary.expense_this_month)} icon={TrendDown} color="var(--error)" accent="var(--error)" onClick={() => navigate('/transactions?type=expense')} />
+        <StatCard testId="stat-pending" label={s('pending_review')} value={summary.pending_review} icon={Clock} color="var(--warning)" accent="var(--warning)" onClick={() => { const el = document.querySelector('[data-testid="pending-approval"]'); if (el) el.scrollIntoView({ behavior: 'smooth' }); }} />
       </div>
+
+      {/* Next Month Projection */}
+      {projection && (
+        <div data-testid="next-month-projection" style={{
+          background: '#fff', border: '1px solid var(--border-subtle)', borderRadius: 2,
+          padding: '24px 28px', marginBottom: 32,
+        }}>
+          <div style={{ marginBottom: 16 }}>
+            <h3 style={{ fontSize: 16, fontWeight: 600, margin: 0 }}>
+              {s('may_projection') || `${projection.month || 'Next Month'} Projection`}
+            </h3>
+            <p className="mono" style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
+              {s('upcoming_outflows') || 'Upcoming outflows next month'}
+            </p>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16 }}>
+            <div>
+              <div className="mono" style={{ fontSize: 11, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: 600, marginBottom: 6 }}>
+                {s('expenses') || 'Expenses'}
+              </div>
+              <div className="mono" style={{ fontSize: 18, fontWeight: 600, color: 'var(--error)' }}>
+                {formatCurrency(projection.expenses || 0)}
+              </div>
+            </div>
+            <div>
+              <div className="mono" style={{ fontSize: 11, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: 600, marginBottom: 6 }}>
+                {s('emis') || 'EMIs'}
+              </div>
+              <div className="mono" style={{ fontSize: 18, fontWeight: 600, color: 'var(--warning)' }}>
+                {formatCurrency(projection.emis || 0)}
+              </div>
+            </div>
+            <div>
+              <div className="mono" style={{ fontSize: 11, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: 600, marginBottom: 6 }}>
+                {s('od_interest') || 'OD Interest'}
+              </div>
+              <div className="mono" style={{ fontSize: 18, fontWeight: 600, color: 'var(--info)' }}>
+                {formatCurrency(projection.od_interest || 0)}
+              </div>
+            </div>
+            <div>
+              <div className="mono" style={{ fontSize: 11, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: 600, marginBottom: 6 }}>
+                {s('total_outflow') || 'Total Outflow'}
+              </div>
+              <div className="mono" style={{ fontSize: 18, fontWeight: 600, color: 'var(--text-primary)' }}>
+                {formatCurrency(projection.total_outflow || 0)}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Collapsible sections */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, marginBottom: 24 }}>
@@ -668,6 +733,14 @@ export default function Dashboard() {
       </div>
 
       {/* Pending Approval — full width */}
+      <div style={{ position: 'relative' }}>
+        {pendingLoading && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, position: 'absolute', top: -24, right: 0, zIndex: 1 }}>
+            <SpinnerGap size={14} className="spin" style={{ color: 'var(--text-muted)' }} />
+            <span className="mono" style={{ fontSize: 11, color: 'var(--text-muted)' }}>{s('syncing') || 'Syncing...'}</span>
+          </div>
+        )}
+      </div>
       <CollapsibleSection title={s('pending_approval')} count={pendingItems.length} testId="pending-approval">
         {pendingLoading ? (
           <div className="mono" style={{ color: 'var(--text-muted)', padding: '12px 0', fontSize: 13 }}>{s('loading_pending')}</div>

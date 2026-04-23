@@ -425,6 +425,16 @@ function AccountsGroupedList({ accounts, onEdit, onDelete, expandedSubTypes, tog
                                   onMouseEnter={e => { e.currentTarget.style.color = 'var(--brand-primary)'; e.currentTarget.style.textDecoration = 'underline'; }}
                                   onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-primary)'; e.currentTarget.style.textDecoration = 'none'; }}
                                 >{acc.name}</span>
+                                {acc.ai_created === true && (
+                                  <span title="Created by AI" style={{
+                                    display: 'inline-flex', alignItems: 'center', gap: 3,
+                                    fontSize: 10, fontWeight: 700, color: 'var(--brand-primary)',
+                                    background: 'rgba(52,199,89,0.08)', border: '1px solid rgba(52,199,89,0.2)',
+                                    borderRadius: 10, padding: '2px 7px', flexShrink: 0, lineHeight: 1,
+                                  }}>
+                                    <Robot size={10} weight="fill" /> AI
+                                  </span>
+                                )}
                                 {acc.account_number && (
                                   <span className="mono" style={{ fontSize: 11, color: 'var(--text-muted)', flexShrink: 0 }}>
                                     {acc.account_number}

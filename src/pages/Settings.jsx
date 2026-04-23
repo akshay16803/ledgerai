@@ -118,6 +118,11 @@ export default function Settings() {
   const [resetConfirmText, setResetConfirmText] = useState('');
   const [isResetting, setIsResetting] = useState(false);
   const [resetSuccess, setResetSuccess] = useState(false);
+  // Delete account state
+  const [showDeleteWarning, setShowDeleteWarning] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
     api.get('/api/settings').then(s => {
@@ -212,6 +217,19 @@ export default function Settings() {
       alert(err.message || 'Failed to reset data');
     } finally {
       setIsResetting(false);
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    if (deleteConfirmText !== 'DELETE') return;
+    setIsDeleting(true);
+    try {
+      await api.del('/api/auth/delete-account');
+      window.location.href = '/login';
+    } catch (err) {
+      alert(err.message || 'Failed to delete account');
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -591,6 +609,7 @@ export default function Settings() {
           <div style={{
             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
             padding: '16px 20px', border: '1px solid var(--border-subtle)', borderRadius: 4,
+            marginBottom: 12,
           }}>
             <div>
               <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4 }}>{s('reset_all_data')}</div>
@@ -611,6 +630,34 @@ export default function Settings() {
             >
               <ArrowCounterClockwise size={14} weight="bold" />
               {isResetting ? 'Resetting...' : 'Reset Data'}
+            </button>
+          </div>
+
+          {/* Delete Account */}
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '16px 20px', border: '1px solid rgba(220,53,69,0.3)', borderRadius: 4,
+            background: 'rgba(220,53,69,0.02)',
+          }}>
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 600, color: '#dc3545', marginBottom: 4 }}>Delete Account</div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', maxWidth: 400 }}>
+                Permanently delete your account and all associated data. This action cannot be undone.
+              </div>
+            </div>
+            <button
+              onClick={() => setShowDeleteWarning(true)}
+              disabled={isDeleting}
+              style={{
+                background: '#dc3545', color: '#fff', border: 'none',
+                padding: '8px 20px', borderRadius: 2, fontSize: 13, fontWeight: 600,
+                cursor: isDeleting ? 'not-allowed' : 'pointer', fontFamily: 'var(--font-body)',
+                opacity: isDeleting ? 0.5 : 1, whiteSpace: 'nowrap',
+                display: 'flex', alignItems: 'center', gap: 6,
+              }}
+            >
+              <Trash size={14} weight="bold" />
+              {isDeleting ? 'Deleting...' : 'Delete Account'}
             </button>
           </div>
         </div>
@@ -725,6 +772,104 @@ export default function Settings() {
           display: 'flex', alignItems: 'center', gap: 8,
         }}>
           <Check size={18} weight="bold" /> Data reset complete — starting fresh!
+        </div>
+      )}
+
+      {/* Delete Account Warning Modal — Step 1 */}
+      {showDeleteWarning && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex',
+          alignItems: 'center', justifyContent: 'center', zIndex: 9999,
+        }} onClick={() => setShowDeleteWarning(false)}>
+          <div style={{
+            background: '#fff', borderRadius: 8, padding: 32, maxWidth: 480, width: '90%',
+            boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+          }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+              <div style={{
+                width: 40, height: 40, borderRadius: '50%', background: 'rgba(220,53,69,0.1)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                <Trash size={22} weight="fill" style={{ color: '#dc3545' }} />
+              </div>
+              <h3 style={{ fontSize: 18, fontWeight: 600, color: 'var(--text-primary)' }}>Delete Account?</h3>
+            </div>
+            <div style={{ fontSize: 14, color: 'var(--text-secondary)', lineHeight: 1.7, marginBottom: 24 }}>
+              <p style={{ marginBottom: 12 }}>This will permanently delete your account and all data, including:</p>
+              <ul style={{ margin: '0 0 12px 20px', padding: 0 }}>
+                <li>Your user profile and login</li>
+                <li>All transactions, accounts, and balances</li>
+                <li>All invoices, purchase bills, customers, and vendors</li>
+                <li>All settings and preferences</li>
+                <li>All connected email accounts and synced data</li>
+              </ul>
+              <p style={{ marginBottom: 0, fontWeight: 600, color: '#dc3545' }}>
+                This action is irreversible. You will not be able to recover any data.
+              </p>
+            </div>
+            <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
+              <button onClick={() => setShowDeleteWarning(false)} style={{
+                background: 'none', border: '1px solid var(--border-strong)', padding: '10px 20px',
+                borderRadius: 4, fontSize: 13, fontWeight: 500, cursor: 'pointer', fontFamily: 'var(--font-body)',
+              }}>Cancel</button>
+              <button onClick={() => { setShowDeleteWarning(false); setShowDeleteConfirm(true); }} style={{
+                background: '#dc3545', color: '#fff', border: 'none', padding: '10px 20px',
+                borderRadius: 4, fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font-body)',
+              }}>I Understand, Continue</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Account Confirm Modal — Step 2: Type DELETE */}
+      {showDeleteConfirm && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex',
+          alignItems: 'center', justifyContent: 'center', zIndex: 9999,
+        }} onClick={() => { setShowDeleteConfirm(false); setDeleteConfirmText(''); }}>
+          <div style={{
+            background: '#fff', borderRadius: 8, padding: 32, maxWidth: 420, width: '90%',
+            boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+          }} onClick={e => e.stopPropagation()}>
+            <h3 style={{ fontSize: 18, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 12 }}>
+              Type DELETE to Confirm
+            </h3>
+            <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 20, lineHeight: 1.6 }}>
+              This will permanently delete your account and all data. Type <strong style={{ color: '#dc3545' }}>DELETE</strong> in the box below to confirm.
+            </p>
+            <input
+              value={deleteConfirmText}
+              onChange={e => setDeleteConfirmText(e.target.value.toUpperCase())}
+              placeholder="Type DELETE here"
+              autoFocus
+              style={{
+                width: '100%', padding: '12px 16px', border: '2px solid var(--border-strong)',
+                borderRadius: 4, fontSize: 15, fontFamily: 'var(--font-mono, monospace)',
+                textAlign: 'center', letterSpacing: '0.15em', fontWeight: 700,
+                boxSizing: 'border-box', marginBottom: 20,
+                borderColor: deleteConfirmText === 'DELETE' ? '#dc3545' : 'var(--border-strong)',
+              }}
+            />
+            <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
+              <button onClick={() => { setShowDeleteConfirm(false); setDeleteConfirmText(''); }} style={{
+                background: 'none', border: '1px solid var(--border-strong)', padding: '10px 20px',
+                borderRadius: 4, fontSize: 13, fontWeight: 500, cursor: 'pointer', fontFamily: 'var(--font-body)',
+              }}>Cancel</button>
+              <button
+                onClick={handleDeleteAccount}
+                disabled={deleteConfirmText !== 'DELETE' || isDeleting}
+                style={{
+                  background: deleteConfirmText === 'DELETE' ? '#dc3545' : '#ccc',
+                  color: '#fff', border: 'none', padding: '10px 20px',
+                  borderRadius: 4, fontSize: 13, fontWeight: 600,
+                  cursor: deleteConfirmText === 'DELETE' && !isDeleting ? 'pointer' : 'not-allowed',
+                  fontFamily: 'var(--font-body)', opacity: isDeleting ? 0.6 : 1,
+                }}
+              >
+                {isDeleting ? 'Deleting...' : 'Delete My Account'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
