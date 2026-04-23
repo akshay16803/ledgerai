@@ -24,6 +24,7 @@ import Records from './pages/Records.jsx';
 import TaxSummary from './pages/TaxSummary.jsx';
 import Settings from './pages/Settings.jsx';
 import Support from './pages/Support.jsx';
+import HelpCenter from './pages/HelpCenter.jsx';
 import Invoices from './pages/Invoices.jsx';
 import Customers from './pages/Customers.jsx';
 import Purchases from './pages/Purchases.jsx';
@@ -106,6 +107,7 @@ export default function App() {
       <Route path="/purchases" element={<ProtectedRoute><AppLayout><PageBoundary><Purchases /></PageBoundary></AppLayout></ProtectedRoute>} />
       <Route path="/vendors" element={<ProtectedRoute><AppLayout><PageBoundary><Vendors /></PageBoundary></AppLayout></ProtectedRoute>} />
       <Route path="/settings" element={<ProtectedRoute><AppLayout><PageBoundary><Settings /></PageBoundary></AppLayout></ProtectedRoute>} />
+      <Route path="/help" element={<ProtectedRoute><AppLayout><PageBoundary><HelpCenter /></PageBoundary></AppLayout></ProtectedRoute>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

@@ -5,7 +5,7 @@ import { useAuth } from '../contexts/AuthContext.jsx';
 import { api } from '../lib/api';
 import {
   House, ArrowsLeftRight, Bank, Tag,
-  Lightbulb, SignOut, Gear, EnvelopeSimple, TrendUp, Scales, ChartBar, Archive, Receipt, List, X, Headset, Users, Package, Storefront, Repeat
+  Lightbulb, SignOut, Gear, EnvelopeSimple, TrendUp, Scales, ChartBar, Archive, Receipt, List, X, Headset, Users, Package, Storefront, Repeat, Question
 } from '@phosphor-icons/react';
 
 function getBaseNavItems() {
@@ -22,6 +22,7 @@ function getBaseNavItems() {
     { to: '/records', icon: Archive, label: s('records') },
     { to: '/past-insights', icon: Receipt, label: s('past_insights') },
     { to: '/feature-requests', icon: Lightbulb, label: s('feature_requests') },
+    { to: '/help', icon: Question, label: 'Help Center' },
     { to: '/support', icon: Headset, label: s('support') },
     { to: '/settings', icon: Gear, label: s('settings') },
   ];
