@@ -208,6 +208,7 @@ class TransactionUpdate(BaseModel):
     recurring_frequency: Optional[str] = None
     recurrence_date: Optional[int] = None
     receipt_id: Optional[str] = None
+    status: Optional[str] = None  # B10: Allow status changes including revert to pending_review
 
 class FeatureRequestCreate(BaseModel):
     title: str
@@ -892,8 +893,15 @@ async def get_account(account_id: str, user: dict = Depends(get_current_user)):
     return {"account": account}
 
 
-@app.post("/api/accounts")
+@app.post("/api/accounts", status_code=201)
 async def create_account(data: AccountCreate, user: dict = Depends(get_current_user)):
+    # B6: Validate account_type
+    valid_account_types = {"asset", "liability", "equity", "investment"}
+    if data.account_type not in valid_account_types:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid account_type '{data.account_type}'. Must be one of: {', '.join(sorted(valid_account_types))}"
+        )
     # Prevent duplicate accounts with same name + account_number for this user
     dup_query = {"user_id": user["user_id"], "name": data.name}
     if data.account_number:
@@ -1428,7 +1436,7 @@ async def list_categories(user: dict = Depends(get_current_user), category_type:
     return cats
 
 
-@app.post("/api/categories")
+@app.post("/api/categories", status_code=201)
 async def create_category(data: CategoryCreate, user: dict = Depends(get_current_user)):
     cat = {
         "category_id": f"cat_{uuid.uuid4().hex[:12]}",
@@ -1632,6 +1640,10 @@ async def list_transactions(
     limit: int = 100,
     skip: int = 0,
 ):
+    # B5: Validate limit and skip are non-negative
+    if limit < 0 or skip < 0:
+        raise HTTPException(status_code=400, detail="limit and skip must be non-negative")
+
     query = {"user_id": user["user_id"]}
     if transaction_type:
         query["transaction_type"] = transaction_type
@@ -1643,6 +1655,9 @@ async def list_transactions(
         query["category_id"] = category_id
     if subcategory_id:
         query["subcategory_id"] = subcategory_id
+    # B9: If date_from > date_to, swap them
+    if from_date and to_date and from_date > to_date:
+        from_date, to_date = to_date, from_date
     if from_date:
         query.setdefault("date", {})["$gte"] = from_date
     if to_date:
@@ -1660,6 +1675,48 @@ async def list_transactions(
     return {"transactions": txns, "total": total}
 
 
+@app.get("/api/transactions/pending")
+async def list_pending_transactions(
+    user: dict = Depends(get_current_user),
+    limit: int = 50,
+    skip: int = 0,
+):
+    """List all pending review transactions."""
+    query = {"user_id": user["user_id"], "status": "pending_review"}
+    txns = await db.transactions.find(query, {"_id": 0}).sort("date", -1).skip(skip).limit(limit).to_list(limit)
+    total = await db.transactions.count_documents(query)
+    txns = await enrich_transactions_with_names(user["user_id"], txns)
+    return {"items": txns, "total": total}
+
+
+@app.get("/api/transactions/search")
+async def search_transactions(
+    q: str = "",
+    user: dict = Depends(get_current_user),
+    limit: int = 50,
+    skip: int = 0,
+):
+    """Search transactions by description, amount, or date."""
+    user_id = user["user_id"]
+    query: dict = {"user_id": user_id}
+
+    if q:
+        # Try parsing as a number for amount search
+        try:
+            amount_val = float(q)
+            query["$or"] = [
+                {"description": {"$regex": q, "$options": "i"}},
+                {"amount": amount_val},
+            ]
+        except ValueError:
+            query["description"] = {"$regex": q, "$options": "i"}
+
+    txns = await db.transactions.find(query, {"_id": 0}).sort("date", -1).skip(skip).limit(limit).to_list(limit)
+    total = await db.transactions.count_documents(query)
+    txns = await enrich_transactions_with_names(user["user_id"], txns)
+    return {"items": txns, "total": total}
+
+
 @app.get("/api/transactions/{transaction_id}")
 async def get_transaction(transaction_id: str, user: dict = Depends(get_current_user)):
     txn = await db.transactions.find_one(
@@ -1671,7 +1728,7 @@ async def get_transaction(transaction_id: str, user: dict = Depends(get_current_
     return enriched[0]
 
 
-@app.post("/api/transactions")
+@app.post("/api/transactions", status_code=201)
 async def create_transaction(data: TransactionCreate, user: dict = Depends(get_current_user)):
     if data.transaction_type in ["income", "expense"] and not data.category_id:
         raise HTTPException(status_code=400, detail="Category is required for income/expense")
@@ -1718,6 +1775,18 @@ async def create_transaction(data: TransactionCreate, user: dict = Depends(get_c
             {"receipt_id": data.receipt_id, "user_id": user["user_id"]},
             {"$set": {"transaction_id": txn["transaction_id"], "linked_at": datetime.now(timezone.utc)}}
         )
+
+    # B8: Warn if transaction date is more than 30 days in the future
+    warning = None
+    try:
+        from datetime import timedelta
+        txn_date = datetime.strptime(data.date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        if txn_date > datetime.now(timezone.utc) + timedelta(days=30):
+            warning = f"Transaction date {data.date} is more than 30 days in the future"
+    except (ValueError, TypeError):
+        pass
+    if warning:
+        txn["warning"] = warning
 
     return txn
 
@@ -2167,48 +2236,6 @@ async def bulk_update_transactions(request: Request, user: dict = Depends(get_cu
     return {"updated": result.modified_count, "total": len(transaction_ids)}
 
 
-@app.get("/api/transactions/pending")
-async def list_pending_transactions(
-    user: dict = Depends(get_current_user),
-    limit: int = 50,
-    skip: int = 0,
-):
-    """List all pending review transactions."""
-    query = {"user_id": user["user_id"], "status": "pending_review"}
-    txns = await db.transactions.find(query, {"_id": 0}).sort("date", -1).skip(skip).limit(limit).to_list(limit)
-    total = await db.transactions.count_documents(query)
-    txns = await enrich_transactions_with_names(user["user_id"], txns)
-    return {"items": txns, "total": total}
-
-
-@app.get("/api/transactions/search")
-async def search_transactions(
-    q: str = "",
-    user: dict = Depends(get_current_user),
-    limit: int = 50,
-    skip: int = 0,
-):
-    """Search transactions by description, amount, or date."""
-    user_id = user["user_id"]
-    query: dict = {"user_id": user_id}
-
-    if q:
-        # Try parsing as a number for amount search
-        try:
-            amount_val = float(q)
-            query["$or"] = [
-                {"description": {"$regex": q, "$options": "i"}},
-                {"amount": amount_val},
-            ]
-        except ValueError:
-            query["description"] = {"$regex": q, "$options": "i"}
-
-    txns = await db.transactions.find(query, {"_id": 0}).sort("date", -1).skip(skip).limit(limit).to_list(limit)
-    total = await db.transactions.count_documents(query)
-    txns = await enrich_transactions_with_names(user["user_id"], txns)
-    return {"items": txns, "total": total}
-
-
 # ─── Recurring & Cash Flow Routes ────────────────────────────────────
 
 @app.get("/api/recurring/list")
@@ -2454,7 +2481,7 @@ async def list_mandates(user: dict = Depends(get_current_user)):
     return {"mandates": items}
 
 
-@app.post("/api/mandates")
+@app.post("/api/mandates", status_code=201)
 async def create_mandate(payload: dict = Body(...), user: dict = Depends(get_current_user)):
     """Manually create a mandate (for cases the AI didn't catch, or
     mandates the user knows about but didn't get an email for)."""
@@ -2488,6 +2515,55 @@ async def create_mandate(payload: dict = Body(...), user: dict = Depends(get_cur
     await db.mandates.insert_one(doc)
     doc.pop("_id", None)
     return doc
+
+
+@app.get("/api/mandates/{mandate_id}")
+async def get_mandate(mandate_id: str, user: dict = Depends(get_current_user)):
+    """Get a single mandate by ID."""
+    mandate = await db.mandates.find_one(
+        {"mandate_id": mandate_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    if not mandate:
+        raise HTTPException(status_code=404, detail="Mandate not found")
+    return mandate
+
+
+@app.put("/api/mandates/{mandate_id}")
+async def put_mandate(mandate_id: str, payload: dict = Body(...), user: dict = Depends(get_current_user)):
+    """Update a mandate (PUT). Same logic as PATCH."""
+    mandate = await db.mandates.find_one(
+        {"mandate_id": mandate_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    if not mandate:
+        raise HTTPException(status_code=404, detail="Mandate not found")
+    updatable = {
+        "merchant", "amount", "currency", "frequency", "mandate_type",
+        "start_date", "end_date", "debit_day", "account_id", "status",
+    }
+    set_fields: dict = {}
+    for k, v in payload.items():
+        if k not in updatable:
+            continue
+        if k == "amount" and v is not None:
+            try:
+                set_fields[k] = float(v)
+            except Exception:
+                raise HTTPException(status_code=400, detail="amount must be a number")
+        elif k in ("frequency", "mandate_type", "status", "currency") and v is not None:
+            set_fields[k] = str(v).lower()
+        else:
+            set_fields[k] = v
+    if not set_fields:
+        return mandate
+    set_fields["updated_at"] = datetime.now(timezone.utc)
+    await db.mandates.update_one(
+        {"mandate_id": mandate_id, "user_id": user["user_id"]},
+        {"$set": set_fields},
+    )
+    updated = await db.mandates.find_one(
+        {"mandate_id": mandate_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    return updated
 
 
 @app.patch("/api/mandates/{mandate_id}")
@@ -6428,59 +6504,48 @@ async def _create_transaction_from_ai_result(
     
     # If no match found, create new account with detected bank name
     if not account_id and detected_bank_name:
-        # Auto-create the bank account
-        bank_sub_type = "savings"  # default
-        if detected_bank_type == "current":
-            bank_sub_type = "current"
-        elif detected_bank_type == "credit_card":
-            bank_sub_type = "credit_card"
-        elif detected_bank_type == "wallet":
-            bank_sub_type = "wallet"
-        
-        new_account = {
-            "account_id": f"acc_{uuid.uuid4().hex[:12]}",
+        # Check if an account with this exact name already exists for this user
+        existing_account = await db.accounts.find_one({
             "user_id": user_id,
-            "name": detected_bank_name[:100],  # Limit name length
-            "account_type": "asset" if bank_sub_type in ["savings", "current", "wallet"] else "liability",
-            "sub_type": bank_sub_type,
-            "opening_balance": 0,  # Will be set during approval
-            "balance_as_of_date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
-            "needs_opening_balance": True,  # Flag to prompt user during approval
-            "ai_created": True,
-            "created_at": datetime.now(timezone.utc),
-        }
-        await db.accounts.insert_one(new_account)
-        del new_account["_id"]
-        account_id = new_account["account_id"]
-        logger.info(f"Auto-created bank account: {detected_bank_name} -> {account_id}")
-    
-    # If still no account_id, use "Unknown Bank" account
-    if not account_id:
-        unknown_account = await db.accounts.find_one({
-            "user_id": user_id,
-            "name": "Unknown Bank"
+            "name": detected_bank_name[:100]
         }, {"_id": 0, "account_id": 1})
 
-        if unknown_account:
-            account_id = unknown_account["account_id"]
+        if existing_account:
+            account_id = existing_account["account_id"]
+            logger.info(f"Found existing account with same name '{detected_bank_name}' -> {account_id}, skipping duplicate creation")
         else:
-            # Create "Unknown Bank" account
-            unknown_acc = {
+            # Auto-create the bank account
+            bank_sub_type = "savings"  # default
+            if detected_bank_type == "current":
+                bank_sub_type = "current"
+            elif detected_bank_type == "credit_card":
+                bank_sub_type = "credit_card"
+            elif detected_bank_type == "wallet":
+                bank_sub_type = "wallet"
+
+            new_account = {
                 "account_id": f"acc_{uuid.uuid4().hex[:12]}",
                 "user_id": user_id,
-                "name": "Unknown Bank",
-                "account_type": "asset",
-                "sub_type": "bank",
-                "opening_balance": 0,
+                "name": detected_bank_name[:100],  # Limit name length
+                "account_type": "asset" if bank_sub_type in ["savings", "current", "wallet"] else "liability",
+                "sub_type": bank_sub_type,
+                "opening_balance": 0,  # Will be set during approval
+                "currency": "INR",  # Default currency, can be changed by user
+                "balance": 0,
+                "description": "Auto-detected from email sync. Please review and update.",
                 "balance_as_of_date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
-                "needs_opening_balance": True,
+                "needs_opening_balance": True,  # Flag to prompt user during approval
                 "ai_created": True,
                 "created_at": datetime.now(timezone.utc),
             }
-            await db.accounts.insert_one(unknown_acc)
-            del unknown_acc["_id"]
-            account_id = unknown_acc["account_id"]
-            logger.info(f"Created 'Unknown Bank' fallback account: {account_id}")
+            await db.accounts.insert_one(new_account)
+            del new_account["_id"]
+            account_id = new_account["account_id"]
+            logger.info(f"Auto-created bank account: {detected_bank_name} -> {account_id}")
+    
+    # If still no account_id, leave it as None — user will assign during pending review
+    if not account_id:
+        logger.info("No account matched and no bank detected — leaving account_id as None for user review")
 
     # --- Category pre-fill from historical approved transactions ---
     prefilled_category = await _prefill_category_from_history(
@@ -7634,12 +7699,20 @@ CRITICAL RULES — READ CAREFULLY:
    - It is from a well-known subscription service (Netflix, Spotify, Google Play, Apple, Amazon Prime, gym, insurance, SaaS platform, telecom carrier)
    - The email mentions a billing period or next renewal date
    Do NOT mark as recurring just because it is a UPI payment, bank debit, or generic expense. One-time purchases, P2P transfers, grocery deliveries, and ad-hoc payments are NOT recurring even if the user makes them frequently.
+   IMPORTANT: Default is_recurring to FALSE. When in doubt, set is_recurring=false. The user can mark it as recurring during review. It is FAR better to miss a recurring flag than to wrongly mark a one-time payment as recurring.
+   Specific NON-RECURRING examples: Person-to-person UPI transfers (to Akshay, Rohit, etc.), airline tickets, one-time purchases (electronics, household items), EMI payments (unless explicitly stated as auto-debit/recurring), large lump-sum payments (property, car), food delivery orders, taxi rides.
 10. CATEGORY ASSIGNMENT — BEST EFFORT:
    - Use your best judgment to assign the most appropriate category based on the email content, merchant name, transaction description, and context.
    - NEVER use an income category (Salary, Business Income, Investment Income, Rental Income, Other Income) for an expense transaction. Income categories are ONLY for transaction_type "income".
    - NEVER use an expense category for an income transaction.
    - For credit card bill payments (transaction_type "transfer"), set category_id to null.
    - If you truly cannot determine any reasonable category (e.g., a completely generic bank debit with zero context), set category_id to null.
+   - CRITICAL: Do NOT default to "Food & Dining > Restaurants" for unknown transactions. "Restaurants" is ONLY for actual food delivery (Swiggy, Zomato) or restaurant payments. If you don't know what a transaction is, use "Other Expenses" for expenses or "Other Income" for income.
+   - For API credits, software subscriptions, SaaS payments (OpenAI, Anthropic, Supabase, AWS, etc.) → use "Subscriptions" or "Other Expenses", NEVER "Restaurants" or "Sales"
+   - For payments to companies/businesses → use "Other Expenses" unless you know the specific category
+   - NEVER categorize an EXPENSE as income category. If transaction_type="expense", the category MUST be an expense category.
+   - For telecom payments (JIO, Airtel, Vi, BSNL) → use "Bills & Utilities > Phone"
+   - For EMI/loan payments → use "Housing > Mortgage" or "Other Expenses", NEVER "Electricity"
    - Examples of good category assignments:
      * "Your Swiggy order" → Food & Dining > Restaurants
      * "Electricity bill payment" → Bills & Utilities > Electricity
@@ -7698,7 +7771,7 @@ async def analyze_email_with_ai(email_doc: dict, account_names: list, category_i
         response = await async_openai_client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "You are a financial transaction analyzer. Extract transaction details from emails. Respond only with valid JSON."},
+                {"role": "system", "content": "You are a careful financial transaction analyzer. Read the ENTIRE email first to understand its context before extracting details. Default is_recurring to false. Only use income categories for income transactions. Never default to 'Restaurants' for unknown transactions. Respond only with valid JSON."},
                 {"role": "user", "content": prompt},
             ],
             temperature=0.1,
@@ -8053,58 +8126,47 @@ async def _process_sms_transaction(user_id: str, sms_doc: dict, result: dict, ac
     
     # If no match found, create new account with detected bank name
     if not account_id and detected_bank_name:
-        bank_sub_type = "savings"
-        if detected_bank_type == "current":
-            bank_sub_type = "current"
-        elif detected_bank_type == "credit_card":
-            bank_sub_type = "credit_card"
-        elif detected_bank_type == "wallet":
-            bank_sub_type = "wallet"
-        
-        new_account = {
-            "account_id": f"acc_{uuid.uuid4().hex[:12]}",
+        # Check if an account with this exact name already exists for this user
+        existing_account = await db.accounts.find_one({
             "user_id": user_id,
-            "name": detected_bank_name[:100],
-            "account_type": "asset" if bank_sub_type in ["savings", "current", "wallet"] else "liability",
-            "sub_type": bank_sub_type,
-            "opening_balance": 0,
-            "balance_as_of_date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
-            "needs_opening_balance": True,
-            "ai_created": True,
-            "created_at": datetime.now(timezone.utc),
-        }
-        await db.accounts.insert_one(new_account)
-        del new_account["_id"]
-        account_id = new_account["account_id"]
-        logger.info(f"Auto-created bank account from SMS: {detected_bank_name} -> {account_id}")
-    
-    # If still no account_id, use "Unknown Bank" account
-    if not account_id:
-        unknown_account = await db.accounts.find_one({
-            "user_id": user_id,
-            "name": "Unknown Bank"
+            "name": detected_bank_name[:100]
         }, {"_id": 0, "account_id": 1})
-        
-        if unknown_account:
-            account_id = unknown_account["account_id"]
+
+        if existing_account:
+            account_id = existing_account["account_id"]
+            logger.info(f"Found existing account with same name '{detected_bank_name}' -> {account_id}, skipping duplicate creation (SMS)")
         else:
-            # Create "Unknown Bank" account
-            unknown_acc = {
+            bank_sub_type = "savings"
+            if detected_bank_type == "current":
+                bank_sub_type = "current"
+            elif detected_bank_type == "credit_card":
+                bank_sub_type = "credit_card"
+            elif detected_bank_type == "wallet":
+                bank_sub_type = "wallet"
+
+            new_account = {
                 "account_id": f"acc_{uuid.uuid4().hex[:12]}",
                 "user_id": user_id,
-                "name": "Unknown Bank",
-                "account_type": "asset",
-                "sub_type": "bank",
+                "name": detected_bank_name[:100],
+                "account_type": "asset" if bank_sub_type in ["savings", "current", "wallet"] else "liability",
+                "sub_type": bank_sub_type,
                 "opening_balance": 0,
+                "currency": "INR",  # Default currency, can be changed by user
+                "balance": 0,
+                "description": "Auto-detected from email sync. Please review and update.",
                 "balance_as_of_date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
                 "needs_opening_balance": True,
                 "ai_created": True,
                 "created_at": datetime.now(timezone.utc),
             }
-            await db.accounts.insert_one(unknown_acc)
-            del unknown_acc["_id"]
-            account_id = unknown_acc["account_id"]
-            logger.info(f"Created 'Unknown Bank' fallback account for SMS: {account_id}")
+            await db.accounts.insert_one(new_account)
+            del new_account["_id"]
+            account_id = new_account["account_id"]
+            logger.info(f"Auto-created bank account from SMS: {detected_bank_name} -> {account_id}")
+    
+    # If still no account_id, leave it as None — user will assign during pending review
+    if not account_id:
+        logger.info("No account matched and no bank detected from SMS — leaving account_id as None for user review")
 
     # --- Category pre-fill from historical approved transactions ---
     prefilled_category = await _prefill_category_from_history(
@@ -9873,7 +9935,7 @@ async def ai_chat(body: dict = Body(...), user: dict = Depends(get_current_user)
     # Build compact account list
     acc_lines = []
     for a in accounts:
-        line = f"- {a['name']} (ID: {a['account_id']}, type: {a['account_type']}/{a.get('sub_type','general')}, balance: {a['balance']}"
+        line = f"- {a['name']} (ID: {a['account_id']}, type: {a.get('account_type','asset')}/{a.get('sub_type','general')}, balance: {a.get('balance', 0)}"
         if a.get("loan_interest_rate"):
             line += f", rate: {a['loan_interest_rate']}%"
         if a.get("loan_sanctioned_amount"):
@@ -11822,7 +11884,7 @@ def amount_to_words_inr(amount: float) -> str:
 
 # ─── Customers CRUD ──────────────────────────────────────────────────
 
-@app.post("/api/customers")
+@app.post("/api/customers", status_code=201)
 async def create_customer(request: Request, user: dict = Depends(get_current_user)):
     body = await request.json()
     now = datetime.now(timezone.utc)
@@ -12216,7 +12278,7 @@ async def get_sales_by_customer(user: dict = Depends(get_current_user)):
     return {"items": results, "total": len(results)}
 
 
-@app.post("/api/invoices")
+@app.post("/api/invoices", status_code=201)
 async def create_invoice(request: Request, user: dict = Depends(get_current_user)):
     body = await request.json()
     now = datetime.now(timezone.utc)
@@ -12633,7 +12695,7 @@ async def duplicate_invoice(invoice_id: str, user: dict = Depends(get_current_us
 
 # ─── Vendors CRUD ──────────────────────────────────────────────────
 
-@app.post("/api/vendors")
+@app.post("/api/vendors", status_code=201)
 async def create_vendor(request: Request, user: dict = Depends(get_current_user)):
     body = await request.json()
     now = datetime.now(timezone.utc)
@@ -12930,7 +12992,7 @@ async def get_purchases_by_vendor(user: dict = Depends(get_current_user)):
     return {"items": results, "total": len(results)}
 
 
-@app.post("/api/bills")
+@app.post("/api/bills", status_code=201)
 async def create_bill(request: Request, user: dict = Depends(get_current_user)):
     body = await request.json()
     now = datetime.now(timezone.utc)
