@@ -4,6 +4,8 @@ struct CurrencySettingsView: View {
 
     // MARK: - State
 
+
+    @Environment(LocalizationManager.self) var lang
     @Bindable var viewModel: SettingsViewModel
     @Environment(\.dismiss) private var dismiss
     @State private var isLoadingOptions = true
@@ -22,7 +24,7 @@ struct CurrencySettingsView: View {
                 formContent
             }
         }
-        .navigationTitle("Currency & Locale")
+        .navigationTitle(lang.s("currency_locale"))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -31,9 +33,9 @@ struct CurrencySettingsView: View {
         }
         .task { await loadOptions() }
         .alert("Saved", isPresented: $viewModel.showSaveSuccess) {
-            Button("OK") { dismiss() }
+            Button(lang.s("ok")) { dismiss() }
         } message: {
-            Text("Currency and locale settings have been updated.")
+            Text(lang.s("currency_updated"))
         }
     }
 
@@ -52,7 +54,7 @@ struct CurrencySettingsView: View {
     private var currencySection: some View {
         Section {
             Picker(selection: currencyBinding, label: pickerLabel) {
-                Text("Select Currency").tag("")
+                Text(lang.s("select_currency")).tag("")
                 ForEach(viewModel.currencies) { currency in
                     HStack {
                         Text(currency.code)
@@ -75,7 +77,7 @@ struct CurrencySettingsView: View {
                 .foregroundStyle(Color.spentyPrimary)
                 .textCase(nil)
         } footer: {
-            Text("This currency will be used as the default for new invoices and transactions.")
+            Text(lang.s("currency_info"))
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }
@@ -86,7 +88,7 @@ struct CurrencySettingsView: View {
             Image(systemName: "banknote")
                 .foregroundStyle(Color.spentyPrimary)
                 .frame(width: 24)
-            Text("Currency")
+            Text(lang.s("currency"))
         }
     }
 
@@ -102,7 +104,7 @@ struct CurrencySettingsView: View {
     private var dateFormatSection: some View {
         Section {
             Picker(selection: dateFormatBinding, label: datePickerLabel) {
-                Text("Select Format").tag("")
+                Text(lang.s("select_format")).tag("")
                 ForEach(viewModel.dateFormats) { fmt in
                     HStack {
                         Text(fmt.format)
@@ -125,7 +127,7 @@ struct CurrencySettingsView: View {
                 .foregroundStyle(Color.spentyPrimary)
                 .textCase(nil)
         } footer: {
-            Text("Dates on invoices and reports will use this format.")
+            Text(lang.s("date_format_info"))
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }
@@ -136,7 +138,7 @@ struct CurrencySettingsView: View {
             Image(systemName: "calendar.badge.clock")
                 .foregroundStyle(Color.spentyPrimary)
                 .frame(width: 24)
-            Text("Date Format")
+            Text(lang.s("date_format"))
         }
     }
 
@@ -158,7 +160,7 @@ struct CurrencySettingsView: View {
                     .controlSize(.small)
                     .tint(Color.spentyPrimary)
             } else {
-                Text("Save")
+                Text(lang.s("save"))
                     .font(.body.weight(.semibold))
                     .foregroundStyle(Color.spentyPrimary)
             }

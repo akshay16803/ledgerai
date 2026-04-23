@@ -3,6 +3,8 @@ import WebKit
 
 struct RecordPreviewView: View {
 
+
+    @Environment(LocalizationManager.self) var lang
     let recordId: String
     @Bindable var viewModel: RecordsViewModel
 
@@ -34,7 +36,7 @@ struct RecordPreviewView: View {
                         .font(SpentyFonts.subheadline)
                         .foregroundColor(.spentyTextSecondary)
                         .multilineTextAlignment(.center)
-                    Button("Retry") {
+                    Button(lang.s("retry")) {
                         Task { await loadPreview() }
                     }
                     .secondaryButtonStyle()
@@ -75,7 +77,7 @@ struct RecordPreviewView: View {
                 }
             }
         } message: {
-            Text("This email record will be permanently deleted.")
+            Text(lang.s("delete_email_record"))
         }
         .task { await loadPreview() }
     }
@@ -118,7 +120,7 @@ struct RecordPreviewView: View {
                     Image(systemName: "link.circle.fill")
                         .font(.system(size: 16))
                         .foregroundColor(.spentySuccess)
-                    Text("Linked to transaction")
+                    Text(lang.s("linked_to_txn"))
                         .font(SpentyFonts.caption1)
                         .foregroundColor(.spentySuccess)
                     Text(transactionId.prefix(8) + "...")
@@ -146,7 +148,7 @@ struct RecordPreviewView: View {
                     .foregroundColor(.spentyTextPrimary)
                     .textSelection(.enabled)
             } else {
-                Text("No content available")
+                Text(lang.s("no_content"))
                     .font(SpentyFonts.subheadline)
                     .foregroundColor(.spentyTextSecondary)
                     .italic()
@@ -252,7 +254,7 @@ struct RecordPreviewView: View {
                 Button(role: .destructive) {
                     showDeleteConfirm = true
                 } label: {
-                    Label("Delete", systemImage: "trash")
+                    Label(lang.s("delete"), systemImage: "trash")
                 }
             } label: {
                 Image(systemName: "ellipsis.circle")

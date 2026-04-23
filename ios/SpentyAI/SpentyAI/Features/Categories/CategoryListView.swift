@@ -4,6 +4,8 @@ struct CategoryListView: View {
 
     // MARK: - State
 
+
+    @Environment(LocalizationManager.self) var lang
     @State private var viewModel = CategoriesViewModel()
 
     // MARK: - Body
@@ -31,7 +33,7 @@ struct CategoryListView: View {
                 }
             }
         }
-        .navigationTitle("Categories")
+        .navigationTitle(lang.s("categories"))
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {
@@ -47,7 +49,7 @@ struct CategoryListView: View {
             CategoryFormView(viewModel: viewModel)
         }
         .alert("Error", isPresented: $viewModel.showError) {
-            Button("OK") { viewModel.dismissError() }
+            Button(lang.s("ok")) { viewModel.dismissError() }
         } message: {
             Text(viewModel.errorMessage)
         }
@@ -59,9 +61,9 @@ struct CategoryListView: View {
     // MARK: - Segmented Control
 
     private var segmentedControl: some View {
-        Picker("Category type", selection: $viewModel.activeTab) {
-            Text("Expense").tag(CategoryType.expense)
-            Text("Income").tag(CategoryType.income)
+        Picker(lang.s("type"), selection: $viewModel.activeTab) {
+            Text(lang.s("expense_tab")).tag(CategoryType.expense)
+            Text(lang.s("income_tab")).tag(CategoryType.income)
         }
         .pickerStyle(.segmented)
     }
@@ -107,6 +109,8 @@ struct CategoryListView: View {
 // MARK: - Tree Row
 
 private struct CategoryTreeRow: View {
+
+    @Environment(LocalizationManager.self) var lang
 
     let category: Category
     let onAddChild: () -> Void
@@ -210,7 +214,7 @@ private struct CategoryTreeRow: View {
                     .foregroundStyle(Color.spentyPrimary.opacity(0.7))
                     .frame(width: 24)
 
-                Text("Add Subcategory")
+                Text(lang.s("add_subcategory"))
                     .font(SpentyFonts.subheadline)
                     .foregroundStyle(Color.spentyPrimary)
             }
@@ -224,7 +228,7 @@ private struct CategoryTreeRow: View {
         Button(role: .destructive) {
             onDelete(cat)
         } label: {
-            Label("Delete", systemImage: "trash")
+            Label(lang.s("delete"), systemImage: "trash")
         }
     }
 
@@ -232,7 +236,7 @@ private struct CategoryTreeRow: View {
         Button {
             onEdit(cat)
         } label: {
-            Label("Edit", systemImage: "pencil")
+            Label(lang.s("edit"), systemImage: "pencil")
         }
         .tint(Color.spentyWarning)
     }

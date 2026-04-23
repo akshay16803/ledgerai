@@ -3,6 +3,8 @@ import StoreKit
 
 struct SubscriptionPaywall: View {
 
+
+    @Environment(LocalizationManager.self) var lang
     @State private var viewModel = BillingViewModel()
     @State private var selectedProductId: String = "com.spentyai.yearly"
     @State private var showPromoSection = false
@@ -48,7 +50,7 @@ struct SubscriptionPaywall: View {
             }
         }
         .alert("Error", isPresented: $viewModel.showError) {
-            Button("OK") { viewModel.showError = false }
+            Button(lang.s("ok")) { viewModel.showError = false }
         } message: {
             Text(viewModel.errorMessage)
         }
@@ -60,7 +62,7 @@ struct SubscriptionPaywall: View {
                         ProgressView()
                             .scaleEffect(1.3)
                             .tint(.white)
-                        Text("Processing...")
+                        Text(lang.s("processing_paywall"))
                             .font(.subheadline.weight(.medium))
                             .foregroundStyle(.white)
                     }
@@ -87,11 +89,11 @@ struct SubscriptionPaywall: View {
                     )
                 )
 
-            Text("Unlock SpentyAI Premium")
+            Text(lang.s("unlock_premium"))
                 .font(.title.weight(.bold))
                 .multilineTextAlignment(.center)
 
-            Text("Smart financial insights, AI-powered categorization, and complete control over your money.")
+            Text(lang.s("premium_subtitle"))
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -211,7 +213,7 @@ struct SubscriptionPaywall: View {
                 }
             }
         } label: {
-            Text("Continue")
+            Text(lang.s("continue_btn"))
                 .font(.headline)
                 .foregroundStyle(.white)
                 .frame(maxWidth: .infinity)
@@ -230,7 +232,7 @@ struct SubscriptionPaywall: View {
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "ticket")
-                    Text("Have a promo code?")
+                    Text(lang.s("have_promo"))
                         .font(.subheadline)
                     Spacer()
                     Image(systemName: showPromoSection ? "chevron.up" : "chevron.down")
@@ -242,7 +244,7 @@ struct SubscriptionPaywall: View {
             if showPromoSection {
                 VStack(spacing: 10) {
                     HStack(spacing: 8) {
-                        TextField("Enter code", text: $viewModel.promoCode)
+                        TextField(lang.s("enter_code"), text: $viewModel.promoCode)
                             .textFieldStyle(.roundedBorder)
                             .textInputAutocapitalization(.characters)
                             .autocorrectionDisabled()
@@ -253,7 +255,7 @@ struct SubscriptionPaywall: View {
                             if viewModel.isValidatingPromo {
                                 ProgressView()
                             } else {
-                                Text("Apply")
+                                Text(lang.s("apply_promo"))
                             }
                         }
                         .buttonStyle(.bordered)
@@ -279,7 +281,7 @@ struct SubscriptionPaywall: View {
                                 }
                             }
                         } label: {
-                            Text("Activate Promo")
+                            Text(lang.s("activate_promo_btn"))
                                 .font(.subheadline.weight(.semibold))
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 10)
@@ -305,7 +307,7 @@ struct SubscriptionPaywall: View {
                 .font(.subheadline)
                 .foregroundStyle(brandPrimary)
 
-            Text("Already have a subscription? It will be detected automatically.")
+            Text(lang.s("auto_detect_sub"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -319,7 +321,7 @@ struct SubscriptionPaywall: View {
 
     private var termsSection: some View {
         VStack(spacing: 4) {
-            Text("Recurring billing. Cancel anytime in Settings.")
+            Text(lang.s("recurring_billing"))
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
 

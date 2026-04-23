@@ -3,6 +3,8 @@ import UniformTypeIdentifiers
 
 struct StatementUploadView: View {
 
+
+    @Environment(LocalizationManager.self) var lang
     @Bindable var viewModel: ReconciliationViewModel
     @Environment(\.dismiss) private var dismiss
 
@@ -26,11 +28,11 @@ struct StatementUploadView: View {
                     .padding(20)
                 }
             }
-            .navigationTitle("Upload Statement")
+            .navigationTitle(lang.s("upload_statement"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+                    Button(lang.s("cancel")) { dismiss() }
                         .foregroundColor(.spentyPrimary)
                 }
             }
@@ -55,7 +57,7 @@ struct StatementUploadView: View {
 
     private var subTypePicker: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Account Sub-Type")
+            Text(lang.s("account_sub_type"))
                 .font(SpentyFonts.caption1)
                 .foregroundColor(.spentyTextSecondary)
 
@@ -136,7 +138,7 @@ struct StatementUploadView: View {
     private var periodSection: some View {
         VStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 8) {
-                Text("Period From")
+                Text(lang.s("period_from"))
                     .font(SpentyFonts.caption1)
                     .foregroundColor(.spentyTextSecondary)
 
@@ -150,7 +152,7 @@ struct StatementUploadView: View {
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("Period To")
+                Text(lang.s("period_to"))
                     .font(SpentyFonts.caption1)
                     .foregroundColor(.spentyTextSecondary)
 
@@ -169,7 +171,7 @@ struct StatementUploadView: View {
 
     private var filePicker: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Statement File")
+            Text(lang.s("statement_file"))
                 .font(SpentyFonts.caption1)
                 .foregroundColor(.spentyTextSecondary)
 
@@ -186,7 +188,7 @@ struct StatementUploadView: View {
                             .font(SpentyFonts.subheadline)
                             .foregroundColor(selectedFileName != nil ? .spentyTextPrimary : .spentyTextSecondary)
 
-                        Text("Supported: PDF, CSV")
+                        Text(lang.s("supported_formats"))
                             .font(SpentyFonts.caption2)
                             .foregroundColor(.spentyTextSecondary.opacity(0.7))
                     }

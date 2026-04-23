@@ -4,6 +4,8 @@ struct VendorDetailView: View {
 
     // MARK: - State
 
+
+    @Environment(LocalizationManager.self) var lang
     @Bindable var viewModel: VendorsViewModel
     let vendor: Vendor
 
@@ -35,7 +37,7 @@ struct VendorDetailView: View {
                 Button {
                     viewModel.startEdit(displayVendor)
                 } label: {
-                    Text("Edit")
+                    Text(lang.s("edit"))
                         .fontWeight(.medium)
                 }
                 .tint(Color.spentyPrimary)
@@ -95,7 +97,7 @@ struct VendorDetailView: View {
 
                 if displayVendor.email == nil && displayVendor.phone == nil && displayVendor.billingAddress == nil {
                     HStack {
-                        Text("No contact details added.")
+                        Text(lang.s("no_contact_details"))
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                         Spacer()
@@ -133,7 +135,7 @@ struct VendorDetailView: View {
 
     private var financialSummary: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Financial Summary")
+            Text(lang.s("financial_summary"))
                 .font(.headline)
                 .padding(.horizontal, 4)
 
@@ -184,7 +186,7 @@ struct VendorDetailView: View {
 
     private var billsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Bills")
+            Text(lang.s("bills"))
                 .font(.headline)
                 .padding(.horizontal, 4)
 
@@ -203,7 +205,7 @@ struct VendorDetailView: View {
                         Image(systemName: "doc.plaintext")
                             .font(.largeTitle)
                             .foregroundStyle(Color.spentyPrimary.opacity(0.4))
-                        Text("No bills found")
+                        Text(lang.s("no_bills_found"))
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }

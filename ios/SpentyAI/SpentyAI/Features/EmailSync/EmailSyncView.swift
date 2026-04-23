@@ -2,6 +2,8 @@ import SwiftUI
 
 struct EmailSyncView: View {
 
+
+    @Environment(LocalizationManager.self) var lang
     @State private var viewModel = EmailSyncViewModel()
 
     var body: some View {
@@ -20,7 +22,7 @@ struct EmailSyncView: View {
             .padding(16)
         }
         .background(Color.spentyBgPrimary)
-        .navigationTitle("Email Sync")
+        .navigationTitle(lang.s("email_sync"))
         .navigationBarTitleDisplayMode(.large)
         .refreshable {
             await viewModel.loadAll()
@@ -63,11 +65,11 @@ struct EmailSyncView: View {
                     .symbolEffect(.bounce, value: viewModel.showConnectionSuccess)
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("\(viewModel.connectionSuccessProvider.capitalized) Connected!")
+                    Text("\(viewModel.connectionSuccessProvider.capitalized) " + lang.s("provider_connected"))
                         .font(SpentyFonts.headline)
                         .foregroundColor(.spentyTextPrimary)
 
-                    Text("Setting up sync...")
+                    Text(lang.s("setting_up_sync"))
                         .font(SpentyFonts.caption1)
                         .foregroundColor(.spentyTextSecondary)
                 }
@@ -181,7 +183,7 @@ struct EmailSyncView: View {
         if viewModel.syncStatsResponse != nil {
             VStack(alignment: .leading, spacing: 14) {
                 HStack {
-                    Text("Sync Overview")
+                    Text(lang.s("sync_overview"))
                         .font(SpentyFonts.headline)
                         .foregroundColor(.spentyTextPrimary)
 
@@ -200,7 +202,7 @@ struct EmailSyncView: View {
                         ProgressView()
                             .controlSize(.small)
                             .tint(Color.spentyPrimary)
-                        Text("Processing emails...")
+                        Text(lang.s("processing_emails"))
                             .font(SpentyFonts.caption1)
                             .foregroundColor(.spentyPrimary)
                     }
@@ -213,25 +215,25 @@ struct EmailSyncView: View {
                         GridItem(.flexible(), spacing: 12)
                     ], spacing: 12) {
                         StatCard(
-                            label: "Total Emails",
+                            label: lang.s("emails"),
                             value: "\(stats.totalSynced ?? 0)",
                             icon: "envelope.fill",
                             color: .spentyPrimary
                         )
                         StatCard(
-                            label: "AI Analyzed",
+                            label: lang.s("analyzed"),
                             value: "\(stats.aiAnalyzed)",
                             icon: "cpu.fill",
                             color: .blue
                         )
                         StatCard(
-                            label: "Transactions",
+                            label: lang.s("transactions"),
                             value: "\(stats.transactionsCreated ?? 0)",
                             icon: "banknote.fill",
                             color: .spentySuccess
                         )
                         StatCard(
-                            label: "Pending Approval",
+                            label: lang.s("pending_approval"),
                             value: "\(stats.pendingReview ?? 0)",
                             icon: "clock.fill",
                             color: .spentyWarning
@@ -251,7 +253,7 @@ struct EmailSyncView: View {
                                         ProgressView()
                                             .controlSize(.mini)
                                             .tint(Color.spentyPrimary)
-                                        Text("AI analyzing emails...")
+                                        Text(lang.s("ai_analyzing"))
                                             .font(SpentyFonts.caption1)
                                             .foregroundColor(.spentyPrimary)
                                     }
@@ -260,7 +262,7 @@ struct EmailSyncView: View {
                                         Image(systemName: "checkmark.circle.fill")
                                             .font(.system(size: 11))
                                             .foregroundColor(.spentySuccess)
-                                        Text("AI analysis complete")
+                                        Text(lang.s("ai_complete"))
                                             .font(SpentyFonts.caption1)
                                             .foregroundColor(.spentySuccess)
                                     }
@@ -295,17 +297,17 @@ struct EmailSyncView: View {
                             .font(.system(size: 36))
                             .foregroundColor(.spentyTextSecondary.opacity(0.5))
 
-                        Text("No emails processed yet")
+                        Text(lang.s("no_emails_processed"))
                             .font(SpentyFonts.subheadline)
                             .foregroundColor(.spentyTextSecondary)
 
                         if viewModel.isAnySyncing || viewModel.syncPhase != .idle {
-                            Text("SpentyAI is scanning your inbox. This may take a few minutes.")
+                            Text(lang.s("scanning_inbox"))
                                 .font(SpentyFonts.caption1)
                                 .foregroundColor(.spentyTextSecondary)
                                 .multilineTextAlignment(.center)
                         } else if viewModel.hasAnyAccount {
-                            Text("Tap Sync on your account below to start scanning emails.")
+                            Text(lang.s("tap_sync_start"))
                                 .font(SpentyFonts.caption1)
                                 .foregroundColor(.spentyTextSecondary)
                                 .multilineTextAlignment(.center)
@@ -328,7 +330,7 @@ struct EmailSyncView: View {
                     .font(.system(size: 18))
                     .foregroundColor(.spentyError)
 
-                Text("Gmail")
+                Text(lang.s("gmail"))
                     .font(SpentyFonts.title3)
                     .foregroundColor(.spentyTextPrimary)
 
@@ -342,7 +344,7 @@ struct EmailSyncView: View {
             }
 
             if viewModel.gmailAccounts.isEmpty {
-                Text("No Gmail accounts connected")
+                Text(lang.s("no_gmail"))
                     .font(SpentyFonts.subheadline)
                     .foregroundColor(.spentyTextSecondary)
             } else {
@@ -362,7 +364,7 @@ struct EmailSyncView: View {
                     } else {
                         Image(systemName: "plus.circle.fill")
                     }
-                    Text(viewModel.gmailAccounts.isEmpty ? "Connect Gmail" : "Add Another Gmail")
+                    Text(viewModel.gmailAccounts.isEmpty ? lang.s("gmail") : lang.s("add_another_gmail"))
                 }
                 .font(SpentyFonts.subheadline)
                 .fontWeight(.semibold)
@@ -390,7 +392,7 @@ struct EmailSyncView: View {
                         .font(.system(size: 18))
                         .foregroundColor(.spentyInfo)
 
-                    Text("Outlook")
+                    Text(lang.s("outlook"))
                         .font(SpentyFonts.title3)
                         .foregroundColor(.spentyTextPrimary)
 
@@ -416,7 +418,7 @@ struct EmailSyncView: View {
                         } else {
                             Image(systemName: "plus.circle.fill")
                         }
-                        Text("Connect Outlook")
+                        Text(lang.s("connect_outlook"))
                     }
                     .primaryButtonStyle()
                 }
@@ -438,10 +440,10 @@ struct EmailSyncView: View {
                         .clipShape(Circle())
 
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Add Outlook Account")
+                        Text(lang.s("add_outlook"))
                             .font(SpentyFonts.subheadline)
                             .foregroundColor(.spentyTextPrimary)
-                        Text("Connect your Outlook email for sync")
+                        Text(lang.s("connect_outlook_info"))
                             .font(SpentyFonts.caption1)
                             .foregroundColor(.spentyTextSecondary)
                     }
@@ -513,7 +515,7 @@ struct EmailSyncView: View {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(.system(size: 12))
                         .foregroundColor(.spentyWarning)
-                    Text("This account needs to be reconnected")
+                    Text(lang.s("needs_reconnect"))
                         .font(SpentyFonts.caption1)
                         .foregroundColor(.spentyWarning)
                 }
@@ -542,7 +544,7 @@ struct EmailSyncView: View {
                         HStack(spacing: 4) {
                             Image(systemName: "arrow.triangle.2.circlepath")
                                 .font(.system(size: 12))
-                            Text("Reconnect")
+                            Text(lang.s("reconnect"))
                                 .font(SpentyFonts.caption1)
                         }
                         .foregroundColor(.spentyWarning)
@@ -559,7 +561,7 @@ struct EmailSyncView: View {
                     HStack(spacing: 4) {
                         Image(systemName: "arrow.clockwise")
                             .font(.system(size: 12))
-                        Text("Sync")
+                        Text(lang.s("sync"))
                             .font(SpentyFonts.caption1)
                     }
                     .foregroundColor(.spentyPrimary)
@@ -580,7 +582,7 @@ struct EmailSyncView: View {
                     HStack(spacing: 4) {
                         Image(systemName: "trash")
                             .font(.system(size: 12))
-                        Text("Disconnect")
+                        Text(lang.s("disconnect"))
                             .font(SpentyFonts.caption1)
                     }
                     .foregroundColor(.spentyError)
@@ -618,7 +620,7 @@ struct EmailSyncView: View {
                 ProgressView()
                     .controlSize(.mini)
                     .tint(Color.spentyPrimary)
-                Text("Syncing...")
+                Text(lang.s("syncing"))
                     .font(SpentyFonts.caption2)
                     .foregroundColor(.spentyPrimary)
             }
@@ -627,7 +629,7 @@ struct EmailSyncView: View {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.system(size: 12))
                     .foregroundColor(.spentyWarning)
-                Text("Needs Reconnect")
+                Text(lang.s("needs_reconnect_status"))
                     .font(SpentyFonts.caption2)
                     .foregroundColor(.spentyWarning)
             }
@@ -637,7 +639,7 @@ struct EmailSyncView: View {
                 Image(systemName: "exclamationmark.circle.fill")
                     .font(.system(size: 12))
                     .foregroundColor(.spentyError)
-                Text("Processing failed")
+                Text(lang.s("processing_failed"))
                     .font(SpentyFonts.caption2)
                     .foregroundColor(.spentyError)
             }
@@ -656,7 +658,7 @@ struct EmailSyncView: View {
                 Image(systemName: "checkmark.circle.fill")
                     .font(.system(size: 12))
                     .foregroundColor(.spentySuccess)
-                Text("Up to date")
+                Text(lang.s("up_to_date"))
                     .font(SpentyFonts.caption2)
                     .foregroundColor(.spentySuccess)
             }
@@ -666,7 +668,7 @@ struct EmailSyncView: View {
                 Image(systemName: "arrow.clockwise")
                     .font(.system(size: 12))
                     .foregroundColor(.spentyPrimary)
-                Text("Tap Sync to start")
+                Text(lang.s("tap_sync"))
                     .font(SpentyFonts.caption2)
                     .foregroundColor(.spentyPrimary)
             }
@@ -675,7 +677,7 @@ struct EmailSyncView: View {
                 Image(systemName: "clock")
                     .font(.system(size: 12))
                     .foregroundColor(.spentyTextSecondary)
-                Text("Never synced")
+                Text(lang.s("never_synced"))
                     .font(SpentyFonts.caption2)
                     .foregroundColor(.spentyTextSecondary)
             }
@@ -688,9 +690,9 @@ struct EmailSyncView: View {
             GridItem(.flexible(), spacing: 8),
             GridItem(.flexible(), spacing: 8)
         ], spacing: 8) {
-            miniStat(label: "Emails", value: "\(stats.totalSynced ?? 0)", color: .spentyPrimary)
-            miniStat(label: "Analyzed", value: "\(stats.processedByAi.map { $0 + (stats.noTransaction ?? 0) } ?? 0)", color: .blue)
-            miniStat(label: "Transactions", value: "\(stats.transactionsCreated ?? 0)", color: .spentySuccess)
+            miniStat(label: lang.s("emails"), value: "\(stats.totalSynced ?? 0)", color: .spentyPrimary)
+            miniStat(label: lang.s("analyzed"), value: "\(stats.processedByAi.map { $0 + (stats.noTransaction ?? 0) } ?? 0)", color: .blue)
+            miniStat(label: lang.s("transactions"), value: "\(stats.transactionsCreated ?? 0)", color: .spentySuccess)
         }
     }
 
@@ -752,11 +754,11 @@ struct EmailSyncView: View {
                         .foregroundColor(.spentyWarning)
 
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Pending Approval")
+                        Text(lang.s("pending_approval"))
                             .font(SpentyFonts.headline)
                             .foregroundColor(.spentyTextPrimary)
 
-                        Text("AI-detected transactions awaiting your approval")
+                        Text(lang.s("ai_detected_txns"))
                             .font(SpentyFonts.caption1)
                             .foregroundColor(.spentyTextSecondary)
                     }
@@ -785,6 +787,8 @@ struct EmailSyncView: View {
 // MARK: - Sync Date Picker Sheet (Improvement #8 — presets first, calendar on demand)
 
 private struct SyncDatePickerSheet: View {
+
+    @Environment(LocalizationManager.self) var lang
     @Bindable var viewModel: EmailSyncViewModel
     @Environment(\.dismiss) private var dismiss
 
@@ -819,11 +823,11 @@ private struct SyncDatePickerSheet: View {
                     }
 
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("How far back should we scan?")
+                        Text(lang.s("how_far_back"))
                             .font(SpentyFonts.headline)
                             .foregroundColor(.spentyTextPrimary)
 
-                        Text("Pick a time range and SpentyAI will scan your emails from that date onward to detect transactions.")
+                        Text(lang.s("pick_date_range"))
                             .font(SpentyFonts.footnote)
                             .foregroundColor(.spentyTextSecondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -846,7 +850,7 @@ private struct SyncDatePickerSheet: View {
                         HStack {
                             Image(systemName: "calendar")
                                 .font(.system(size: 14))
-                            Text("Pick a custom date")
+                            Text(lang.s("pick_custom_date"))
                                 .font(SpentyFonts.subheadline)
                             Spacer()
                             Image(systemName: viewModel.showCustomDatePicker ? "chevron.up" : "chevron.down")
@@ -904,11 +908,11 @@ private struct SyncDatePickerSheet: View {
                 .padding(16)
             }
             .background(Color.spentyBgPrimary)
-            .navigationTitle("Sync Start Date")
+            .navigationTitle(lang.s("sync_start_date"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("Cancel") {
+                    Button(lang.s("cancel")) {
                         viewModel.cancelSyncDatePicker()
                         dismiss()
                     }

@@ -4,6 +4,8 @@ struct AIChatView: View {
 
     // MARK: - State
 
+
+    @Environment(LocalizationManager.self) var lang
     @State private var viewModel = AIChatViewModel()
     @State private var showClearConfirmation = false
     @FocusState private var isInputFocused: Bool
@@ -26,11 +28,11 @@ struct AIChatView: View {
                     }
                 }
             }
-            .navigationTitle("AI Assistant")
+            .navigationTitle(lang.s("ai_assistant"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("Close") { dismiss() }
+                    Button(lang.s("close")) { dismiss() }
                         .foregroundStyle(Color.spentyPrimary)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
@@ -76,13 +78,13 @@ struct AIChatView: View {
                 }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("This will permanently delete your entire conversation history with the AI assistant.")
+                Text(lang.s("delete_history_confirm"))
             }
             .alert("Error", isPresented: .init(
                 get: { viewModel.errorMessage != nil },
                 set: { if !$0 { viewModel.dismissError() } }
             )) {
-                Button("OK") { viewModel.dismissError() }
+                Button(lang.s("ok")) { viewModel.dismissError() }
             } message: {
                 Text(viewModel.errorMessage ?? "")
             }
@@ -145,19 +147,19 @@ struct AIChatView: View {
             // Status text
             VStack(spacing: 8) {
                 if viewModel.speechManager.isSpeaking {
-                    Text("Speaking...")
+                    Text(lang.s("speaking"))
                         .font(SpentyFonts.title3)
                         .foregroundStyle(Color.spentyPrimary)
                 } else if viewModel.speechManager.isListening {
-                    Text("Listening...")
+                    Text(lang.s("listening"))
                         .font(SpentyFonts.title3)
                         .foregroundStyle(Color.spentyPrimary)
                 } else if viewModel.isSending {
-                    Text("Thinking...")
+                    Text(lang.s("thinking"))
                         .font(SpentyFonts.title3)
                         .foregroundStyle(Color.spentyTextSecondary)
                 } else {
-                    Text("Tap to speak")
+                    Text(lang.s("tap_to_speak"))
                         .font(SpentyFonts.title3)
                         .foregroundStyle(Color.spentyTextSecondary)
                 }
@@ -202,7 +204,7 @@ struct AIChatView: View {
                                 .font(.system(size: 28))
                                 .foregroundStyle(Color.spentyPrimary)
                         }
-                        Text("Send")
+                        Text(lang.s("send"))
                             .font(SpentyFonts.caption1)
                             .foregroundStyle(Color.spentyTextSecondary)
                     }
@@ -246,7 +248,7 @@ struct AIChatView: View {
                                 .font(.system(size: 20, weight: .bold))
                                 .foregroundStyle(Color.spentyError)
                         }
-                        Text("Exit")
+                        Text(lang.s("exit"))
                             .font(SpentyFonts.caption1)
                             .foregroundStyle(Color.spentyTextSecondary)
                     }
@@ -327,11 +329,11 @@ struct AIChatView: View {
             }
 
             VStack(spacing: 8) {
-                Text("SpentyAI Assistant")
+                Text(lang.s("spentyai_assistant"))
                     .font(SpentyFonts.title2)
                     .foregroundStyle(Color.spentyTextPrimary)
 
-                Text("Ask me anything about your finances, or let me help you create transactions, invoices, and bills.")
+                Text(lang.s("ask_anything"))
                     .font(SpentyFonts.subheadline)
                     .foregroundStyle(Color.spentyTextSecondary)
                     .multilineTextAlignment(.center)
@@ -450,7 +452,7 @@ struct AIChatView: View {
                 }
                 .disabled(viewModel.isSending)
 
-                TextField("Ask SpentyAI...", text: $viewModel.input, axis: .vertical)
+                TextField(lang.s("ask_spentyai"), text: $viewModel.input, axis: .vertical)
                     .font(SpentyFonts.body)
                     .lineLimit(1...5)
                     .padding(.horizontal, 14)

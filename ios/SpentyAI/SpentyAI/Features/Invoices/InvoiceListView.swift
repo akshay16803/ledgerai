@@ -4,6 +4,8 @@ struct InvoiceListView: View {
 
     // MARK: - State
 
+
+    @Environment(LocalizationManager.self) var lang
     @State private var viewModel = InvoicesViewModel()
     @State private var paymentInvoice: Invoice?
     @State private var debtorsExpanded = false
@@ -25,8 +27,8 @@ struct InvoiceListView: View {
                 }
             }
         }
-        .navigationTitle("Invoices")
-        .searchable(text: $viewModel.searchText, prompt: "Search by number or customer")
+        .navigationTitle(lang.s("invoices"))
+        .searchable(text: $viewModel.searchText, prompt: lang.s("search_invoice"))
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
@@ -51,7 +53,7 @@ struct InvoiceListView: View {
             get: { viewModel.errorMessage != nil },
             set: { if !$0 { viewModel.errorMessage = nil } }
         )) {
-            Button("OK") { viewModel.errorMessage = nil }
+            Button(lang.s("ok")) { viewModel.errorMessage = nil }
         } message: {
             Text(viewModel.errorMessage ?? "")
         }
@@ -168,7 +170,7 @@ struct InvoiceListView: View {
     private var invoiceListSection: some View {
         Section {
             if viewModel.filteredInvoices.isEmpty {
-                Text("No invoices match your filters.")
+                Text(lang.s("no_invoices_match"))
                     .font(SpentyFonts.subheadline)
                     .foregroundStyle(Color.spentyTextSecondary)
                     .frame(maxWidth: .infinity)
@@ -184,13 +186,13 @@ struct InvoiceListView: View {
                         Button(role: .destructive) {
                             Task { await viewModel.deleteInvoice(id: invoice.id) }
                         } label: {
-                            Label("Delete", systemImage: "trash")
+                            Label(lang.s("delete"), systemImage: "trash")
                         }
 
                         Button {
                             viewModel.startEdit(invoice)
                         } label: {
-                            Label("Edit", systemImage: "pencil")
+                            Label(lang.s("edit"), systemImage: "pencil")
                         }
                         .tint(Color.spentyPrimary)
                     }
@@ -263,7 +265,7 @@ struct InvoiceListView: View {
                     Button {
                         paymentInvoice = invoice
                     } label: {
-                        Label("Record Payment", systemImage: "indianrupeesign.circle")
+                        Label(lang.s("record_payment"), systemImage: "indianrupeesign.circle")
                             .font(SpentyFonts.caption2.weight(.medium))
                             .foregroundStyle(Color.spentyPrimary)
                     }
@@ -323,7 +325,7 @@ struct InvoiceListView: View {
                 withAnimation { debtorsExpanded.toggle() }
             } label: {
                 HStack {
-                    Text("Debtors Summary")
+                    Text(lang.s("debtors_summary"))
                     Spacer()
                     Image(systemName: debtorsExpanded ? "chevron.up" : "chevron.down")
                         .font(SpentyFonts.caption1)
@@ -358,7 +360,7 @@ struct InvoiceListView: View {
                 withAnimation { agingExpanded.toggle() }
             } label: {
                 HStack {
-                    Text("Aging Analysis")
+                    Text(lang.s("aging_analysis"))
                     Spacer()
                     Image(systemName: agingExpanded ? "chevron.up" : "chevron.down")
                         .font(SpentyFonts.caption1)
@@ -373,9 +375,9 @@ struct InvoiceListView: View {
     private var emptyState: some View {
         EmptyStateView(
             icon: "doc.text.magnifyingglass",
-            title: "No Invoices Yet",
+            title: lang.s("no_invoices"),
             subtitle: "Tap the + button to create your first invoice.",
-            buttonTitle: "Create Invoice"
+            buttonTitle: lang.s("create_invoice")
         ) {
             viewModel.startCreate()
         }

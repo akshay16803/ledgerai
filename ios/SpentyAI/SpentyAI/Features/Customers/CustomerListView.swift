@@ -4,6 +4,8 @@ struct CustomerListView: View {
 
     // MARK: - State
 
+
+    @Environment(LocalizationManager.self) var lang
     @State private var viewModel = CustomersViewModel()
 
     // MARK: - Body
@@ -22,8 +24,8 @@ struct CustomerListView: View {
                 }
             }
         }
-        .navigationTitle("Customers")
-        .searchable(text: $viewModel.searchText, prompt: "Search by name or email")
+        .navigationTitle(lang.s("customers"))
+        .searchable(text: $viewModel.searchText, prompt: lang.s("search_customers"))
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
@@ -45,7 +47,7 @@ struct CustomerListView: View {
             get: { viewModel.errorMessage != nil },
             set: { if !$0 { viewModel.errorMessage = nil } }
         )) {
-            Button("OK") { viewModel.errorMessage = nil }
+            Button(lang.s("ok")) { viewModel.errorMessage = nil }
         } message: {
             Text(viewModel.errorMessage ?? "")
         }
@@ -101,7 +103,7 @@ struct CustomerListView: View {
     private var emptyState: some View {
         EmptyStateView(
             icon: "person.2.slash",
-            title: "No Customers Yet",
+            title: lang.s("no_customers"),
             subtitle: viewModel.searchText.isEmpty
                 ? "Tap the + button to add your first customer."
                 : "No customers match your search.",

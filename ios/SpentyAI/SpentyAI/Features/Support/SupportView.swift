@@ -4,6 +4,8 @@ struct SupportView: View {
 
     // MARK: - State
 
+
+    @Environment(LocalizationManager.self) var lang
     @State private var viewModel = SupportViewModel()
     @State private var expandedFAQ: String?
 
@@ -24,7 +26,7 @@ struct SupportView: View {
                 .padding(.vertical, 16)
             }
         }
-        .navigationTitle("Support")
+        .navigationTitle(lang.s("support"))
         .navigationBarTitleDisplayMode(.large)
         .task {
             await viewModel.loadFAQ()
@@ -33,14 +35,14 @@ struct SupportView: View {
             get: { viewModel.errorMessage != nil },
             set: { if !$0 { viewModel.dismissError() } }
         )) {
-            Button("OK") { viewModel.dismissError() }
+            Button(lang.s("ok")) { viewModel.dismissError() }
         } message: {
             Text(viewModel.errorMessage ?? "")
         }
         .alert("Ticket Submitted", isPresented: $viewModel.isSubmitted) {
-            Button("OK") { viewModel.dismissSuccess() }
+            Button(lang.s("ok")) { viewModel.dismissSuccess() }
         } message: {
-            Text("We've received your support request and will get back to you shortly.")
+            Text(lang.s("support_submitted"))
         }
     }
 
@@ -60,11 +62,11 @@ struct SupportView: View {
                     .foregroundStyle(Color.spentyPrimary)
             }
 
-            Text("How can we help?")
+            Text(lang.s("how_can_help"))
                 .font(SpentyFonts.title2)
                 .foregroundColor(.spentyTextPrimary)
 
-            Text("Submit a ticket or browse our FAQ below.")
+            Text(lang.s("submit_ticket_info"))
                 .font(SpentyFonts.subheadline)
                 .foregroundColor(.spentyTextSecondary)
                 .multilineTextAlignment(.center)
@@ -81,12 +83,12 @@ struct SupportView: View {
 
             // Subject
             VStack(alignment: .leading, spacing: 6) {
-                Text("Subject")
+                Text(lang.s("subject"))
                     .font(SpentyFonts.subheadline)
                     .fontWeight(.medium)
                     .foregroundColor(.spentyTextPrimary)
 
-                TextField("Brief description of your issue", text: $viewModel.subject)
+                TextField(lang.s("subject_placeholder"), text: $viewModel.subject)
                     .textFieldStyle(.plain)
                     .inputStyle()
             }
@@ -127,7 +129,7 @@ struct SupportView: View {
 
             // Priority Picker
             VStack(alignment: .leading, spacing: 6) {
-                Text("Priority")
+                Text(lang.s("priority"))
                     .font(SpentyFonts.subheadline)
                     .fontWeight(.medium)
                     .foregroundColor(.spentyTextPrimary)
@@ -163,7 +165,7 @@ struct SupportView: View {
 
             // Message
             VStack(alignment: .leading, spacing: 6) {
-                Text("Message")
+                Text(lang.s("message"))
                     .font(SpentyFonts.subheadline)
                     .fontWeight(.medium)
                     .foregroundColor(.spentyTextPrimary)
@@ -180,7 +182,7 @@ struct SupportView: View {
                     )
                     .overlay(alignment: .topLeading) {
                         if viewModel.message.isEmpty {
-                            Text("Describe your issue in detail...")
+                            Text(lang.s("describe_issue"))
                                 .foregroundStyle(Color(.placeholderText))
                                 .padding(.horizontal, 12)
                                 .padding(.vertical, 16)
@@ -230,7 +232,7 @@ struct SupportView: View {
                 }
                 .padding(.vertical, 20)
             } else if viewModel.faqItems.isEmpty {
-                Text("No FAQ items available.")
+                Text(lang.s("no_faq"))
                     .font(SpentyFonts.subheadline)
                     .foregroundColor(.spentyTextSecondary)
                     .frame(maxWidth: .infinity)

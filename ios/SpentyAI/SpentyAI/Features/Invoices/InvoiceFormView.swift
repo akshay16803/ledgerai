@@ -4,6 +4,8 @@ struct InvoiceFormView: View {
 
     // MARK: - State
 
+
+    @Environment(LocalizationManager.self) var lang
     @Bindable var viewModel: InvoicesViewModel
     @Environment(\.dismiss) private var dismiss
 
@@ -79,14 +81,14 @@ struct InvoiceFormView: View {
                 }
                 .scrollContentBackground(.hidden)
             }
-            .navigationTitle(isEditing ? "Edit Invoice" : "New Invoice")
+            .navigationTitle(isEditing ? lang.s("edit_invoice") : lang.s("new_invoice"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+                    Button(lang.s("cancel")) { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
+                    Button(lang.s("save")) {
                         Task { await save() }
                     }
                     .fontWeight(.semibold)
@@ -112,18 +114,18 @@ struct InvoiceFormView: View {
     private var invoiceInfoSection: some View {
         Section {
             HStack {
-                Text("Invoice #")
+                Text(lang.s("invoice_number"))
                     .foregroundStyle(.secondary)
                 TextField("INV-001", text: $invoiceNumber)
                     .multilineTextAlignment(.trailing)
             }
             if showValidation && invoiceNumber.trimmingCharacters(in: .whitespaces).isEmpty {
-                Text("Invoice number is required.")
+                Text(lang.s("invoice_number_required"))
                     .font(.caption)
                     .foregroundStyle(Color.spentyError)
             }
         } header: {
-            Text("Invoice")
+            Text(lang.s("invoice"))
         }
     }
 
@@ -135,7 +137,7 @@ struct InvoiceFormView: View {
                 showCustomerPicker = true
             } label: {
                 HStack {
-                    Text("Customer")
+                    Text(lang.s("customer"))
                         .foregroundStyle(.primary)
                     Spacer()
                     Text(customerName.isEmpty ? "Select Customer" : customerName)
@@ -150,12 +152,12 @@ struct InvoiceFormView: View {
             }
 
             if showValidation && selectedCustomerId == nil {
-                Text("Customer is required.")
+                Text(lang.s("customer_required"))
                     .font(.caption)
                     .foregroundStyle(Color.spentyError)
             }
         } header: {
-            Text("Customer")
+            Text(lang.s("customer"))
         }
     }
 
@@ -186,11 +188,11 @@ struct InvoiceFormView: View {
                     }
                 }
             }
-            .navigationTitle("Select Customer")
+            .navigationTitle(lang.s("select_customer"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { showCustomerPicker = false }
+                    Button(lang.s("cancel")) { showCustomerPicker = false }
                 }
             }
         }
@@ -200,10 +202,10 @@ struct InvoiceFormView: View {
 
     private var datesSection: some View {
         Section {
-            DatePicker("Invoice Date", selection: $invoiceDate, displayedComponents: .date)
-            DatePicker("Due Date", selection: $dueDate, displayedComponents: .date)
+            DatePicker(lang.s("date"), selection: $invoiceDate, displayedComponents: .date)
+            DatePicker(lang.s("date"), selection: $dueDate, displayedComponents: .date)
         } header: {
-            Text("Dates")
+            Text(lang.s("dates"))
         }
     }
 
@@ -227,18 +229,18 @@ struct InvoiceFormView: View {
             }
 
             if showValidation && lineItems.isEmpty {
-                Text("At least one line item is required.")
+                Text(lang.s("at_least_one_item"))
                     .font(.caption)
                     .foregroundStyle(Color.spentyError)
             }
         } header: {
-            Text("Line Items")
+            Text(lang.s("line_items"))
         }
     }
 
     private func lineItemRow(item: Binding<FormLineItem>) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            TextField("Description *", text: item.description)
+            TextField(lang.s("description") + " *", text: item.description)
                 .font(.body)
 
             TextField("HSN/SAC Code", text: item.hsnSac)
@@ -247,7 +249,7 @@ struct InvoiceFormView: View {
 
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Qty")
+                    Text(lang.s("qty"))
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                     TextField("1", value: item.quantity, format: .number)
@@ -267,7 +269,7 @@ struct InvoiceFormView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("GST %")
+                    Text(lang.s("gst_percent"))
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                     TextField("18", value: item.taxPercent, format: .number)
@@ -279,7 +281,7 @@ struct InvoiceFormView: View {
                 Spacer()
 
                 VStack(alignment: .trailing, spacing: 2) {
-                    Text("Amount")
+                    Text(lang.s("amount"))
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                     Text(formatCurrency(item.wrappedValue.lineTotal))
@@ -289,7 +291,7 @@ struct InvoiceFormView: View {
             }
 
             if showValidation && item.wrappedValue.description.trimmingCharacters(in: .whitespaces).isEmpty {
-                Text("Description is required.")
+                Text(lang.s("description_required"))
                     .font(.caption)
                     .foregroundStyle(Color.spentyError)
             }
@@ -306,7 +308,7 @@ struct InvoiceFormView: View {
     private var totalsSection: some View {
         Section {
             HStack {
-                Text("Subtotal")
+                Text(lang.s("subtotal"))
                     .foregroundStyle(.secondary)
                 Spacer()
                 Text(formatCurrency(subtotal))
@@ -315,7 +317,7 @@ struct InvoiceFormView: View {
 
             if isInterState {
                 HStack {
-                    Text("IGST")
+                    Text(lang.s("igst"))
                         .foregroundStyle(.secondary)
                     Spacer()
                     Text(formatCurrency(igst))
@@ -323,7 +325,7 @@ struct InvoiceFormView: View {
                 }
             } else {
                 HStack {
-                    Text("CGST")
+                    Text(lang.s("cgst"))
                         .foregroundStyle(.secondary)
                     Spacer()
                     Text(formatCurrency(cgst))
@@ -331,7 +333,7 @@ struct InvoiceFormView: View {
                 }
 
                 HStack {
-                    Text("SGST")
+                    Text(lang.s("sgst"))
                         .foregroundStyle(.secondary)
                     Spacer()
                     Text(formatCurrency(sgst))
@@ -340,7 +342,7 @@ struct InvoiceFormView: View {
             }
 
             HStack {
-                Text("Total Tax")
+                Text(lang.s("total_tax"))
                     .foregroundStyle(.secondary)
                 Spacer()
                 Text(formatCurrency(totalTax))
@@ -348,7 +350,7 @@ struct InvoiceFormView: View {
             }
 
             HStack {
-                Text("Grand Total")
+                Text(lang.s("grand_total"))
                     .font(.body.weight(.bold))
                 Spacer()
                 Text(formatCurrency(grandTotal))
@@ -356,7 +358,7 @@ struct InvoiceFormView: View {
                     .foregroundStyle(Color.spentyPrimary)
             }
         } header: {
-            Text("GST Summary")
+            Text(lang.s("gst_summary"))
         }
     }
 
@@ -364,12 +366,12 @@ struct InvoiceFormView: View {
 
     private var notesSection: some View {
         Section {
-            TextField("Payment Terms", text: $terms, axis: .vertical)
+            TextField(lang.s("payment_terms"), text: $terms, axis: .vertical)
                 .lineLimit(2...4)
-            TextField("Notes", text: $notes, axis: .vertical)
+            TextField(lang.s("notes"), text: $notes, axis: .vertical)
                 .lineLimit(2...4)
         } header: {
-            Text("Terms & Notes")
+            Text(lang.s("terms_notes"))
         }
     }
 

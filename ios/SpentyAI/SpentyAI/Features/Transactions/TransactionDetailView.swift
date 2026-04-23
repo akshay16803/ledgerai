@@ -3,6 +3,7 @@ import QuickLook
 
 struct TransactionDetailView: View {
 
+    @Environment(LocalizationManager.self) var lang
     @Environment(\.dismiss) private var dismiss
 
     let transactionId: String
@@ -117,7 +118,7 @@ struct TransactionDetailView: View {
                 Color.spentyBgPrimary.ignoresSafeArea()
 
                 if isLoading && transaction.amount == nil {
-                    LoadingView(message: "Loading transaction...")
+                    LoadingView(message: lang.s("loading_transaction"))
                 } else {
                     ScrollView {
                         VStack(spacing: 20) {
@@ -135,7 +136,7 @@ struct TransactionDetailView: View {
                     }
                 }
             }
-            .navigationTitle("Transaction Details")
+            .navigationTitle(lang.s("transaction_details"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -172,7 +173,7 @@ struct TransactionDetailView: View {
                             .navigationBarTitleDisplayMode(.inline)
                             .toolbar {
                                 ToolbarItem(placement: .topBarLeading) {
-                                    Button("Done") { showPreview = false }
+                                    Button(lang.s("done")) { showPreview = false }
                                         .font(SpentyFonts.headline)
                                         .foregroundColor(.spentyPrimary)
                                 }
@@ -186,13 +187,13 @@ struct TransactionDetailView: View {
                     }
                 }
             }
-            .alert("Delete Transaction", isPresented: $showDeleteConfirm) {
-                Button("Cancel", role: .cancel) {}
-                Button("Delete", role: .destructive) {
+            .alert(lang.s("delete_transaction"), isPresented: $showDeleteConfirm) {
+                Button(lang.s("cancel"), role: .cancel) {}
+                Button(lang.s("delete"), role: .destructive) {
                     Task { await deleteTransaction() }
                 }
             } message: {
-                Text("Are you sure you want to delete this transaction? This action cannot be undone.")
+                Text(lang.s("delete_transaction_confirm"))
             }
         }
     }
@@ -232,32 +233,32 @@ struct TransactionDetailView: View {
 
     private var detailCard: some View {
         VStack(spacing: 0) {
-            detailRow(label: "Type", value: typeDisplayName)
+            detailRow(label: lang.s("type"), value: typeDisplayName)
             divider
-            detailRow(label: "Date", value: formattedDate)
+            detailRow(label: lang.s("date"), value: formattedDate)
             divider
             if let desc = transaction.description, !desc.isEmpty {
-                detailRow(label: "Description", value: desc)
+                detailRow(label: lang.s("description"), value: desc)
                 divider
             }
             if let name = transaction.categoryName, !name.isEmpty {
-                detailRow(label: "Category", value: name)
+                detailRow(label: lang.s("category"), value: name)
                 divider
             }
             if let name = transaction.subcategoryName, !name.isEmpty {
-                detailRow(label: "Subcategory", value: name)
+                detailRow(label: lang.s("subcategory"), value: name)
                 divider
             }
             if let name = transaction.accountName, !name.isEmpty {
-                detailRow(label: "Account", value: name)
+                detailRow(label: lang.s("account_label"), value: name)
                 divider
             }
             if isTransfer, let name = transaction.toAccountName, !name.isEmpty {
-                detailRow(label: "To Account", value: name)
+                detailRow(label: lang.s("to_account"), value: name)
                 divider
             }
             if let paymentMethod = transaction.paymentMethod, !paymentMethod.isEmpty {
-                detailRow(label: "Payment Method", value: paymentMethod)
+                detailRow(label: lang.s("payment_method"), value: paymentMethod)
                 divider
             }
             // Source hidden per user request
@@ -292,10 +293,10 @@ struct TransactionDetailView: View {
     private var recurringRow: some View {
         let isRecurring = transaction.isRecurring ?? false
         detailRow(
-            label: "Recurring",
+            label: lang.s("recurring"),
             value: isRecurring
-                ? "Yes\(transaction.recurringFrequency.map { " (\($0.capitalized))" } ?? "")"
-                : "No"
+                ? "\(lang.s("yes"))\(transaction.recurringFrequency.map { " (\($0.capitalized))" } ?? "")"
+                : lang.s("no")
         )
     }
 
@@ -303,7 +304,7 @@ struct TransactionDetailView: View {
     private var foreignCurrencyRows: some View {
         divider
         if let currency = transaction.originalCurrency {
-            detailRow(label: "Original Currency", value: currency.uppercased())
+            detailRow(label: lang.s("original_currency"), value: currency.uppercased())
         }
         if let originalAmount = transaction.originalAmount {
             divider
@@ -311,13 +312,13 @@ struct TransactionDetailView: View {
             let _ = formatter.numberStyle = .decimal
             let _ = formatter.maximumFractionDigits = 2
             detailRow(
-                label: "Original Amount",
+                label: lang.s("original_amount"),
                 value: formatter.string(from: NSNumber(value: originalAmount)) ?? "\(originalAmount)"
             )
         }
         if let exchangeRate = transaction.exchangeRate {
             divider
-            let rateLabel = transaction.isEstimatedRate == true ? "Exchange Rate (Est.)" : "Exchange Rate"
+            let rateLabel = transaction.isEstimatedRate == true ? lang.s("exchange_rate_est") : lang.s("exchange_rate")
             detailRow(label: rateLabel, value: String(format: "%.4f", exchangeRate))
         }
     }
@@ -336,7 +337,7 @@ struct TransactionDetailView: View {
                     Image(systemName: "envelope.open")
                         .font(SpentyFonts.body)
                         .foregroundColor(.spentyPrimary)
-                    Text("Source Document")
+                    Text(lang.s("source_document"))
                         .font(SpentyFonts.headline)
                         .foregroundColor(.spentyTextPrimary)
                     Spacer()
@@ -382,7 +383,7 @@ struct TransactionDetailView: View {
                 } else if let content = sourceContent {
                     sourceContentView(content)
                 } else if !isLoadingSource {
-                    Text("No source content available")
+                    Text(lang.s("no_source"))
                         .font(SpentyFonts.footnote)
                         .foregroundColor(.spentyTextSecondary)
                 }
@@ -402,13 +403,13 @@ struct TransactionDetailView: View {
         VStack(spacing: 8) {
             if content.type == "email" {
                 if let subject = content.subject, !subject.isEmpty {
-                    sourceRow(label: "Subject", value: subject)
+                    sourceRow(label: lang.s("subject"), value: subject)
                 }
                 if let from = content.from, !from.isEmpty {
-                    sourceRow(label: "From", value: from)
+                    sourceRow(label: lang.s("from"), value: from)
                 }
                 if let date = content.date, !date.isEmpty {
-                    sourceRow(label: "Date", value: date)
+                    sourceRow(label: lang.s("date"), value: date)
                 }
                 if let body = content.body, !body.isEmpty {
                     Divider().background(Color.spentyBorder)
@@ -420,10 +421,10 @@ struct TransactionDetailView: View {
                 }
             } else if content.type == "sms" {
                 if let sender = content.sender, !sender.isEmpty {
-                    sourceRow(label: "Sender", value: sender)
+                    sourceRow(label: lang.s("sender"), value: sender)
                 }
                 if let date = content.date, !date.isEmpty {
-                    sourceRow(label: "Date", value: date)
+                    sourceRow(label: lang.s("date"), value: date)
                 }
                 if let body = content.body, !body.isEmpty {
                     Divider().background(Color.spentyBorder)
@@ -457,7 +458,7 @@ struct TransactionDetailView: View {
                 Image(systemName: "paperclip")
                     .font(SpentyFonts.footnote)
                     .foregroundColor(.spentyTextSecondary)
-                Text("Attachments (\(attachments.count))")
+                Text("\(lang.s("attachments")) (\(attachments.count))")
                     .font(SpentyFonts.subheadline)
                     .foregroundColor(.spentyTextPrimary)
                 Spacer()
@@ -513,7 +514,7 @@ struct TransactionDetailView: View {
     private var supportingDocumentCard: some View {
         VStack(spacing: 12) {
             HStack {
-                Text("Receipt")
+                Text(lang.s("receipt"))
                     .font(SpentyFonts.headline)
                     .foregroundColor(.spentyTextPrimary)
                 Spacer()
@@ -526,7 +527,7 @@ struct TransactionDetailView: View {
                     HStack(spacing: 10) {
                         Image(systemName: "doc.text.image")
                             .font(SpentyFonts.body)
-                        Text("View Receipt")
+                        Text(lang.s("view_receipt"))
                             .font(SpentyFonts.subheadline)
                     }
                     .foregroundColor(.spentyPrimary)
@@ -540,7 +541,7 @@ struct TransactionDetailView: View {
                     Image(systemName: "doc.text.image")
                         .font(SpentyFonts.footnote)
                         .foregroundColor(.spentyTextSecondary)
-                    Text("No receipt attached")
+                    Text(lang.s("no_receipt"))
                         .font(SpentyFonts.footnote)
                         .foregroundColor(.spentyTextSecondary)
                 }
@@ -561,7 +562,7 @@ struct TransactionDetailView: View {
                         .font(.system(size: 48))
                         .foregroundColor(.spentyPrimary)
 
-                    Text("Receipt")
+                    Text(lang.s("receipt"))
                         .font(SpentyFonts.title3)
                         .foregroundColor(.spentyTextPrimary)
 
@@ -572,18 +573,18 @@ struct TransactionDetailView: View {
                             .textSelection(.enabled)
                     }
 
-                    Text("Full receipt preview will be available in a future update.")
+                    Text(lang.s("receipt_preview_future"))
                         .font(SpentyFonts.subheadline)
                         .foregroundColor(.spentyTextSecondary)
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 32)
                 }
             }
-            .navigationTitle("Receipt")
+            .navigationTitle(lang.s("receipt"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") {
+                    Button(lang.s("done")) {
                         showReceiptSheet = false
                     }
                     .font(SpentyFonts.headline)
@@ -602,7 +603,7 @@ struct TransactionDetailView: View {
             } label: {
                 HStack(spacing: 8) {
                     Image(systemName: "pencil")
-                    Text("Edit Transaction")
+                    Text(lang.s("edit_transaction"))
                 }
                 .primaryButtonStyle()
             }
@@ -615,7 +616,7 @@ struct TransactionDetailView: View {
                     } label: {
                         HStack(spacing: 6) {
                             Image(systemName: "checkmark.circle")
-                            Text("Approve")
+                            Text(lang.s("approve"))
                         }
                         .primaryButtonStyle()
                     }
@@ -626,7 +627,7 @@ struct TransactionDetailView: View {
                     } label: {
                         HStack(spacing: 6) {
                             Image(systemName: "xmark.circle")
-                            Text("Reject")
+                            Text(lang.s("reject"))
                         }
                         .destructiveButtonStyle()
                     }
@@ -639,7 +640,7 @@ struct TransactionDetailView: View {
             } label: {
                 HStack(spacing: 8) {
                     Image(systemName: "trash")
-                    Text("Delete Transaction")
+                    Text(lang.s("delete_transaction"))
                 }
                 .destructiveButtonStyle()
             }

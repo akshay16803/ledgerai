@@ -4,6 +4,8 @@ struct PurchaseListView: View {
 
     // MARK: - State
 
+
+    @Environment(LocalizationManager.self) var lang
     @State private var viewModel = PurchasesViewModel()
     @State private var showDeleteConfirm = false
     @State private var billToDelete: Bill?
@@ -25,8 +27,8 @@ struct PurchaseListView: View {
                 }
             }
         }
-        .navigationTitle("Purchases")
-        .searchable(text: $viewModel.searchText, prompt: "Search bills...")
+        .navigationTitle(lang.s("purchases"))
+        .searchable(text: $viewModel.searchText, prompt: lang.s("search_bills"))
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 HStack(spacing: 12) {
@@ -70,7 +72,7 @@ struct PurchaseListView: View {
             get: { viewModel.errorMessage != nil },
             set: { if !$0 { viewModel.errorMessage = nil } }
         )) {
-            Button("OK") { viewModel.errorMessage = nil }
+            Button(lang.s("ok")) { viewModel.errorMessage = nil }
         } message: {
             Text(viewModel.errorMessage ?? "")
         }
@@ -83,7 +85,7 @@ struct PurchaseListView: View {
                 billToDelete = nil
             }
         } message: {
-            Text("Are you sure you want to delete this bill? This cannot be undone.")
+            Text(lang.s("delete_bill_confirm"))
         }
         .task {
             await viewModel.loadAll()
@@ -199,13 +201,13 @@ struct PurchaseListView: View {
                             billToDelete = bill
                             showDeleteConfirm = true
                         } label: {
-                            Label("Delete", systemImage: "trash")
+                            Label(lang.s("delete"), systemImage: "trash")
                         }
 
                         Button {
                             viewModel.startEdit(bill)
                         } label: {
-                            Label("Edit", systemImage: "pencil")
+                            Label(lang.s("edit"), systemImage: "pencil")
                         }
                         .tint(Color.spentyInfo)
                     }
@@ -310,7 +312,7 @@ struct PurchaseListView: View {
                 .listRowBackground(Color.spentyCardBg)
             }
         } header: {
-            Text("Creditors")
+            Text(lang.s("creditors"))
         }
     }
 
@@ -340,7 +342,7 @@ struct PurchaseListView: View {
                 .listRowBackground(Color.spentyCardBg)
             }
         } header: {
-            Text("Aging Analysis")
+            Text(lang.s("aging_analysis"))
         }
     }
 
@@ -354,7 +356,7 @@ struct PurchaseListView: View {
                 .frame(width: 64, height: 64)
                 .foregroundStyle(Color.spentyPrimary.opacity(0.4))
 
-            Text("No Bills Yet")
+            Text(lang.s("no_bills"))
                 .font(SpentyFonts.title3)
                 .foregroundStyle(Color.spentyTextPrimary)
 

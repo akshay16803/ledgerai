@@ -2,6 +2,8 @@ import SwiftUI
 
 struct RecordsView: View {
 
+
+    @Environment(LocalizationManager.self) var lang
     @State private var viewModel = RecordsViewModel()
     @State private var showDeleteConfirm = false
     @State private var deleteTargetId: String?
@@ -39,7 +41,7 @@ struct RecordsView: View {
                 }
             }
         }
-        .navigationTitle("Records")
+        .navigationTitle(lang.s("records"))
         .navigationBarTitleDisplayMode(.large)
         .toolbar { toolbarContent }
         .navigationDestination(for: String.self) { recordId in
@@ -62,7 +64,7 @@ struct RecordsView: View {
                 }
             }
         } message: {
-            Text("This action cannot be undone.")
+            Text(lang.s("cannot_undo"))
         }
         .confirmationDialog(
             "Delete Receipt",
@@ -75,7 +77,7 @@ struct RecordsView: View {
                 }
             }
         } message: {
-            Text("This receipt will be permanently removed.")
+            Text(lang.s("delete_receipt"))
         }
         .task {
             await viewModel.loadRecords()
@@ -215,7 +217,7 @@ struct RecordsView: View {
                     Image(systemName: "arrow.down.doc.fill")
                         .font(.system(size: 12))
                 }
-                Text("ZIP")
+                Text(lang.s("zip"))
                     .font(SpentyFonts.footnote)
             }
             .foregroundColor(.spentyPrimary)
@@ -330,7 +332,7 @@ struct RecordsView: View {
             } else if viewModel.records.isEmpty {
                 EmptyStateView(
                     icon: "envelope.open",
-                    title: "No Email Records",
+                    title: lang.s("no_email_records"),
                     subtitle: "Synced emails with financial data will appear here."
                 )
             } else {
@@ -346,7 +348,7 @@ struct RecordsView: View {
                                 deleteTargetId = record.id
                                 showDeleteConfirm = true
                             } label: {
-                                Label("Delete", systemImage: "trash")
+                                Label(lang.s("delete"), systemImage: "trash")
                             }
                         }
                         .onAppear {
@@ -459,9 +461,9 @@ struct RecordsView: View {
             } else if viewModel.receipts.isEmpty {
                 EmptyStateView(
                     icon: "doc.text.viewfinder",
-                    title: "No Receipts",
+                    title: lang.s("no_receipts"),
                     subtitle: "Upload receipts from camera or photo library to parse and link them.",
-                    buttonTitle: "Upload Receipt"
+                    buttonTitle: lang.s("upload_receipt")
                 ) {
                     showUploadSheet = true
                 }
@@ -476,7 +478,7 @@ struct RecordsView: View {
                                     deleteReceiptId = receipt.id
                                     showDeleteReceiptConfirm = true
                                 } label: {
-                                    Label("Delete", systemImage: "trash")
+                                    Label(lang.s("delete"), systemImage: "trash")
                                 }
                             }
                             .swipeActions(edge: .leading) {
@@ -547,7 +549,7 @@ struct RecordsView: View {
                     HStack(spacing: 4) {
                         Image(systemName: "link")
                             .font(.system(size: 10))
-                        Text("Linked")
+                        Text(lang.s("linked"))
                             .font(SpentyFonts.caption2)
                     }
                     .foregroundColor(.spentySuccess)

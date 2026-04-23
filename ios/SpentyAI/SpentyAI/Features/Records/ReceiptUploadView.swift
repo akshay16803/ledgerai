@@ -3,6 +3,8 @@ import PhotosUI
 
 struct ReceiptUploadView: View {
 
+
+    @Environment(LocalizationManager.self) var lang
     @Bindable var viewModel: RecordsViewModel
     @Binding var isPresented: Bool
 
@@ -45,11 +47,11 @@ struct ReceiptUploadView: View {
                     .padding(16)
                 }
             }
-            .navigationTitle("Upload Receipt")
+            .navigationTitle(lang.s("upload_receipt"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { isPresented = false }
+                    Button(lang.s("cancel")) { isPresented = false }
                         .foregroundColor(.spentyTextSecondary)
                 }
             }
@@ -73,11 +75,11 @@ struct ReceiptUploadView: View {
                             .font(.system(size: 48))
                             .foregroundColor(.spentyPrimary)
 
-                        Text("Select Receipt Image")
+                        Text(lang.s("select_receipt"))
                             .font(SpentyFonts.headline)
                             .foregroundColor(.spentyTextPrimary)
 
-                        Text("Choose from your photo library")
+                        Text(lang.s("choose_library"))
                             .font(SpentyFonts.subheadline)
                             .foregroundColor(.spentyTextSecondary)
                     }
@@ -118,7 +120,7 @@ struct ReceiptUploadView: View {
                     selection: $selectedPhotoItem,
                     matching: .images
                 ) {
-                    Text("Change")
+                    Text(lang.s("change"))
                         .font(SpentyFonts.footnote)
                         .fontWeight(.medium)
                         .foregroundColor(.spentyPrimary)
@@ -135,7 +137,7 @@ struct ReceiptUploadView: View {
             HStack {
                 Image(systemName: "sparkles")
                     .foregroundColor(.spentyPrimary)
-                Text("AI Parsed Data")
+                Text(lang.s("ai_parsed_data"))
                     .font(SpentyFonts.headline)
                     .foregroundColor(.spentyTextPrimary)
             }
@@ -160,7 +162,7 @@ struct ReceiptUploadView: View {
 
                     if let items = data.items, !items.isEmpty {
                         Divider()
-                        Text("Items")
+                        Text(lang.s("items"))
                             .font(SpentyFonts.footnote)
                             .fontWeight(.medium)
                             .foregroundColor(.spentyTextSecondary)
@@ -211,12 +213,12 @@ struct ReceiptUploadView: View {
             HStack {
                 Image(systemName: "link")
                     .foregroundColor(.spentyPrimary)
-                Text("Link to Transaction")
+                Text(lang.s("link_transaction"))
                     .font(SpentyFonts.headline)
                     .foregroundColor(.spentyTextPrimary)
             }
 
-            TextField("Transaction ID", text: $linkedTransactionId)
+            TextField(lang.s("transaction_id"), text: $linkedTransactionId)
                 .inputStyle()
 
             if !linkedTransactionId.isEmpty {
@@ -230,7 +232,7 @@ struct ReceiptUploadView: View {
                         isPresented = false
                     }
                 } label: {
-                    Text("Link Transaction")
+                    Text(lang.s("link_btn"))
                         .secondaryButtonStyle()
                 }
             }
@@ -263,7 +265,7 @@ struct ReceiptUploadView: View {
                 Button {
                     isPresented = false
                 } label: {
-                    Text("Done")
+                    Text(lang.s("done"))
                         .primaryButtonStyle()
                 }
             }

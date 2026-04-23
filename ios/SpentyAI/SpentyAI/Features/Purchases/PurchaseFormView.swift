@@ -4,6 +4,8 @@ struct PurchaseFormView: View {
 
     // MARK: - State
 
+
+    @Environment(LocalizationManager.self) var lang
     @Bindable var viewModel: PurchasesViewModel
     @Environment(\.dismiss) private var dismiss
 
@@ -60,14 +62,14 @@ struct PurchaseFormView: View {
                 }
                 .scrollContentBackground(.hidden)
             }
-            .navigationTitle(isEditing ? "Edit Bill" : "New Bill")
+            .navigationTitle(isEditing ? lang.s("edit_bill") : lang.s("new_bill"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+                    Button(lang.s("cancel")) { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
+                    Button(lang.s("save")) {
                         Task { await save() }
                     }
                     .fontWeight(.semibold)
@@ -93,7 +95,7 @@ struct PurchaseFormView: View {
     private var billDetailsSection: some View {
         Section {
             HStack {
-                Text("Bill Number")
+                Text(lang.s("bill_number"))
                     .foregroundStyle(Color.spentyTextSecondary)
                 Spacer()
                 TextField("Auto", text: $billNumber)
@@ -101,7 +103,7 @@ struct PurchaseFormView: View {
                     .foregroundStyle(Color.spentyTextPrimary)
             }
         } header: {
-            Text("Bill Details")
+            Text(lang.s("bill_details"))
         }
     }
 
@@ -110,11 +112,11 @@ struct PurchaseFormView: View {
     private var vendorSection: some View {
         Section {
             if viewModel.vendors.isEmpty {
-                TextField("Vendor Name *", text: $vendorName)
+                TextField(lang.s("vendor_name") + " *", text: $vendorName)
                     .foregroundStyle(Color.spentyTextPrimary)
             } else {
-                Picker("Vendor", selection: $selectedVendorId) {
-                    Text("Select Vendor").tag(nil as String?)
+                Picker(lang.s("vendor"), selection: $selectedVendorId) {
+                    Text(lang.s("select_vendor")).tag(nil as String?)
                     ForEach(viewModel.vendors) { vendor in
                         Text(vendor.name ?? "Unnamed").tag(vendor.id as String?)
                     }
@@ -131,12 +133,12 @@ struct PurchaseFormView: View {
             }
 
             if showValidation && vendorName.trimmingCharacters(in: .whitespaces).isEmpty {
-                Text("Vendor name is required.")
+                Text(lang.s("vendor_required"))
                     .font(SpentyFonts.caption1)
                     .foregroundStyle(Color.spentyError)
             }
         } header: {
-            Text("Vendor")
+            Text(lang.s("vendor"))
         }
     }
 
@@ -144,13 +146,13 @@ struct PurchaseFormView: View {
 
     private var datesSection: some View {
         Section {
-            DatePicker("Bill Date", selection: $date, displayedComponents: .date)
+            DatePicker(lang.s("date"), selection: $date, displayedComponents: .date)
                 .foregroundStyle(Color.spentyTextPrimary)
 
-            DatePicker("Due Date", selection: $dueDate, displayedComponents: .date)
+            DatePicker(lang.s("date"), selection: $dueDate, displayedComponents: .date)
                 .foregroundStyle(Color.spentyTextPrimary)
         } header: {
-            Text("Dates")
+            Text(lang.s("dates"))
         }
     }
 
@@ -177,18 +179,18 @@ struct PurchaseFormView: View {
             }
 
             if showValidation && !hasValidLineItems {
-                Text("At least one line item with a description is required.")
+                Text(lang.s("at_least_one_item"))
                     .font(SpentyFonts.caption1)
                     .foregroundStyle(Color.spentyError)
             }
         } header: {
-            Text("Line Items")
+            Text(lang.s("line_items"))
         }
     }
 
     private func lineItemRow(item: Binding<PurchaseFormLineItem>) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            TextField("Description", text: item.description)
+            TextField(lang.s("description"), text: item.description)
                 .font(SpentyFonts.subheadline)
 
             TextField("HSN/SAC Code", text: item.hsnSac)
@@ -197,7 +199,7 @@ struct PurchaseFormView: View {
 
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Qty")
+                    Text(lang.s("qty"))
                         .font(SpentyFonts.caption2)
                         .foregroundStyle(Color.spentyTextSecondary)
                     TextField("1", value: item.quantity, format: .number)
@@ -217,7 +219,7 @@ struct PurchaseFormView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Tax %")
+                    Text(lang.s("tax_percent"))
                         .font(SpentyFonts.caption2)
                         .foregroundStyle(Color.spentyTextSecondary)
                     TextField("0", value: item.taxRate, format: .number)
@@ -229,7 +231,7 @@ struct PurchaseFormView: View {
                 Spacer()
 
                 VStack(alignment: .trailing, spacing: 2) {
-                    Text("Amount")
+                    Text(lang.s("amount"))
                         .font(SpentyFonts.caption2)
                         .foregroundStyle(Color.spentyTextSecondary)
                     Text(formatCurrency(item.wrappedValue.computedAmount))
@@ -249,7 +251,7 @@ struct PurchaseFormView: View {
     private var totalsSection: some View {
         Section {
             HStack {
-                Text("Subtotal")
+                Text(lang.s("subtotal"))
                     .foregroundStyle(Color.spentyTextSecondary)
                 Spacer()
                 Text(formatCurrency(subtotal))
@@ -258,7 +260,7 @@ struct PurchaseFormView: View {
             }
 
             HStack {
-                Text("Tax")
+                Text(lang.s("tax"))
                     .foregroundStyle(Color.spentyTextSecondary)
                 Spacer()
                 Text(formatCurrency(taxAmount))
@@ -267,7 +269,7 @@ struct PurchaseFormView: View {
             }
 
             HStack {
-                Text("Grand Total")
+                Text(lang.s("grand_total"))
                     .font(SpentyFonts.headline)
                     .foregroundStyle(Color.spentyTextPrimary)
                 Spacer()
@@ -276,7 +278,7 @@ struct PurchaseFormView: View {
                     .foregroundStyle(Color.spentyPrimary)
             }
         } header: {
-            Text("Totals")
+            Text(lang.s("totals"))
         }
     }
 
@@ -288,7 +290,7 @@ struct PurchaseFormView: View {
                 .lineLimit(2...5)
                 .foregroundStyle(Color.spentyTextPrimary)
         } header: {
-            Text("Notes")
+            Text(lang.s("notes"))
         }
     }
 

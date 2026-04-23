@@ -2,6 +2,7 @@ import SwiftUI
 
 struct TransactionListView: View {
 
+    @Environment(LocalizationManager.self) var lang
     @State private var viewModel = TransactionsViewModel()
     @State private var showDateFilter = false
     @State private var showDeleteConfirm = false
@@ -30,7 +31,7 @@ struct TransactionListView: View {
                     contentArea
                 }
             }
-            .navigationTitle("Transactions")
+            .navigationTitle(lang.s("transactions"))
             .navigationBarTitleDisplayMode(.large)
             .toolbar { toolbarContent }
             .sheet(isPresented: $viewModel.showForm) {
@@ -48,27 +49,27 @@ struct TransactionListView: View {
                 )
             }
             .confirmationDialog(
-                "Delete Transaction",
+                lang.s("delete_transaction"),
                 isPresented: $showDeleteConfirm,
                 titleVisibility: .visible
             ) {
-                Button("Delete", role: .destructive) {
+                Button(lang.s("delete"), role: .destructive) {
                     if let id = deleteTargetId {
                         Task { await viewModel.deleteTransaction(id: id) }
                     }
                 }
             } message: {
-                Text("This action cannot be undone.")
+                Text(lang.s("cannot_undo"))
             }
             .task { await viewModel.loadInitial() }
             .alert(
-                "Error",
+                lang.s("error"),
                 isPresented: Binding(
                     get: { viewModel.errorMessage != nil },
                     set: { if !$0 { viewModel.errorMessage = nil } }
                 )
             ) {
-                Button("OK") { viewModel.errorMessage = nil }
+                Button(lang.s("ok")) { viewModel.errorMessage = nil }
             } message: {
                 Text(viewModel.errorMessage ?? "")
             }
@@ -80,7 +81,7 @@ struct TransactionListView: View {
     private var viewModeToggle: some View {
         Picker("View", selection: $viewModel.viewMode) {
             ForEach(TransactionViewMode.allCases, id: \.self) { mode in
-                Text(mode.rawValue).tag(mode)
+                Text(mode == .list ? lang.s("list") : lang.s("ledger")).tag(mode)
             }
         }
         .pickerStyle(.segmented)
@@ -92,7 +93,7 @@ struct TransactionListView: View {
 
     private var searchSection: some View {
         SearchBar(
-            placeholder: "Search transactions...",
+            placeholder: lang.s("search_transactions"),
             text: $viewModel.searchQuery,
             onCommit: {
                 Task { await viewModel.performSearch() }
@@ -131,7 +132,7 @@ struct TransactionListView: View {
 
     private var accountPicker: some View {
         Menu {
-            Button("All Accounts") {
+            Button(lang.s("all_accounts")) {
                 viewModel.filterAccountId = ""
                 Task { await viewModel.refresh() }
             }
@@ -163,7 +164,7 @@ struct TransactionListView: View {
     }
 
     private var selectedAccountLabel: String {
-        if viewModel.filterAccountId.isEmpty { return "Account" }
+        if viewModel.filterAccountId.isEmpty { return lang.s("account_label") }
         return viewModel.accountName(for: viewModel.filterAccountId)
     }
 
@@ -207,22 +208,22 @@ struct TransactionListView: View {
     }
 
     private var dateRangeLabel: String {
-        if hasDateFilter { return "Date Set" }
-        return "Date Range"
+        if hasDateFilter { return lang.s("date_set") }
+        return lang.s("date_range")
     }
 
     private var dateFilterPopover: some View {
         VStack(spacing: 16) {
-            Text("Date Range")
+            Text(lang.s("date_range"))
                 .font(SpentyFonts.headline)
                 .foregroundColor(.spentyTextPrimary)
 
             VStack(alignment: .leading, spacing: 6) {
-                Text("From")
+                Text(lang.s("from"))
                     .font(SpentyFonts.caption1)
                     .foregroundColor(.spentyTextSecondary)
                 DatePicker(
-                    "From",
+                    lang.s("from"),
                     selection: Binding(
                         get: { viewModel.filterDateFrom ?? Date() },
                         set: { viewModel.filterDateFrom = $0 }
@@ -233,11 +234,11 @@ struct TransactionListView: View {
             }
 
             VStack(alignment: .leading, spacing: 6) {
-                Text("To")
+                Text(lang.s("to"))
                     .font(SpentyFonts.caption1)
                     .foregroundColor(.spentyTextSecondary)
                 DatePicker(
-                    "To",
+                    lang.s("to"),
                     selection: Binding(
                         get: { viewModel.filterDateTo ?? Date() },
                         set: { viewModel.filterDateTo = $0 }
@@ -247,7 +248,7 @@ struct TransactionListView: View {
                 .labelsHidden()
             }
 
-            Button("Apply") {
+            Button(lang.s("apply")) {
                 showDateFilter = false
                 Task { await viewModel.refresh() }
             }
@@ -270,7 +271,7 @@ struct TransactionListView: View {
                 Spacer()
 
                 Button { Task { await viewModel.bulkDelete() } } label: {
-                    Label("Delete", systemImage: "trash")
+                    Label(lang.s("delete"), systemImage: "trash")
                         .font(SpentyFonts.footnote)
                 }
                 .tint(Color.spentyError)
@@ -291,11 +292,11 @@ struct TransactionListView: View {
             } else if viewModel.transactions.isEmpty {
                 EmptyStateView(
                     icon: "arrow.left.arrow.right",
-                    title: "No Approved Transactions",
+                    title: lang.s("no_approved_transactions"),
                     subtitle: viewModel.pendingCount > 0
-                        ? "You have \(viewModel.pendingCount) transaction\(viewModel.pendingCount == 1 ? "" : "s") pending review."
-                        : "Add your first transaction to start tracking.",
-                    buttonTitle: "Add Transaction"
+                        ? String(format: lang.s("pending_review_count"), viewModel.pendingCount)
+                        : lang.s("add_first_transaction"),
+                    buttonTitle: lang.s("add_transaction")
                 ) {
                     viewModel.beginCreate()
                 }
@@ -323,13 +324,13 @@ struct TransactionListView: View {
                             deleteTargetId = txn.id
                             showDeleteConfirm = true
                         } label: {
-                            Label("Delete", systemImage: "trash")
+                            Label(lang.s("delete"), systemImage: "trash")
                         }
 
                         Button {
                             viewModel.beginEdit(txn)
                         } label: {
-                            Label("Edit", systemImage: "pencil")
+                            Label(lang.s("edit"), systemImage: "pencil")
                         }
                         .tint(Color.spentyInfo)
                     }
@@ -380,7 +381,7 @@ struct TransactionListView: View {
             typeIcon(txn.transactionType)
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(txn.description ?? "No description")
+                Text(txn.description ?? lang.s("no_description"))
                     .font(SpentyFonts.subheadline)
                     .fontWeight(.medium)
                     .foregroundColor(.spentyTextPrimary)
@@ -464,9 +465,9 @@ struct TransactionListView: View {
         ToolbarItem(placement: .topBarLeading) {
             if viewModel.isSelecting {
                 HStack(spacing: 12) {
-                    Button("Select All") { viewModel.selectAll() }
+                    Button(lang.s("select_all")) { viewModel.selectAll() }
                         .font(SpentyFonts.footnote)
-                    Button("Cancel") { viewModel.clearSelection() }
+                    Button(lang.s("cancel")) { viewModel.clearSelection() }
                         .font(SpentyFonts.footnote)
                         .foregroundColor(.spentyError)
                 }

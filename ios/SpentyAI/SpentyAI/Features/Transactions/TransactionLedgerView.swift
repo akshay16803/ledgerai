@@ -2,6 +2,7 @@ import SwiftUI
 
 struct TransactionLedgerView: View {
 
+    @Environment(LocalizationManager.self) var lang
     var viewModel: TransactionsViewModel
 
     private static let ledgerDateFormatter: DateFormatter = {
@@ -90,7 +91,7 @@ struct TransactionLedgerView: View {
         HStack(spacing: 6) {
             Image(systemName: "info.circle")
                 .font(.system(size: 13))
-            Text("Select an account to see running balance")
+            Text(lang.s("select_account_ledger"))
                 .font(SpentyFonts.caption1)
         }
         .foregroundColor(.spentyInfo)
@@ -104,16 +105,16 @@ struct TransactionLedgerView: View {
 
     private var headerRow: some View {
         HStack(spacing: 0) {
-            Text("Date")
+            Text(lang.s("date"))
                 .frame(width: 80, alignment: .leading)
-            Text("Description")
+            Text(lang.s("description"))
                 .frame(maxWidth: .infinity, alignment: .leading)
-            Text("Debit")
+            Text(lang.s("debit"))
                 .frame(width: 80, alignment: .trailing)
-            Text("Credit")
+            Text(lang.s("credit"))
                 .frame(width: 80, alignment: .trailing)
             if isFilteredByAccount {
-                Text("Balance")
+                Text(lang.s("balance"))
                     .frame(width: 80, alignment: .trailing)
             }
         }

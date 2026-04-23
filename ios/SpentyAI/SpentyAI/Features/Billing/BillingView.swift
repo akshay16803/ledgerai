@@ -3,6 +3,8 @@ import StoreKit
 
 struct BillingView: View {
 
+
+    @Environment(LocalizationManager.self) var lang
     @State private var viewModel = BillingViewModel()
 
     // MARK: - Brand Colors
@@ -31,24 +33,24 @@ struct BillingView: View {
             .padding()
         }
         .background(brandBg.ignoresSafeArea())
-        .navigationTitle("Subscription")
+        .navigationTitle(lang.s("subscription"))
         .navigationBarTitleDisplayMode(.large)
         .task {
             await viewModel.loadAll()
             await viewModel.checkEntitlements()
         }
         .alert("Error", isPresented: $viewModel.showError) {
-            Button("OK") { viewModel.showError = false }
+            Button(lang.s("ok")) { viewModel.showError = false }
         } message: {
             Text(viewModel.errorMessage)
         }
-        .alert("Cancel Subscription", isPresented: $viewModel.showCancelConfirmation) {
+        .alert(lang.s("cancel_subscription"), isPresented: $viewModel.showCancelConfirmation) {
             Button("Keep Plan", role: .cancel) {}
             Button("Cancel Plan", role: .destructive) {
                 Task { await viewModel.cancelSubscription() }
             }
         } message: {
-            Text("Are you sure you want to cancel your subscription? You'll retain access until the end of your current billing period.")
+            Text(lang.s("cancel_sub_confirm"))
         }
         .overlay {
             if viewModel.isLoading {
@@ -71,7 +73,7 @@ struct BillingView: View {
                         .font(.title2)
                         .foregroundStyle(brandPrimary)
 
-                    Text("Active Subscription")
+                    Text(lang.s("active_subscription"))
                         .font(.headline)
                         .foregroundStyle(brandPrimary)
                 }
@@ -104,7 +106,7 @@ struct BillingView: View {
 
     private var planCardsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Choose a Plan")
+            Text(lang.s("choose_plan"))
                 .font(.title3.weight(.semibold))
 
             ForEach(Self.fallbackPlans, id: \.productId) { plan in
@@ -176,7 +178,7 @@ struct BillingView: View {
                             ProgressView()
                                 .tint(.white)
                         } else {
-                            Text("Subscribe")
+                            Text(lang.s("subscribe"))
                                 .font(.subheadline.weight(.semibold))
                         }
                     }
@@ -202,11 +204,11 @@ struct BillingView: View {
 
     private var promoCodeSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Promo Code")
+            Text(lang.s("promo_code"))
                 .font(.title3.weight(.semibold))
 
             HStack(spacing: 8) {
-                TextField("Enter promo code", text: $viewModel.promoCode)
+                TextField(lang.s("promo_code"), text: $viewModel.promoCode)
                     .textFieldStyle(.roundedBorder)
                     .textInputAutocapitalization(.characters)
                     .autocorrectionDisabled()
@@ -217,7 +219,7 @@ struct BillingView: View {
                     if viewModel.isValidatingPromo {
                         ProgressView()
                     } else {
-                        Text("Validate")
+                        Text(lang.s("validate"))
                     }
                 }
                 .buttonStyle(.bordered)
@@ -243,7 +245,7 @@ struct BillingView: View {
                     if viewModel.isActivatingPromo {
                         ProgressView().tint(.white)
                     } else {
-                        Text("Activate Promo Code")
+                        Text(lang.s("activate_promo"))
                             .font(.subheadline.weight(.semibold))
                     }
                 }
@@ -265,7 +267,7 @@ struct BillingView: View {
     private var paymentHistorySection: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("Payment History")
+                Text(lang.s("payment_history"))
                     .font(.title3.weight(.semibold))
 
                 Spacer()
@@ -273,7 +275,7 @@ struct BillingView: View {
                 NavigationLink {
                     PaymentHistoryView(orders: viewModel.paymentHistory)
                 } label: {
-                    Text("See All")
+                    Text(lang.s("see_all"))
                         .font(.subheadline)
                         .foregroundStyle(brandPrimary)
                 }
@@ -350,7 +352,7 @@ struct BillingView: View {
         } label: {
             HStack {
                 Image(systemName: "xmark.circle")
-                Text("Cancel Subscription")
+                Text(lang.s("cancel_subscription"))
             }
             .font(.subheadline)
             .foregroundStyle(brandError)

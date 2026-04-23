@@ -2,6 +2,7 @@ import SwiftUI
 
 struct AccountFormView: View {
 
+    @Environment(LocalizationManager.self) var lang
     @Bindable var viewModel: AccountsViewModel
     let account: Account?
 
@@ -59,15 +60,15 @@ struct AccountFormView: View {
                 }
                 .scrollContentBackground(.hidden)
             }
-            .navigationTitle(isEditing ? "Edit Account" : "New Account")
+            .navigationTitle(isEditing ? lang.s("edit_account") : lang.s("new_account"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("Cancel") { dismiss() }
+                    Button(lang.s("cancel")) { dismiss() }
                         .foregroundColor(.spentyTextSecondary)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button(isEditing ? "Save" : "Add") {
+                    Button(isEditing ? lang.s("save") : lang.s("add")) {
                         Task { await save() }
                     }
                     .fontWeight(.semibold)
@@ -79,7 +80,7 @@ struct AccountFormView: View {
             .overlay {
                 if viewModel.isSaving {
                     Color.black.opacity(0.15).ignoresSafeArea()
-                    ProgressView("Saving...")
+                    ProgressView(lang.s("saving"))
                         .padding(24)
                         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
                 }
@@ -91,38 +92,38 @@ struct AccountFormView: View {
 
     private var basicInfoSection: some View {
         Section {
-            TextField("Account Name", text: $name)
+            TextField(lang.s("account_name_placeholder"), text: $name)
                 .font(SpentyFonts.body)
 
-            Picker("Account Type", selection: $accountType) {
+            Picker(lang.s("account_type"), selection: $accountType) {
                 ForEach(AccountsViewModel.accountTypes, id: \.self) { type in
                     Text(type.capitalized).tag(type)
                 }
             }
 
             if filteredSubTypes.isEmpty {
-                TextField("Sub-Type", text: $subType)
+                TextField(lang.s("sub_type"), text: $subType)
                     .font(SpentyFonts.body)
             } else {
-                Picker("Sub-Type", selection: $subType) {
-                    Text("None").tag("")
+                Picker(lang.s("sub_type"), selection: $subType) {
+                    Text(lang.s("none_option")).tag("")
                     ForEach(filteredSubTypes) { st in
                         Text(st.name ?? "").tag(st.name ?? "")
                     }
                 }
             }
 
-            TextField("Account Number", text: $accountNumber)
+            TextField(lang.s("account_number"), text: $accountNumber)
                 .font(SpentyFonts.body)
                 .textContentType(.creditCardNumber)
 
-            Picker("Currency", selection: $currency) {
+            Picker(lang.s("currency"), selection: $currency) {
                 ForEach(["INR", "USD", "EUR", "GBP", "AED", "SGD", "AUD", "CAD", "JPY"], id: \.self) { code in
                     Text(code).tag(code)
                 }
             }
         } header: {
-            Text("Basic Information")
+            Text(lang.s("basic_info"))
                 .font(SpentyFonts.caption1)
                 .foregroundColor(.spentyTextSecondary)
         }
@@ -131,7 +132,7 @@ struct AccountFormView: View {
     private var balanceSection: some View {
         Section {
             HStack {
-                Text("Opening Balance")
+                Text(lang.s("opening_balance"))
                     .font(SpentyFonts.body)
                 Spacer()
                 TextField("0.00", text: $openingBalance)
@@ -142,13 +143,13 @@ struct AccountFormView: View {
             }
 
             DatePicker(
-                "Balance As-of Date",
+                lang.s("as_of_date"),
                 selection: $balanceAsOfDate,
                 displayedComponents: .date
             )
             .font(SpentyFonts.body)
         } header: {
-            Text("Balance")
+            Text(lang.s("balance"))
                 .font(SpentyFonts.caption1)
                 .foregroundColor(.spentyTextSecondary)
         }
@@ -156,16 +157,16 @@ struct AccountFormView: View {
 
     private var loanSection: some View {
         Section {
-            formNumberField("Interest Rate (%)", text: $loanInterestRate)
-            formNumberField("Tenure (Months)", text: $loanTenureMonths, isDecimal: false)
-            formNumberField("EMI Amount", text: $loanEmiAmount)
-            formNumberField("EMI Day (1-31)", text: $loanEmiDay, isDecimal: false)
-            formNumberField("Sanctioned Amount", text: $loanSanctionedAmount)
+            formNumberField(lang.s("interest_rate_pct"), text: $loanInterestRate)
+            formNumberField(lang.s("tenure_months"), text: $loanTenureMonths, isDecimal: false)
+            formNumberField(lang.s("emi_amount"), text: $loanEmiAmount)
+            formNumberField(lang.s("emi_day"), text: $loanEmiDay, isDecimal: false)
+            formNumberField(lang.s("sanctioned_amount"), text: $loanSanctionedAmount)
         } header: {
             HStack(spacing: 6) {
                 Image(systemName: "percent")
                     .font(.system(size: 11))
-                Text("Loan Details")
+                Text(lang.s("loan_details"))
             }
             .font(SpentyFonts.caption1)
             .foregroundColor(.spentyError)
@@ -174,13 +175,13 @@ struct AccountFormView: View {
 
     private var dematSection: some View {
         Section {
-            TextField("Broker Name", text: $brokerName)
+            TextField(lang.s("broker_name"), text: $brokerName)
                 .font(SpentyFonts.body)
         } header: {
             HStack(spacing: 6) {
                 Image(systemName: "chart.line.uptrend.xyaxis")
                     .font(.system(size: 11))
-                Text("Demat Details")
+                Text(lang.s("demat_details"))
             }
             .font(SpentyFonts.caption1)
             .foregroundColor(.spentyWarning)
@@ -189,11 +190,11 @@ struct AccountFormView: View {
 
     private var notesSection: some View {
         Section {
-            TextField("Description / Notes", text: $descriptionText, axis: .vertical)
+            TextField(lang.s("description_notes"), text: $descriptionText, axis: .vertical)
                 .lineLimit(3...6)
                 .font(SpentyFonts.body)
         } header: {
-            Text("Notes")
+            Text(lang.s("notes"))
                 .font(SpentyFonts.caption1)
                 .foregroundColor(.spentyTextSecondary)
         }

@@ -284,13 +284,13 @@ final class TransactionsViewModel {
     // MARK: - Helpers
 
     func accountName(for id: String?) -> String {
-        guard let id else { return "Unknown" }
-        return accounts.first(where: { $0.id == id })?.name ?? "Unknown"
+        guard let id else { return L.s("unknown") }
+        return accounts.first(where: { $0.id == id })?.name ?? L.s("unknown")
     }
 
     func categoryName(for id: String?) -> String {
-        guard let id else { return "Uncategorized" }
-        return categories.first(where: { $0.id == id })?.name ?? "Uncategorized"
+        guard let id else { return L.s("uncategorized") }
+        return categories.first(where: { $0.id == id })?.name ?? L.s("uncategorized")
     }
 
     func subcategoryName(for categoryId: String?, subcategoryId: String?) -> String? {

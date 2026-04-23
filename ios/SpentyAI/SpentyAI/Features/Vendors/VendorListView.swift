@@ -4,6 +4,8 @@ struct VendorListView: View {
 
     // MARK: - State
 
+
+    @Environment(LocalizationManager.self) var lang
     @State private var viewModel = VendorsViewModel()
 
     // MARK: - Body
@@ -22,8 +24,8 @@ struct VendorListView: View {
                 }
             }
         }
-        .navigationTitle("Vendors")
-        .searchable(text: $viewModel.searchText, prompt: "Search vendors")
+        .navigationTitle(lang.s("vendors"))
+        .searchable(text: $viewModel.searchText, prompt: lang.s("search_vendors"))
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {
@@ -39,7 +41,7 @@ struct VendorListView: View {
             VendorFormView(viewModel: viewModel)
         }
         .alert("Error", isPresented: $viewModel.showError) {
-            Button("OK") { viewModel.dismissError() }
+            Button(lang.s("ok")) { viewModel.dismissError() }
         } message: {
             Text(viewModel.errorMessage)
         }
@@ -53,7 +55,7 @@ struct VendorListView: View {
     private var emptyState: some View {
         EmptyStateView(
             icon: "building.2",
-            title: "No Vendors",
+            title: lang.s("no_vendors"),
             subtitle: viewModel.searchText.isEmpty
                 ? "Add your first vendor to get started."
                 : "No vendors matching \"\(viewModel.searchText)\".",

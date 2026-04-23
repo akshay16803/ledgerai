@@ -3,6 +3,7 @@ import Charts
 
 struct ReportsView: View {
 
+    @Environment(LocalizationManager.self) var lang
     @State private var vm = ReportsViewModel()
     @State private var expandedCategoryId: UUID?
     @State private var selectedDrillDown: ReportDrillDown?
@@ -27,7 +28,7 @@ struct ReportsView: View {
                 .padding(.bottom, 32)
             }
             .background(Color.spentyBgPrimary.ignoresSafeArea())
-            .navigationTitle("Reports")
+            .navigationTitle(lang.s("reports"))
             .refreshable {
                 await vm.loadData()
             }
@@ -40,8 +41,8 @@ struct ReportsView: View {
                         .tint(Color.spentyPrimary)
                 }
             }
-            .alert("Error", isPresented: $vm.showError) {
-                Button("OK", role: .cancel) {}
+            .alert(lang.s("error"), isPresented: $vm.showError) {
+                Button(lang.s("ok"), role: .cancel) {}
             } message: {
                 Text(vm.errorMessage)
             }
@@ -109,7 +110,7 @@ struct ReportsView: View {
     private var customDateSection: some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("From")
+                Text(lang.s("from"))
                     .font(SpentyFonts.caption1)
                     .foregroundColor(.spentyTextSecondary)
                 DatePicker("", selection: $vm.startDate, displayedComponents: .date)
@@ -118,7 +119,7 @@ struct ReportsView: View {
             }
 
             VStack(alignment: .leading, spacing: 4) {
-                Text("To")
+                Text(lang.s("to"))
                     .font(SpentyFonts.caption1)
                     .foregroundColor(.spentyTextSecondary)
                 DatePicker("", selection: $vm.endDate, displayedComponents: .date)
@@ -157,7 +158,7 @@ struct ReportsView: View {
                 )
             } label: {
                 StatCard(
-                    label: "Total Income",
+                    label: lang.s("total_income"),
                     value: formatCurrency(vm.totalIncome),
                     icon: "arrow.down.circle.fill",
                     color: .spentySuccess
@@ -173,7 +174,7 @@ struct ReportsView: View {
                 )
             } label: {
                 StatCard(
-                    label: "Total Expense",
+                    label: lang.s("total_expense"),
                     value: formatCurrency(abs(vm.totalExpense)),
                     icon: "arrow.up.circle.fill",
                     color: .spentyError
@@ -189,7 +190,7 @@ struct ReportsView: View {
                 )
             } label: {
                 StatCard(
-                    label: "Net",
+                    label: lang.s("net"),
                     value: formatCurrency(vm.net),
                     icon: "equal.circle.fill",
                     color: vm.net >= 0 ? .spentySuccess : .spentyError
@@ -205,7 +206,7 @@ struct ReportsView: View {
                 )
             } label: {
                 StatCard(
-                    label: "Transactions",
+                    label: lang.s("transactions"),
                     value: "\(vm.transactionCount)",
                     icon: "list.bullet.rectangle.fill",
                     color: .spentyInfo
@@ -260,12 +261,12 @@ struct ReportsView: View {
 
     private var categoryTableSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Category Details")
+            Text(lang.s("category_details"))
                 .font(SpentyFonts.headline)
                 .foregroundColor(.spentyTextPrimary)
 
             if vm.categories.isEmpty {
-                Text("No categories to display")
+                Text(lang.s("no_categories_display"))
                     .font(SpentyFonts.footnote)
                     .foregroundColor(.spentyTextSecondary)
                     .padding(.vertical, 12)
@@ -350,7 +351,7 @@ struct ReportsView: View {
                             Image(systemName: "doc.text.magnifyingglass")
                                 .font(.system(size: 12))
                                 .foregroundColor(.spentyPrimary)
-                            Text("View all transactions")
+                            Text(lang.s("view_all_transactions"))
                                 .font(SpentyFonts.footnote)
                                 .foregroundColor(.spentyPrimary)
                             Spacer()
@@ -461,7 +462,7 @@ struct ReportsView: View {
                     } else {
                         Image(systemName: "tablecells")
                     }
-                    Text("Export CSV")
+                    Text(lang.s("export_csv"))
                 }
                 .secondaryButtonStyle()
             }
@@ -478,7 +479,7 @@ struct ReportsView: View {
                     } else {
                         Image(systemName: "doc.richtext")
                     }
-                    Text("Export PDF")
+                    Text(lang.s("export_pdf"))
                 }
                 .primaryButtonStyle()
             }
@@ -550,6 +551,7 @@ struct ReportDrillDown: Identifiable {
 // MARK: - Transaction Drill-Down View
 
 struct ReportTransactionsView: View {
+    @Environment(LocalizationManager.self) var lang
     let drillDown: ReportDrillDown
     let startDate: Date
     let endDate: Date
@@ -611,7 +613,7 @@ struct ReportTransactionsView: View {
                         Image(systemName: "tray")
                             .font(.system(size: 32))
                             .foregroundColor(.spentyTextSecondary)
-                        Text("No transactions found")
+                        Text(lang.s("no_transactions_found"))
                             .font(SpentyFonts.footnote)
                             .foregroundColor(.spentyTextSecondary)
                     }
@@ -640,7 +642,7 @@ struct ReportTransactionsView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("Close") { dismiss() }
+                    Button(lang.s("close")) { dismiss() }
                         .foregroundColor(.spentyPrimary)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
@@ -719,7 +721,7 @@ struct ReportTransactionsView: View {
             if showDateFilter {
                 HStack(spacing: 12) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("From")
+                        Text(lang.s("from"))
                             .font(SpentyFonts.caption2)
                             .foregroundColor(.spentyTextSecondary)
                         DatePicker("", selection: $filterDateFrom, displayedComponents: .date)
@@ -727,7 +729,7 @@ struct ReportTransactionsView: View {
                             .tint(Color.spentyPrimary)
                     }
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("To")
+                        Text(lang.s("to"))
                             .font(SpentyFonts.caption2)
                             .foregroundColor(.spentyTextSecondary)
                         DatePicker("", selection: $filterDateTo, displayedComponents: .date)
@@ -759,7 +761,7 @@ struct ReportTransactionsView: View {
                     .font(SpentyFonts.footnote.weight(.medium))
                     .foregroundColor(.spentyTextPrimary)
                 let total = transactions.reduce(0.0) { $0 + abs($1.amount ?? 0) }
-                Text("Total: \(formatCurrency(total))")
+                Text("\(lang.s("total")): \(formatCurrency(total))")
                     .font(SpentyFonts.caption1)
                     .foregroundColor(.spentyTextSecondary)
             }
@@ -772,7 +774,7 @@ struct ReportTransactionsView: View {
     private func transactionRow(_ txn: Transaction) -> some View {
         HStack {
             VStack(alignment: .leading, spacing: 4) {
-                Text(txn.description ?? "No description")
+                Text(txn.description ?? lang.s("no_description"))
                     .font(SpentyFonts.subheadline)
                     .foregroundColor(.spentyTextPrimary)
                     .lineLimit(1)

@@ -14,16 +14,18 @@ enum CashFlowDrillDown: Identifiable {
 
     var title: String {
         switch self {
-        case .income: return "Monthly Income Items"
-        case .expense: return "Monthly Expense Items"
-        case .odInterest: return "OD Interest Breakdown"
-        case .emi: return "EMI Schedule"
+        case .income: return L.s("monthly_income_items")
+        case .expense: return L.s("monthly_expense_items")
+        case .odInterest: return L.s("od_interest_breakdown")
+        case .emi: return L.s("emi_schedule")
         }
     }
 }
 
 struct CashFlowView: View {
 
+
+    @Environment(LocalizationManager.self) var lang
     @State private var viewModel = CashFlowViewModel()
     @State private var activeDrillDown: CashFlowDrillDown?
     @State private var showCalendar = false
@@ -37,7 +39,7 @@ struct CashFlowView: View {
             }
         }
         .background(Color.spentyBgPrimary)
-        .navigationTitle("Cash Flow")
+        .navigationTitle(lang.s("cash_flow"))
         .navigationBarTitleDisplayMode(.large)
         .task {
             await viewModel.loadAll()
@@ -111,7 +113,7 @@ struct CashFlowView: View {
         ) {
             Button { activeDrillDown = .income } label: {
                 StatCard(
-                    label: "Monthly Income",
+                    label: lang.s("monthly_income"),
                     value: formatCurrency(viewModel.monthlyIncome),
                     icon: "arrow.down.circle.fill",
                     color: .spentySuccess
@@ -121,7 +123,7 @@ struct CashFlowView: View {
 
             Button { activeDrillDown = .expense } label: {
                 StatCard(
-                    label: "Monthly Expense",
+                    label: lang.s("monthly_expense"),
                     value: formatCurrency(viewModel.monthlyExpenseWithMandates),
                     icon: "arrow.up.circle.fill",
                     color: .spentyAccent1
@@ -131,7 +133,7 @@ struct CashFlowView: View {
 
             Button { activeDrillDown = .odInterest } label: {
                 StatCard(
-                    label: "OD Interest",
+                    label: lang.s("od_interest"),
                     value: formatCurrency(viewModel.monthlyODInterest),
                     icon: "percent",
                     color: .spentyError
@@ -141,7 +143,7 @@ struct CashFlowView: View {
 
             Button { activeDrillDown = .emi } label: {
                 StatCard(
-                    label: "Monthly EMI",
+                    label: lang.s("monthly_emi"),
                     value: formatCurrency(viewModel.monthlyEMI),
                     icon: "creditcard.fill",
                     color: .spentyAccent3
@@ -170,10 +172,10 @@ struct CashFlowView: View {
                     .foregroundColor(.spentyPrimary)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("\(nextMonth) Projection")
+                    Text("\(nextMonth) " + lang.s("projection"))
                         .font(SpentyFonts.headline)
                         .foregroundColor(.spentyTextPrimary)
-                    Text("View day-wise cash flow calendar")
+                    Text(lang.s("view_calendar"))
                         .font(SpentyFonts.caption1)
                         .foregroundColor(.spentyTextSecondary)
                 }
@@ -201,7 +203,7 @@ struct CashFlowView: View {
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundColor(.spentyPrimary)
 
-                Text("Monthly Breakdown")
+                Text(lang.s("monthly_breakdown"))
                     .font(SpentyFonts.headline)
                     .foregroundColor(.spentyTextPrimary)
 
@@ -324,6 +326,8 @@ enum DrillDownDetailItem: Identifiable {
 
 struct CashFlowDrillDownSheet: View {
 
+    @Environment(LocalizationManager.self) var lang
+
     let drillDown: CashFlowDrillDown
     let viewModel: CashFlowViewModel
     @Environment(\.dismiss) private var dismiss
@@ -373,7 +377,7 @@ struct CashFlowDrillDownSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { dismiss() }
+                    Button(lang.s("done")) { dismiss() }
                         .font(SpentyFonts.headline)
                         .foregroundColor(.spentyPrimary)
                 }
@@ -386,7 +390,7 @@ struct CashFlowDrillDownSheet: View {
                             ProgressView()
                                 .progressViewStyle(CircularProgressViewStyle(tint: .spentyPrimary))
                                 .scaleEffect(1.2)
-                            Text("Loading transaction...")
+                            Text(lang.s("loading_transaction"))
                                 .font(SpentyFonts.caption1)
                                 .foregroundColor(.spentyTextSecondary)
                         }
@@ -430,7 +434,7 @@ struct CashFlowDrillDownSheet: View {
                         recurringItemButton(item, color: .spentyError)
                     }
                 } header: {
-                    Text("Recurring Expenses")
+                    Text(lang.s("recurring_expenses"))
                         .font(SpentyFonts.caption1.bold())
                         .foregroundColor(.spentyTextSecondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -443,7 +447,7 @@ struct CashFlowDrillDownSheet: View {
                 Section {
                     mandatesList
                 } header: {
-                    Text("Mandates")
+                    Text(lang.s("mandates"))
                         .font(SpentyFonts.caption1.bold())
                         .foregroundColor(.spentyTextSecondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -650,7 +654,7 @@ struct CashFlowDrillDownSheet: View {
 
                 // Total row
                 HStack {
-                    Text("Total Monthly EMI")
+                    Text(lang.s("total_monthly_emi"))
                         .font(SpentyFonts.subheadline)
                         .fontWeight(.semibold)
                         .foregroundColor(.spentyTextPrimary)
@@ -672,15 +676,15 @@ struct CashFlowDrillDownSheet: View {
 
     private var netSummary: some View {
         VStack(spacing: 12) {
-            summaryRow(label: "Recurring Income", amount: viewModel.monthlyIncome, color: .spentySuccess, prefix: "+")
-            summaryRow(label: "Recurring Expense", amount: viewModel.monthlyExpense, color: .spentyError, prefix: "-")
-            summaryRow(label: "Mandates", amount: viewModel.monthlyMandates, color: .spentyWarning, prefix: "-")
-            summaryRow(label: "OD Interest", amount: viewModel.monthlyODInterest, color: .spentyError, prefix: "-")
+            summaryRow(label: lang.s("recurring_income"), amount: viewModel.monthlyIncome, color: .spentySuccess, prefix: "+")
+            summaryRow(label: lang.s("recurring_expense"), amount: viewModel.monthlyExpense, color: .spentyError, prefix: "-")
+            summaryRow(label: lang.s("mandates"), amount: viewModel.monthlyMandates, color: .spentyWarning, prefix: "-")
+            summaryRow(label: lang.s("od_interest"), amount: viewModel.monthlyODInterest, color: .spentyError, prefix: "-")
 
             Divider().background(Color.spentyBorder)
 
             HStack {
-                Text("Net Cash Flow")
+                Text(lang.s("net_cash_flow"))
                     .font(SpentyFonts.headline)
                     .foregroundColor(.spentyTextPrimary)
                 Spacer()
@@ -815,7 +819,7 @@ struct CashFlowDrillDownSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { selectedDetailItem = nil }
+                    Button(lang.s("done")) { selectedDetailItem = nil }
                         .font(SpentyFonts.headline)
                         .foregroundColor(.spentyPrimary)
                 }
@@ -825,9 +829,9 @@ struct CashFlowDrillDownSheet: View {
 
     private func detailSheetTitle(for item: DrillDownDetailItem) -> String {
         switch item {
-        case .mandate: return "Mandate Details"
-        case .emi: return "EMI Details"
-        case .odInterest: return "OD Interest Details"
+        case .mandate: return L.s("mandate_details")
+        case .emi: return L.s("emi_details")
+        case .odInterest: return L.s("od_interest_details")
         }
     }
 
@@ -909,7 +913,7 @@ struct CashFlowDrillDownSheet: View {
                                 Image(systemName: "envelope.open.fill")
                                     .font(.system(size: 14, weight: .medium))
                             }
-                            Text("View Source Document")
+                            Text(lang.s("view_source_doc"))
                                 .font(SpentyFonts.subheadline)
                                 .fontWeight(.medium)
                         }
@@ -957,7 +961,7 @@ struct CashFlowDrillDownSheet: View {
                         HStack {
                             Image(systemName: "doc.text.image")
                                 .font(.system(size: 14, weight: .medium))
-                            Text("View Latest Transaction")
+                            Text(lang.s("view_latest_txn"))
                                 .font(SpentyFonts.subheadline)
                                 .fontWeight(.medium)
                         }
@@ -982,7 +986,7 @@ struct CashFlowDrillDownSheet: View {
                     HStack {
                         Image(systemName: "pencil")
                             .font(.system(size: 14, weight: .medium))
-                        Text("Edit Mandate")
+                        Text(lang.s("edit_mandate"))
                             .font(SpentyFonts.subheadline)
                             .fontWeight(.medium)
                     }
@@ -1002,7 +1006,7 @@ struct CashFlowDrillDownSheet: View {
                     HStack {
                         Image(systemName: "trash")
                             .font(.system(size: 14, weight: .medium))
-                        Text("Delete Mandate")
+                        Text(lang.s("delete_mandate"))
                             .font(SpentyFonts.subheadline)
                             .fontWeight(.medium)
                     }
@@ -1022,7 +1026,7 @@ struct CashFlowDrillDownSheet: View {
         .sheet(isPresented: $showMandateEdit) {
             mandateEditSheet
         }
-        .alert("Delete Mandate", isPresented: $showMandateDeleteConfirm) {
+        .alert(lang.s("delete_mandate"), isPresented: $showMandateDeleteConfirm) {
             Button("Cancel", role: .cancel) {}
             Button("Delete", role: .destructive) {
                 if let mandateId = deletingMandateId {
@@ -1033,7 +1037,7 @@ struct CashFlowDrillDownSheet: View {
                 }
             }
         } message: {
-            Text("Are you sure you want to delete this mandate? This will update your cash flow projections.")
+            Text(lang.s("delete_mandate_confirm"))
         }
     }
 
@@ -1086,7 +1090,7 @@ struct CashFlowDrillDownSheet: View {
                                 .cornerRadius(12)
                         }
                     } else {
-                        Text("No source document available")
+                        Text(lang.s("no_source_doc"))
                             .font(SpentyFonts.body)
                             .foregroundColor(.spentyTextSecondary)
                             .frame(maxWidth: .infinity)
@@ -1096,11 +1100,11 @@ struct CashFlowDrillDownSheet: View {
                 .padding(16)
             }
             .background(Color.spentyBgPrimary.ignoresSafeArea())
-            .navigationTitle("Source Document")
+            .navigationTitle(lang.s("source_document"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") { showMandateSource = false }
+                    Button(lang.s("done")) { showMandateSource = false }
                         .foregroundColor(.spentyTextSecondary)
                 }
             }
@@ -1115,17 +1119,17 @@ struct CashFlowDrillDownSheet: View {
                 VStack(spacing: 16) {
                     // Merchant
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("Merchant / Payee")
+                        Text(lang.s("merchant_payee"))
                             .font(SpentyFonts.caption1)
                             .foregroundColor(.spentyTextSecondary)
-                        TextField("Merchant name", text: $editMandateMerchant)
+                        TextField(lang.s("merchant_name"), text: $editMandateMerchant)
                             .font(SpentyFonts.body)
                             .inputStyle()
                     }
 
                     // Amount
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("Amount")
+                        Text(lang.s("amount"))
                             .font(SpentyFonts.caption1)
                             .foregroundColor(.spentyTextSecondary)
                         TextField("0.00", text: $editMandateAmount)
@@ -1136,30 +1140,30 @@ struct CashFlowDrillDownSheet: View {
 
                     // Frequency
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("Frequency")
+                        Text(lang.s("frequency"))
                             .font(SpentyFonts.caption1)
                             .foregroundColor(.spentyTextSecondary)
-                        Picker("Frequency", selection: $editMandateFrequency) {
-                            Text("Daily").tag("daily")
-                            Text("Weekly").tag("weekly")
-                            Text("Monthly").tag("monthly")
-                            Text("Quarterly").tag("quarterly")
-                            Text("Yearly").tag("yearly")
+                        Picker(lang.s("frequency"), selection: $editMandateFrequency) {
+                            Text(lang.s("daily")).tag("daily")
+                            Text(lang.s("weekly")).tag("weekly")
+                            Text(lang.s("monthly")).tag("monthly")
+                            Text(lang.s("quarterly")).tag("quarterly")
+                            Text(lang.s("yearly")).tag("yearly")
                         }
                         .pickerStyle(.segmented)
                     }
 
                     // Type
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("Mandate Type")
+                        Text(lang.s("mandate_type"))
                             .font(SpentyFonts.caption1)
                             .foregroundColor(.spentyTextSecondary)
-                        Picker("Type", selection: $editMandateType) {
-                            Text("Subscription").tag("subscription")
-                            Text("EMI").tag("emi")
-                            Text("Insurance").tag("insurance")
-                            Text("Utility").tag("utility")
-                            Text("Other").tag("other")
+                        Picker(lang.s("type"), selection: $editMandateType) {
+                            Text(lang.s("subscription")).tag("subscription")
+                            Text(lang.s("emi")).tag("emi")
+                            Text(lang.s("insurance")).tag("insurance")
+                            Text(lang.s("utility")).tag("utility")
+                            Text(lang.s("other")).tag("other")
                         }
                         .pickerStyle(.menu)
                         .tint(.spentyTextPrimary)
@@ -1167,13 +1171,13 @@ struct CashFlowDrillDownSheet: View {
 
                     // Status
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("Status")
+                        Text(lang.s("status"))
                             .font(SpentyFonts.caption1)
                             .foregroundColor(.spentyTextSecondary)
-                        Picker("Status", selection: $editMandateStatus) {
-                            Text("Active").tag("active")
-                            Text("Paused").tag("paused")
-                            Text("Cancelled").tag("cancelled")
+                        Picker(lang.s("status"), selection: $editMandateStatus) {
+                            Text(lang.s("active")).tag("active")
+                            Text(lang.s("paused")).tag("paused")
+                            Text(lang.s("cancelled")).tag("cancelled")
                         }
                         .pickerStyle(.segmented)
                     }
@@ -1181,15 +1185,15 @@ struct CashFlowDrillDownSheet: View {
                 .padding(16)
             }
             .background(Color.spentyBgPrimary.ignoresSafeArea())
-            .navigationTitle("Edit Mandate")
+            .navigationTitle(lang.s("edit_mandate"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { showMandateEdit = false }
+                    Button(lang.s("cancel")) { showMandateEdit = false }
                         .foregroundColor(.spentyTextSecondary)
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
+                    Button(lang.s("save")) {
                         guard let mandateId = editingMandateItem?.mandateId else { return }
                         let newAmount = Double(editMandateAmount)
                         Task {
@@ -1231,7 +1235,7 @@ struct CashFlowDrillDownSheet: View {
                     color: .spentyAccent3
                 )
 
-                Text("Monthly EMI")
+                Text(lang.s("monthly_emi"))
                     .font(SpentyFonts.caption1)
                     .foregroundColor(.spentyTextSecondary)
             }
@@ -1285,7 +1289,7 @@ struct CashFlowDrillDownSheet: View {
                     color: .spentyError
                 )
 
-                Text("Monthly Interest Charge")
+                Text(lang.s("monthly_interest_charge"))
                     .font(SpentyFonts.caption1)
                     .foregroundColor(.spentyTextSecondary)
             }

@@ -4,6 +4,8 @@ struct BusinessProfileView: View {
 
     // MARK: - Indian States
 
+
+    @Environment(LocalizationManager.self) var lang
     private static let indianStates = [
         "Andhra Pradesh", "Arunachal Pradesh", "Assam", "Bihar",
         "Chhattisgarh", "Goa", "Gujarat", "Haryana",
@@ -64,19 +66,19 @@ struct BusinessProfileView: View {
             .toolbar {
                 ToolbarItemGroup(placement: .keyboard) {
                     Spacer()
-                    Button("Done") { focusedField = nil }
+                    Button(lang.s("done")) { focusedField = nil }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     saveButton
                 }
             }
         }
-        .navigationTitle("Business Profile")
+        .navigationTitle(lang.s("business_profile"))
         .navigationBarTitleDisplayMode(.inline)
         .alert("Saved", isPresented: $viewModel.showSaveSuccess) {
-            Button("OK") { dismiss() }
+            Button(lang.s("ok")) { dismiss() }
         } message: {
-            Text("Your business profile has been updated.")
+            Text(lang.s("profile_updated"))
         }
     }
 
@@ -88,13 +90,13 @@ struct BusinessProfileView: View {
                 Image(systemName: "building.2")
                     .foregroundStyle(Color.spentyPrimary)
                     .frame(width: 24)
-                TextField("Firm Name", text: binding(\.firmName))
+                TextField(lang.s("firm_name"), text: binding(\.firmName))
                     .focused($focusedField, equals: .firmName)
                     .textContentType(.organizationName)
                     .autocorrectionDisabled()
             }
         } header: {
-            Text("Firm Details")
+            Text(lang.s("firm_details"))
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(Color.spentyPrimary)
                 .textCase(nil)
@@ -109,7 +111,7 @@ struct BusinessProfileView: View {
                 Image(systemName: "number")
                     .foregroundStyle(Color.spentyPrimary)
                     .frame(width: 24)
-                TextField("GSTIN", text: binding(\.firmGstin))
+                TextField(lang.s("gstin"), text: binding(\.firmGstin))
                     .focused($focusedField, equals: .gstin)
                     .textInputAutocapitalization(.characters)
                     .autocorrectionDisabled()
@@ -119,13 +121,13 @@ struct BusinessProfileView: View {
                 Image(systemName: "creditcard")
                     .foregroundStyle(Color.spentyPrimary)
                     .frame(width: 24)
-                TextField("PAN", text: binding(\.firmPan))
+                TextField(lang.s("pan"), text: binding(\.firmPan))
                     .focused($focusedField, equals: .pan)
                     .textInputAutocapitalization(.characters)
                     .autocorrectionDisabled()
             }
         } header: {
-            Text("Tax Identifiers")
+            Text(lang.s("tax_identifiers"))
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(Color.spentyPrimary)
                 .textCase(nil)
@@ -142,8 +144,8 @@ struct BusinessProfileView: View {
                     .foregroundStyle(Color.spentyPrimary)
                     .frame(width: 24)
 
-                Picker("State", selection: binding(\.firmState)) {
-                    Text("Select State").tag("")
+                Picker(lang.s("select_state"), selection: binding(\.firmState)) {
+                    Text(lang.s("select_state")).tag("")
                     ForEach(Self.indianStates, id: \.self) { state in
                         Text(state).tag(state)
                     }
@@ -157,8 +159,8 @@ struct BusinessProfileView: View {
                     .foregroundStyle(Color.spentyPrimary)
                     .frame(width: 24)
 
-                Picker("Country", selection: countryBinding) {
-                    Text("Select Country").tag("")
+                Picker(lang.s("select_country"), selection: countryBinding) {
+                    Text(lang.s("select_country")).tag("")
                     ForEach(Self.countries, id: \.self) { country in
                         Text(country).tag(country)
                     }
@@ -173,13 +175,13 @@ struct BusinessProfileView: View {
                     .frame(width: 24)
                     .padding(.top, 8)
 
-                TextField("Business Address", text: binding(\.firmAddress), axis: .vertical)
+                TextField(lang.s("business_address"), text: binding(\.firmAddress), axis: .vertical)
                     .focused($focusedField, equals: .address)
                     .lineLimit(3...6)
                     .textContentType(.fullStreetAddress)
             }
         } header: {
-            Text("Location")
+            Text(lang.s("location"))
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(Color.spentyPrimary)
                 .textCase(nil)
@@ -198,7 +200,7 @@ struct BusinessProfileView: View {
                     .controlSize(.small)
                     .tint(Color.spentyPrimary)
             } else {
-                Text("Save")
+                Text(lang.s("save"))
                     .font(.body.weight(.semibold))
                     .foregroundStyle(Color.spentyPrimary)
             }

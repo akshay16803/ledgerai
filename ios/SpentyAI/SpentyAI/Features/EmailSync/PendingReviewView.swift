@@ -2,6 +2,8 @@ import SwiftUI
 
 struct PendingReviewView: View {
 
+
+    @Environment(LocalizationManager.self) var lang
     @Bindable var viewModel: EmailSyncViewModel
 
     @State private var accounts: [Account] = []
@@ -21,7 +23,7 @@ struct PendingReviewView: View {
             } else if viewModel.pendingTransactions.isEmpty {
                 EmptyStateView(
                     icon: "checkmark.circle",
-                    title: "All Caught Up",
+                    title: lang.s("all_caught_up"),
                     subtitle: "No transactions pending review. New AI-detected transactions will appear here."
                 )
             } else {
@@ -29,7 +31,7 @@ struct PendingReviewView: View {
             }
         }
         .background(Color.spentyBgPrimary)
-        .navigationTitle("Pending Approval")
+        .navigationTitle(lang.s("pending_approval"))
         .navigationBarTitleDisplayMode(.large)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -125,7 +127,7 @@ struct PendingReviewView: View {
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: "checkmark.circle.fill")
-                        Text("Approve All")
+                        Text(lang.s("approve_all"))
                     }
                     .font(SpentyFonts.headline)
                     .foregroundColor(.white)
@@ -140,7 +142,7 @@ struct PendingReviewView: View {
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: "xmark.circle.fill")
-                        Text("Reject All")
+                        Text(lang.s("reject_all"))
                     }
                     .font(SpentyFonts.headline)
                     .foregroundColor(.white)
@@ -238,7 +240,7 @@ struct PendingReviewView: View {
                     HStack(spacing: 4) {
                         Image(systemName: "checkmark")
                             .font(.system(size: 12, weight: .bold))
-                        Text("Approve")
+                        Text(lang.s("approve"))
                             .font(SpentyFonts.caption1)
                     }
                     .foregroundColor(.white)
@@ -254,7 +256,7 @@ struct PendingReviewView: View {
                     HStack(spacing: 4) {
                         Image(systemName: "xmark")
                             .font(.system(size: 12, weight: .bold))
-                        Text("Reject")
+                        Text(lang.s("reject"))
                             .font(SpentyFonts.caption1)
                     }
                     .foregroundColor(.spentyError)
@@ -270,7 +272,7 @@ struct PendingReviewView: View {
                     HStack(spacing: 4) {
                         Image(systemName: "pencil")
                             .font(.system(size: 12, weight: .bold))
-                        Text("Edit")
+                        Text(lang.s("edit"))
                             .font(SpentyFonts.caption1)
                     }
                     .foregroundColor(.spentyPrimary)
@@ -319,16 +321,16 @@ struct PendingReviewView: View {
                 VStack(alignment: .leading, spacing: 16) {
                     // Description
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Description")
+                        Text(lang.s("description"))
                             .font(SpentyFonts.headline)
                             .foregroundColor(.spentyTextPrimary)
-                        TextField("Transaction description", text: $viewModel.editDescription)
+                        TextField(lang.s("transaction_description"), text: $viewModel.editDescription)
                             .inputStyle()
                     }
 
                     // Amount
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Amount")
+                        Text(lang.s("amount"))
                             .font(SpentyFonts.headline)
                             .foregroundColor(.spentyTextPrimary)
                         TextField("0.00", text: $viewModel.editAmount)
@@ -344,7 +346,7 @@ struct PendingReviewView: View {
                                 .foregroundColor(.spentyPrimary)
                                 .frame(width: 22)
 
-                            Text("Type")
+                            Text(lang.s("type"))
                                 .font(.system(size: 15))
                                 .foregroundColor(.spentyTextPrimary)
                                 .lineLimit(1)
@@ -352,8 +354,8 @@ struct PendingReviewView: View {
                             Spacer(minLength: 4)
 
                             Picker("", selection: $viewModel.editTransactionType) {
-                                Text("Expense").tag("expense")
-                                Text("Income").tag("income")
+                                Text(lang.s("expense_tab")).tag("expense")
+                                Text(lang.s("income_tab")).tag("income")
                             }
                             .pickerStyle(.menu)
                             .tint(.spentyTextPrimary)
@@ -385,7 +387,7 @@ struct PendingReviewView: View {
                             Spacer(minLength: 4)
 
                             Picker("", selection: $viewModel.editAccountId) {
-                                Text("Select").tag("")
+                                Text(lang.s("select")).tag("")
                                 ForEach(accounts) { account in
                                     Text(account.name ?? "Unnamed").tag(account.id)
                                 }
@@ -411,14 +413,14 @@ struct PendingReviewView: View {
                     .cardStyle()
                     .alert("New Account", isPresented: $showNewAccountAlert) {
                         TextField("Account name", text: $newAccountName)
-                        Picker("Type", selection: $newAccountType) {
-                            Text("Savings").tag("savings")
-                            Text("Current").tag("current")
-                            Text("Credit Card").tag("credit_card")
-                            Text("Cash").tag("cash")
-                            Text("Wallet").tag("wallet")
-                            Text("Loan").tag("loan")
-                            Text("Investment").tag("investment")
+                        Picker(lang.s("type"), selection: $newAccountType) {
+                            Text(lang.s("savings")).tag("savings")
+                            Text(lang.s("current")).tag("current")
+                            Text(lang.s("credit_card")).tag("credit_card")
+                            Text(lang.s("cash")).tag("cash")
+                            Text(lang.s("wallet")).tag("wallet")
+                            Text(lang.s("loan")).tag("loan")
+                            Text(lang.s("investment")).tag("investment")
                         }
                         Button("Cancel", role: .cancel) { }
                         Button("Create") {
@@ -446,7 +448,7 @@ struct PendingReviewView: View {
                             Spacer(minLength: 4)
 
                             Picker("", selection: $viewModel.editCategoryId) {
-                                Text("Select").tag("")
+                                Text(lang.s("select")).tag("")
                                 ForEach(filteredCategories) { cat in
                                     Text(cat.name ?? "Unnamed").tag(cat.id)
                                 }
@@ -540,18 +542,18 @@ struct PendingReviewView: View {
                 .padding(16)
             }
             .background(Color.spentyBgPrimary)
-            .navigationTitle("Edit Transaction")
+            .navigationTitle(lang.s("edit_transaction"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
+                    Button(lang.s("cancel")) {
                         viewModel.showEditSheet = false
                     }
                     .foregroundColor(.spentyPrimary)
                 }
 
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
+                    Button(lang.s("save")) {
                         Task { await viewModel.saveEditedTransaction() }
                     }
                     .fontWeight(.semibold)
@@ -715,7 +717,7 @@ struct PendingReviewView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") {
+                    Button(lang.s("done")) {
                         viewModel.showSourceSheet = false
                     }
                     .foregroundColor(.spentyPrimary)

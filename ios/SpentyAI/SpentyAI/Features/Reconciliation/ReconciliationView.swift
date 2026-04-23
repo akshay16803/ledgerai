@@ -3,6 +3,8 @@ import UniformTypeIdentifiers
 
 struct ReconciliationView: View {
 
+
+    @Environment(LocalizationManager.self) var lang
     @State private var viewModel = ReconciliationViewModel()
     @State private var showDeleteConfirm = false
     @State private var deleteTargetId: String?
@@ -24,9 +26,9 @@ struct ReconciliationView: View {
                 } else if viewModel.statements.isEmpty {
                     EmptyStateView(
                         icon: "doc.text.magnifyingglass",
-                        title: "No Statements",
+                        title: lang.s("no_statements"),
                         subtitle: "Upload a bank statement to start reconciling.",
-                        buttonTitle: "Upload Statement"
+                        buttonTitle: lang.s("upload_statement")
                     ) {
                         viewModel.showUploadSheet = true
                     }
@@ -35,7 +37,7 @@ struct ReconciliationView: View {
                 }
             }
         }
-        .navigationTitle("Reconciliation")
+        .navigationTitle(lang.s("reconciliation"))
         .navigationBarTitleDisplayMode(.large)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
@@ -62,7 +64,7 @@ struct ReconciliationView: View {
                 }
             }
         } message: {
-            Text("This action cannot be undone.")
+            Text(lang.s("cannot_undo"))
         }
         .task { await viewModel.loadInitial() }
     }
@@ -82,7 +84,7 @@ struct ReconciliationView: View {
                         deleteTargetId = statement.id
                         showDeleteConfirm = true
                     } label: {
-                        Label("Delete", systemImage: "trash")
+                        Label(lang.s("delete"), systemImage: "trash")
                     }
                 }
             }

@@ -4,6 +4,8 @@ struct CustomerFormView: View {
 
     // MARK: - State
 
+
+    @Environment(LocalizationManager.self) var lang
     @Bindable var viewModel: CustomersViewModel
     @Environment(\.dismiss) private var dismiss
 
@@ -29,57 +31,57 @@ struct CustomerFormView: View {
 
                 Form {
                     Section {
-                        TextField("Customer Name *", text: $name)
+                        TextField(lang.s("customer_name"), text: $name)
                             .textContentType(.organizationName)
                         if showValidation && !isNameValid {
-                            Text("Name is required.")
+                            Text(lang.s("name_required"))
                                 .font(.caption)
                                 .foregroundStyle(Color.spentyError)
                         }
                     } header: {
-                        Text("Required")
+                        Text(lang.s("required"))
                     }
 
                     Section {
-                        TextField("Email", text: $email)
+                        TextField(lang.s("email"), text: $email)
                             .keyboardType(.emailAddress)
                             .textContentType(.emailAddress)
                             .autocapitalization(.none)
 
-                        TextField("Phone", text: $phone)
+                        TextField(lang.s("phone"), text: $phone)
                             .keyboardType(.phonePad)
                             .textContentType(.telephoneNumber)
 
-                        TextField("GSTIN", text: $gstin)
+                        TextField(lang.s("gstin"), text: $gstin)
                             .autocapitalization(.allCharacters)
                     } header: {
-                        Text("Contact")
+                        Text(lang.s("contact"))
                     }
 
                     Section {
-                        TextField("Billing Address", text: $billingAddress, axis: .vertical)
+                        TextField(lang.s("billing_address"), text: $billingAddress, axis: .vertical)
                             .lineLimit(2...4)
                             .textContentType(.fullStreetAddress)
 
-                        TextField("Shipping Address", text: $shippingAddress, axis: .vertical)
+                        TextField(lang.s("shipping_address"), text: $shippingAddress, axis: .vertical)
                             .lineLimit(2...4)
                             .textContentType(.fullStreetAddress)
                     } header: {
-                        Text("Addresses")
+                        Text(lang.s("addresses"))
                     }
                 }
                 .scrollContentBackground(.hidden)
             }
-            .navigationTitle(isEditing ? "Edit Customer" : "New Customer")
+            .navigationTitle(isEditing ? lang.s("edit_customer") : lang.s("new_customer"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
+                    Button(lang.s("cancel")) {
                         dismiss()
                     }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
+                    Button(lang.s("save")) {
                         Task { await save() }
                     }
                     .fontWeight(.semibold)

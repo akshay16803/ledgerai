@@ -2,6 +2,8 @@ import SwiftUI
 
 struct MandatesListView: View {
 
+
+    @Environment(LocalizationManager.self) var lang
     @Bindable var viewModel: CashFlowViewModel
 
     @State private var editingMandateId: String?
@@ -47,7 +49,7 @@ struct MandatesListView: View {
             }
             .disabled(viewModel.isDetecting)
 
-            Text("Scans your past transactions to find recurring payments like subscriptions, EMIs, and auto-pay. Detected mandates improve your cash flow forecast.")
+            Text(lang.s("mandates_info"))
                 .font(SpentyFonts.caption2)
                 .foregroundColor(.spentyTextSecondary.opacity(0.7))
         }
@@ -87,7 +89,7 @@ struct MandatesListView: View {
                             Button(role: .destructive) {
                                 Task { await viewModel.deleteMandate(id: mandate.id) }
                             } label: {
-                                Label("Delete", systemImage: "trash")
+                                Label(lang.s("delete"), systemImage: "trash")
                             }
 
                             Button {
@@ -193,7 +195,7 @@ struct MandatesListView: View {
                 .font(.system(size: 32))
                 .foregroundColor(.spentyTextSecondary.opacity(0.4))
 
-            Text("No mandates found")
+            Text(lang.s("no_mandates_found"))
                 .font(SpentyFonts.caption1)
                 .foregroundColor(.spentyTextSecondary)
 

@@ -5,6 +5,8 @@ struct PurchasePreviewView: View {
 
     // MARK: - State
 
+
+    @Environment(LocalizationManager.self) var lang
     @Bindable var viewModel: PurchasesViewModel
     @Environment(\.dismiss) private var dismiss
     let billId: String
@@ -22,7 +24,7 @@ struct PurchasePreviewView: View {
                     VStack(spacing: 12) {
                         ProgressView()
                             .tint(Color.spentyPrimary)
-                        Text("Loading bill PDF...")
+                        Text(lang.s("loading_bill_pdf"))
                             .font(SpentyFonts.subheadline)
                             .foregroundStyle(Color.spentyTextSecondary)
                     }
@@ -37,11 +39,11 @@ struct PurchasePreviewView: View {
                             .frame(width: 48, height: 48)
                             .foregroundStyle(Color.spentyPrimary.opacity(0.4))
 
-                        Text("Unable to load PDF")
+                        Text(lang.s("unable_load_pdf"))
                             .font(SpentyFonts.headline)
                             .foregroundStyle(Color.spentyTextPrimary)
 
-                        Text("The bill preview could not be generated.")
+                        Text(lang.s("bill_preview_error"))
                             .font(SpentyFonts.subheadline)
                             .foregroundStyle(Color.spentyTextSecondary)
                             .multilineTextAlignment(.center)
@@ -58,11 +60,11 @@ struct PurchasePreviewView: View {
                     .padding(32)
                 }
             }
-            .navigationTitle("Bill Preview")
+            .navigationTitle(lang.s("bill_preview"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") { dismiss() }
+                    Button(lang.s("done")) { dismiss() }
                 }
 
                 ToolbarItem(placement: .topBarTrailing) {

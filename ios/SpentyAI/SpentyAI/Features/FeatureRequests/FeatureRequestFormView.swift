@@ -4,6 +4,8 @@ struct FeatureRequestFormView: View {
 
     // MARK: - State
 
+
+    @Environment(LocalizationManager.self) var lang
     @Environment(\.dismiss) private var dismiss
 
     @State private var title = ""
@@ -23,15 +25,15 @@ struct FeatureRequestFormView: View {
 
                 Form {
                     Section {
-                        TextField("Title", text: $title)
+                        TextField(lang.s("title"), text: $title)
                             .inputStyle()
                     } header: {
-                        Text("Title")
+                        Text(lang.s("title"))
                     } footer: {
-                        Text("A short, descriptive title for your request.")
+                        Text(lang.s("title_info"))
                     }
 
-                    Section("Description") {
+                    Section(lang.s("description")) {
                         TextEditor(text: $description)
                             .frame(minHeight: 120)
                             .scrollContentBackground(.hidden)
@@ -44,7 +46,7 @@ struct FeatureRequestFormView: View {
                             )
                             .overlay(alignment: .topLeading) {
                                 if description.isEmpty {
-                                    Text("Describe what you'd like to see...")
+                                    Text(lang.s("describe_feature"))
                                         .foregroundStyle(.tertiary)
                                         .padding(.top, 16)
                                         .padding(.leading, 12)
@@ -53,7 +55,7 @@ struct FeatureRequestFormView: View {
                             }
                     }
 
-                    Section("Category") {
+                    Section(lang.s("category")) {
                         Picker("Category", selection: $category) {
                             ForEach(FeatureRequestCategory.allCases, id: \.self) { cat in
                                 Text(cat.rawValue).tag(cat)
@@ -68,11 +70,11 @@ struct FeatureRequestFormView: View {
                 }
                 .scrollContentBackground(.hidden)
             }
-            .navigationTitle("New Request")
+            .navigationTitle(lang.s("new_request"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
+                    Button(lang.s("cancel")) {
                         dismiss()
                     }
                 }

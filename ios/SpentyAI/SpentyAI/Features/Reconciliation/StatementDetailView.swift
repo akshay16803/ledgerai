@@ -2,6 +2,8 @@ import SwiftUI
 
 struct StatementDetailView: View {
 
+
+    @Environment(LocalizationManager.self) var lang
     @Bindable var viewModel: ReconciliationViewModel
     let statementId: String
 
@@ -85,7 +87,7 @@ struct StatementDetailView: View {
                 }
             }
         }
-        .navigationTitle("Statement Details")
+        .navigationTitle(lang.s("statement_details"))
         .navigationBarTitleDisplayMode(.inline)
         .overlay {
             if let error = viewModel.errorMessage {
@@ -109,7 +111,7 @@ struct StatementDetailView: View {
             }
             Button("Cancel", role: .cancel) { }
         } message: {
-            Text("Mark this statement as approved?")
+            Text(lang.s("mark_approved"))
         }
         .confirmationDialog("Reject Statement", isPresented: $showRejectConfirm, titleVisibility: .visible) {
             Button("Reject", role: .destructive) {
@@ -117,7 +119,7 @@ struct StatementDetailView: View {
             }
             Button("Cancel", role: .cancel) { }
         } message: {
-            Text("Mark this statement as rejected?")
+            Text(lang.s("mark_rejected"))
         }
         .task { await viewModel.loadStatement(id: statementId) }
         .onDisappear { viewModel.stopParsePolling() }
@@ -186,7 +188,7 @@ struct StatementDetailView: View {
             HStack(spacing: 8) {
                 Image(systemName: "checkmark.seal.fill")
                     .foregroundColor(.spentySuccess)
-                Text("Statement Approved")
+                Text(lang.s("statement_approved"))
                     .font(SpentyFonts.headline)
                     .foregroundColor(.spentySuccess)
                 Spacer()
@@ -198,7 +200,7 @@ struct StatementDetailView: View {
             HStack(spacing: 8) {
                 Image(systemName: "xmark.seal.fill")
                     .foregroundColor(.spentyError)
-                Text("Statement Rejected")
+                Text(lang.s("statement_rejected"))
                     .font(SpentyFonts.headline)
                     .foregroundColor(.spentyError)
                 Spacer()
@@ -244,7 +246,7 @@ struct StatementDetailView: View {
 
             if let auditStatus = statement.auditStatus {
                 HStack {
-                    Text("Audit Status")
+                    Text(lang.s("audit_status"))
                         .font(SpentyFonts.caption1)
                         .foregroundColor(.spentyTextSecondary)
                     Spacer()
@@ -255,7 +257,7 @@ struct StatementDetailView: View {
             if let progress = statement.processingProgress, progress > 0 && progress < 1 {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
-                        Text("Processing")
+                        Text(lang.s("processing"))
                             .font(SpentyFonts.caption1)
                             .foregroundColor(.spentyTextSecondary)
                         Spacer()
@@ -310,7 +312,7 @@ struct StatementDetailView: View {
                                 ProgressView().tint(.white)
                             }
                             Image(systemName: "arrow.triangle.2.circlepath")
-                            Text("Reconcile")
+                            Text(lang.s("reconcile"))
                         }
                         .font(SpentyFonts.footnote)
                         .fontWeight(.semibold)
@@ -328,7 +330,7 @@ struct StatementDetailView: View {
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: "tag.fill")
-                        Text("Bulk Categorize")
+                        Text(lang.s("bulk_categorize"))
                     }
                     .font(SpentyFonts.footnote)
                     .fontWeight(.semibold)
@@ -384,7 +386,7 @@ struct StatementDetailView: View {
                     } label: {
                         HStack(spacing: 6) {
                             Image(systemName: "checkmark.circle.fill")
-                            Text("Approve")
+                            Text(lang.s("approve"))
                         }
                         .font(SpentyFonts.footnote)
                         .fontWeight(.semibold)
@@ -400,7 +402,7 @@ struct StatementDetailView: View {
                     } label: {
                         HStack(spacing: 6) {
                             Image(systemName: "xmark.circle.fill")
-                            Text("Reject")
+                            Text(lang.s("reject"))
                         }
                         .font(SpentyFonts.footnote)
                         .fontWeight(.semibold)
@@ -435,7 +437,7 @@ struct StatementDetailView: View {
     private var reconciliationResultsCard: some View {
         if let result = viewModel.reconciliationResult {
             VStack(alignment: .leading, spacing: 12) {
-                Text("Reconciliation Results")
+                Text(lang.s("reconciliation_results"))
                     .font(SpentyFonts.headline)
                     .foregroundColor(.spentyTextPrimary)
 
@@ -465,7 +467,7 @@ struct StatementDetailView: View {
                 }
                 if let diff = result.difference, diff != 0 {
                     HStack {
-                        Text("Difference")
+                        Text(lang.s("difference"))
                             .font(SpentyFonts.caption1)
                             .foregroundColor(.spentyTextSecondary)
                         Spacer()
@@ -533,7 +535,7 @@ struct StatementDetailView: View {
                     HStack(spacing: 8) {
                         Image(systemName: "checkmark.circle.fill")
                             .foregroundColor(.spentySuccess)
-                        Text("Matched")
+                        Text(lang.s("matched"))
                             .font(SpentyFonts.headline)
                             .foregroundColor(.spentyTextPrimary)
                         Spacer()
@@ -621,7 +623,7 @@ struct StatementDetailView: View {
                     HStack(spacing: 8) {
                         Image(systemName: "exclamationmark.triangle.fill")
                             .foregroundColor(.spentyError)
-                        Text("Missing from Ledger")
+                        Text(lang.s("missing_from_ledger"))
                             .font(SpentyFonts.headline)
                             .foregroundColor(.spentyTextPrimary)
                         Spacer()
@@ -653,7 +655,7 @@ struct StatementDetailView: View {
                     HStack(spacing: 8) {
                         Image(systemName: "doc.questionmark.fill")
                             .foregroundColor(.spentyWarning)
-                        Text("Missing from Statement")
+                        Text(lang.s("missing_from_statement"))
                             .font(SpentyFonts.headline)
                             .foregroundColor(.spentyTextPrimary)
                         Spacer()
@@ -692,7 +694,7 @@ struct StatementDetailView: View {
                                 }
                                 HStack(spacing: 16) {
                                     VStack(alignment: .leading, spacing: 2) {
-                                        Text("Statement")
+                                        Text(lang.s("statement_col"))
                                             .font(SpentyFonts.caption2)
                                             .foregroundColor(.spentyTextSecondary)
                                         if let amt = conflict.statementEntry?.amount {
@@ -702,7 +704,7 @@ struct StatementDetailView: View {
                                         }
                                     }
                                     VStack(alignment: .leading, spacing: 2) {
-                                        Text("Ledger")
+                                        Text(lang.s("ledger_col"))
                                             .font(SpentyFonts.caption2)
                                             .foregroundColor(.spentyTextSecondary)
                                         if let amt = conflict.ledgerTransaction?.amount {
@@ -714,7 +716,7 @@ struct StatementDetailView: View {
                                     Spacer()
                                     if let diff = conflict.amountDifference {
                                         VStack(alignment: .trailing, spacing: 2) {
-                                            Text("Difference")
+                                            Text(lang.s("difference"))
                                                 .font(SpentyFonts.caption2)
                                                 .foregroundColor(.spentyTextSecondary)
                                             Text(formatAmount(diff))
@@ -735,7 +737,7 @@ struct StatementDetailView: View {
                     HStack(spacing: 8) {
                         Image(systemName: "bolt.trianglebadge.exclamationmark.fill")
                             .foregroundColor(.spentyError)
-                        Text("Conflicts")
+                        Text(lang.s("conflicts"))
                             .font(SpentyFonts.headline)
                             .foregroundColor(.spentyTextPrimary)
                         Spacer()
@@ -797,7 +799,7 @@ struct StatementDetailView: View {
     private var entriesSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("Parsed Entries")
+                Text(lang.s("parsed_entries"))
                     .font(SpentyFonts.headline)
                     .foregroundColor(.spentyTextPrimary)
                 Spacer()
@@ -813,7 +815,7 @@ struct StatementDetailView: View {
                         Image(systemName: "tray")
                             .font(.system(size: 32))
                             .foregroundColor(.spentyTextSecondary.opacity(0.5))
-                        Text("No entries parsed yet")
+                        Text(lang.s("no_entries_parsed"))
                             .font(SpentyFonts.footnote)
                             .foregroundColor(.spentyTextSecondary)
                     }
@@ -865,7 +867,7 @@ struct StatementDetailView: View {
                     HStack(spacing: 4) {
                         Image(systemName: "checkmark.circle.fill")
                             .font(.system(size: 10))
-                        Text("Matched")
+                        Text(lang.s("matched"))
                             .font(SpentyFonts.caption2)
                     }
                     .foregroundColor(.spentySuccess)
@@ -944,7 +946,7 @@ struct StatementDetailView: View {
                     .font(.system(size: 48))
                     .foregroundColor(.spentyPrimary)
 
-                Text("Unlock PDF")
+                Text(lang.s("unlock_pdf"))
                     .font(SpentyFonts.title2)
                     .foregroundColor(.spentyTextPrimary)
 
@@ -973,11 +975,11 @@ struct StatementDetailView: View {
             }
             .padding(24)
             .background(Color.spentyBgPrimary)
-            .navigationTitle("Unlock Statement")
+            .navigationTitle(lang.s("unlock_statement"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
+                    Button(lang.s("cancel")) {
                         viewModel.showUnlockSheet = false
                         viewModel.unlockPassword = ""
                     }
@@ -1026,11 +1028,11 @@ struct StatementDetailView: View {
                 }
             }
             .listStyle(.insetGrouped)
-            .navigationTitle("Select Category")
+            .navigationTitle(lang.s("select_category"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { showBulkCategoryPicker = false }
+                    Button(lang.s("cancel")) { showBulkCategoryPicker = false }
                         .foregroundColor(.spentyPrimary)
                 }
             }

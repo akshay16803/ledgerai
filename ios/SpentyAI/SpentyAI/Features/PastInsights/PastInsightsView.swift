@@ -4,6 +4,8 @@ struct PastInsightsView: View {
 
     // MARK: - State
 
+
+    @Environment(LocalizationManager.self) var lang
     @State private var viewModel = PastInsightsViewModel()
 
     // MARK: - Body
@@ -22,7 +24,7 @@ struct PastInsightsView: View {
                 }
             }
         }
-        .navigationTitle("Past Insights")
+        .navigationTitle(lang.s("past_insights"))
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {
@@ -39,7 +41,7 @@ struct PastInsightsView: View {
             createFormSheet
         }
         .alert("Error", isPresented: $viewModel.showError) {
-            Button("OK") { viewModel.dismissError() }
+            Button(lang.s("ok")) { viewModel.dismissError() }
         } message: {
             Text(viewModel.errorMessage)
         }
@@ -53,9 +55,9 @@ struct PastInsightsView: View {
     private var emptyState: some View {
         EmptyStateView(
             icon: "doc.text.magnifyingglass",
-            title: "No Past Insight Summaries",
+            title: lang.s("no_past_insights"),
             subtitle: "Create a past insight summary to analyze your income and expenses over a date range.",
-            buttonTitle: "Create Summary"
+            buttonTitle: lang.s("generate_insight")
         ) {
             viewModel.startCreate()
             Task { await viewModel.loadAvailableEmails() }
@@ -148,7 +150,7 @@ struct PastInsightsView: View {
                 Color.spentyBgPrimary.ignoresSafeArea()
 
                 Form {
-                    Section("Summary Details") {
+                    Section(lang.s("details")) {
                         TextField("Name", text: $viewModel.createName)
 
                         DatePicker("From", selection: $viewModel.createDateFrom, displayedComponents: .date)
@@ -158,12 +160,12 @@ struct PastInsightsView: View {
                             .tint(Color.spentyPrimary)
                     }
 
-                    Section("Email Account") {
+                    Section(lang.s("email")) {
                         if viewModel.availableEmails.isEmpty {
                             HStack {
                                 ProgressView()
                                     .tint(Color.spentyPrimary)
-                                Text("Loading email accounts...")
+                                Text(lang.s("loading_accounts"))
                                     .font(SpentyFonts.subheadline)
                                     .foregroundStyle(Color.spentyTextSecondary)
                             }
@@ -190,7 +192,7 @@ struct PastInsightsView: View {
                                     ProgressView()
                                         .tint(.white)
                                 } else {
-                                    Text("Generate Past Insight Summary")
+                                    Text(lang.s("generate_insight"))
                                         .fontWeight(.semibold)
                                 }
                                 Spacer()
@@ -206,11 +208,11 @@ struct PastInsightsView: View {
                 }
                 .scrollContentBackground(.hidden)
             }
-            .navigationTitle("New Past Insight Summary")
+            .navigationTitle(lang.s("new_insight"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
+                    Button(lang.s("cancel")) {
                         viewModel.showCreateForm = false
                     }
                     .tint(Color.spentyPrimary)

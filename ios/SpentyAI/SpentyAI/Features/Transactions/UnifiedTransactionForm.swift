@@ -15,6 +15,7 @@ enum TransactionFormMode {
 
 struct UnifiedTransactionForm: View {
 
+    @Environment(LocalizationManager.self) var lang
     @Environment(\.dismiss) private var dismiss
 
     let mode: TransactionFormMode
@@ -145,16 +146,16 @@ struct UnifiedTransactionForm: View {
 
     private var navigationTitle: String {
         switch mode {
-        case .create: return "New Transaction"
-        case .edit: return "Edit Transaction"
-        case .approve: return "Review Transaction"
+        case .create: return lang.s("new_transaction")
+        case .edit: return lang.s("edit_transaction")
+        case .approve: return lang.s("review_transaction")
         }
     }
 
     private var confirmButtonText: String {
         switch mode {
-        case .create: return "Create"
-        case .edit, .approve: return "Save"
+        case .create: return lang.s("create")
+        case .edit, .approve: return lang.s("save")
         }
     }
 
@@ -245,7 +246,7 @@ struct UnifiedTransactionForm: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+                    Button(lang.s("cancel")) { dismiss() }
                         .foregroundColor(.spentyTextSecondary)
                 }
                 ToolbarItem(placement: .confirmationAction) {
@@ -276,18 +277,18 @@ struct UnifiedTransactionForm: View {
                 guard let newItem else { return }
                 Task { await handleReceiptUpload(newItem) }
             }
-            .alert("Delete Transaction", isPresented: $showDeleteConfirm) {
-                Button("Cancel", role: .cancel) {}
-                Button("Delete", role: .destructive) {
+            .alert(lang.s("delete_transaction"), isPresented: $showDeleteConfirm) {
+                Button(lang.s("cancel"), role: .cancel) {}
+                Button(lang.s("delete"), role: .destructive) {
                     Task { await deleteTransaction() }
                 }
             } message: {
-                Text("Are you sure you want to delete this transaction? This action cannot be undone.")
+                Text(lang.s("delete_transaction_confirm"))
             }
-            .alert("Missing Information", isPresented: $showValidationAlert) {
-                Button("OK", role: .cancel) {}
+            .alert(lang.s("missing_info"), isPresented: $showValidationAlert) {
+                Button(lang.s("ok"), role: .cancel) {}
             } message: {
-                Text(errorMessage ?? "Please fill in all required fields.")
+                Text(errorMessage ?? lang.s("fill_required_fields"))
             }
             .fullScreenCover(isPresented: $showPreview) {
                 if let url = previewURL {
@@ -296,7 +297,7 @@ struct UnifiedTransactionForm: View {
                             .navigationBarTitleDisplayMode(.inline)
                             .toolbar {
                                 ToolbarItem(placement: .topBarLeading) {
-                                    Button("Done") { showPreview = false }
+                                    Button(lang.s("done")) { showPreview = false }
                                         .font(SpentyFonts.headline)
                                         .foregroundColor(.spentyPrimary)
                                 }
@@ -379,7 +380,7 @@ struct UnifiedTransactionForm: View {
                 }
                 .frame(maxWidth: .infinity)
 
-                Text(transactionType == "transfer" ? "Transfer amount" : transactionType == "income" ? "Money received" : "Money spent")
+                Text(transactionType == "transfer" ? lang.s("transfer_amount") : transactionType == "income" ? lang.s("money_received") : lang.s("money_spent"))
                     .font(.system(size: 13))
                     .foregroundColor(.spentyTextSecondary)
             }
@@ -395,11 +396,11 @@ struct UnifiedTransactionForm: View {
 
     private var detailsSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            sectionLabel("Details")
+            sectionLabel(lang.s("details"))
 
             VStack(spacing: 0) {
                 // Date row
-                formRow(icon: "calendar", label: "Date") {
+                formRow(icon: "calendar", label: lang.s("date")) {
                     DatePicker("", selection: $date, displayedComponents: .date)
                         .datePickerStyle(.compact)
                         .labelsHidden()
@@ -414,7 +415,7 @@ struct UnifiedTransactionForm: View {
                         .foregroundColor(.spentyPrimary)
                         .frame(width: 22)
 
-                    Text(isTransfer ? "From" : "Account")
+                    Text(isTransfer ? lang.s("from") : lang.s("account_label"))
                         .font(.system(size: 15))
                         .foregroundColor(.spentyTextPrimary)
                         .lineLimit(1)
@@ -423,7 +424,7 @@ struct UnifiedTransactionForm: View {
                     Spacer(minLength: 4)
 
                     Picker("", selection: $accountId) {
-                        Text("Select").tag("")
+                        Text(lang.s("select")).tag("")
                         ForEach(accounts) { account in
                             Text(account.name ?? "Unnamed").tag(account.id)
                         }
@@ -449,9 +450,9 @@ struct UnifiedTransactionForm: View {
                 if isTransfer {
                     formDivider
 
-                    formRow(icon: "arrow.right.circle", label: "To") {
+                    formRow(icon: "arrow.right.circle", label: lang.s("to")) {
                         Picker("", selection: $toAccountId) {
-                            Text("Select").tag("")
+                            Text(lang.s("select")).tag("")
                             ForEach(accounts.filter { $0.id != accountId }) { account in
                                 Text(account.name ?? "Unnamed").tag(account.id)
                             }
@@ -467,9 +468,9 @@ struct UnifiedTransactionForm: View {
                 formDivider
 
                 // Payment method row
-                formRow(icon: "creditcard", label: "Payment") {
+                formRow(icon: "creditcard", label: lang.s("payment")) {
                     Picker("", selection: $paymentMethod) {
-                        Text("Select").tag("")
+                        Text(lang.s("select")).tag("")
                         ForEach(paymentMethods, id: \.self) { method in
                             Text(method).tag(method)
                         }
@@ -489,7 +490,7 @@ struct UnifiedTransactionForm: View {
 
     private var categorySection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            sectionLabel("Category")
+            sectionLabel(lang.s("category"))
 
             VStack(spacing: 0) {
                 // Category row
@@ -499,7 +500,7 @@ struct UnifiedTransactionForm: View {
                         .foregroundColor(.spentyPrimary)
                         .frame(width: 22)
 
-                    Text("Category")
+                    Text(lang.s("category"))
                         .font(.system(size: 15))
                         .foregroundColor(.spentyTextPrimary)
                         .lineLimit(1)
@@ -508,7 +509,7 @@ struct UnifiedTransactionForm: View {
                     Spacer(minLength: 4)
 
                     Picker("", selection: $categoryId) {
-                        Text("Select").tag("")
+                        Text(lang.s("select")).tag("")
                         ForEach(filteredCategories) { cat in
                             Text(cat.name ?? "Unnamed").tag(cat.id)
                         }
@@ -547,7 +548,7 @@ struct UnifiedTransactionForm: View {
                             .foregroundColor(.spentyPrimary.opacity(0.6))
                             .frame(width: 22)
 
-                        Text("Subcategory")
+                        Text(lang.s("subcategory"))
                             .font(.system(size: 15))
                             .foregroundColor(.spentyTextPrimary)
                             .lineLimit(1)
@@ -556,7 +557,7 @@ struct UnifiedTransactionForm: View {
                         Spacer(minLength: 4)
 
                         Picker("", selection: $subcategoryId) {
-                            Text("None").tag("")
+                            Text(lang.s("none_option")).tag("")
                             ForEach(subcategories) { sub in
                                 Text(sub.name ?? "Unnamed").tag(sub.id)
                             }
@@ -582,44 +583,44 @@ struct UnifiedTransactionForm: View {
                 }
             }
             .cardStyle()
-            .alert("New Account", isPresented: $showNewAccountAlert) {
-                TextField("Account name", text: $newAccountName)
-                Picker("Type", selection: $newAccountType) {
-                    Text("Savings").tag("savings")
-                    Text("Current").tag("current")
-                    Text("Credit Card").tag("credit_card")
-                    Text("Cash").tag("cash")
-                    Text("Wallet").tag("wallet")
-                    Text("Loan").tag("loan")
-                    Text("Investment").tag("investment")
+            .alert(lang.s("new_account"), isPresented: $showNewAccountAlert) {
+                TextField(lang.s("account_name_placeholder"), text: $newAccountName)
+                Picker(lang.s("type"), selection: $newAccountType) {
+                    Text(lang.s("savings")).tag("savings")
+                    Text(lang.s("current")).tag("current")
+                    Text(lang.s("credit_card")).tag("credit_card")
+                    Text(lang.s("cash")).tag("cash")
+                    Text(lang.s("wallet")).tag("wallet")
+                    Text(lang.s("loan")).tag("loan")
+                    Text(lang.s("investment")).tag("investment")
                 }
-                Button("Cancel", role: .cancel) { }
-                Button("Create") {
+                Button(lang.s("cancel"), role: .cancel) { }
+                Button(lang.s("create")) {
                     Task { await createInlineAccount() }
                 }
                 .disabled(newAccountName.trimmingCharacters(in: .whitespaces).isEmpty)
             } message: {
-                Text("Enter a name and type for the new account.")
+                Text(lang.s("enter_account_name"))
             }
-            .alert("New Category", isPresented: $showNewCategorySheet) {
-                TextField("Category name", text: $newCategoryName)
-                Button("Cancel", role: .cancel) { }
-                Button("Create") {
+            .alert(lang.s("new_category"), isPresented: $showNewCategorySheet) {
+                TextField(lang.s("category"), text: $newCategoryName)
+                Button(lang.s("cancel"), role: .cancel) { }
+                Button(lang.s("create")) {
                     Task { await createInlineCategory() }
                 }
                 .disabled(newCategoryName.trimmingCharacters(in: .whitespaces).isEmpty)
             } message: {
-                Text("Enter a name for the new \(transactionType) category.")
+                Text(lang.s("enter_category_name"))
             }
-            .alert("New Subcategory", isPresented: $showNewSubcategorySheet) {
-                TextField("Subcategory name", text: $newSubcategoryName)
-                Button("Cancel", role: .cancel) { }
-                Button("Create") {
+            .alert(lang.s("new_subcategory"), isPresented: $showNewSubcategorySheet) {
+                TextField(lang.s("subcategory"), text: $newSubcategoryName)
+                Button(lang.s("cancel"), role: .cancel) { }
+                Button(lang.s("create")) {
                     Task { await createInlineSubcategory() }
                 }
                 .disabled(newSubcategoryName.trimmingCharacters(in: .whitespaces).isEmpty)
             } message: {
-                Text("Enter a name for the new subcategory.")
+                Text(lang.s("enter_subcategory_name"))
             }
         }
     }
@@ -628,7 +629,7 @@ struct UnifiedTransactionForm: View {
 
     private var noteSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            sectionLabel("Note")
+            sectionLabel(lang.s("note"))
 
             HStack(alignment: .center, spacing: 8) {
                 Image(systemName: "text.alignleft")
@@ -636,7 +637,7 @@ struct UnifiedTransactionForm: View {
                     .foregroundColor(.spentyPrimary)
                     .frame(width: 22)
 
-                TextField("Add a note...", text: $descriptionText)
+                TextField(lang.s("add_note"), text: $descriptionText)
                     .font(.system(size: 15))
                     .foregroundColor(.spentyTextPrimary)
             }
@@ -655,7 +656,7 @@ struct UnifiedTransactionForm: View {
 
     private var recurringSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            sectionLabel("Recurring")
+            sectionLabel(lang.s("recurring"))
 
             VStack(spacing: 0) {
                 // Toggle row
@@ -666,7 +667,7 @@ struct UnifiedTransactionForm: View {
                         .frame(width: 22)
 
                     Toggle(isOn: $isRecurring) {
-                        Text("Repeat")
+                        Text(lang.s("repeat_toggle"))
                             .font(.system(size: 15))
                             .foregroundColor(.spentyTextPrimary)
                             .lineLimit(1)
@@ -686,7 +687,7 @@ struct UnifiedTransactionForm: View {
                                 .foregroundColor(.spentyPrimary.opacity(0.6))
                                 .frame(width: 22)
 
-                            Text("Frequency")
+                            Text(lang.s("frequency"))
                                 .font(.system(size: 15))
                                 .foregroundColor(.spentyTextPrimary)
                                 .lineLimit(1)
@@ -721,7 +722,7 @@ struct UnifiedTransactionForm: View {
                     formDivider
 
                     // Recurrence day
-                    formRow(icon: "number", label: "Day") {
+                    formRow(icon: "number", label: lang.s("day")) {
                         TextField("1-31", text: $recurrenceDate)
                             .keyboardType(.numberPad)
                             .font(.system(size: 15))
@@ -738,7 +739,7 @@ struct UnifiedTransactionForm: View {
 
     private var attachmentSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            sectionLabel("Receipt")
+            sectionLabel(lang.s("receipt"))
 
             VStack(spacing: 12) {
                 // Two side-by-side buttons: Camera and Gallery
@@ -758,7 +759,7 @@ struct UnifiedTransactionForm: View {
                                     .foregroundColor(.spentyPrimary)
                             }
 
-                            Text("Take Photo")
+                            Text(lang.s("take_photo"))
                                 .font(.system(size: 13, weight: .medium))
                                 .foregroundColor(.spentyTextPrimary)
                                 .lineLimit(1)
@@ -785,7 +786,7 @@ struct UnifiedTransactionForm: View {
                                     .foregroundColor(.spentyPrimary)
                             }
 
-                            Text("Choose Photo")
+                            Text(lang.s("choose_photo"))
                                 .font(.system(size: 13, weight: .medium))
                                 .foregroundColor(.spentyTextPrimary)
                                 .lineLimit(1)
@@ -803,7 +804,7 @@ struct UnifiedTransactionForm: View {
                         Image(systemName: "checkmark.circle.fill")
                             .font(.system(size: 15))
                             .foregroundColor(.spentySuccess)
-                        Text("Receipt attached")
+                        Text(lang.s("receipt_attached"))
                             .font(.system(size: 13, weight: .medium))
                             .foregroundColor(.spentySuccess)
                         Spacer()
@@ -815,7 +816,7 @@ struct UnifiedTransactionForm: View {
                     HStack(spacing: 10) {
                         ProgressView()
                             .tint(.spentyPrimary)
-                        Text("Scanning receipt...")
+                        Text(lang.s("scanning_receipt"))
                             .font(.system(size: 13))
                             .foregroundColor(.spentyTextSecondary)
                         Spacer()
@@ -853,7 +854,7 @@ struct UnifiedTransactionForm: View {
                     Image(systemName: "envelope.open")
                         .font(SpentyFonts.body)
                         .foregroundColor(.spentyPrimary)
-                    Text("Source Document")
+                    Text(lang.s("source_document"))
                         .font(SpentyFonts.headline)
                         .foregroundColor(.spentyTextPrimary)
                     Spacer()
@@ -899,7 +900,7 @@ struct UnifiedTransactionForm: View {
                 } else if let content = sourceContent {
                     sourceContentView(content)
                 } else if !isLoadingSource {
-                    Text("No source content available")
+                    Text(lang.s("no_source"))
                         .font(SpentyFonts.footnote)
                         .foregroundColor(.spentyTextSecondary)
                 }
@@ -919,13 +920,13 @@ struct UnifiedTransactionForm: View {
         VStack(spacing: 8) {
             if content.type == "email" {
                 if let subject = content.subject, !subject.isEmpty {
-                    sourceRow(label: "Subject", value: subject)
+                    sourceRow(label: lang.s("subject"), value: subject)
                 }
                 if let from = content.from, !from.isEmpty {
-                    sourceRow(label: "From", value: from)
+                    sourceRow(label: lang.s("from"), value: from)
                 }
                 if let date = content.date, !date.isEmpty {
-                    sourceRow(label: "Date", value: date)
+                    sourceRow(label: lang.s("date"), value: date)
                 }
                 if let body = content.body, !body.isEmpty {
                     Divider().background(Color.spentyBorder)
@@ -937,10 +938,10 @@ struct UnifiedTransactionForm: View {
                 }
             } else if content.type == "sms" {
                 if let sender = content.sender, !sender.isEmpty {
-                    sourceRow(label: "Sender", value: sender)
+                    sourceRow(label: lang.s("sender"), value: sender)
                 }
                 if let date = content.date, !date.isEmpty {
-                    sourceRow(label: "Date", value: date)
+                    sourceRow(label: lang.s("date"), value: date)
                 }
                 if let body = content.body, !body.isEmpty {
                     Divider().background(Color.spentyBorder)
@@ -974,7 +975,7 @@ struct UnifiedTransactionForm: View {
                 Image(systemName: "paperclip")
                     .font(SpentyFonts.footnote)
                     .foregroundColor(.spentyTextSecondary)
-                Text("Attachments (\(attachments.count))")
+                Text("\(lang.s("attachments")) (\(attachments.count))")
                     .font(SpentyFonts.subheadline)
                     .foregroundColor(.spentyTextPrimary)
                 Spacer()
@@ -1035,7 +1036,7 @@ struct UnifiedTransactionForm: View {
                 Image(systemName: "doc.text.image")
                     .font(SpentyFonts.body)
                     .foregroundColor(.spentyPrimary)
-                Text("Receipt")
+                Text(lang.s("receipt"))
                     .font(SpentyFonts.headline)
                     .foregroundColor(.spentyTextPrimary)
                 Spacer()
@@ -1081,7 +1082,7 @@ struct UnifiedTransactionForm: View {
                         Image(systemName: "eye.circle")
                             .font(SpentyFonts.body)
                     }
-                    Text("View Receipt")
+                    Text(lang.s("view_receipt"))
                         .font(SpentyFonts.subheadline)
                 }
                 .foregroundColor(.spentyPrimary)
@@ -1111,7 +1112,7 @@ struct UnifiedTransactionForm: View {
                 Image(systemName: "doc.text.image")
                     .font(SpentyFonts.body)
                     .foregroundColor(.spentyPrimary)
-                Text("Receipt")
+                Text(lang.s("receipt"))
                     .font(SpentyFonts.headline)
                     .foregroundColor(.spentyTextPrimary)
                 Spacer()
@@ -1138,7 +1139,7 @@ struct UnifiedTransactionForm: View {
                 Image(systemName: "checkmark.circle.fill")
                     .font(.system(size: 15))
                     .foregroundColor(.spentySuccess)
-                Text("Receipt attached")
+                Text(lang.s("receipt_attached"))
                     .font(.system(size: 13, weight: .medium))
                     .foregroundColor(.spentySuccess)
                 Spacer()
@@ -1157,7 +1158,7 @@ struct UnifiedTransactionForm: View {
             } label: {
                 HStack(spacing: 8) {
                     Image(systemName: "checkmark.circle.fill")
-                    Text("Approve Transaction")
+                    Text(lang.s("approve_transaction"))
                 }
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundColor(.white)
@@ -1174,7 +1175,7 @@ struct UnifiedTransactionForm: View {
             } label: {
                 HStack(spacing: 8) {
                     Image(systemName: "xmark.circle.fill")
-                    Text("Reject Transaction")
+                    Text(lang.s("reject_transaction"))
                 }
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundColor(.white)
@@ -1195,7 +1196,7 @@ struct UnifiedTransactionForm: View {
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: "trash")
-                Text("Delete Transaction")
+                Text(lang.s("delete_transaction"))
             }
             .destructiveButtonStyle()
         }
@@ -1240,7 +1241,7 @@ struct UnifiedTransactionForm: View {
             accounts = try await AccountRepository().fetchAccounts()
             categories = try await CategoryRepository.shared.getCategories()
         } catch {
-            errorMessage = "Failed to load form data"
+            errorMessage = L.s("failed_load_form_data")
         }
 
         // Re-fetch the full transaction so we always have paymentMethod,
@@ -1434,25 +1435,25 @@ struct UnifiedTransactionForm: View {
     @discardableResult
     private func saveTransaction() async -> Bool {
         guard let parsedAmount = Double(amount), parsedAmount > 0 else {
-            errorMessage = "Please enter a valid amount."
+            errorMessage = lang.s("valid_amount_error")
             showValidationAlert = true
             return false
         }
 
         guard !accountId.isEmpty else {
-            errorMessage = "Please select an account."
+            errorMessage = lang.s("select_account_error")
             showValidationAlert = true
             return false
         }
 
         if !isTransfer && categoryId.isEmpty {
-            errorMessage = "Please select a category."
+            errorMessage = lang.s("select_category_error")
             showValidationAlert = true
             return false
         }
 
         if isTransfer && toAccountId.isEmpty {
-            errorMessage = "Please select a destination account."
+            errorMessage = lang.s("select_dest_account_error")
             showValidationAlert = true
             return false
         }

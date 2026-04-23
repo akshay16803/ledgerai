@@ -6,6 +6,8 @@ struct BillUploadParserView: View {
 
     // MARK: - State
 
+
+    @Environment(LocalizationManager.self) var lang
     @Bindable var viewModel: PurchasesViewModel
     @Environment(\.dismiss) private var dismiss
 
@@ -35,11 +37,11 @@ struct BillUploadParserView: View {
                     .padding(20)
                 }
             }
-            .navigationTitle("Upload Bill")
+            .navigationTitle(lang.s("upload_bill"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+                    Button(lang.s("cancel")) { dismiss() }
                 }
             }
             .fileImporter(
@@ -53,7 +55,7 @@ struct BillUploadParserView: View {
                 get: { viewModel.errorMessage != nil && !viewModel.isUploading },
                 set: { if !$0 { viewModel.errorMessage = nil } }
             )) {
-                Button("OK") { viewModel.errorMessage = nil }
+                Button(lang.s("ok")) { viewModel.errorMessage = nil }
             } message: {
                 Text(viewModel.errorMessage ?? "")
             }
@@ -70,11 +72,11 @@ struct BillUploadParserView: View {
                 .frame(width: 72, height: 72)
                 .foregroundStyle(Color.spentyPrimary.opacity(0.5))
 
-            Text("Upload a Bill")
+            Text(lang.s("upload_bill_title"))
                 .font(SpentyFonts.title3)
                 .foregroundStyle(Color.spentyTextPrimary)
 
-            Text("Upload a photo or PDF of a purchase bill. AI will extract the vendor, items, and amounts automatically.")
+            Text(lang.s("upload_bill_info"))
                 .font(SpentyFonts.subheadline)
                 .foregroundStyle(Color.spentyTextSecondary)
                 .multilineTextAlignment(.center)
@@ -109,11 +111,11 @@ struct BillUploadParserView: View {
                 .scaleEffect(1.3)
                 .tint(Color.spentyPrimary)
 
-            Text("Parsing bill...")
+            Text(lang.s("parsing_bill"))
                 .font(SpentyFonts.headline)
                 .foregroundStyle(Color.spentyTextPrimary)
 
-            Text("AI is extracting data from your bill. This may take a moment.")
+            Text(lang.s("ai_extracting"))
                 .font(SpentyFonts.subheadline)
                 .foregroundStyle(Color.spentyTextSecondary)
                 .multilineTextAlignment(.center)
@@ -140,7 +142,7 @@ struct BillUploadParserView: View {
                     .foregroundStyle(Color.spentySuccess)
                     .font(.title2)
 
-                Text("Bill Parsed Successfully")
+                Text(lang.s("bill_parsed"))
                     .font(SpentyFonts.headline)
                     .foregroundStyle(Color.spentyTextPrimary)
             }
@@ -226,7 +228,7 @@ struct BillUploadParserView: View {
                 Button {
                     viewModel.parsedBill = nil
                 } label: {
-                    Text("Upload Another")
+                    Text(lang.s("upload_another"))
                         .secondaryButtonStyle()
                 }
             }

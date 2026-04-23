@@ -4,6 +4,8 @@ struct CategoryFormView: View {
 
     // MARK: - Environment & State
 
+
+    @Environment(LocalizationManager.self) var lang
     @Environment(\.dismiss) private var dismiss
     @Bindable var viewModel: CategoriesViewModel
 
@@ -27,13 +29,13 @@ struct CategoryFormView: View {
                         TextField(isSubcategory ? "Subcategory name" : "Category name", text: $name)
                             .autocorrectionDisabled()
                     } header: {
-                        Text("Name")
+                        Text(lang.s("name"))
                     }
 
                     // ── Parent Picker ───────────────────────────
                     Section {
-                        Picker("Parent category", selection: $selectedParentId) {
-                            Text("None (top-level)")
+                        Picker(lang.s("parent"), selection: $selectedParentId) {
+                            Text(lang.s("none_top_level"))
                                 .tag(String?.none)
 
                             ForEach(viewModel.topLevelCategories) { parent in
@@ -42,15 +44,15 @@ struct CategoryFormView: View {
                             }
                         }
                     } header: {
-                        Text("Parent")
+                        Text(lang.s("parent"))
                     } footer: {
-                        Text("Leave empty to create a top-level category.")
+                        Text(lang.s("leave_empty_info"))
                     }
 
                     // ── Type (read-only, driven by active tab) ─
                     Section {
                         HStack {
-                            Text("Type")
+                            Text(lang.s("type"))
                             Spacer()
                             Text(viewModel.activeTab.rawValue.capitalized)
                                 .foregroundStyle(.secondary)
@@ -59,14 +61,14 @@ struct CategoryFormView: View {
                 }
                 .scrollContentBackground(.hidden)
             }
-            .navigationTitle(isEditing ? "Edit Category" : (isSubcategory ? "New Subcategory" : "New Category"))
+            .navigationTitle(isEditing ? lang.s("edit_category") : (isSubcategory ? lang.s("new_subcategory") : lang.s("new_category")))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+                    Button(lang.s("cancel")) { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(isEditing ? "Save" : "Add") {
+                    Button(isEditing ? lang.s("save") : lang.s("add")) {
                         Task { await save() }
                     }
                     .fontWeight(.semibold)

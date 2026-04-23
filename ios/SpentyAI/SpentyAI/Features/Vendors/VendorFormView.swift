@@ -4,6 +4,8 @@ struct VendorFormView: View {
 
     // MARK: - State
 
+
+    @Environment(LocalizationManager.self) var lang
     @Bindable var viewModel: VendorsViewModel
 
     @State private var name = ""
@@ -26,39 +28,39 @@ struct VendorFormView: View {
 
                 Form {
                     Section {
-                        TextField("Vendor Name", text: $name)
+                        TextField(lang.s("vendor_name"), text: $name)
                             .textContentType(.organizationName)
                     } header: {
-                        Text("Name *")
+                        Text(lang.s("name") + " *")
                     }
 
-                    Section("Contact") {
-                        TextField("Email", text: $email)
+                    Section(lang.s("contact")) {
+                        TextField(lang.s("email"), text: $email)
                             .keyboardType(.emailAddress)
                             .textContentType(.emailAddress)
                             .autocapitalization(.none)
 
-                        TextField("Phone", text: $phone)
+                        TextField(lang.s("phone"), text: $phone)
                             .keyboardType(.phonePad)
                             .textContentType(.telephoneNumber)
                     }
 
-                    Section("Business") {
-                        TextField("GSTIN", text: $gstin)
+                    Section(lang.s("business")) {
+                        TextField(lang.s("gstin"), text: $gstin)
                             .autocapitalization(.allCharacters)
 
-                        TextField("Address", text: $billingAddress, axis: .vertical)
+                        TextField(lang.s("address"), text: $billingAddress, axis: .vertical)
                             .lineLimit(3...6)
                             .textContentType(.fullStreetAddress)
                     }
                 }
                 .scrollContentBackground(.hidden)
             }
-            .navigationTitle(isEditing ? "Edit Vendor" : "New Vendor")
+            .navigationTitle(isEditing ? lang.s("edit_vendor") : lang.s("new_vendor"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+                    Button(lang.s("cancel")) { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button {
@@ -67,7 +69,7 @@ struct VendorFormView: View {
                         if isSaving {
                             ProgressView()
                         } else {
-                            Text("Save")
+                            Text(lang.s("save"))
                                 .fontWeight(.semibold)
                         }
                     }

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct DashboardView: View {
 
+    @Environment(LocalizationManager.self) var lang
     @State private var viewModel = DashboardViewModel()
     @State private var isAccountsExpanded = false
     @State private var isTransactionsExpanded = false
@@ -29,24 +30,38 @@ struct DashboardView: View {
                 floatingButtons
             }
             .background(Color.spentyBgPrimary)
-            .navigationTitle("Dashboard")
+            .navigationTitle(lang.s("dashboard"))
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        viewModel.showAIChat = true
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "sparkles")
-                                .font(.system(size: 14, weight: .medium))
-                            Text("AI")
-                                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    HStack(spacing: 8) {
+                        Button {
+                            lang.toggle()
+                        } label: {
+                            Text(lang.isHindi ? lang.s("language_english") : lang.s("language_hindi"))
+                                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                                .foregroundColor(.spentyPrimary)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 5)
+                                .background(Color.spentyPrimary.opacity(0.1))
+                                .cornerRadius(12)
                         }
-                        .foregroundColor(.spentyPrimary)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 5)
-                        .background(Color.spentyPrimary.opacity(0.1))
-                        .cornerRadius(16)
+
+                        Button {
+                            viewModel.showAIChat = true
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "sparkles")
+                                    .font(.system(size: 14, weight: .medium))
+                                Text("AI")
+                                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                            }
+                            .foregroundColor(.spentyPrimary)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background(Color.spentyPrimary.opacity(0.1))
+                            .cornerRadius(16)
+                        }
                     }
                 }
             }
@@ -82,14 +97,14 @@ struct DashboardView: View {
             }
             .sheet(isPresented: $showIncomeList) {
                 DashboardFilteredTransactionsView(
-                    title: "Income This Month",
+                    title: lang.s("income_this_month"),
                     transactions: viewModel.recentTransactions.filter { $0.transactionType?.lowercased() == "income" },
                     emptyMessage: "No income transactions this month"
                 )
             }
             .sheet(isPresented: $showExpenseList) {
                 DashboardFilteredTransactionsView(
-                    title: "Expenses This Month",
+                    title: lang.s("expenses_this_month"),
                     transactions: viewModel.recentTransactions.filter { $0.transactionType?.lowercased() == "expense" },
                     emptyMessage: "No expense transactions this month"
                 )
@@ -180,7 +195,7 @@ struct DashboardView: View {
         ) {
             Button { showAllAccounts = true } label: {
                 StatCard(
-                    label: "Net Worth",
+                    label: lang.s("net_worth"),
                     value: formatCurrency(viewModel.netWorth),
                     icon: "banknote.fill",
                     color: viewModel.netWorth >= 0 ? .spentySuccess : .spentyError
@@ -190,7 +205,7 @@ struct DashboardView: View {
 
             Button { showIncomeList = true } label: {
                 StatCard(
-                    label: "Income This Month",
+                    label: lang.s("income_this_month"),
                     value: formatCurrency(viewModel.incomeThisMonth),
                     icon: "arrow.down.circle.fill",
                     color: .spentySuccess
@@ -200,7 +215,7 @@ struct DashboardView: View {
 
             Button { showExpenseList = true } label: {
                 StatCard(
-                    label: "Expenses This Month",
+                    label: lang.s("expenses_this_month"),
                     value: formatCurrency(viewModel.expenseThisMonth),
                     icon: "arrow.up.circle.fill",
                     color: .spentyAccent1
@@ -210,7 +225,7 @@ struct DashboardView: View {
 
             Button { showAllPending = true } label: {
                 StatCard(
-                    label: "Pending Approval",
+                    label: lang.s("pending_approval"),
                     value: "\(viewModel.pendingReview)",
                     icon: "clock.fill",
                     color: .spentyWarning
@@ -246,10 +261,10 @@ struct DashboardView: View {
                         .cornerRadius(10)
 
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("\(nextMonth) Projection")
+                        Text(lang.s("may_projection"))
                             .font(SpentyFonts.headline)
                             .foregroundColor(.spentyTextPrimary)
-                        Text("Upcoming outflows next month")
+                        Text(lang.s("upcoming_outflows"))
                             .font(SpentyFonts.caption1)
                             .foregroundColor(.spentyTextSecondary)
                     }
@@ -263,14 +278,14 @@ struct DashboardView: View {
 
                 // Breakdown row
                 HStack(spacing: 0) {
-                    projectionMiniStat(label: "Expenses", amount: viewModel.nextMonthExpense, color: .spentyAccent1)
-                    projectionMiniStat(label: "EMIs", amount: viewModel.nextMonthEMI, color: .spentyAccent3)
-                    projectionMiniStat(label: "OD Interest", amount: viewModel.nextMonthODInterest, color: .spentyAccent1)
+                    projectionMiniStat(label: lang.s("expenses"), amount: viewModel.nextMonthExpense, color: .spentyAccent1)
+                    projectionMiniStat(label: lang.s("emis"), amount: viewModel.nextMonthEMI, color: .spentyAccent3)
+                    projectionMiniStat(label: lang.s("od_interest"), amount: viewModel.nextMonthODInterest, color: .spentyAccent1)
                 }
 
                 // Total bar
                 HStack {
-                    Text("Total Outflow")
+                    Text(lang.s("total_outflow"))
                         .font(SpentyFonts.caption1)
                         .foregroundColor(.spentyTextSecondary)
                     Spacer()
@@ -307,7 +322,7 @@ struct DashboardView: View {
     private var accountsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             collapsibleHeader(
-                title: "Accounts",
+                title: lang.s("accounts"),
                 icon: "building.columns.fill",
                 count: viewModel.accounts.count,
                 isExpanded: $isAccountsExpanded
@@ -376,7 +391,7 @@ struct DashboardView: View {
     private var recentTransactionsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             collapsibleHeader(
-                title: "Recent Transactions",
+                title: lang.s("transactions"),
                 icon: "clock.arrow.circlepath",
                 count: viewModel.recentTransactions.count,
                 isExpanded: $isTransactionsExpanded
@@ -472,7 +487,7 @@ struct DashboardView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
                 collapsibleHeader(
-                    title: "Pending Approval",
+                    title: lang.s("pending_approval"),
                     icon: "envelope.badge.fill",
                     count: viewModel.pendingReview,
                     isExpanded: $isPendingExpanded
@@ -483,7 +498,7 @@ struct DashboardView: View {
                         ProgressView()
                             .scaleEffect(0.7)
                             .tint(.spentyPrimary)
-                        Text("Syncing...")
+                        Text(lang.s("syncing"))
                             .font(SpentyFonts.caption2)
                             .foregroundColor(.spentyTextSecondary)
                     }
@@ -502,7 +517,7 @@ struct DashboardView: View {
                 } else if viewModel.pendingTransactions.isEmpty {
                     HStack {
                         Spacer()
-                        Text("No pending transactions")
+                        Text(lang.s("no_pending"))
                             .font(SpentyFonts.subheadline)
                             .foregroundColor(.spentyTextSecondary)
                             .padding(.vertical, 20)
@@ -690,6 +705,7 @@ struct PendingTransactionDetailSheet: View {
     let transaction: PendingTransaction
     @Bindable var viewModel: DashboardViewModel
 
+    @Environment(LocalizationManager.self) var lang
     @Environment(\.dismiss) private var dismiss
 
     // MARK: - Form State (mirrors TransactionFormView)
@@ -826,7 +842,7 @@ struct PendingTransactionDetailSheet: View {
                                             .tint(.white)
                                     } else {
                                         Image(systemName: "checkmark.circle.fill")
-                                        Text("Approve Transaction")
+                                        Text(lang.s("approve_transaction"))
                                             .fontWeight(.semibold)
                                     }
                                 }
@@ -842,7 +858,7 @@ struct PendingTransactionDetailSheet: View {
                             } label: {
                                 HStack {
                                     Image(systemName: "xmark.circle.fill")
-                                    Text("Reject Transaction")
+                                    Text(lang.s("reject_transaction"))
                                         .fontWeight(.medium)
                                 }
                                 .frame(maxWidth: .infinity)
@@ -856,11 +872,11 @@ struct PendingTransactionDetailSheet: View {
                     .padding(16)
                 }
             }
-            .navigationTitle("Review Transaction")
+            .navigationTitle(lang.s("review_transaction"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+                    Button(lang.s("cancel")) { dismiss() }
                         .tint(.spentyPrimary)
                 }
             }
@@ -918,9 +934,9 @@ struct PendingTransactionDetailSheet: View {
 
                 let subtitle: String = {
                     switch editType {
-                    case "transfer": return "Transfer amount"
-                    case "income": return "Money received"
-                    default: return "Money spent"
+                    case "transfer": return lang.s("transfer")
+                    case "income": return lang.s("money_received")
+                    default: return lang.s("money_spent")
                     }
                 }()
                 Text(subtitle)
@@ -939,11 +955,11 @@ struct PendingTransactionDetailSheet: View {
 
     private var detailsSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            reviewSectionLabel("Details")
+            reviewSectionLabel(lang.s("details"))
 
             VStack(spacing: 0) {
                 // Date
-                reviewFormRow(icon: "calendar", label: "Date") {
+                reviewFormRow(icon: "calendar", label: lang.s("date")) {
                     DatePicker("", selection: $editDate, displayedComponents: .date)
                         .datePickerStyle(.compact)
                         .labelsHidden()
@@ -958,7 +974,7 @@ struct PendingTransactionDetailSheet: View {
                         .foregroundColor(.spentyPrimary)
                         .frame(width: 22)
 
-                    Text(isTransfer ? "From" : "Account")
+                    Text(isTransfer ? lang.s("from") : lang.s("account_label"))
                         .font(.system(size: 15))
                         .foregroundColor(.spentyTextPrimary)
                         .lineLimit(1)
@@ -966,7 +982,7 @@ struct PendingTransactionDetailSheet: View {
                     Spacer(minLength: 4)
 
                     Picker("", selection: $editAccountId) {
-                        Text("Select").tag("")
+                        Text(lang.s("select")).tag("")
                         ForEach(accounts) { account in
                             Text(account.name ?? "Unnamed").tag(account.id)
                         }
@@ -992,9 +1008,9 @@ struct PendingTransactionDetailSheet: View {
                 if isTransfer {
                     reviewFormDivider
 
-                    reviewFormRow(icon: "arrow.right.circle", label: "To") {
+                    reviewFormRow(icon: "arrow.right.circle", label: lang.s("to")) {
                         Picker("", selection: $editToAccountId) {
-                            Text("Select").tag("")
+                            Text(lang.s("select")).tag("")
                             ForEach(accounts.filter { $0.id != editAccountId }) { account in
                                 Text(account.name ?? "Unnamed").tag(account.id)
                             }
@@ -1010,9 +1026,9 @@ struct PendingTransactionDetailSheet: View {
                 reviewFormDivider
 
                 // Payment method
-                reviewFormRow(icon: "creditcard", label: "Payment") {
+                reviewFormRow(icon: "creditcard", label: lang.s("payment")) {
                     Picker("", selection: $editPaymentMethod) {
-                        Text("Select").tag("")
+                        Text(lang.s("select")).tag("")
                         ForEach(paymentMethods, id: \.self) { method in
                             Text(method).tag(method)
                         }
@@ -1032,7 +1048,7 @@ struct PendingTransactionDetailSheet: View {
 
     private var categorySection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            reviewSectionLabel("Category")
+            reviewSectionLabel(lang.s("category"))
 
             VStack(spacing: 0) {
                 // Category row
@@ -1042,7 +1058,7 @@ struct PendingTransactionDetailSheet: View {
                         .foregroundColor(.spentyPrimary)
                         .frame(width: 22)
 
-                    Text("Category")
+                    Text(lang.s("category"))
                         .font(.system(size: 15))
                         .foregroundColor(.spentyTextPrimary)
                         .lineLimit(1)
@@ -1050,7 +1066,7 @@ struct PendingTransactionDetailSheet: View {
                     Spacer(minLength: 4)
 
                     Picker("", selection: $editCategoryId) {
-                        Text("Select").tag("")
+                        Text(lang.s("select")).tag("")
                         ForEach(filteredCategories) { cat in
                             Text(cat.name ?? "Unnamed").tag(cat.id)
                         }
@@ -1088,7 +1104,7 @@ struct PendingTransactionDetailSheet: View {
                             .foregroundColor(.spentyPrimary.opacity(0.6))
                             .frame(width: 22)
 
-                        Text("Subcategory")
+                        Text(lang.s("subcategory"))
                             .font(.system(size: 15))
                             .foregroundColor(.spentyTextPrimary)
                             .lineLimit(1)
@@ -1096,7 +1112,7 @@ struct PendingTransactionDetailSheet: View {
                         Spacer(minLength: 4)
 
                         Picker("", selection: $editSubcategoryId) {
-                            Text("None").tag("")
+                            Text(lang.s("none_option")).tag("")
                             ForEach(subcategories) { sub in
                                 Text(sub.name ?? "Unnamed").tag(sub.id)
                             }
@@ -1122,44 +1138,44 @@ struct PendingTransactionDetailSheet: View {
                 }
             }
             .cardStyle()
-            .alert("New Account", isPresented: $showNewAccountAlert) {
-                TextField("Account name", text: $newAccountName)
-                Picker("Type", selection: $newAccountType) {
-                    Text("Savings").tag("savings")
-                    Text("Current").tag("current")
-                    Text("Credit Card").tag("credit_card")
-                    Text("Cash").tag("cash")
-                    Text("Wallet").tag("wallet")
-                    Text("Loan").tag("loan")
-                    Text("Investment").tag("investment")
+            .alert(lang.s("new_account"), isPresented: $showNewAccountAlert) {
+                TextField(lang.s("account_name_placeholder"), text: $newAccountName)
+                Picker(lang.s("type"), selection: $newAccountType) {
+                    Text(lang.s("savings")).tag("savings")
+                    Text(lang.s("current")).tag("current")
+                    Text(lang.s("credit_card")).tag("credit_card")
+                    Text(lang.s("cash")).tag("cash")
+                    Text(lang.s("wallet")).tag("wallet")
+                    Text(lang.s("loan")).tag("loan")
+                    Text(lang.s("investment")).tag("investment")
                 }
-                Button("Cancel", role: .cancel) { }
-                Button("Create") {
+                Button(lang.s("cancel"), role: .cancel) { }
+                Button(lang.s("create")) {
                     Task { await createInlineAccount() }
                 }
                 .disabled(newAccountName.trimmingCharacters(in: .whitespaces).isEmpty)
             } message: {
-                Text("Enter a name and type for the new account.")
+                Text(lang.s("enter_account_name"))
             }
-            .alert("New Category", isPresented: $showNewCategoryAlert) {
-                TextField("Category name", text: $newCategoryName)
-                Button("Cancel", role: .cancel) { }
-                Button("Create") {
+            .alert(lang.s("new_category"), isPresented: $showNewCategoryAlert) {
+                TextField(lang.s("name"), text: $newCategoryName)
+                Button(lang.s("cancel"), role: .cancel) { }
+                Button(lang.s("create")) {
                     Task { await createInlineCategory() }
                 }
                 .disabled(newCategoryName.trimmingCharacters(in: .whitespaces).isEmpty)
             } message: {
-                Text("Enter a name for the new \(editType) category.")
+                Text(lang.s("enter_subcategory_name"))
             }
-            .alert("New Subcategory", isPresented: $showNewSubcategoryAlert) {
-                TextField("Subcategory name", text: $newSubcategoryName)
-                Button("Cancel", role: .cancel) { }
-                Button("Create") {
+            .alert(lang.s("new_subcategory"), isPresented: $showNewSubcategoryAlert) {
+                TextField(lang.s("name"), text: $newSubcategoryName)
+                Button(lang.s("cancel"), role: .cancel) { }
+                Button(lang.s("create")) {
                     Task { await createInlineSubcategory() }
                 }
                 .disabled(newSubcategoryName.trimmingCharacters(in: .whitespaces).isEmpty)
             } message: {
-                Text("Enter a name for the new subcategory.")
+                Text(lang.s("enter_subcategory_name"))
             }
         }
     }
@@ -1168,14 +1184,14 @@ struct PendingTransactionDetailSheet: View {
 
     private var noteSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            reviewSectionLabel("Note")
+            reviewSectionLabel(lang.s("note"))
 
             HStack(spacing: 10) {
                 Image(systemName: "text.alignleft")
                     .font(.system(size: 15))
                     .foregroundColor(.spentyPrimary)
 
-                TextField("Add a note...", text: $editDescription)
+                TextField(lang.s("add_note"), text: $editDescription)
                     .font(.system(size: 15))
                     .foregroundColor(.spentyTextPrimary)
             }
@@ -1194,7 +1210,7 @@ struct PendingTransactionDetailSheet: View {
 
     private var recurringSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            reviewSectionLabel("Recurring")
+            reviewSectionLabel(lang.s("recurring"))
 
             VStack(spacing: 0) {
                 HStack(spacing: 10) {
@@ -1204,7 +1220,7 @@ struct PendingTransactionDetailSheet: View {
                         .frame(width: 24)
 
                     Toggle(isOn: $editIsRecurring) {
-                        Text("Repeat")
+                        Text(lang.s("repeat_toggle"))
                             .font(.system(size: 15))
                             .foregroundColor(.spentyTextPrimary)
                             .lineLimit(1)
@@ -1223,7 +1239,7 @@ struct PendingTransactionDetailSheet: View {
                                 .foregroundColor(.spentyPrimary.opacity(0.6))
                                 .frame(width: 24)
 
-                            Text("Frequency")
+                            Text(lang.s("frequency"))
                                 .font(.system(size: 15))
                                 .foregroundColor(.spentyTextPrimary)
                                 .lineLimit(1)
@@ -1285,7 +1301,7 @@ struct PendingTransactionDetailSheet: View {
                         .background(Color.spentyInfo.opacity(0.1), in: Circle())
 
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Source Document")
+                        Text(lang.s("source_document"))
                             .font(SpentyFonts.subheadline)
                             .fontWeight(.semibold)
                             .foregroundColor(.spentyTextPrimary)
@@ -1325,7 +1341,7 @@ struct PendingTransactionDetailSheet: View {
                         Spacer()
                         VStack(spacing: 8) {
                             ProgressView()
-                            Text("Loading source…")
+                            Text(lang.s("loading_source"))
                                 .font(SpentyFonts.caption1)
                                 .foregroundColor(.spentyTextSecondary)
                         }
@@ -1338,7 +1354,7 @@ struct PendingTransactionDetailSheet: View {
                             .font(SpentyFonts.caption1)
                             .foregroundColor(.spentyError)
                             .multilineTextAlignment(.center)
-                        Button("Retry") {
+                        Button(lang.s("retry")) {
                             Task { await loadSourceContent() }
                         }
                         .font(SpentyFonts.caption1)
@@ -1579,6 +1595,7 @@ struct PendingTransactionDetailSheet: View {
 struct DashboardAccountsListView: View {
 
     let accounts: [Account]
+    @Environment(LocalizationManager.self) var lang
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -1587,7 +1604,7 @@ struct DashboardAccountsListView: View {
                 Color.spentyBgPrimary.ignoresSafeArea()
 
                 if accounts.isEmpty {
-                    ContentUnavailableView("No Accounts", systemImage: "building.columns", description: Text("No accounts found"))
+                    ContentUnavailableView(lang.s("no_accounts"), systemImage: "building.columns", description: Text(lang.s("no_accounts_found")))
                 } else {
                     List(accounts) { account in
                         NavigationLink {
@@ -1632,11 +1649,11 @@ struct DashboardAccountsListView: View {
                     .scrollContentBackground(.hidden)
                 }
             }
-            .navigationTitle("All Accounts")
+            .navigationTitle(lang.s("accounts"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") { dismiss() }
+                    Button(lang.s("done")) { dismiss() }
                         .tint(.spentyPrimary)
                 }
             }
@@ -1651,6 +1668,7 @@ struct DashboardFilteredTransactionsView: View {
     let title: String
     let transactions: [Transaction]
     let emptyMessage: String
+    @Environment(LocalizationManager.self) var lang
     @Environment(\.dismiss) private var dismiss
     @State private var selectedTransaction: Transaction?
 
@@ -1707,7 +1725,7 @@ struct DashboardFilteredTransactionsView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") { dismiss() }
+                    Button(lang.s("done")) { dismiss() }
                         .tint(.spentyPrimary)
                 }
             }
@@ -1732,6 +1750,7 @@ struct DashboardAllPendingView: View {
 
     @Bindable var viewModel: DashboardViewModel
     let onTap: (PendingTransaction) -> Void
+    @Environment(LocalizationManager.self) var lang
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -1740,7 +1759,7 @@ struct DashboardAllPendingView: View {
                 Color.spentyBgPrimary.ignoresSafeArea()
 
                 if viewModel.pendingTransactions.isEmpty {
-                    ContentUnavailableView("All Caught Up", systemImage: "checkmark.circle", description: Text("No pending transactions"))
+                    ContentUnavailableView(lang.s("all_caught_up"), systemImage: "checkmark.circle", description: Text(lang.s("no_pending")))
                 } else {
                     List(viewModel.pendingTransactions) { txn in
                         Button {
@@ -1787,11 +1806,11 @@ struct DashboardAllPendingView: View {
                     .scrollContentBackground(.hidden)
                 }
             }
-            .navigationTitle("Pending Approval")
+            .navigationTitle(lang.s("pending_approval"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") { dismiss() }
+                    Button(lang.s("done")) { dismiss() }
                         .tint(.spentyPrimary)
                 }
             }

@@ -4,6 +4,8 @@ struct CustomerDetailView: View {
 
     // MARK: - Properties
 
+
+    @Environment(LocalizationManager.self) var lang
     let customer: Customer
     @Bindable var viewModel: CustomersViewModel
 
@@ -30,7 +32,7 @@ struct CustomerDetailView: View {
         .navigationBarTitleDisplayMode(.large)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button("Edit") {
+                Button(lang.s("edit")) {
                     viewModel.startEdit(displayCustomer)
                 }
                 .foregroundStyle(Color.spentyPrimary)
@@ -111,7 +113,7 @@ struct CustomerDetailView: View {
             cardHeader("Invoices", icon: "doc.text")
 
             if viewModel.customerInvoices.isEmpty {
-                Text("No invoices found for this customer.")
+                Text(lang.s("no_invoices_customer"))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .center)

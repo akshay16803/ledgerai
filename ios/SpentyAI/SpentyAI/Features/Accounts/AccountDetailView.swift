@@ -3,6 +3,7 @@ import Charts
 
 struct AccountDetailView: View {
 
+    @Environment(LocalizationManager.self) var lang
     @State private var viewModel = AccountsViewModel()
     let accountId: String
 
@@ -40,7 +41,7 @@ struct AccountDetailView: View {
             Color.spentyBgPrimary.ignoresSafeArea()
 
             if viewModel.isDetailLoading && account == nil {
-                LoadingView(message: "Loading account...")
+                LoadingView(message: lang.s("loading_account"))
             } else if let account {
                 ScrollView {
                     VStack(spacing: 16) {
@@ -131,7 +132,7 @@ struct AccountDetailView: View {
 
             // Balance
             VStack(spacing: 4) {
-                Text("Current Balance")
+                Text(lang.s("current_balance"))
                     .font(SpentyFonts.caption1)
                     .foregroundColor(.spentyTextSecondary)
 
@@ -162,7 +163,7 @@ struct AccountDetailView: View {
                 // Editing mode
                 VStack(spacing: 12) {
                     HStack {
-                        Text("Set Opening Balance")
+                        Text(lang.s("set_opening_balance"))
                             .font(SpentyFonts.subheadline.weight(.semibold))
                             .foregroundColor(.spentyTextPrimary)
                         Spacer()
@@ -180,7 +181,7 @@ struct AccountDetailView: View {
                             .font(.system(size: 16))
                             .foregroundColor(.spentyPrimary)
                             .frame(width: 24)
-                        Text("Amount")
+                        Text(lang.s("amount"))
                             .font(SpentyFonts.body)
                             .foregroundColor(.spentyTextPrimary)
                         Spacer()
@@ -200,7 +201,7 @@ struct AccountDetailView: View {
                             .font(.system(size: 16))
                             .foregroundColor(.spentyPrimary)
                             .frame(width: 24)
-                        Text("As-of Date")
+                        Text(lang.s("as_of_date"))
                             .font(SpentyFonts.body)
                             .foregroundColor(.spentyTextPrimary)
                         Spacer()
@@ -210,7 +211,7 @@ struct AccountDetailView: View {
                     }
                     .padding(.vertical, 4)
 
-                    Text("Balance will be recalculated: opening balance + income − expenses ± transfers from this date onward.")
+                    Text(lang.s("balance_recalc_info"))
                         .font(SpentyFonts.caption2)
                         .foregroundColor(.spentyTextSecondary)
                         .padding(.top, 4)
@@ -224,7 +225,7 @@ struct AccountDetailView: View {
                                     .tint(.white)
                                     .scaleEffect(0.8)
                             }
-                            Text(isSavingBalance ? "Saving..." : "Save & Recalculate")
+                            Text(isSavingBalance ? lang.s("saving") : lang.s("save_recalculate"))
                         }
                         .primaryButtonStyle()
                     }
@@ -248,7 +249,7 @@ struct AccountDetailView: View {
                             .foregroundColor(.spentyPrimary)
                             .frame(width: 24)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("Opening Balance")
+                            Text(lang.s("opening_balance"))
                                 .font(SpentyFonts.caption1)
                                 .foregroundColor(.spentyTextSecondary)
                             if let opening = account.openingBalance {
@@ -256,7 +257,7 @@ struct AccountDetailView: View {
                                     .font(SpentyFonts.subheadline.weight(.medium))
                                     .foregroundColor(.spentyTextPrimary)
                             } else {
-                                Text("Not set — tap to add")
+                                Text(lang.s("not_set_tap"))
                                     .font(SpentyFonts.subheadline)
                                     .foregroundColor(.spentyTextSecondary)
                             }
@@ -291,21 +292,21 @@ struct AccountDetailView: View {
         let items: [(String, String)] = {
             var list: [(String, String)] = []
             if let num = account.accountNumber, !num.isEmpty {
-                list.append(("Account No.", num))
+                list.append((lang.s("account_number"), num))
             }
             if let currency = account.currency {
-                list.append(("Currency", currency))
+                list.append((lang.s("currency"), currency))
             }
             // Opening Balance is shown in the dedicated section above
             if isLoan {
-                if let rate = account.loanInterestRate { list.append(("Interest Rate", "\(rate)%")) }
-                if let tenure = account.loanTenureMonths { list.append(("Tenure", "\(tenure) months")) }
-                if let emi = account.loanEmiAmount { list.append(("EMI", formatCurrency(emi, account.currency))) }
-                if let day = account.loanEmiDay { list.append(("EMI Day", "\(day)")) }
-                if let sanctioned = account.loanSanctionedAmount { list.append(("Sanctioned", formatCurrency(sanctioned, account.currency))) }
+                if let rate = account.loanInterestRate { list.append((lang.s("interest"), "\(rate)%")) }
+                if let tenure = account.loanTenureMonths { list.append((lang.s("tenure_months"), "\(tenure)")) }
+                if let emi = account.loanEmiAmount { list.append((lang.s("emi"), formatCurrency(emi, account.currency))) }
+                if let day = account.loanEmiDay { list.append((lang.s("emi_day"), "\(day)")) }
+                if let sanctioned = account.loanSanctionedAmount { list.append((lang.s("sanctioned_amount"), formatCurrency(sanctioned, account.currency))) }
             }
             if let broker = account.brokerName, !broker.isEmpty {
-                list.append(("Broker", broker))
+                list.append((lang.s("broker_name"), broker))
             }
             return list
         }()
@@ -331,9 +332,9 @@ struct AccountDetailView: View {
 
     private func tabSelector(_ account: Account) -> some View {
         let tabs: [(String, String)] = {
-            var t: [(String, String)] = [("Transactions", "list.bullet")]
-            if isLoan { t.append(("Amortization", "chart.bar.fill")) }
-            if isOD { t.append(("OD Interest", "percent")) }
+            var t: [(String, String)] = [(lang.s("transactions"), "list.bullet")]
+            if isLoan { t.append((lang.s("amortization_schedule"), "chart.bar.fill")) }
+            if isOD { t.append((lang.s("od_interest"), "percent")) }
             if isDemat { t.append(("Demat", "doc.text.fill")) }
             return t
         }()
@@ -402,7 +403,7 @@ struct AccountDetailView: View {
         VStack(alignment: .leading, spacing: 12) {
             // Header
             HStack {
-                Text("Transactions")
+                Text(lang.s("transactions"))
                     .font(SpentyFonts.headline)
                     .foregroundColor(.spentyTextPrimary)
 
@@ -413,7 +414,7 @@ struct AccountDetailView: View {
                         viewModel.resetFilters()
                         Task { await viewModel.loadFilteredTransactions(accountId) }
                     } label: {
-                        Text("Clear Filters")
+                        Text(lang.s("clear_filters"))
                             .font(SpentyFonts.caption1)
                             .foregroundColor(.spentyError)
                     }
@@ -430,7 +431,7 @@ struct AccountDetailView: View {
                     .font(.system(size: 14))
                     .foregroundColor(.spentyTextSecondary)
 
-                TextField("Search transactions...", text: $viewModel.filterSearch)
+                TextField(lang.s("search_transactions"), text: $viewModel.filterSearch)
                     .font(SpentyFonts.body)
                     .textFieldStyle(.plain)
                     .onSubmit {
@@ -461,7 +462,7 @@ struct AccountDetailView: View {
                         viewModel.filterTransactionType = value
                         Task { await viewModel.loadFilteredTransactions(accountId) }
                     } label: {
-                        Text(type)
+                        Text(lang.s(type.lowercased()))
                             .font(SpentyFonts.caption1)
                             .fontWeight(.semibold)
                             .foregroundColor(viewModel.filterTransactionType == value ? .white : .spentyTextPrimary)
@@ -481,7 +482,7 @@ struct AccountDetailView: View {
                 HStack(spacing: 6) {
                     Image(systemName: "line.3.horizontal.decrease")
                         .font(.system(size: 12))
-                    Text("More Filters")
+                    Text(lang.s("more_filters"))
                         .font(SpentyFonts.caption1)
                         .fontWeight(.medium)
                     Spacer()
@@ -501,7 +502,7 @@ struct AccountDetailView: View {
                     // Date range
                     HStack(spacing: 12) {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("From")
+                            Text(lang.s("from"))
                                 .font(SpentyFonts.caption2)
                                 .foregroundColor(.spentyTextSecondary)
                             DatePicker("", selection: Binding(
@@ -512,7 +513,7 @@ struct AccountDetailView: View {
                         }
 
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("To")
+                            Text(lang.s("to"))
                                 .font(SpentyFonts.caption2)
                                 .foregroundColor(.spentyTextSecondary)
                             DatePicker("", selection: Binding(
@@ -526,11 +527,11 @@ struct AccountDetailView: View {
                     // Category picker
                     if !viewModel.filterCategories.isEmpty {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("Category")
+                            Text(lang.s("category"))
                                 .font(SpentyFonts.caption2)
                                 .foregroundColor(.spentyTextSecondary)
-                            Picker("Category", selection: $viewModel.filterCategoryId) {
-                                Text("All Categories").tag("")
+                            Picker(lang.s("category"), selection: $viewModel.filterCategoryId) {
+                                Text(lang.s("all_categories")).tag("")
                                 ForEach(viewModel.filterCategories, id: \.id) { cat in
                                     Text(cat.name).tag(cat.id)
                                 }
@@ -545,7 +546,7 @@ struct AccountDetailView: View {
                     // Amount range
                     HStack(spacing: 12) {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("Min Amount")
+                            Text(lang.s("min_amount"))
                                 .font(SpentyFonts.caption2)
                                 .foregroundColor(.spentyTextSecondary)
                             TextField("0", text: $viewModel.filterMinAmount)
@@ -555,10 +556,10 @@ struct AccountDetailView: View {
                         }
 
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("Max Amount")
+                            Text(lang.s("max_amount"))
                                 .font(SpentyFonts.caption2)
                                 .foregroundColor(.spentyTextSecondary)
-                            TextField("No limit", text: $viewModel.filterMaxAmount)
+                            TextField(lang.s("no_limit"), text: $viewModel.filterMaxAmount)
                                 .font(SpentyFonts.body)
                                 .keyboardType(.decimalPad)
                                 .textFieldStyle(.roundedBorder)
@@ -569,7 +570,7 @@ struct AccountDetailView: View {
                     Button {
                         Task { await viewModel.loadFilteredTransactions(accountId) }
                     } label: {
-                        Text("Apply Filters")
+                        Text(lang.s("apply_filters"))
                             .primaryButtonStyle()
                     }
                 }
@@ -593,7 +594,7 @@ struct AccountDetailView: View {
                     Image(systemName: "tray")
                         .font(.system(size: 32))
                         .foregroundColor(.spentyTextSecondary.opacity(0.4))
-                    Text(hasActiveFilters ? "No transactions match your filters" : "No transactions found")
+                    Text(hasActiveFilters ? lang.s("no_transactions_match_filters") : lang.s("no_transactions_found"))
                         .font(SpentyFonts.subheadline)
                         .foregroundColor(.spentyTextSecondary)
                 }
@@ -670,7 +671,7 @@ struct AccountDetailView: View {
 
     private var amortizationSection: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Amortization Schedule")
+            Text(lang.s("amortization_schedule"))
                 .font(SpentyFonts.headline)
                 .foregroundColor(.spentyTextPrimary)
 
@@ -678,7 +679,7 @@ struct AccountDetailView: View {
                 VStack(spacing: 8) {
                     ProgressView()
                         .tint(Color.spentyPrimary)
-                    Text("Loading schedule...")
+                    Text(lang.s("loading_schedule"))
                         .font(SpentyFonts.subheadline)
                         .foregroundColor(.spentyTextSecondary)
                 }
@@ -687,8 +688,8 @@ struct AccountDetailView: View {
             } else {
                 // Summary cards
                 HStack(spacing: 12) {
-                    amortizationStat("Total Payment", value: viewModel.amortizationTotalPayment, color: .spentyPrimary)
-                    amortizationStat("Total Interest", value: viewModel.amortizationTotalInterest, color: .spentyError)
+                    amortizationStat(lang.s("total_payment"), value: viewModel.amortizationTotalPayment, color: .spentyPrimary)
+                    amortizationStat(lang.s("total_interest"), value: viewModel.amortizationTotalInterest, color: .spentyError)
                 }
 
                 // Chart
@@ -748,13 +749,13 @@ struct AccountDetailView: View {
             HStack {
                 Text("#")
                     .frame(width: 32, alignment: .leading)
-                Text("EMI")
+                Text(lang.s("emi"))
                     .frame(maxWidth: .infinity, alignment: .trailing)
-                Text("Principal")
+                Text(lang.s("principal"))
                     .frame(maxWidth: .infinity, alignment: .trailing)
-                Text("Interest")
+                Text(lang.s("interest"))
                     .frame(maxWidth: .infinity, alignment: .trailing)
-                Text("Balance")
+                Text(lang.s("balance"))
                     .frame(maxWidth: .infinity, alignment: .trailing)
             }
             .font(SpentyFonts.caption1)
@@ -806,15 +807,15 @@ struct AccountDetailView: View {
 
     private var odInterestSection: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("OD Interest Calculator")
+            Text(lang.s("od_interest_calculator"))
                 .font(SpentyFonts.headline)
                 .foregroundColor(.spentyTextPrimary)
 
             VStack(spacing: 12) {
-                DatePicker("From Date", selection: $viewModel.odFromDate, displayedComponents: .date)
+                DatePicker(lang.s("from_date"), selection: $viewModel.odFromDate, displayedComponents: .date)
                     .font(SpentyFonts.body)
 
-                DatePicker("To Date", selection: $viewModel.odToDate, displayedComponents: .date)
+                DatePicker(lang.s("to_date"), selection: $viewModel.odToDate, displayedComponents: .date)
                     .font(SpentyFonts.body)
 
                 Button {
@@ -825,7 +826,7 @@ struct AccountDetailView: View {
                             ProgressView()
                                 .tint(.white)
                         }
-                        Text("Calculate Interest")
+                        Text(lang.s("calculate_interest"))
                     }
                     .primaryButtonStyle()
                 }
@@ -837,16 +838,16 @@ struct AccountDetailView: View {
 
             if let result = viewModel.odInterestResult {
                 VStack(spacing: 12) {
-                    odResultRow("Interest Amount", value: formatCurrency(result.interest, account?.currency), color: .spentyError)
+                    odResultRow(lang.s("interest_amount"), value: formatCurrency(result.interest, account?.currency), color: .spentyError)
                     Divider()
-                    odResultRow("Number of Days", value: "\(result.days)", color: .spentyTextPrimary)
+                    odResultRow(lang.s("number_of_days"), value: "\(result.days)", color: .spentyTextPrimary)
                     if let avg = result.averageBalance {
                         Divider()
-                        odResultRow("Average Balance", value: formatCurrency(avg, account?.currency), color: .spentyInfo)
+                        odResultRow(lang.s("average_balance"), value: formatCurrency(avg, account?.currency), color: .spentyInfo)
                     }
                     if let rate = result.rate {
                         Divider()
-                        odResultRow("Effective Rate", value: String(format: "%.2f%%", rate), color: .spentyWarning)
+                        odResultRow(lang.s("effective_rate"), value: String(format: "%.2f%%", rate), color: .spentyWarning)
                     }
                 }
                 .padding(16)

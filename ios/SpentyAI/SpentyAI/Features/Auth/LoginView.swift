@@ -4,6 +4,8 @@ struct LoginView: View {
 
     // MARK: - State
 
+
+    @Environment(LocalizationManager.self) var lang
     @State private var viewModel: AuthViewModel
     var authManager: AuthManager
 
@@ -35,8 +37,8 @@ struct LoginView: View {
             }
             .padding(.horizontal, 32)
         }
-        .alert("Sign In Error", isPresented: $viewModel.showError) {
-            Button("OK") { viewModel.dismissError() }
+        .alert(lang.s("sign_in_error"), isPresented: $viewModel.showError) {
+            Button(lang.s("ok")) { viewModel.dismissError() }
         } message: {
             Text(viewModel.errorMessage)
         }
@@ -68,11 +70,11 @@ struct LoginView: View {
                     .foregroundStyle(Color.spentyPrimary)
             }
 
-            Text("SpentyAI")
+            Text(lang.s("spentyai"))
                 .font(.system(size: 34, weight: .bold, design: .rounded))
                 .foregroundStyle(Color.spentyPrimary)
 
-            Text("Smart spending starts here")
+            Text(lang.s("smart_spending"))
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
@@ -96,7 +98,7 @@ struct LoginView: View {
                         .resizable()
                         .frame(width: 22, height: 22)
 
-                    Text("Sign in with Google")
+                    Text(lang.s("sign_in_google"))
                         .font(.body.weight(.semibold))
                 }
                 .frame(maxWidth: .infinity, minHeight: 52)

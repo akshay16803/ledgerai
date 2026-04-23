@@ -4,6 +4,8 @@ struct RecordPaymentView: View {
 
     // MARK: - Payment methods
 
+
+    @Environment(LocalizationManager.self) var lang
     private let paymentMethods = ["Cash", "Bank Transfer", "UPI", "Cheque", "Card", "Other"]
 
     // MARK: - State
@@ -53,14 +55,14 @@ struct RecordPaymentView: View {
                 }
                 .scrollContentBackground(.hidden)
             }
-            .navigationTitle("Record Payment")
+            .navigationTitle(lang.s("record_payment"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+                    Button(lang.s("cancel")) { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
+                    Button(lang.s("save")) {
                         Task { await save() }
                     }
                     .fontWeight(.semibold)
@@ -83,7 +85,7 @@ struct RecordPaymentView: View {
             summaryRow("Customer", value: invoice.customerName ?? "—")
 
             HStack {
-                Text("Invoice Total")
+                Text(lang.s("invoice_total"))
                     .foregroundStyle(.secondary)
                 Spacer()
                 Text(formatCurrency(invoiceTotal))
@@ -91,7 +93,7 @@ struct RecordPaymentView: View {
             }
 
             HStack {
-                Text("Amount Paid")
+                Text(lang.s("amount_paid"))
                     .foregroundStyle(.secondary)
                 Spacer()
                 Text(formatCurrency(amountPaid))
@@ -99,7 +101,7 @@ struct RecordPaymentView: View {
             }
 
             HStack {
-                Text("Balance Due")
+                Text(lang.s("balance_due"))
                     .fontWeight(.semibold)
                 Spacer()
                 Text(formatCurrency(balanceDue))
@@ -107,7 +109,7 @@ struct RecordPaymentView: View {
                     .foregroundColor(balanceDue > 0 ? .spentyError : .spentySuccess)
             }
         } header: {
-            Text("Invoice Summary")
+            Text(lang.s("invoice_summary"))
         }
     }
 
@@ -135,7 +137,7 @@ struct RecordPaymentView: View {
 
             if showValidation && !isAmountValid {
                 if amount <= 0 {
-                    Text("Amount must be greater than zero.")
+                    Text(lang.s("amount_greater_zero"))
                         .font(.caption)
                         .foregroundStyle(Color.spentyError)
                 } else if amount > balanceDue {
@@ -145,15 +147,15 @@ struct RecordPaymentView: View {
                 }
             }
 
-            DatePicker("Payment Date", selection: $paymentDate, displayedComponents: .date)
+            DatePicker(lang.s("date"), selection: $paymentDate, displayedComponents: .date)
 
-            Picker("Method", selection: $selectedMethod) {
+            Picker(lang.s("payment"), selection: $selectedMethod) {
                 ForEach(paymentMethods, id: \.self) { method in
                     Text(method).tag(method)
                 }
             }
         } header: {
-            Text("Payment Details")
+            Text(lang.s("payment_details"))
         }
     }
 
@@ -161,17 +163,17 @@ struct RecordPaymentView: View {
 
     private var accountSection: some View {
         Section {
-            Picker("Account", selection: $selectedAccountId) {
-                Text("None").tag(String?.none)
+            Picker(lang.s("account_label"), selection: $selectedAccountId) {
+                Text(lang.s("none_option")).tag(String?.none)
                 ForEach(viewModel.accounts) { account in
                     Text(account.name ?? "Unnamed Account")
                         .tag(Optional(account.id))
                 }
             }
         } header: {
-            Text("Deposit Account")
+            Text(lang.s("deposit_account"))
         } footer: {
-            Text("Select the bank/cash account where this payment was received.")
+            Text(lang.s("deposit_account_info"))
         }
     }
 
@@ -179,10 +181,10 @@ struct RecordPaymentView: View {
 
     private var noteSection: some View {
         Section {
-            TextField("Payment notes (optional)", text: $note, axis: .vertical)
+            TextField(lang.s("payment_notes"), text: $note, axis: .vertical)
                 .lineLimit(2...4)
         } header: {
-            Text("Notes")
+            Text(lang.s("notes"))
         }
     }
 

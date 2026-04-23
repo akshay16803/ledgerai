@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct FilterBar: View {
+    @Environment(LocalizationManager.self) var lang
     let filters: [String]
     @Binding var selected: String
 
@@ -11,7 +12,7 @@ struct FilterBar: View {
                     Button {
                         selected = filter
                     } label: {
-                        Text(filter)
+                        Text(lang.s(filter.lowercased()))
                             .font(SpentyFonts.footnote)
                             .fontWeight(selected == filter ? .semibold : .regular)
                             .foregroundColor(selected == filter ? .white : .spentyTextPrimary)

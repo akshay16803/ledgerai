@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct MainTabView: View {
+    @Environment(LocalizationManager.self) var lang
     @State private var selectedTab: Tab = .dashboard
 
     enum Tab: String, CaseIterable {
@@ -19,37 +20,47 @@ struct MainTabView: View {
             case .more: return "ellipsis.circle.fill"
             }
         }
+
+        func localizedLabel(_ lang: LocalizationManager) -> String {
+            switch self {
+            case .dashboard: return lang.s("dashboard")
+            case .transactions: return lang.s("transactions")
+            case .accounts: return lang.s("accounts")
+            case .reports: return lang.s("reports")
+            case .more: return lang.s("more")
+            }
+        }
     }
 
     var body: some View {
         TabView(selection: $selectedTab) {
             DashboardView()
                 .tabItem {
-                    Label(Tab.dashboard.rawValue, systemImage: Tab.dashboard.icon)
+                    Label(Tab.dashboard.localizedLabel(lang), systemImage: Tab.dashboard.icon)
                 }
                 .tag(Tab.dashboard)
 
             TransactionListView()
                 .tabItem {
-                    Label(Tab.transactions.rawValue, systemImage: Tab.transactions.icon)
+                    Label(Tab.transactions.localizedLabel(lang), systemImage: Tab.transactions.icon)
                 }
                 .tag(Tab.transactions)
 
             AccountListView()
                 .tabItem {
-                    Label(Tab.accounts.rawValue, systemImage: Tab.accounts.icon)
+                    Label(Tab.accounts.localizedLabel(lang), systemImage: Tab.accounts.icon)
                 }
                 .tag(Tab.accounts)
 
             ReportsView()
                 .tabItem {
-                    Label(Tab.reports.rawValue, systemImage: Tab.reports.icon)
+                    Label(Tab.reports.localizedLabel(lang), systemImage: Tab.reports.icon)
                 }
                 .tag(Tab.reports)
 
             MoreMenuView()
                 .tabItem {
-                    Label(Tab.more.rawValue, systemImage: Tab.more.icon)
+                    Label(Tab.more.localizedLabel(lang), systemImage: Tab.more.icon)
                 }
                 .tag(Tab.more)
         }
@@ -60,87 +71,88 @@ struct MainTabView: View {
 // MARK: - More Menu
 
 struct MoreMenuView: View {
+    @Environment(LocalizationManager.self) var lang
     @State private var showAIChat = false
     @State private var cashFlowViewModel = CashFlowViewModel()
 
     var body: some View {
         NavigationStack {
         List {
-            Section("Finance") {
+            Section(lang.s("finance")) {
                 NavigationLink { CashFlowView() } label: {
-                    MoreRow(title: "Cash Flow", icon: "chart.line.uptrend.xyaxis", color: .spentyPrimary)
+                    MoreRow(title: lang.s("cash_flow"), icon: "chart.line.uptrend.xyaxis", color: .spentyPrimary)
                 }
                 NavigationLink { InvoiceListView() } label: {
-                    MoreRow(title: "Invoices", icon: "doc.text.fill", color: .spentyInfo)
+                    MoreRow(title: lang.s("invoices"), icon: "doc.text.fill", color: .spentyInfo)
                 }
                 NavigationLink { PurchaseListView() } label: {
-                    MoreRow(title: "Purchases", icon: "cart.fill", color: .spentyAccent1)
+                    MoreRow(title: lang.s("purchases"), icon: "cart.fill", color: .spentyAccent1)
                 }
                 NavigationLink { CategoryListView() } label: {
-                    MoreRow(title: "Categories", icon: "folder.fill", color: .spentyWarning)
+                    MoreRow(title: lang.s("categories"), icon: "folder.fill", color: .spentyWarning)
                 }
             }
 
-            Section("People") {
+            Section(lang.s("people")) {
                 NavigationLink { CustomerListView() } label: {
-                    MoreRow(title: "Customers", icon: "person.2.fill", color: .spentyInfo)
+                    MoreRow(title: lang.s("customers"), icon: "person.2.fill", color: .spentyInfo)
                 }
                 NavigationLink { VendorListView() } label: {
-                    MoreRow(title: "Vendors", icon: "shippingbox.fill", color: .spentyAccent1)
+                    MoreRow(title: lang.s("vendors"), icon: "shippingbox.fill", color: .spentyAccent1)
                 }
             }
 
-            Section("Obligations") {
+            Section(lang.s("obligations")) {
                 NavigationLink {
                     MandatesListView(viewModel: cashFlowViewModel)
                         .task { await cashFlowViewModel.loadAll() }
                 } label: {
-                    MoreRow(title: "Mandates", icon: "doc.plaintext.fill", color: .spentyWarning)
+                    MoreRow(title: lang.s("mandates"), icon: "doc.plaintext.fill", color: .spentyWarning)
                 }
             }
 
-            Section("Data") {
+            Section(lang.s("data")) {
                 NavigationLink { ReconciliationView() } label: {
-                    MoreRow(title: "Reconciliation", icon: "checkmark.circle.fill", color: .spentySuccess)
+                    MoreRow(title: lang.s("reconciliation"), icon: "checkmark.circle.fill", color: .spentySuccess)
                 }
                 NavigationLink { EmailSyncView() } label: {
-                    MoreRow(title: "Email Sync", icon: "envelope.fill", color: .spentyInfo)
+                    MoreRow(title: lang.s("email_sync"), icon: "envelope.fill", color: .spentyInfo)
                 }
                 NavigationLink { SMSSyncView() } label: {
-                    MoreRow(title: "SMS Sync", icon: "message.fill", color: .spentyAccent3)
+                    MoreRow(title: lang.s("sms_sync"), icon: "message.fill", color: .spentyAccent3)
                 }
                 NavigationLink { RecordsView() } label: {
-                    MoreRow(title: "Records", icon: "archivebox.fill", color: .spentyTextSecondary)
+                    MoreRow(title: lang.s("records"), icon: "archivebox.fill", color: .spentyTextSecondary)
                 }
                 NavigationLink { PastInsightsView() } label: {
-                    MoreRow(title: "Past Insights", icon: "clock.fill", color: .spentyAccent3)
+                    MoreRow(title: lang.s("past_insights"), icon: "clock.fill", color: .spentyAccent3)
                 }
             }
 
-            Section("Tools") {
+            Section(lang.s("tools")) {
                 Button {
                     showAIChat = true
                 } label: {
-                    MoreRow(title: "AI Chat", icon: "bubble.left.and.bubble.right.fill", color: .spentyPrimary)
+                    MoreRow(title: lang.s("ai_chat"), icon: "bubble.left.and.bubble.right.fill", color: .spentyPrimary)
                 }
                 NavigationLink { FeatureRequestsView() } label: {
-                    MoreRow(title: "Feature Requests", icon: "lightbulb.fill", color: .spentyWarning)
+                    MoreRow(title: lang.s("feature_requests"), icon: "lightbulb.fill", color: .spentyWarning)
                 }
                 NavigationLink { SupportView() } label: {
-                    MoreRow(title: "Support", icon: "questionmark.circle.fill", color: .spentyInfo)
+                    MoreRow(title: lang.s("support"), icon: "questionmark.circle.fill", color: .spentyInfo)
                 }
             }
 
-            Section("Account") {
+            Section(lang.s("account_section")) {
                 NavigationLink { SettingsView() } label: {
-                    MoreRow(title: "Settings", icon: "gearshape.fill", color: .spentyTextSecondary)
+                    MoreRow(title: lang.s("settings"), icon: "gearshape.fill", color: .spentyTextSecondary)
                 }
                 NavigationLink { BillingView() } label: {
-                    MoreRow(title: "Billing", icon: "creditcard.fill", color: .spentyPrimary)
+                    MoreRow(title: lang.s("billing"), icon: "creditcard.fill", color: .spentyPrimary)
                 }
             }
         }
-        .navigationTitle("More")
+        .navigationTitle(lang.s("more"))
         .sheet(isPresented: $showAIChat) {
             AIChatView()
         }

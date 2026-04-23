@@ -2,6 +2,7 @@ import SwiftUI
 
 struct AccountListView: View {
 
+    @Environment(LocalizationManager.self) var lang
     @State private var viewModel = AccountsViewModel()
 
     var body: some View {
@@ -10,19 +11,19 @@ struct AccountListView: View {
                 Color.spentyBgPrimary.ignoresSafeArea()
 
                 if viewModel.isLoading && viewModel.accounts.isEmpty {
-                    LoadingView(message: "Loading accounts...")
+                    LoadingView(message: lang.s("loading_accounts_msg"))
                 } else if viewModel.filteredAccounts.isEmpty && !viewModel.searchText.isEmpty {
                     EmptyStateView(
                         icon: "magnifyingglass",
-                        title: "No Results",
-                        subtitle: "No accounts match \"\(viewModel.searchText)\"."
+                        title: lang.s("no_results"),
+                        subtitle: lang.s("no_accounts_found")
                     )
                 } else if viewModel.accounts.isEmpty {
                     EmptyStateView(
                         icon: "building.columns",
-                        title: "No Accounts Yet",
-                        subtitle: "Add your first account to start tracking your finances.",
-                        buttonTitle: "Add Account"
+                        title: lang.s("no_accounts"),
+                        subtitle: lang.s("add_first_account"),
+                        buttonTitle: lang.s("add_account")
                     ) {
                         viewModel.editingAccount = nil
                         viewModel.showingForm = true
@@ -31,8 +32,8 @@ struct AccountListView: View {
                     accountList
                 }
             }
-            .navigationTitle("Accounts")
-            .searchable(text: $viewModel.searchText, prompt: "Search accounts")
+            .navigationTitle(lang.s("accounts"))
+            .searchable(text: $viewModel.searchText, prompt: lang.s("search_accounts"))
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
@@ -96,7 +97,7 @@ struct AccountListView: View {
 
     private var totalBalanceCard: some View {
         VStack(spacing: 6) {
-            Text("Total Balance")
+            Text(lang.s("total_balance"))
                 .font(SpentyFonts.caption1)
                 .foregroundColor(.spentyTextSecondary)
 
@@ -142,14 +143,14 @@ struct AccountListView: View {
                         Button(role: .destructive) {
                             Task { await viewModel.deleteAccount(account.id) }
                         } label: {
-                            Label("Delete", systemImage: "trash")
+                            Label(lang.s("delete"), systemImage: "trash")
                         }
 
                         Button {
                             viewModel.editingAccount = account
                             viewModel.showingForm = true
                         } label: {
-                            Label("Edit", systemImage: "pencil")
+                            Label(lang.s("edit"), systemImage: "pencil")
                         }
                         .tint(Color.spentyInfo)
                     }

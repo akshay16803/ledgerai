@@ -5,6 +5,8 @@ struct InvoicePreviewView: View {
 
     // MARK: - State
 
+
+    @Environment(LocalizationManager.self) var lang
     @Bindable var viewModel: InvoicesViewModel
     let invoice: Invoice
 
@@ -26,7 +28,7 @@ struct InvoicePreviewView: View {
                     VStack(spacing: 12) {
                         ProgressView()
                             .tint(Color.spentyPrimary)
-                        Text("Loading invoice PDF...")
+                        Text(lang.s("loading_invoice_pdf"))
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
@@ -86,7 +88,7 @@ struct InvoicePreviewView: View {
                 row("Date", value: formatDate(invoice.date))
                 row("Due Date", value: formatDate(invoice.dueDate))
             } header: {
-                Text("Details")
+                Text(lang.s("details"))
             }
 
             if let items = invoice.lineItems, !items.isEmpty {
@@ -108,7 +110,7 @@ struct InvoicePreviewView: View {
                         .padding(.vertical, 2)
                     }
                 } header: {
-                    Text("Line Items")
+                    Text(lang.s("line_items"))
                 }
             }
 
@@ -116,7 +118,7 @@ struct InvoicePreviewView: View {
                 row("Subtotal", value: formatCurrency(invoice.subtotal ?? 0))
                 row("Tax", value: formatCurrency(invoice.taxAmount ?? 0))
                 HStack {
-                    Text("Grand Total")
+                    Text(lang.s("grand_total"))
                         .fontWeight(.bold)
                     Spacer()
                     Text(formatCurrency(invoice.grandTotal ?? 0))
@@ -124,7 +126,7 @@ struct InvoicePreviewView: View {
                         .foregroundStyle(Color.spentyPrimary)
                 }
             } header: {
-                Text("Totals")
+                Text(lang.s("totals"))
             }
 
             if let notes = invoice.notes, !notes.isEmpty {
@@ -132,7 +134,7 @@ struct InvoicePreviewView: View {
                     Text(notes)
                         .font(.body)
                 } header: {
-                    Text("Notes")
+                    Text(lang.s("notes"))
                 }
             }
 
@@ -168,7 +170,7 @@ struct InvoicePreviewView: View {
                         .foregroundStyle(Color.spentyError)
                 }
             } header: {
-                Text("Actions")
+                Text(lang.s("actions"))
             }
         }
         .listStyle(.insetGrouped)
@@ -182,7 +184,7 @@ struct InvoicePreviewView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Are you sure you want to delete this invoice? This action cannot be undone.")
+            Text(lang.s("delete_invoice_confirm"))
         }
     }
 
@@ -203,7 +205,7 @@ struct InvoicePreviewView: View {
                 .font(.largeTitle)
                 .foregroundStyle(Color.spentyError.opacity(0.6))
 
-            Text("Could not load PDF")
+            Text(lang.s("could_not_load_pdf"))
                 .font(.headline)
 
             Text(message)
@@ -211,7 +213,7 @@ struct InvoicePreviewView: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
 
-            Button("Retry") {
+            Button(lang.s("retry")) {
                 Task { await loadPDF() }
             }
             .buttonStyle(.borderedProminent)

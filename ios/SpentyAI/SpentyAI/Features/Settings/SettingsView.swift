@@ -5,6 +5,8 @@ struct SettingsView: View {
 
     // MARK: - State
 
+
+    @Environment(LocalizationManager.self) var lang
     @Environment(AuthManager.self) private var authManager
     @State private var viewModel = SettingsViewModel(authManager: AuthManager())
     @State private var hasInitialized = false
@@ -26,7 +28,7 @@ struct SettingsView: View {
                 settingsForm
             }
         }
-        .navigationTitle("Settings")
+        .navigationTitle(lang.s("settings"))
         .navigationBarTitleDisplayMode(.large)
         .task {
             if !hasInitialized {
@@ -36,7 +38,7 @@ struct SettingsView: View {
             await viewModel.loadSettings()
         }
         .alert("Error", isPresented: $viewModel.showError) {
-            Button("OK") { viewModel.dismissError() }
+            Button(lang.s("ok")) { viewModel.dismissError() }
         } message: {
             Text(viewModel.errorMessage)
         }
@@ -50,10 +52,10 @@ struct SettingsView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This action is permanent. All your data will be erased and cannot be recovered.")
+            Text(lang.s("reset_warning"))
         }
         // Step 1: Reset Data warning — explains what will happen
-        .alert("Reset All Data?", isPresented: $viewModel.showResetWarning) {
+        .alert(lang.s("reset_all_data"), isPresented: $viewModel.showResetWarning) {
             Button("I Understand, Continue", role: .destructive) {
                 viewModel.showResetConfirmInput = true
             }
@@ -62,8 +64,8 @@ struct SettingsView: View {
             Text("This will erase all your transactions, accounts, invoices, bills, customers, vendors, receipts, and reports.\n\nAny connected email accounts (Gmail, Outlook) will be disconnected and all synced data removed.\n\nYour account and settings will stay — but everything else goes back to zero, as if you just signed up.\n\nThis cannot be undone.")
         }
         // Step 2: Type RESET to confirm
-        .alert("Type RESET to Confirm", isPresented: $viewModel.showResetConfirmInput) {
-            TextField("Type RESET", text: $viewModel.resetConfirmText)
+        .alert(lang.s("type_reset_confirm"), isPresented: $viewModel.showResetConfirmInput) {
+            TextField(lang.s("type_reset"), text: $viewModel.resetConfirmText)
                 .autocorrectionDisabled()
                 .textInputAutocapitalization(.characters)
             Button("Reset My Data", role: .destructive) {
@@ -74,16 +76,16 @@ struct SettingsView: View {
                 viewModel.resetConfirmText = ""
             }
         } message: {
-            Text("To make sure this isn't an accident, type RESET in the box above.")
+            Text(lang.s("type_reset_instruction"))
         }
         // Success confirmation
-        .alert("Data Reset Complete", isPresented: $viewModel.showResetSuccess) {
-            Button("OK") {
+        .alert(lang.s("data_reset_complete"), isPresented: $viewModel.showResetSuccess) {
+            Button(lang.s("ok")) {
                 viewModel.showResetSuccess = false
                 Task { await viewModel.loadSettings() }
             }
         } message: {
-            Text("All your data has been cleared. Default accounts and categories have been set up for you — you're starting fresh!")
+            Text(lang.s("data_cleared"))
         }
     }
 
@@ -110,7 +112,7 @@ struct SettingsView: View {
                     sectionIcon("building.2.fill", color: .spentyPrimary)
 
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Business Profile")
+                        Text(lang.s("business_profile"))
                             .font(SpentyFonts.body)
                             .foregroundColor(.spentyTextPrimary)
                         Text(viewModel.settings.firmName ?? "Set up your business details")
@@ -141,7 +143,7 @@ struct SettingsView: View {
                     sectionIcon("coloncurrencysign.circle.fill", color: .spentyWarning)
 
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Currency & Locale")
+                        Text(lang.s("currency_locale"))
                             .font(SpentyFonts.body)
                             .foregroundColor(.spentyTextPrimary)
                         Text(currencySubtitle)
@@ -262,7 +264,7 @@ struct SettingsView: View {
                 Image(systemName: "plus.circle.fill")
                     .font(.title3)
                     .foregroundStyle(Color.spentyPrimary)
-                Text("Upload Logo")
+                Text(lang.s("upload_logo"))
                     .font(SpentyFonts.subheadline)
                     .foregroundStyle(Color.spentyPrimary)
 
@@ -335,7 +337,7 @@ struct SettingsView: View {
                 Image(systemName: "plus.circle.fill")
                     .font(.title3)
                     .foregroundStyle(Color.spentyPrimary)
-                Text("Upload Signature")
+                Text(lang.s("upload_signature"))
                     .font(SpentyFonts.subheadline)
                     .foregroundStyle(Color.spentyPrimary)
 
@@ -362,7 +364,7 @@ struct SettingsView: View {
                 HStack(spacing: 14) {
                     sectionIcon("rectangle.portrait.and.arrow.right", color: .spentyWarning)
 
-                    Text("Sign Out")
+                    Text(lang.s("sign_out"))
                         .font(SpentyFonts.body)
                         .foregroundColor(.spentyTextPrimary)
                 }
@@ -377,10 +379,10 @@ struct SettingsView: View {
                     sectionIcon("arrow.counterclockwise.circle.fill", color: .orange)
 
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Reset Data")
+                        Text(lang.s("reset_data"))
                             .font(SpentyFonts.body)
                             .foregroundColor(.orange)
-                        Text("Start fresh — removes all your data")
+                        Text(lang.s("reset_data_subtitle"))
                             .font(SpentyFonts.caption2)
                             .foregroundColor(.spentyTextSecondary)
                     }
@@ -395,7 +397,7 @@ struct SettingsView: View {
                 HStack(spacing: 14) {
                     sectionIcon("person.crop.circle.badge.xmark", color: .spentyError)
 
-                    Text("Delete Account")
+                    Text(lang.s("delete_account"))
                         .font(SpentyFonts.body)
                         .foregroundColor(.spentyError)
                 }
@@ -408,7 +410,7 @@ struct SettingsView: View {
                 .foregroundColor(.spentyPrimary)
                 .textCase(nil)
         } footer: {
-            Text("Reset Data wipes your transactions and records but keeps your account. Delete Account removes everything permanently.")
+            Text(lang.s("reset_vs_delete"))
                 .font(SpentyFonts.caption2)
                 .foregroundColor(.spentyTextSecondary)
         }

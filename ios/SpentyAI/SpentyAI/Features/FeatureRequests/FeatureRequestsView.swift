@@ -4,6 +4,8 @@ struct FeatureRequestsView: View {
 
     // MARK: - State
 
+
+    @Environment(LocalizationManager.self) var lang
     @State private var viewModel = FeatureRequestsViewModel()
 
     // MARK: - Body
@@ -23,7 +25,7 @@ struct FeatureRequestsView: View {
                 }
             }
         }
-        .navigationTitle("Feature Requests")
+        .navigationTitle(lang.s("feature_requests"))
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {
@@ -48,7 +50,7 @@ struct FeatureRequestsView: View {
             get: { viewModel.errorMessage != nil },
             set: { if !$0 { viewModel.errorMessage = nil } }
         )) {
-            Button("OK") { viewModel.errorMessage = nil }
+            Button(lang.s("ok")) { viewModel.errorMessage = nil }
         } message: {
             Text(viewModel.errorMessage ?? "")
         }
@@ -62,9 +64,9 @@ struct FeatureRequestsView: View {
     private var emptyState: some View {
         EmptyStateView(
             icon: "lightbulb",
-            title: "No Requests Yet",
+            title: lang.s("no_requests"),
             subtitle: "Be the first to suggest a feature!",
-            buttonTitle: "Submit a Request"
+            buttonTitle: lang.s("new_request")
         ) {
             viewModel.showForm = true
         }
