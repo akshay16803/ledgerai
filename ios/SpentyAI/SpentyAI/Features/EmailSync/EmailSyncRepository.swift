@@ -42,6 +42,11 @@ final class EmailSyncRepository {
         return try await APIClient.shared.post(APIEndpoints.emailStartSync, body: body)
     }
 
+    func startOutlookSync(outlookEmail: String, syncFromDate: String) async throws -> EmailSyncResponse {
+        let body = OutlookStartSyncRequest(outlookEmail: outlookEmail, syncFromDate: syncFromDate)
+        return try await APIClient.shared.post(APIEndpoints.outlookStartSync, body: body)
+    }
+
     func retryPending(gmailEmail: String? = nil) async throws -> EmailRetryResponse {
         let body = RetryPendingRequest(gmailEmail: gmailEmail ?? "")
         return try await APIClient.shared.post(APIEndpoints.emailRetryPending, body: body)
@@ -103,6 +108,16 @@ struct DisconnectRequest: Encodable {
 struct StartSyncRequest: Encodable {
     let gmailEmail: String
     let syncFromDate: String
+}
+
+struct OutlookStartSyncRequest: Encodable {
+    let outlookEmail: String
+    let syncFromDate: String
+
+    enum CodingKeys: String, CodingKey {
+        case outlookEmail = "outlook_email"
+        case syncFromDate = "sync_from_date"
+    }
 }
 
 struct RetryPendingRequest: Encodable {

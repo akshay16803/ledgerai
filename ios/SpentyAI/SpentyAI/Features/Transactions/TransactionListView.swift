@@ -291,8 +291,10 @@ struct TransactionListView: View {
             } else if viewModel.transactions.isEmpty {
                 EmptyStateView(
                     icon: "arrow.left.arrow.right",
-                    title: "No Transactions",
-                    subtitle: "Add your first transaction to start tracking.",
+                    title: "No Approved Transactions",
+                    subtitle: viewModel.pendingCount > 0
+                        ? "You have \(viewModel.pendingCount) transaction\(viewModel.pendingCount == 1 ? "" : "s") pending review."
+                        : "Add your first transaction to start tracking.",
                     buttonTitle: "Add Transaction"
                 ) {
                     viewModel.beginCreate()

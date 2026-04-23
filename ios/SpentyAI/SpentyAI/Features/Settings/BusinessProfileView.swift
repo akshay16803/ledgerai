@@ -24,6 +24,20 @@ struct BusinessProfileView: View {
         "United Arab Emirates", "Japan", "Other"
     ]
 
+    /// Maps ISO country codes to the display names used in the picker.
+    private static let countryCodeToName: [String: String] = [
+        "IN": "India",
+        "US": "United States",
+        "GB": "United Kingdom",
+        "CA": "Canada",
+        "AU": "Australia",
+        "DE": "Germany",
+        "FR": "France",
+        "SG": "Singapore",
+        "AE": "United Arab Emirates",
+        "JP": "Japan"
+    ]
+
     // MARK: - State
 
     @Bindable var viewModel: SettingsViewModel
@@ -143,7 +157,7 @@ struct BusinessProfileView: View {
                     .foregroundStyle(Color.spentyPrimary)
                     .frame(width: 24)
 
-                Picker("Country", selection: binding(\.businessCountry)) {
+                Picker("Country", selection: countryBinding) {
                     Text("Select Country").tag("")
                     ForEach(Self.countries, id: \.self) { country in
                         Text(country).tag(country)
@@ -199,6 +213,21 @@ struct BusinessProfileView: View {
         Binding(
             get: { viewModel.settings[keyPath: keyPath] ?? "" },
             set: { viewModel.settings[keyPath: keyPath] = $0.isEmpty ? nil : $0 }
+        )
+    }
+
+    /// Country binding that normalizes ISO codes (e.g. "IN") to display names (e.g. "India").
+    private var countryBinding: Binding<String> {
+        Binding(
+            get: {
+                let stored = viewModel.settings.businessCountry ?? ""
+                // If stored value is an ISO code, map it to the display name
+                if let mapped = Self.countryCodeToName[stored.uppercased()] {
+                    return mapped
+                }
+                return stored
+            },
+            set: { viewModel.settings.businessCountry = $0.isEmpty ? nil : $0 }
         )
     }
 }

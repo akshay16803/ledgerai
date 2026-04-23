@@ -182,11 +182,27 @@ struct AccountListView: View {
                 }
 
             VStack(alignment: .leading, spacing: 3) {
-                Text(account.name ?? "Unnamed Account")
-                    .font(SpentyFonts.callout)
-                    .fontWeight(.medium)
-                    .foregroundColor(.spentyTextPrimary)
-                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    Text(account.displayName)
+                        .font(SpentyFonts.callout)
+                        .fontWeight(.medium)
+                        .foregroundColor(.spentyTextPrimary)
+                        .lineLimit(1)
+
+                    if account.aiCreated == true {
+                        HStack(spacing: 2) {
+                            Image(systemName: "sparkles")
+                                .font(.system(size: 9, weight: .bold))
+                            Text("AI")
+                                .font(.system(size: 9, weight: .bold))
+                        }
+                        .foregroundColor(.spentyPrimary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.spentyPrimary.opacity(0.12))
+                        .cornerRadius(4)
+                    }
+                }
 
                 if let subType = account.subType, !subType.isEmpty {
                     Text(Self.friendlySubType(subType))

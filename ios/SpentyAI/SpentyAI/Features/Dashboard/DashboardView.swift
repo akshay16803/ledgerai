@@ -345,7 +345,7 @@ struct DashboardView: View {
                 )
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(account.name ?? "Unnamed Account")
+                Text(account.displayName)
                     .font(SpentyFonts.subheadline)
                     .foregroundColor(.spentyTextPrimary)
                     .lineLimit(1)
@@ -470,12 +470,25 @@ struct DashboardView: View {
 
     private var pendingApprovalSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            collapsibleHeader(
-                title: "Pending Approval",
-                icon: "envelope.badge.fill",
-                count: viewModel.pendingReview,
-                isExpanded: $isPendingExpanded
-            )
+            HStack(spacing: 8) {
+                collapsibleHeader(
+                    title: "Pending Approval",
+                    icon: "envelope.badge.fill",
+                    count: viewModel.pendingReview,
+                    isExpanded: $isPendingExpanded
+                )
+
+                if viewModel.isLoadingPending {
+                    HStack(spacing: 4) {
+                        ProgressView()
+                            .scaleEffect(0.7)
+                            .tint(.spentyPrimary)
+                        Text("Syncing...")
+                            .font(SpentyFonts.caption2)
+                            .foregroundColor(.spentyTextSecondary)
+                    }
+                }
+            }
 
             if isPendingExpanded {
                 if viewModel.isLoadingPending {

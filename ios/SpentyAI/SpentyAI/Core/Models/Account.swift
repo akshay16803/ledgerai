@@ -17,6 +17,7 @@ struct Account: Codable, Identifiable {
     var loanEmiDay: Int?
     var loanSanctionedAmount: Double?
     var brokerName: String?
+    var aiCreated: Bool?
 
     enum CodingKeys: String, CodingKey {
         case id = "accountId"
@@ -35,6 +36,16 @@ struct Account: Codable, Identifiable {
         case loanEmiDay
         case loanSanctionedAmount
         case brokerName
+        case aiCreated = "ai_created"
+    }
+
+    /// Display name — replaces "Unknown Bank" with "Unidentified Account"
+    var displayName: String {
+        let raw = name ?? "Unnamed Account"
+        if raw.lowercased() == "unknown bank" {
+            return "Unidentified Account"
+        }
+        return raw
     }
 }
 

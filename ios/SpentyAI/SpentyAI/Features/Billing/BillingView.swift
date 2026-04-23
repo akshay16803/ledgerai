@@ -24,7 +24,7 @@ struct BillingView: View {
                     paymentHistorySection
                 }
 
-                if viewModel.isSubscribed {
+                if viewModel.isSubscribed && !viewModel.isLifetime {
                     cancelSection
                 }
             }
@@ -167,7 +167,7 @@ struct BillingView: View {
                 }
             }
 
-            if !isCurrent {
+            if !isCurrent && !viewModel.isLifetime {
                 Button {
                     Task { await viewModel.purchasePlan(plan.productId) }
                 } label: {

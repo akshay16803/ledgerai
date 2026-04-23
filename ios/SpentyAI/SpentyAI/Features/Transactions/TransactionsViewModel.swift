@@ -35,6 +35,10 @@ final class TransactionsViewModel {
     var editingTransaction: Transaction? = nil
     var errorMessage: String? = nil
 
+    // MARK: - Pending Count (for empty state messaging)
+
+    var pendingCount: Int = 0
+
     // MARK: - Bulk Selection
 
     var isSelecting: Bool = false
@@ -43,6 +47,7 @@ final class TransactionsViewModel {
     // MARK: - Private
 
     private let repository = TransactionRepository.shared
+    private let emailRepository = EmailSyncRepository.shared
     private let pageSize = 30
 
     private static let queryDateFormatter: DateFormatter = {
@@ -74,6 +79,19 @@ final class TransactionsViewModel {
             errorMessage = error.localizedDescription
         }
         isLoading = false
+
+        // Load pending count for empty state messaging
+        await loadPendingCount()
+    }
+
+    @MainActor
+    private func loadPendingCount() async {
+        do {
+            let stats = try await emailRepository.syncStats()
+            pendingCount = stats.pendingReview ?? 0
+        } catch {
+            pendingCount = 0
+        }
     }
 
     @MainActor

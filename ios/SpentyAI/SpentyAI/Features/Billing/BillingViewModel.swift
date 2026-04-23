@@ -278,6 +278,12 @@ final class BillingViewModel {
         currentStatus?.isActive == true
     }
 
+    var isLifetime: Bool {
+        currentStatus?.isActive == true &&
+        (currentStatus?.plan?.lowercased() == "lifetime" ||
+         currentStatus?.productId == "com.spentyai.lifetime")
+    }
+
     var currentPlanName: String? {
         currentStatus?.plan
     }

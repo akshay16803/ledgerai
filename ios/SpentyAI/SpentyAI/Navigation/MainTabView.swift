@@ -23,45 +23,35 @@ struct MainTabView: View {
 
     var body: some View {
         TabView(selection: $selectedTab) {
-            NavigationStack {
-                DashboardView()
-            }
-            .tabItem {
-                Label(Tab.dashboard.rawValue, systemImage: Tab.dashboard.icon)
-            }
-            .tag(Tab.dashboard)
+            DashboardView()
+                .tabItem {
+                    Label(Tab.dashboard.rawValue, systemImage: Tab.dashboard.icon)
+                }
+                .tag(Tab.dashboard)
 
-            NavigationStack {
-                TransactionListView()
-            }
-            .tabItem {
-                Label(Tab.transactions.rawValue, systemImage: Tab.transactions.icon)
-            }
-            .tag(Tab.transactions)
+            TransactionListView()
+                .tabItem {
+                    Label(Tab.transactions.rawValue, systemImage: Tab.transactions.icon)
+                }
+                .tag(Tab.transactions)
 
-            NavigationStack {
-                AccountListView()
-            }
-            .tabItem {
-                Label(Tab.accounts.rawValue, systemImage: Tab.accounts.icon)
-            }
-            .tag(Tab.accounts)
+            AccountListView()
+                .tabItem {
+                    Label(Tab.accounts.rawValue, systemImage: Tab.accounts.icon)
+                }
+                .tag(Tab.accounts)
 
-            NavigationStack {
-                ReportsView()
-            }
-            .tabItem {
-                Label(Tab.reports.rawValue, systemImage: Tab.reports.icon)
-            }
-            .tag(Tab.reports)
+            ReportsView()
+                .tabItem {
+                    Label(Tab.reports.rawValue, systemImage: Tab.reports.icon)
+                }
+                .tag(Tab.reports)
 
-            NavigationStack {
-                MoreMenuView()
-            }
-            .tabItem {
-                Label(Tab.more.rawValue, systemImage: Tab.more.icon)
-            }
-            .tag(Tab.more)
+            MoreMenuView()
+                .tabItem {
+                    Label(Tab.more.rawValue, systemImage: Tab.more.icon)
+                }
+                .tag(Tab.more)
         }
         .tint(Color.spentyPrimary)
     }
@@ -71,8 +61,10 @@ struct MainTabView: View {
 
 struct MoreMenuView: View {
     @State private var showAIChat = false
+    @State private var cashFlowViewModel = CashFlowViewModel()
 
     var body: some View {
+        NavigationStack {
         List {
             Section("Finance") {
                 NavigationLink { CashFlowView() } label: {
@@ -95,6 +87,15 @@ struct MoreMenuView: View {
                 }
                 NavigationLink { VendorListView() } label: {
                     MoreRow(title: "Vendors", icon: "shippingbox.fill", color: .spentyAccent1)
+                }
+            }
+
+            Section("Obligations") {
+                NavigationLink {
+                    MandatesListView(viewModel: cashFlowViewModel)
+                        .task { await cashFlowViewModel.loadAll() }
+                } label: {
+                    MoreRow(title: "Mandates", icon: "doc.plaintext.fill", color: .spentyWarning)
                 }
             }
 
@@ -143,6 +144,7 @@ struct MoreMenuView: View {
         .sheet(isPresented: $showAIChat) {
             AIChatView()
         }
+        } // NavigationStack
     }
 }
 

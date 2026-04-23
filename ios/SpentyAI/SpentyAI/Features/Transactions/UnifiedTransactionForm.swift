@@ -42,6 +42,7 @@ struct UnifiedTransactionForm: View {
     @State private var capturedReceiptImage: UIImage?
     @State private var isSaving: Bool = false
     @State private var errorMessage: String?
+    @State private var showValidationAlert: Bool = false
 
     // Data
     @State private var accounts: [Account] = []
@@ -282,6 +283,11 @@ struct UnifiedTransactionForm: View {
                 }
             } message: {
                 Text("Are you sure you want to delete this transaction? This action cannot be undone.")
+            }
+            .alert("Missing Information", isPresented: $showValidationAlert) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(errorMessage ?? "Please fill in all required fields.")
             }
             .fullScreenCover(isPresented: $showPreview) {
                 if let url = previewURL {
@@ -1429,21 +1435,25 @@ struct UnifiedTransactionForm: View {
     private func saveTransaction() async -> Bool {
         guard let parsedAmount = Double(amount), parsedAmount > 0 else {
             errorMessage = "Please enter a valid amount."
+            showValidationAlert = true
             return false
         }
 
         guard !accountId.isEmpty else {
             errorMessage = "Please select an account."
+            showValidationAlert = true
             return false
         }
 
         if !isTransfer && categoryId.isEmpty {
             errorMessage = "Please select a category."
+            showValidationAlert = true
             return false
         }
 
         if isTransfer && toAccountId.isEmpty {
             errorMessage = "Please select a destination account."
+            showValidationAlert = true
             return false
         }
 

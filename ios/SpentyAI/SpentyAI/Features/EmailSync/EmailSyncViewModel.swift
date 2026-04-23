@@ -278,7 +278,14 @@ final class EmailSyncViewModel {
         do {
             syncPhase = .fetchingEmails
             syncProgressMessage = "Sending request to server..."
-            let response = try await repository.startSync(gmailEmail: email, syncFromDate: syncFromDate)
+
+            let response: EmailSyncResponse
+            if provider == "outlook" {
+                response = try await repository.startOutlookSync(outlookEmail: email, syncFromDate: syncFromDate)
+            } else {
+                response = try await repository.startSync(gmailEmail: email, syncFromDate: syncFromDate)
+            }
+
             syncPhase = .processingAI
             syncProgressMessage = response.message ?? "Backend is processing your emails..."
             showSuccessMessage(response.message ?? "Email sync started")
@@ -336,7 +343,14 @@ final class EmailSyncViewModel {
         do {
             syncPhase = .fetchingEmails
             syncProgressMessage = "Sending request to server..."
-            let response = try await repository.startSync(gmailEmail: email, syncFromDate: syncFromDate)
+
+            let response: EmailSyncResponse
+            if pendingSyncProvider == "outlook" {
+                response = try await repository.startOutlookSync(outlookEmail: email, syncFromDate: syncFromDate)
+            } else {
+                response = try await repository.startSync(gmailEmail: email, syncFromDate: syncFromDate)
+            }
+
             syncPhase = .processingAI
             syncProgressMessage = response.message ?? "Backend is processing your emails..."
             showSuccessMessage(response.message ?? "Email sync started")
@@ -736,7 +750,7 @@ final class EmailSyncViewModel {
                 continuation.resume()
             }
             session.presentationContextProvider = self.authContextProvider
-            session.prefersEphemeralWebBrowserSession = false
+            session.prefersEphemeralWebBrowserSession = true
             session.start()
         }
     }
