@@ -530,6 +530,7 @@ const strings = {
   // Auth / Login
   spentyai: { en: 'SpentyAI', hi: 'SpentyAI' },
   smart_spending: { en: 'Smart spending starts here', hi: 'स्मार्ट खर्च यहाँ शुरू होता है' },
+  autonomous_accounting: { en: 'Autonomous Accounting', hi: 'स्वचालित लेखांकन' },
   sign_in_google: { en: 'Sign in with Google', hi: 'Google से साइन इन करें' },
   sign_in_error: { en: 'Sign In Error', hi: 'साइन इन त्रुटि' },
 

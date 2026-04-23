@@ -17,6 +17,13 @@
   --info: #4A6E7D;
   --border-subtle: rgba(26, 54, 45, 0.08);
   --border-strong: rgba(26, 54, 45, 0.20);
+  --sidebar-bg: #1A2E23;
+  --sidebar-text: #B8CFC2;
+  --sidebar-text-active: #FFFFFF;
+  --sidebar-hover: #243D30;
+  --sidebar-active-bg: #2D4A3A;
+  --sidebar-border: #2D4A3A;
+  --sidebar-brand: #5A7A6B;
   --font-heading: 'Playfair Display', serif;
   --font-body: 'Manrope', sans-serif;
   --font-mono: 'IBM Plex Mono', monospace;
