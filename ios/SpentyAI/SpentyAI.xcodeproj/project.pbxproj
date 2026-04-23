@@ -164,6 +164,8 @@
 		C9D0E1F2A3B4C5D6E7F8A9B0 /* CheckBalanceIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4E5F6A7B8C9D0E1F2A3B4C5 /* CheckBalanceIntent.swift */; };
 		D0E1F2A3B4C5D6E7F8A9B0C1 /* AppShortcuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5F6A7B8C9D0E1F2A3B4C5D6 /* AppShortcuts.swift */; };
 		E80EFD4798143458DF8F11E1 /* CameraCaptureView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 632099D6EDE1972BC0A03128 /* CameraCaptureView.swift */; };
+		BF1A2B3C4D5E6F7A8B9C0D1E /* LocalizationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = L0C1A2B3C4D5E6F7A8B9C0D1 /* LocalizationManager.swift */; };
+		BF2A3B4C5D6E7F8A9B0C1D2E /* AppStrings.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5B6C7D8E9F0A1B2C3D4E5F6 /* AppStrings.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -326,6 +328,8 @@
 		D4E5F6A7B8C9D0E1F2A3B4C5 /* CheckBalanceIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CheckBalanceIntent.swift; sourceTree = "<group>"; };
 		E5F6A7B8C9D0E1F2A3B4C5D6 /* AppShortcuts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppShortcuts.swift; sourceTree = "<group>"; };
 		632099D6EDE1972BC0A03128 /* CameraCaptureView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraCaptureView.swift; sourceTree = "<group>"; };
+		L0C1A2B3C4D5E6F7A8B9C0D1 /* LocalizationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalizationManager.swift; sourceTree = "<group>"; };
+		A5B6C7D8E9F0A1B2C3D4E5F6 /* AppStrings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppStrings.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -400,6 +404,7 @@
 			children = (
 				F3472B7532E0BF867DFCBE57 /* Auth */,
 				D529832A72C148C9F39B8AB9 /* Components */,
+				GR1A2B3C4D5E6F7A8B9C0D1E /* Localization */,
 				A31651542F39F7E1F3FB0C31 /* Models */,
 				FE36AFBC7ED0892204CEE160 /* Networking */,
 				E1F2A3B4C5D6E7F8A9B0C1D2 /* Services */,
@@ -416,6 +421,15 @@
 				D23A5B2118E6874A77F86F01 /* KeychainHelper.swift */,
 			);
 			path = Auth;
+			sourceTree = "<group>";
+		};
+		GR1A2B3C4D5E6F7A8B9C0D1E /* Localization */ = {
+			isa = PBXGroup;
+			children = (
+				A5B6C7D8E9F0A1B2C3D4E5F6 /* AppStrings.swift */,
+				L0C1A2B3C4D5E6F7A8B9C0D1 /* LocalizationManager.swift */,
+			);
+			path = Localization;
 			sourceTree = "<group>";
 		};
 		D529832A72C148C9F39B8AB9 /* Components */ = {
@@ -1018,6 +1032,8 @@
 				C9D0E1F2A3B4C5D6E7F8A9B0 /* CheckBalanceIntent.swift in Sources */,
 				D0E1F2A3B4C5D6E7F8A9B0C1 /* AppShortcuts.swift in Sources */,
 				E80EFD4798143458DF8F11E1 /* CameraCaptureView.swift in Sources */,
+				BF1A2B3C4D5E6F7A8B9C0D1E /* LocalizationManager.swift in Sources */,
+				BF2A3B4C5D6E7F8A9B0C1D2E /* AppStrings.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
