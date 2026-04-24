@@ -1,5 +1,5 @@
 import { s, getCurrentLanguage } from '../lib/localization';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { api } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
 import { Headset, PaperPlaneTilt, CheckCircle, Warning, CaretDown } from '@phosphor-icons/react';
