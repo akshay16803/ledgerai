@@ -96,6 +96,7 @@ struct SettingsView: View {
             businessProfileSection
             currencyLocaleSection
             invoiceCustomizationSection
+            legalSupportSection
             accountSection
         }
         .scrollContentBackground(.hidden)
@@ -352,6 +353,116 @@ struct SettingsView: View {
         .onChange(of: signaturePickerItem) { _, newItem in
             handleSignaturePick(newItem)
         }
+    }
+
+    // MARK: - Legal & Support Section
+
+    private var legalSupportSection: some View {
+        Section {
+            legalRow(
+                icon: "info.circle.fill",
+                color: .spentyPrimary,
+                title: lang.s("about_spentyai"),
+                subtitle: nil,
+                url: "https://www.spentyai.com/"
+            )
+
+            legalRow(
+                icon: "questionmark.circle.fill",
+                color: .spentyPrimary,
+                title: lang.s("help_center"),
+                subtitle: nil,
+                url: "https://www.spentyai.com/help"
+            )
+
+            legalRow(
+                icon: "envelope.fill",
+                color: .spentyPrimary,
+                title: lang.s("contact_support"),
+                subtitle: "support@spentyai.com",
+                url: "mailto:support@spentyai.com"
+            )
+
+            legalRow(
+                icon: "hand.raised.fill",
+                color: .spentyPrimary,
+                title: lang.s("privacy_policy"),
+                subtitle: nil,
+                url: "https://www.spentyai.com/privacy.html"
+            )
+
+            legalRow(
+                icon: "doc.text.fill",
+                color: .spentyPrimary,
+                title: lang.s("terms_of_service"),
+                subtitle: nil,
+                url: "https://www.spentyai.com/terms.html"
+            )
+
+            legalRow(
+                icon: "arrow.uturn.backward.circle.fill",
+                color: .spentyPrimary,
+                title: lang.s("refund_policy"),
+                subtitle: nil,
+                url: "https://www.spentyai.com/refund-policy"
+            )
+
+            HStack(spacing: 14) {
+                sectionIcon("number.circle.fill", color: .spentyTextSecondary)
+                Text(lang.s("app_version"))
+                    .font(SpentyFonts.body)
+                    .foregroundColor(.spentyTextPrimary)
+                Spacer()
+                Text(appVersionString)
+                    .font(SpentyFonts.caption1)
+                    .foregroundColor(.spentyTextSecondary)
+            }
+            .padding(.vertical, 4)
+        } header: {
+            Label(lang.s("legal_support"), systemImage: "shield.lefthalf.filled")
+                .font(SpentyFonts.caption1)
+                .fontWeight(.semibold)
+                .foregroundColor(.spentyPrimary)
+                .textCase(nil)
+        }
+    }
+
+    private func legalRow(icon: String, color: Color, title: String, subtitle: String?, url: String) -> some View {
+        Button {
+            if let link = URL(string: url) {
+                UIApplication.shared.open(link)
+            }
+        } label: {
+            HStack(spacing: 14) {
+                sectionIcon(icon, color: color)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(SpentyFonts.body)
+                        .foregroundColor(.spentyTextPrimary)
+                    if let subtitle {
+                        Text(subtitle)
+                            .font(SpentyFonts.caption1)
+                            .foregroundColor(.spentyTextSecondary)
+                            .lineLimit(1)
+                    }
+                }
+
+                Spacer()
+
+                Image(systemName: "arrow.up.right.square")
+                    .font(SpentyFonts.caption1)
+                    .foregroundColor(.spentyTextSecondary)
+            }
+            .padding(.vertical, 4)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var appVersionString: String {
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
+        return "\(version) (\(build))"
     }
 
     // MARK: - Account Section

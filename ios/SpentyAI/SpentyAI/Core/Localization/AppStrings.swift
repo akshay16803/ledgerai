@@ -647,5 +647,15 @@ enum AppStrings {
         // MARK: - Language Toggle
         "language_hindi": ["en": "हि", "hi": "हि"],
         "language_english": ["en": "En", "hi": "En"],
+
+        // MARK: - Legal & Support (Settings)
+        "legal_support": ["en": "Legal & Support", "hi": "क़ानूनी और सहायता"],
+        "about_spentyai": ["en": "About SpentyAI", "hi": "SpentyAI के बारे में"],
+        "help_center": ["en": "Help Center", "hi": "सहायता केंद्र"],
+        "contact_support": ["en": "Contact Support", "hi": "सहायता से संपर्क करें"],
+        "privacy_policy": ["en": "Privacy Policy", "hi": "गोपनीयता नीति"],
+        "terms_of_service": ["en": "Terms of Service", "hi": "सेवा की शर्तें"],
+        "refund_policy": ["en": "Refund & Cancellation", "hi": "रिफ़ंड और रद्दीकरण"],
+        "app_version": ["en": "Version", "hi": "संस्करण"],
     ]
 }
