@@ -12,6 +12,7 @@ final class AIChatViewModel {
     var suggestions: [String] = []
     var errorMessage: String?
     var scrollToBottomTrigger = 0
+    var scrollToLastMessageTopTrigger = 0
 
     // MARK: - Voice State
 
@@ -68,7 +69,7 @@ final class AIChatViewModel {
         do {
             let response = try await repository.sendMessage(text, conversation: messages)
             messages.append(response)
-            scrollToBottom()
+            scrollToLastMessageTop()
 
             // Speak the response if voice responses are enabled or voice mode is active
             if (isVoiceResponseEnabled || isVoiceModeActive), let content = response.content, !content.isEmpty {
@@ -235,5 +236,9 @@ final class AIChatViewModel {
 
     private func scrollToBottom() {
         scrollToBottomTrigger += 1
+    }
+
+    private func scrollToLastMessageTop() {
+        scrollToLastMessageTopTrigger += 1
     }
 }

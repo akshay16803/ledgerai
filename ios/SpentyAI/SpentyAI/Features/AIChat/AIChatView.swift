@@ -174,16 +174,20 @@ struct AIChatView: View {
                         .padding(.top, 8)
                 }
 
-                // Show last AI response
+                // Show last AI response — scrollable, markdown-rendered, no line limit
                 if let lastAssistant = viewModel.messages.last(where: { $0.role == "assistant" }),
                    let content = lastAssistant.content, !content.isEmpty {
-                    Text(content)
-                        .font(SpentyFonts.subheadline)
-                        .foregroundStyle(Color.spentyTextSecondary)
-                        .multilineTextAlignment(.center)
-                        .lineLimit(4)
-                        .padding(.horizontal, 32)
-                        .padding(.top, 12)
+                    ScrollView {
+                        MarkdownText(content)
+                            .font(SpentyFonts.subheadline)
+                            .foregroundStyle(Color.spentyTextSecondary)
+                            .multilineTextAlignment(.leading)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 24)
+                            .padding(.vertical, 8)
+                    }
+                    .frame(maxHeight: 260)
+                    .padding(.top, 4)
                 }
             }
 
@@ -306,6 +310,14 @@ struct AIChatView: View {
             .onChange(of: viewModel.scrollToBottomTrigger) {
                 withAnimation(.easeOut(duration: 0.3)) {
                     proxy.scrollTo("bottom-anchor", anchor: .bottom)
+                }
+            }
+            .onChange(of: viewModel.scrollToLastMessageTopTrigger) {
+                guard let lastId = viewModel.messages.last?.id else { return }
+                // Scroll so the TOP of the newest assistant bubble is visible,
+                // with a little breathing room from the top edge.
+                withAnimation(.easeOut(duration: 0.3)) {
+                    proxy.scrollTo(lastId, anchor: .top)
                 }
             }
         }
