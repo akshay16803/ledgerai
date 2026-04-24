@@ -28,7 +28,7 @@ final class SpeechManager: NSObject {
 
     // MARK: - Private
 
-    private let speechRecognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
+    private let speechRecognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-IN"))
     private let synthesizer = AVSpeechSynthesizer()
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     private var recognitionTask: SFSpeechRecognitionTask?
@@ -182,8 +182,19 @@ final class SpeechManager: NSObject {
             .replacingOccurrences(of: "#", with: "")
             .replacingOccurrences(of: "- ", with: "")
 
+        // Pick voice by detected language: Hindi if Devanagari dominates,
+        // otherwise Indian English (covers pure English and Hinglish naturally).
+        let voiceLang = Self.detectSpeechLanguage(for: cleanText)
         let utterance = AVSpeechUtterance(string: cleanText)
-        utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
+        // Prefer an enhanced/premium Indian voice if the user has downloaded one,
+        // otherwise fall back to the default voice for that locale.
+        if let premium = AVSpeechSynthesisVoice.speechVoices().first(where: {
+            $0.language == voiceLang && ($0.quality == .enhanced || $0.quality == .premium)
+        }) {
+            utterance.voice = premium
+        } else {
+            utterance.voice = AVSpeechSynthesisVoice(language: voiceLang)
+        }
         utterance.rate = AVSpeechUtteranceDefaultSpeechRate
         utterance.pitchMultiplier = 1.0
         utterance.volume = 1.0
@@ -204,6 +215,23 @@ final class SpeechManager: NSObject {
         }
     }
 }
+
+
+    // MARK: - Language Detection
+
+    /// Returns the BCP-47 speech-synthesis locale best suited for the given text.
+    /// Strategy: if Devanagari (Hindi) characters are present, use hi-IN; otherwise
+    /// en-IN. en-IN covers both pure English and Hinglish (Hindi written in Roman
+    /// script, e.g. "kitna kharcha hua") and produces a natural Indian-accent voice.
+    static func detectSpeechLanguage(for text: String) -> String {
+        // Devanagari block: U+0900-U+097F
+        for scalar in text.unicodeScalars {
+            if scalar.value >= 0x0900 && scalar.value <= 0x097F {
+                return "hi-IN"
+            }
+        }
+        return "en-IN"
+    }
 
 // MARK: - AVSpeechSynthesizerDelegate
 
