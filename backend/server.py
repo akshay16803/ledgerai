@@ -2835,10 +2835,9 @@ async def cashflow_projection(user: dict = Depends(get_current_user)):
     ).to_list(500)
 
     accounts = await db.accounts.find({"user_id": user_id}, {"_id": 0}).to_list(100)
-    current_balance = sum(
-        a.get("balance", 0) if a.get("account_type") in ("asset", "investment") else -a.get("balance", 0)
-        for a in accounts
-    )
+    # Balances are stored signed-native (liabilities negative). Sum as-is; do NOT
+    # flip the sign on liabilities — that double-subtracts (BUG-NEW-08 fix).
+    current_balance = sum(a.get("balance", 0) for a in accounts)
 
     # Compute projected monthly OD interest for overdraft accounts
     od_accounts = [
@@ -3027,8 +3026,12 @@ async def dashboard_summary(user: dict = Depends(get_current_user)):
     accounts = await db.accounts.find({"user_id": user_id}, {"_id": 0}).to_list(100)
 
     total_assets = sum(a.get("balance", 0) for a in accounts if a.get("account_type") in ("asset", "investment"))
+    # total_liabilities is a signed sum — for liabilities, balance is stored
+    # negative (e.g. -9728 for 9728 owed on a credit card). To add this into
+    # net worth, we ADD total_liabilities (already negative) rather than
+    # subtract it — subtraction double-counts (BUG-NEW-08 fix).
     total_liabilities = sum(a.get("balance", 0) for a in accounts if a.get("account_type") == "liability")
-    net_worth = total_assets - total_liabilities
+    net_worth = total_assets + total_liabilities
 
     now = datetime.now(timezone.utc)
     month_start = now.replace(day=1).strftime("%Y-%m-%d")
@@ -9932,8 +9935,9 @@ async def ai_chat(body: dict = Body(...), user: dict = Depends(get_current_user)
     today_str = now.strftime("%Y-%m-%d")
 
     total_assets = sum(a.get("balance", 0) for a in accounts if a.get("account_type") in ("asset", "investment"))
+    # Liabilities stored signed-negative — add (do not subtract) to get net worth (BUG-NEW-08 fix)
     total_liabilities = sum(a.get("balance", 0) for a in accounts if a.get("account_type") == "liability")
-    net_worth = total_assets - total_liabilities
+    net_worth = total_assets + total_liabilities
 
     income_this_month = sum(t["amount"] for t in recent_txns if t["transaction_type"] == "income" and t["date"] >= month_start)
     expense_this_month = sum(t["amount"] for t in recent_txns if t["transaction_type"] == "expense" and t["date"] >= month_start)
