@@ -7623,135 +7623,137 @@ async def check_cross_source_duplicate(user_id: str, amount: float, date_str: st
 
 
 def _build_email_analysis_prompt(email_doc: dict, account_names: list, category_info: list, sender_mappings: list = None) -> str:
-    """Build the AI prompt for email transaction analysis."""
-    # Build sender mapping context text
+    """Build the AI prompt for email-as-supporting-document analysis.
+
+    STRICT EXTRACTION PROCESS (no heuristics, no guessing):
+    1. Classify the document: expense / income / transfer (or not a transaction).
+    2. Extract ONLY what the document specifically states:
+       - account used (e.g. "HDFC Savings XX1234") — must appear in doc
+       - amount — must be a specific number printed in the doc
+       - date — must be a date printed in the doc
+       - counterparty (vendor for expense, payer for income)
+       - a short human description of what this payment does
+       - recurring flag (strict: same amount + same date every period)
+    3. Use the AI's world knowledge about the counterparty to understand
+       what kind of business it is (e.g. WeWork = coworking, Netflix = video
+       streaming, Airtel = telecom).
+    4. Match that business to the user's EXISTING categories/subcategories.
+       If nothing is a confident match, leave category blank. Do NOT guess.
+    """
+    # Sender-to-account history is informational only; the model should still
+    # prefer the account that the current document explicitly mentions.
     if sender_mappings:
         mapping_lines = []
         for m in sender_mappings:
-            mapping_lines.append(f"- Emails from \"{m['from_email']}\" → account_id: {m['account_id']} (used {m.get('confidence_count', 1)} times)")
+            mapping_lines.append(f"- Emails from \"{m['from_email']}\" have previously mapped to account_id: {m['account_id']}")
         sender_mapping_text = chr(10).join(mapping_lines)
     else:
         sender_mapping_text = "No history yet"
 
-    return f"""Analyze this email and determine if it contains an ACTUAL COMPLETED cash transaction.
+    return f"""You are processing a SUPPORTING DOCUMENT (an email) to extract one financial transaction. Follow the steps below in order. Do not invent or assume anything the document does not state.
 
-EMAIL:
+DOCUMENT:
 Subject: {email_doc.get('subject', '')}
 From: {email_doc.get('from_email', '')}
 Date: {email_doc.get('date', '')}
-Body: {email_doc.get('body_text', '')[:3000]}
+Body:
+{email_doc.get('body_text', '')[:3000]}
 
-AVAILABLE ACCOUNTS:
-{chr(10).join(account_names) if account_names else "No accounts configured"}
+USER'S EXISTING ACCOUNTS (the ONLY accounts that can be assigned):
+{chr(10).join(account_names) if account_names else "No accounts configured."}
 
-SENDER-TO-ACCOUNT HISTORY (from past approved transactions):
+SENDER → ACCOUNT HISTORY (informational only, weaker than what the document itself says):
 {sender_mapping_text}
 
-AVAILABLE CATEGORIES:
-{chr(10).join(category_info) if category_info else "No categories configured"}
+USER'S EXISTING CATEGORIES + SUBCATEGORIES (the ONLY options for category_id / subcategory_id):
+{chr(10).join(category_info) if category_info else "No categories configured."}
 
-MANDATE / AUTO-PAY DETECTION (SEPARATE FROM TRANSACTIONS):
-Some emails are notifications that an AUTO-DEBIT MANDATE has been registered — not a transaction. Examples:
-  - "e-Mandate for ₹15,000/month to HDFC Home Loan registered"
-  - "UPI AutoPay set up for Netflix Premium ₹799/month"
-  - "NACH / ECS mandate activated for SIP of ₹10,000"
-  - "Standing instruction created for Airtel Postpaid ₹1,499/month"
-  - "Auto-debit enabled for Amazon Prime ₹1,499/year"
-If the email is a mandate creation / activation / registration (not a debit), set is_mandate=true and populate the mandate_* fields below.
-A mandate is FUTURE COMMITTED outflow — it is NOT is_transaction=true and is NOT is_recurring=true.
-A debit that happened BECAUSE of a mandate is a normal transaction (is_transaction=true, is_mandate=false).
+═══════════════════════════════════════════════════════════════
+STEP 1 — CLASSIFY
+═══════════════════════════════════════════════════════════════
+Read the document and decide:
+- Is this a CONFIRMED completed cash movement (money actually moved in/out/between accounts)?
+- If NO (it's a statement summary, marketing email, OTP, balance reminder, mandate-registration notice, etc.) → set is_transaction=false and return. (If it's specifically a MANDATE/AUTO-PAY REGISTRATION, fill in the mandate_* fields and set is_mandate=true but still is_transaction=false.)
+- If YES → transaction_type is one of: "income" (money came in from an external party), "expense" (money went out to an external party), "transfer" (money moved between two of the user's own accounts, e.g. credit-card bill payment).
 
-CRITICAL RULES — READ CAREFULLY:
-1. ONLY mark as a transaction if there is a CONFIRMED cash inflow or outflow from a bank account, wallet, or UPI.
-2. Set is_transaction to FALSE for ALL of the following:
-   - Credit card BILLS/STATEMENTS (these summarize past transactions already recorded individually)
-   - Credit card DUE REMINDERS or payment due notices (not a payment until actually paid)
-   - Stock/mutual fund/trading notifications, alerts, or order confirmations (money moves within demat/trading accounts, not trackable via email)
-   - Algo trading webhooks or signals (e.g., Kite, Zerodha, Groww, Upstox alerts)
-   - Portfolio updates, NAV changes, dividend ANNOUNCEMENTS (not actual credits)
-   - OTP/authentication emails
-   - Newsletters, promotions, marketing emails
-   - Account STATEMENTS or summaries (individual transactions are tracked separately)
-   - Delivery/shipping notifications without payment info
-   - Login alerts, security notifications
-   - Balance check notifications (informational, not a transaction)
-3. DO mark as a transaction:
-   - UPI payment confirmations (money sent/received)
-   - Bank account debit/credit alerts
-   - Actual credit card PAYMENT confirmations (paying the bill, not the bill itself)
-   - Salary/income credits to bank
-   - Subscription charges debited from bank/card
-   - Recharges, bill payments completed
-   - EMI debits
-   - Insurance premium debits
-   - Refunds credited to bank
-   - Actual dividend CREDITS to bank account
-4. For transaction_type:
-   - "income" for money received INTO your accounts from external sources (salary, freelance payment, refund, dividend credit, interest credit)
-   - "expense" for money spent/paid OUT to external parties (purchases, subscriptions, bills, food, services)
-   - "transfer" for money moved BETWEEN YOUR OWN ACCOUNTS. CRITICAL: Credit card bill PAYMENTS (paying off your CC balance) are ALWAYS "transfer" — the money moves from your bank account to your credit card account. Set account_id to the bank/source account and to_account_id to the credit card account. This is NOT an expense because the individual charges were already expenses.
-5. For account_id: IMPORTANT — try hard to match from AVAILABLE ACCOUNTS by comparing bank name in the email (sender domain, subject, body mentions) against account names. For example, if the email is from HDFC Bank and there is an account named "HDFC" or "HDFC Savings", use that account_id. Match by bank keyword (e.g., "hdfc" in email → account with "HDFC" in name). If you can detect a SPECIFIC bank account name from the email but none of the AVAILABLE ACCOUNTS match, include it in detected_bank_name — we will auto-create it.
-6. For payment_method: Detect how the payment was made. Common methods: "upi", "credit_card", "debit_card", "net_banking", "cash", "wallet", "cheque", "neft", "rtgs", "imps", "other".
-7. Extract date in YYYY-MM-DD format. If not clear, use the email date.
-8. CURRENCY: Detect the currency of the transaction from the email. Look for currency symbols ($, USD, EUR, GBP, etc.) or currency codes. If the email is from an Indian bank or UPI, use "INR". If unclear, default to "INR".
-9. RECURRING DETECTION: ONLY set is_recurring to true when there is CLEAR EVIDENCE of a recurring/subscription charge. Valid evidence includes:
-   - The email explicitly says "subscription", "recurring", "renewal", "billing cycle", "auto-renewal", "monthly plan", "annual plan"
-   - It is from a well-known subscription service (Netflix, Spotify, Google Play, Apple, Amazon Prime, gym, insurance, SaaS platform, telecom carrier)
-   - The email mentions a billing period or next renewal date
-   Do NOT mark as recurring just because it is a UPI payment, bank debit, or generic expense. One-time purchases, P2P transfers, grocery deliveries, and ad-hoc payments are NOT recurring even if the user makes them frequently.
-   IMPORTANT: Default is_recurring to FALSE. When in doubt, set is_recurring=false. The user can mark it as recurring during review. It is FAR better to miss a recurring flag than to wrongly mark a one-time payment as recurring.
-   Specific NON-RECURRING examples: Person-to-person UPI transfers (to Akshay, Rohit, etc.), airline tickets, one-time purchases (electronics, household items), EMI payments (unless explicitly stated as auto-debit/recurring), large lump-sum payments (property, car), food delivery orders, taxi rides.
-10. CATEGORY ASSIGNMENT — BEST EFFORT:
-   - Use your best judgment to assign the most appropriate category based on the email content, merchant name, transaction description, and context.
-   - NEVER use an income category (Salary, Business Income, Investment Income, Rental Income, Other Income) for an expense transaction. Income categories are ONLY for transaction_type "income".
-   - NEVER use an expense category for an income transaction.
-   - For credit card bill payments (transaction_type "transfer"), set category_id to null.
-   - If you truly cannot determine any reasonable category (e.g., a completely generic bank debit with zero context), set category_id to null.
-   - CRITICAL: Do NOT default to "Food & Dining > Restaurants" for unknown transactions. "Restaurants" is ONLY for actual food delivery (Swiggy, Zomato) or restaurant payments. If you don't know what a transaction is, use "Other Expenses" for expenses or "Other Income" for income.
-   - For API credits, software subscriptions, SaaS payments (OpenAI, Anthropic, Supabase, AWS, etc.) → use "Subscriptions" or "Other Expenses", NEVER "Restaurants" or "Sales"
-   - For payments to companies/businesses → use "Other Expenses" unless you know the specific category
-   - NEVER categorize an EXPENSE as income category. If transaction_type="expense", the category MUST be an expense category.
-   - For telecom payments (JIO, Airtel, Vi, BSNL) → use "Bills & Utilities > Phone"
-   - For EMI/loan payments → use "Housing > Mortgage" or "Other Expenses", NEVER "Electricity"
-   - Examples of good category assignments:
-     * "Your Swiggy order" → Food & Dining > Restaurants
-     * "Electricity bill payment" → Bills & Utilities > Electricity
-     * "Netflix subscription renewed" → Subscriptions
-     * "Salary credited" → Salary
-     * "OpenAI API top-up" → Technology / Software (best guess is fine)
-     * UPI to a person → Other Expenses (if no better context available)
-   - The user can always change the category during review, so a reasonable guess is better than leaving it empty.
+═══════════════════════════════════════════════════════════════
+STEP 2 — EXTRACT FACTS (strict, only from the document)
+═══════════════════════════════════════════════════════════════
+All of these must come directly from the document. If the document does not state a field, leave it null.
 
-Respond ONLY with valid JSON (no markdown, no explanation):
+- amount: the exact number printed in the document (never approximate).
+- currency: ISO 4217 code detected from the document (default INR for Indian banks / UPI).
+- date: the date printed in the document in YYYY-MM-DD. If multiple dates appear (e.g. transaction date vs statement date), use the transaction date.
+- account_id: match from the user's EXISTING ACCOUNTS list above using the bank/account name printed in the document (e.g. "HDFC Savings XX1234" in the doc → the existing HDFC account). If no existing account matches, set account_id=null and put what you saw in detected_bank_name (+ detected_bank_type). Do NOT fabricate an account.
+- to_account_id: only for transfers between the user's own accounts (e.g. credit-card bill payment → account_id = bank, to_account_id = credit card).
+- payment_method: one of upi / credit_card / debit_card / net_banking / cash / wallet / cheque / neft / rtgs / imps / other — only if the doc states it.
+- counterparty_name: vendor for expense, payer for income, other account for transfer. Use the exact name from the doc.
+- description: one natural sentence describing what this payment is for, e.g. "Monthly coworking space rent at WeWork BKC" or "Refund credited for cancelled Zomato order". Be concrete; do not just repeat the counterparty name.
+
+═══════════════════════════════════════════════════════════════
+STEP 3 — UNDERSTAND THE COUNTERPARTY
+═══════════════════════════════════════════════════════════════
+Silently use your general world knowledge about what kind of business the counterparty is. Examples:
+- WeWork → coworking / office space
+- Netflix / Prime / Hotstar → entertainment streaming
+- Airtel / Jio / Vi / BSNL → telecom
+- Blinkit / Zepto / BigBasket → groceries / quick commerce
+- Swiggy / Zomato → food delivery
+- Uber / Ola / Rapido → ride-hailing
+- HDFC / ICICI / Axis / SBI → banking (self)
+- OpenAI / Anthropic / Supabase / AWS → software / SaaS
+
+Use that understanding ONLY to feed into Step 4 (category matching). Do not put this understanding into any free-text field.
+
+═══════════════════════════════════════════════════════════════
+STEP 4 — MATCH TO EXISTING CATEGORIES (strict — leave blank if uncertain)
+═══════════════════════════════════════════════════════════════
+Look at the user's EXISTING CATEGORIES list. Does the counterparty's business (from Step 3) clearly fit ONE of those categories/subcategories?
+- If a CONFIDENT match exists → set category_id (and subcategory_id if applicable).
+- If nothing is a clear match → set category_id=null and subcategory_id=null.
+- NEVER invent a category. NEVER pick a vaguely-related one just to fill the field. Leaving it blank is the correct answer when in doubt — the user will assign it manually.
+- Never put an expense into an income category or vice versa.
+
+═══════════════════════════════════════════════════════════════
+STEP 5 — RECURRING (strict)
+═══════════════════════════════════════════════════════════════
+is_recurring = true ONLY if the document gives direct evidence that the SAME amount will be auto-debited from the SAME account on the SAME recurring date (monthly / yearly / etc.). Evidence includes explicit words like "subscription", "auto-renew", "next billing date", "monthly plan", "standing instruction", "NACH", "UPI AutoPay".
+- Everything else → is_recurring=false. Single large payments, UPI person-to-person transfers, grocery orders, ride bookings, restaurant bills, one-off EMIs, insurance one-time premiums, etc.
+- When is_recurring=true, populate recurrence_date (day of month 1-31) and recurring_frequency.
+- When in doubt → is_recurring=false. The user can promote it to recurring later.
+
+═══════════════════════════════════════════════════════════════
+RESPONSE FORMAT — JSON only, no markdown
+═══════════════════════════════════════════════════════════════
 {{
   "is_transaction": true/false,
   "transaction_type": "income" | "expense" | "transfer" | null,
   "amount": number or null,
   "currency": "INR" | "USD" | "EUR" | "GBP" | other ISO 4217 code | null,
   "date": "YYYY-MM-DD" or null,
-  "description": "brief description" or null,
-  "account_id": "matching account_id from AVAILABLE ACCOUNTS" or null,
-  "detected_bank_name": "Name of bank account detected from email (e.g., 'HDFC Savings XX1234', 'ICICI Bank 5678')" or null,
+  "description": "one sentence description of what this payment does" or null,
+  "counterparty_name": "vendor/payer/other-account name as written in the document" or null,
+  "account_id": "matching account_id from EXISTING ACCOUNTS" or null,
+  "detected_bank_name": "Account name detected but NOT in user list (e.g., 'HDFC Savings XX1234')" or null,
   "detected_bank_type": "savings" | "current" | "credit_card" | "wallet" | null,
-  "to_account_id": "for transfers" or null,
-  "category_id": "matching category_id" or null,
-  "subcategory_id": "matching subcategory_id" or null,
+  "to_account_id": "for transfers only" or null,
+  "category_id": "matching category_id from EXISTING CATEGORIES (or null)" or null,
+  "subcategory_id": "matching subcategory_id (or null)" or null,
   "payment_method": "upi" | "credit_card" | "debit_card" | "net_banking" | "cash" | "wallet" | "cheque" | "neft" | "rtgs" | "imps" | "other" | null,
   "is_recurring": true/false,
   "recurring_frequency": "daily" | "weekly" | "monthly" | "quarterly" | "yearly" | null,
   "recurrence_date": integer 1-31 (day of month when this charge recurs) or null,
   "is_mandate": true/false,
   "mandate_type": "nach" | "enach" | "upi_autopay" | "ecs" | "sip" | "standing_instruction" | "credit_card_autopay" | "other" | null,
-  "mandate_merchant": "payee / merchant name the mandate is for (e.g. 'HDFC Home Loan', 'Netflix', 'ICICI Prudential SIP')" or null,
+  "mandate_merchant": "payee / merchant name the mandate is for" or null,
   "mandate_amount": number or null,
   "mandate_frequency": "monthly" | "weekly" | "yearly" | "quarterly" | null,
-  "mandate_start_date": "YYYY-MM-DD (first debit date, or mandate activation date)" or null,
+  "mandate_start_date": "YYYY-MM-DD (first debit date or activation date)" or null,
   "mandate_end_date": "YYYY-MM-DD (expiry, if stated)" or null,
   "mandate_debit_day": integer 1-31 if a specific day of the month is mentioned, else null,
   "confidence": "high" | "medium" | "low",
-  "reason": "brief reason for classification"
+  "reason": "one short sentence about how you classified this"
 }}"""
-
 
 def _parse_ai_json_response(content: str) -> dict:
     """Parse and clean an AI JSON response."""
@@ -7771,7 +7773,7 @@ async def analyze_email_with_ai(email_doc: dict, account_names: list, category_i
         response = await async_openai_client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "You are a careful financial transaction analyzer. Read the ENTIRE email first to understand its context before extracting details. Default is_recurring to false. Only use income categories for income transactions. Never default to 'Restaurants' for unknown transactions. Respond only with valid JSON."},
+                {"role": "system", "content": "You extract one transaction from a supporting document using a strict 5-step process: classify, extract only what the document states, understand the vendor via world knowledge, match to user's existing categories (or leave blank), judge recurring strictly. Never guess. Respond only with valid JSON."},
                 {"role": "user", "content": prompt},
             ],
             temperature=0.1,
