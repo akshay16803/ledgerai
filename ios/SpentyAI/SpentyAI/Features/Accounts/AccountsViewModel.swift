@@ -81,12 +81,16 @@ final class AccountsViewModel {
     }
 
     var totalBalance: Double {
+        // Balances are stored with their native sign: liabilities (e.g. credit
+        // card outstanding) come through as negative numbers already. Summing
+        // all balances yields net worth correctly without a sign flip.
+        //
+        // Historical bug (BUG-NEW-04, 2026-04-25): this method previously did
+        // `total - balance` for liability-type accounts, which double-counted
+        // the liability when balance was already negative and inflated the
+        // displayed Total Balance by 2× the outstanding amount.
         accounts.reduce(0) { total, account in
-            let balance = account.balance ?? 0
-            if account.accountType?.lowercased() == "liability" {
-                return total - balance
-            }
-            return total + balance
+            total + (account.balance ?? 0)
         }
     }
 
