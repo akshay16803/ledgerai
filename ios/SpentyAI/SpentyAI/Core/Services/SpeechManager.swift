@@ -214,8 +214,6 @@ final class SpeechManager: NSObject {
             isSpeaking = false
         }
     }
-}
-
 
     // MARK: - Language Detection
 
@@ -232,6 +230,7 @@ final class SpeechManager: NSObject {
         }
         return "en-IN"
     }
+}
 
 // MARK: - AVSpeechSynthesizerDelegate
 
