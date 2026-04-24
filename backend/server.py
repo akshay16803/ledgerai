@@ -12616,11 +12616,48 @@ async def record_payment(invoice_id: str, request: Request, user: dict = Depends
 
 
 
+_INVOICE_FONTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts")
+
+
+def _register_invoice_fonts(pdf: "FPDF") -> str:
+    """Register Unicode fonts (NotoSans + NotoSansDevanagari) on the FPDF instance.
+
+    Returns the base family name to use with pdf.set_font. Falls back to
+    Helvetica if the bundled TTFs are missing so PDF generation never hard-fails.
+    """
+    base = os.path.join(_INVOICE_FONTS_DIR, "NotoSans-Regular.ttf")
+    bold = os.path.join(_INVOICE_FONTS_DIR, "NotoSans-Bold.ttf")
+    dev_r = os.path.join(_INVOICE_FONTS_DIR, "NotoSansDevanagari-Regular.ttf")
+    dev_b = os.path.join(_INVOICE_FONTS_DIR, "NotoSansDevanagari-Bold.ttf")
+    if not (os.path.exists(base) and os.path.exists(bold)):
+        return "Helvetica"
+    try:
+        pdf.add_font("NotoSans", "", base)
+        pdf.add_font("NotoSans", "B", bold)
+        if os.path.exists(dev_r):
+            pdf.add_font("NotoSansDevanagari", "", dev_r)
+        if os.path.exists(dev_b):
+            pdf.add_font("NotoSansDevanagari", "B", dev_b)
+        # Devanagari fallback for Hindi/Marathi text in customer names, notes, etc.
+        try:
+            fallbacks = []
+            if os.path.exists(dev_r):
+                fallbacks.append("NotoSansDevanagari")
+            if fallbacks:
+                pdf.set_fallback_fonts(fallbacks)
+        except Exception:
+            pass
+        return "NotoSans"
+    except Exception:
+        return "Helvetica"
+
+
 def _generate_invoice_pdf_bytes(invoice: dict, settings: dict, *, doc_kind: str = "invoice") -> bytes:
     """Render an Indian GST invoice/bill to PDF bytes using fpdf2.
 
-    Keeps things simple and font-safe: Helvetica (latin-1) only, so the rupee
-    symbol is rendered as "Rs." to avoid glyph issues.
+    Uses a bundled Unicode font (NotoSans + NotoSansDevanagari fallback) so
+    that the rupee symbol and Devanagari/Hindi text render correctly. Falls
+    back to Helvetica silently if the fonts are missing.
     """
     def rs(v):
         try:
@@ -12643,13 +12680,13 @@ def _generate_invoice_pdf_bytes(invoice: dict, settings: dict, *, doc_kind: str 
             if rest:
                 groups.append(rest)
             s = ",".join(reversed(groups)) + "," + last3
-        formatted = f"Rs. {s}.{int(round(dec_part * 100)):02d}"
+        formatted = f"₹ {s}.{int(round(dec_part * 100)):02d}"
         return ("-" + formatted) if neg else formatted
 
     def safe(text):
         if text is None:
             return ""
-        return str(text).replace("₹", "Rs. ").encode("latin-1", "replace").decode("latin-1")
+        return str(text)
 
     is_gst = (invoice.get("invoice_type") or invoice.get("bill_type")) == "gst"
     line_items = invoice.get("line_items") or []
@@ -12681,19 +12718,22 @@ def _generate_invoice_pdf_bytes(invoice: dict, settings: dict, *, doc_kind: str 
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
 
+    # Register Unicode fonts (covers Latin, Rupee, Devanagari/Hindi via fallback).
+    _FONT = _register_invoice_fonts(pdf)
+
     # Title bar
     pdf.set_fill_color(26, 54, 45)
     pdf.set_text_color(255, 255, 255)
-    pdf.set_font("Helvetica", "B", 16)
+    pdf.set_font(_FONT, "B", 16)
     title = "TAX INVOICE" if is_gst else ("BILL" if doc_kind == "bill" else "INVOICE")
     pdf.cell(0, 12, safe(title), border=0, fill=True, align="C", ln=True)
     pdf.ln(2)
 
     # Firm block
     pdf.set_text_color(0, 0, 0)
-    pdf.set_font("Helvetica", "B", 13)
+    pdf.set_font(_FONT, "B", 13)
     pdf.cell(0, 6, safe(firm_name), ln=True)
-    pdf.set_font("Helvetica", "", 9)
+    pdf.set_font(_FONT, "", 9)
     addr_parts = [p for p in [firm_address, firm_city, firm_state, firm_pincode] if p]
     if addr_parts:
         pdf.cell(0, 4.5, safe(", ".join(addr_parts)), ln=True)
@@ -12704,15 +12744,44 @@ def _generate_invoice_pdf_bytes(invoice: dict, settings: dict, *, doc_kind: str 
         pdf.cell(0, 4.5, safe(" | ".join(contact_parts)), ln=True)
     if firm_gstin:
         pdf.cell(0, 4.5, safe(f"GSTIN: {firm_gstin}"), ln=True)
+
+    # Firm logo in the top-right corner (if configured and accessible).
+    _logo_ref = (
+        settings.get("firm_logo_url")
+        or settings.get("invoice_logo_path")
+        or settings.get("firm_logo_path")
+    )
+    if _logo_ref:
+        try:
+            _logo_src = None
+            if isinstance(_logo_ref, str) and _logo_ref.startswith(("http://", "https://")):
+                try:
+                    import requests  # type: ignore
+                    _r = requests.get(_logo_ref, timeout=5)
+                    if _r.ok and _r.content:
+                        import io as _io
+                        _logo_src = _io.BytesIO(_r.content)
+                except Exception:
+                    _logo_src = None
+            elif isinstance(_logo_ref, str) and os.path.exists(_logo_ref):
+                _logo_src = _logo_ref
+            if _logo_src is not None:
+                _logo_w = 30.0
+                _logo_x = pdf.w - pdf.r_margin - _logo_w
+                _logo_y = 18.0  # just under the title bar
+                pdf.image(_logo_src, x=_logo_x, y=_logo_y, w=_logo_w)
+        except Exception:
+            # Silent skip on any image-related failure; never break PDF generation.
+            pass
     pdf.ln(3)
 
     # Invoice meta + bill-to in two columns
     top_y = pdf.get_y()
     col_w = 90
     # Left: invoice meta
-    pdf.set_font("Helvetica", "B", 10)
+    pdf.set_font(_FONT, "B", 10)
     pdf.cell(col_w, 5, ("Invoice Details" if doc_kind != "bill" else "Bill Details"), ln=True)
-    pdf.set_font("Helvetica", "", 9)
+    pdf.set_font(_FONT, "", 9)
     pdf.cell(col_w, 4.5, safe(f"Number: {number}"), ln=True)
     pdf.cell(col_w, 4.5, safe(f"Date: {doc_date}"), ln=True)
     if due_date:
@@ -12722,9 +12791,9 @@ def _generate_invoice_pdf_bytes(invoice: dict, settings: dict, *, doc_kind: str 
 
     # Right: bill to
     pdf.set_xy(pdf.l_margin + col_w + 10, top_y)
-    pdf.set_font("Helvetica", "B", 10)
+    pdf.set_font(_FONT, "B", 10)
     pdf.cell(col_w, 5, ("Bill To" if doc_kind != "bill" else "Vendor"), ln=True)
-    pdf.set_font("Helvetica", "", 9)
+    pdf.set_font(_FONT, "", 9)
     pdf.set_x(pdf.l_margin + col_w + 10)
     pdf.cell(col_w, 4.5, safe(counterparty_name), ln=True)
     if counterparty_address:
@@ -12748,13 +12817,13 @@ def _generate_invoice_pdf_bytes(invoice: dict, settings: dict, *, doc_kind: str 
 
     pdf.set_fill_color(50, 50, 50)
     pdf.set_text_color(255, 255, 255)
-    pdf.set_font("Helvetica", "B", 8)
+    pdf.set_font(_FONT, "B", 8)
     for i, h in enumerate(headers):
         pdf.cell(widths[i], 8, safe(h), border=1, fill=True, align="C")
     pdf.ln()
 
     pdf.set_text_color(0, 0, 0)
-    pdf.set_font("Helvetica", "", 8)
+    pdf.set_font(_FONT, "", 8)
     for idx, li in enumerate(line_items, start=1):
         qty = li.get("quantity", 0) or 0
         rate = li.get("rate", 0) or 0
@@ -12783,7 +12852,7 @@ def _generate_invoice_pdf_bytes(invoice: dict, settings: dict, *, doc_kind: str 
     x_totals = pdf.w - pdf.r_margin - totals_w
     def total_row(label, value, bold=False):
         pdf.set_x(x_totals)
-        pdf.set_font("Helvetica", "B" if bold else "", 9)
+        pdf.set_font(_FONT, "B" if bold else "", 9)
         pdf.cell(totals_w * 0.55, 5.5, safe(label), border=0, align="L")
         pdf.cell(totals_w * 0.45, 5.5, safe(value), border=0, align="R", ln=True)
 
@@ -12809,13 +12878,34 @@ def _generate_invoice_pdf_bytes(invoice: dict, settings: dict, *, doc_kind: str 
     pdf.line(x_totals, pdf.get_y(), pdf.w - pdf.r_margin, pdf.get_y())
     pdf.ln(1)
     total_row("GRAND TOTAL", rs(grand_total), bold=True)
-    pdf.ln(6)
+    pdf.ln(2)
+
+    # Amount in words (Indian numbering)
+    try:
+        from num2words import num2words as _n2w  # type: ignore
+        _gt = float(grand_total or 0)
+        _rupees = int(_gt)
+        _paise = int(round((_gt - _rupees) * 100))
+        _words = _n2w(_rupees, lang="en_IN").replace("-", " ").strip().capitalize()
+        _amt_words = f"Rupees {_words}"
+        if _paise:
+            _paise_words = _n2w(_paise, lang="en_IN").replace("-", " ").strip()
+            _amt_words += f" and {_paise_words} paise"
+        _amt_words += " only"
+        pdf.set_font(_FONT, "B", 8)
+        pdf.cell(25, 4.5, "In Words:", ln=False)
+        pdf.set_font(_FONT, "", 8)
+        pdf.multi_cell(0, 4.5, _amt_words)
+        pdf.ln(2)
+    except Exception:
+        pass
+    pdf.ln(4)
 
     # Bank details
     if doc_kind != "bill" and any([bank_name, bank_acc, bank_ifsc, bank_branch]):
-        pdf.set_font("Helvetica", "B", 9)
+        pdf.set_font(_FONT, "B", 9)
         pdf.cell(0, 5, "Bank Details", ln=True)
-        pdf.set_font("Helvetica", "", 8)
+        pdf.set_font(_FONT, "", 8)
         if bank_name:   pdf.cell(0, 4.5, safe(f"Bank: {bank_name}"), ln=True)
         if bank_acc:    pdf.cell(0, 4.5, safe(f"Account No.: {bank_acc}"), ln=True)
         if bank_ifsc:   pdf.cell(0, 4.5, safe(f"IFSC: {bank_ifsc}"), ln=True)
@@ -12824,14 +12914,14 @@ def _generate_invoice_pdf_bytes(invoice: dict, settings: dict, *, doc_kind: str 
 
     # Notes
     if notes:
-        pdf.set_font("Helvetica", "B", 9)
+        pdf.set_font(_FONT, "B", 9)
         pdf.cell(0, 5, "Notes", ln=True)
-        pdf.set_font("Helvetica", "", 8)
+        pdf.set_font(_FONT, "", 8)
         pdf.multi_cell(0, 4.5, safe(notes))
         pdf.ln(2)
 
     # Signature
-    pdf.set_font("Helvetica", "", 8)
+    pdf.set_font(_FONT, "", 8)
     pdf.ln(8)
     pdf.cell(0, 4.5, safe(f"For {firm_name}"), ln=True, align="R")
     pdf.ln(10)
