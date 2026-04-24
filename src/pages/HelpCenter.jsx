@@ -27,37 +27,75 @@ const CATEGORIES = [
 ];
 
 // Helper that produces the screenshot <img> for an article.
-// Using a function keeps the article list compact and uniform.
-function Screenshot({ file, alt, lang }) {
-  // `file` is just the base name (no extension, no language). We append
-  // -en/-hi.png based on the current language. If the Hindi variant is
-  // missing, we fall back to -en.png; if that's missing too, the <img>
-  // hides itself silently.
+// Renders a single mobile or web screenshot with graceful fallbacks.
+// If the requested language variant is missing, falls back to -en; if
+// that's also missing, the image hides itself silently.
+function SingleShot({ file, platform, alt, lang }) {
   const preferred = lang === 'hi' ? 'hi' : 'en';
+  const suffix = platform === 'web' ? '-web' : '';
+  const fallbackSrc = `/help/${file}${suffix}-en.png`;
   const handleError = (e) => {
     const img = e.currentTarget;
-    const enSrc = `/help/${file}-en.png`;
-    if (!img.src.endsWith('-en.png')) {
-      img.src = enSrc;
+    if (!img.src.endsWith(`${suffix}-en.png`)) {
+      img.src = fallbackSrc;
     } else {
       img.style.display = 'none';
+      // Also hide the label and wrapper when the image is missing
+      const wrap = img.parentElement;
+      if (wrap) wrap.style.display = 'none';
     }
   };
+  const maxW = platform === 'web' ? 520 : 280;
   return (
-    <img
-      src={`/help/${file}-${preferred}.png`}
-      alt={alt}
-      onError={handleError}
-      style={{
-        width: '100%',
-        maxWidth: 340,
-        display: 'block',
-        margin: '16px auto 8px',
-        borderRadius: 8,
-        border: '1px solid var(--border-subtle)',
-        background: 'var(--bg-secondary)',
-      }}
-    />
+    <div style={{ flex: '0 1 auto', textAlign: 'center', margin: '0 8px' }}>
+      <div className="mono" style={{
+        fontSize: 10,
+        textTransform: 'uppercase',
+        letterSpacing: '0.12em',
+        color: 'var(--text-muted)',
+        marginBottom: 6,
+      }}>
+        {platform === 'web' ? 'Web' : 'Mobile'}
+      </div>
+      <img
+        src={`/help/${file}${suffix}-${preferred}.png`}
+        alt={alt}
+        onError={handleError}
+        style={{
+          width: '100%',
+          maxWidth: maxW,
+          display: 'block',
+          borderRadius: 8,
+          border: '1px solid var(--border-subtle)',
+          background: 'var(--bg-secondary)',
+        }}
+      />
+    </div>
+  );
+}
+
+// Renders both mobile and web screenshots side-by-side (stacks on narrow
+// viewports). Pass `webOnly={false}` (default) to show both; some articles
+// that are mobile-specific (bottom-tabs, more-menu) should set platforms
+// to only ['mobile'].
+function Screenshot({ file, alt, lang, platforms }) {
+  const list = platforms || ['mobile', 'web'];
+  return (
+    <div style={{
+      display: 'flex',
+      flexWrap: 'wrap',
+      justifyContent: 'center',
+      alignItems: 'flex-start',
+      gap: 16,
+      margin: '16px auto 8px',
+    }}>
+      {list.includes('mobile') && (
+        <SingleShot file={file} platform="mobile" alt={`${alt} (Mobile)`} lang={lang} />
+      )}
+      {list.includes('web') && (
+        <SingleShot file={file} platform="web" alt={`${alt} (Web)`} lang={lang} />
+      )}
+    </div>
   );
 }
 
@@ -414,6 +452,7 @@ const ARTICLES = [
     title: 'The bottom tab bar on mobile',
     summary: 'Five tabs give you one-tap access to Dashboard, Transactions, Accounts, Reports, and More.',
     file: '28-bottom-tabs',
+    platforms: ['mobile'],
     body: [
       'The bottom tab bar is always visible on mobile.',
       'Order: Dashboard, Transactions, Accounts, Reports, More.',
@@ -426,6 +465,7 @@ const ARTICLES = [
     title: 'What lives under the More tab',
     summary: 'Cash Flow, Invoices, Mandates, Email Sync, Settings, AI Chat, and Support — all one tap away.',
     file: '29-more-menu',
+    platforms: ['mobile'],
     body: [
       'Tap More (bottom-right) to see the full list of secondary screens.',
       'Items include Cash Flow, Invoices, Purchases, Categories, Customers, Vendors, Mandates, Email Sync, Records, Settings, Billing, AI Chat, Support.',
@@ -478,6 +518,7 @@ const ARTICLES = [
     title: 'Using SpentyAI on the web',
     summary: 'Every feature in the mobile app is also on www.spentyai.com.',
     file: '33-web-dashboard',
+    platforms: ['web'],
     body: [
       'Sign in at www.spentyai.com with the same Google account.',
       'The web app shares the exact same data as mobile — dashboard, transactions, accounts, reports, everything.',
@@ -531,7 +572,7 @@ export default function HelpCenter() {
         <p style={{ fontSize: 15, color: 'var(--text-muted)', marginBottom: 24, lineHeight: 1.6 }}>
           {article.summary}
         </p>
-        <Screenshot file={article.file} alt={article.title} lang={lang} />
+        <Screenshot file={article.file} alt={article.title} lang={lang} platforms={article.platforms} />
         <div style={{
           background: '#fff',
           border: '1px solid var(--border-subtle)',
