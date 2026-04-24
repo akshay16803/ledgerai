@@ -12597,9 +12597,235 @@ async def record_payment(invoice_id: str, request: Request, user: dict = Depends
     return camelise(updated)
 
 
+
+def _generate_invoice_pdf_bytes(invoice: dict, settings: dict, *, doc_kind: str = "invoice") -> bytes:
+    """Render an Indian GST invoice/bill to PDF bytes using fpdf2.
+
+    Keeps things simple and font-safe: Helvetica (latin-1) only, so the rupee
+    symbol is rendered as "Rs." to avoid glyph issues.
+    """
+    def rs(v):
+        try:
+            v = float(v or 0)
+        except (TypeError, ValueError):
+            v = 0.0
+        # Indian-style grouping: 12,34,567.89
+        neg = v < 0
+        v = abs(v)
+        int_part = int(v)
+        dec_part = round(v - int_part, 2)
+        s = str(int_part)
+        if len(s) > 3:
+            last3 = s[-3:]
+            rest = s[:-3]
+            groups = []
+            while len(rest) > 2:
+                groups.append(rest[-2:])
+                rest = rest[:-2]
+            if rest:
+                groups.append(rest)
+            s = ",".join(reversed(groups)) + "," + last3
+        formatted = f"Rs. {s}.{int(round(dec_part * 100)):02d}"
+        return ("-" + formatted) if neg else formatted
+
+    def safe(text):
+        if text is None:
+            return ""
+        return str(text).replace("₹", "Rs. ").encode("latin-1", "replace").decode("latin-1")
+
+    is_gst = (invoice.get("invoice_type") or invoice.get("bill_type")) == "gst"
+    line_items = invoice.get("line_items") or []
+
+    number = invoice.get("invoice_number") or invoice.get("bill_number") or ""
+    doc_date = invoice.get("invoice_date") or invoice.get("bill_date") or ""
+    due_date = invoice.get("due_date") or ""
+    counterparty_name = invoice.get("customer_name") or invoice.get("vendor_name") or ""
+    counterparty_state = invoice.get("customer_state") or invoice.get("vendor_state") or ""
+    counterparty_gstin = invoice.get("customer_gstin") or invoice.get("vendor_gstin") or ""
+    counterparty_address = invoice.get("customer_address") or invoice.get("vendor_address") or ""
+    place_of_supply = invoice.get("place_of_supply") or ""
+    notes = invoice.get("notes") or ""
+
+    firm_name = settings.get("firm_name") or "SpentyAI"
+    firm_address = settings.get("firm_address") or ""
+    firm_city = settings.get("firm_city") or ""
+    firm_state = settings.get("firm_state") or ""
+    firm_pincode = settings.get("firm_pincode") or ""
+    firm_gstin = settings.get("firm_gstin") or ""
+    firm_phone = settings.get("firm_phone") or ""
+    firm_email = settings.get("firm_email") or ""
+    bank_name = settings.get("invoice_bank_name") or ""
+    bank_acc = settings.get("invoice_bank_account_no") or ""
+    bank_ifsc = settings.get("invoice_bank_ifsc") or ""
+    bank_branch = settings.get("invoice_bank_branch") or ""
+
+    pdf = FPDF(orientation="P", unit="mm", format="A4")
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.add_page()
+
+    # Title bar
+    pdf.set_fill_color(26, 54, 45)
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_font("Helvetica", "B", 16)
+    title = "TAX INVOICE" if is_gst else ("BILL" if doc_kind == "bill" else "INVOICE")
+    pdf.cell(0, 12, safe(title), border=0, fill=True, align="C", ln=True)
+    pdf.ln(2)
+
+    # Firm block
+    pdf.set_text_color(0, 0, 0)
+    pdf.set_font("Helvetica", "B", 13)
+    pdf.cell(0, 6, safe(firm_name), ln=True)
+    pdf.set_font("Helvetica", "", 9)
+    addr_parts = [p for p in [firm_address, firm_city, firm_state, firm_pincode] if p]
+    if addr_parts:
+        pdf.cell(0, 4.5, safe(", ".join(addr_parts)), ln=True)
+    contact_parts = []
+    if firm_phone: contact_parts.append(f"Phone: {firm_phone}")
+    if firm_email: contact_parts.append(f"Email: {firm_email}")
+    if contact_parts:
+        pdf.cell(0, 4.5, safe(" | ".join(contact_parts)), ln=True)
+    if firm_gstin:
+        pdf.cell(0, 4.5, safe(f"GSTIN: {firm_gstin}"), ln=True)
+    pdf.ln(3)
+
+    # Invoice meta + bill-to in two columns
+    top_y = pdf.get_y()
+    col_w = 90
+    # Left: invoice meta
+    pdf.set_font("Helvetica", "B", 10)
+    pdf.cell(col_w, 5, ("Invoice Details" if doc_kind != "bill" else "Bill Details"), ln=True)
+    pdf.set_font("Helvetica", "", 9)
+    pdf.cell(col_w, 4.5, safe(f"Number: {number}"), ln=True)
+    pdf.cell(col_w, 4.5, safe(f"Date: {doc_date}"), ln=True)
+    if due_date:
+        pdf.cell(col_w, 4.5, safe(f"Due Date: {due_date}"), ln=True)
+    if is_gst and place_of_supply:
+        pdf.cell(col_w, 4.5, safe(f"Place of Supply: {place_of_supply}"), ln=True)
+
+    # Right: bill to
+    pdf.set_xy(pdf.l_margin + col_w + 10, top_y)
+    pdf.set_font("Helvetica", "B", 10)
+    pdf.cell(col_w, 5, ("Bill To" if doc_kind != "bill" else "Vendor"), ln=True)
+    pdf.set_font("Helvetica", "", 9)
+    pdf.set_x(pdf.l_margin + col_w + 10)
+    pdf.cell(col_w, 4.5, safe(counterparty_name), ln=True)
+    if counterparty_address:
+        pdf.set_x(pdf.l_margin + col_w + 10)
+        pdf.multi_cell(col_w, 4.5, safe(counterparty_address))
+    if counterparty_state:
+        pdf.set_x(pdf.l_margin + col_w + 10)
+        pdf.cell(col_w, 4.5, safe(f"State: {counterparty_state}"), ln=True)
+    if counterparty_gstin:
+        pdf.set_x(pdf.l_margin + col_w + 10)
+        pdf.cell(col_w, 4.5, safe(f"GSTIN: {counterparty_gstin}"), ln=True)
+    pdf.ln(8)
+
+    # Line items table
+    if is_gst:
+        headers = ["#", "Description", "HSN/SAC", "Qty", "Rate", "Amount", "GST%", "CGST", "SGST", "IGST", "Total"]
+        widths  = [8,   52,           18,        12,    18,     22,       12,     14,     14,     14,     20]
+    else:
+        headers = ["#", "Description", "Qty", "Rate", "Amount", "Total"]
+        widths  = [8,   90,            15,    25,     25,       27]
+
+    pdf.set_fill_color(50, 50, 50)
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_font("Helvetica", "B", 8)
+    for i, h in enumerate(headers):
+        pdf.cell(widths[i], 8, safe(h), border=1, fill=True, align="C")
+    pdf.ln()
+
+    pdf.set_text_color(0, 0, 0)
+    pdf.set_font("Helvetica", "", 8)
+    for idx, li in enumerate(line_items, start=1):
+        qty = li.get("quantity", 0) or 0
+        rate = li.get("rate", 0) or 0
+        amount = qty * rate
+        taxable = li.get("taxable_amount", amount)
+        gst_rate = li.get("gst_rate", 0) or 0
+        cgst = li.get("cgst", 0) or 0
+        sgst = li.get("sgst", 0) or 0
+        igst = li.get("igst", 0) or 0
+        total = li.get("total", li.get("amount", amount)) or 0
+        desc = safe(li.get("description", ""))[:80]
+        if is_gst:
+            row = [str(idx), desc, safe(li.get("hsn_sac", "") or ""),
+                   f"{qty:g}", rs(rate), rs(taxable), f"{gst_rate:g}%", rs(cgst), rs(sgst), rs(igst), rs(total)]
+        else:
+            row = [str(idx), desc, f"{qty:g}", rs(rate), rs(taxable), rs(total)]
+        for i, v in enumerate(row):
+            align = "L" if i == 1 else ("C" if i == 0 else "R")
+            pdf.cell(widths[i], 7, safe(v), border=1, align=align)
+        pdf.ln()
+
+    pdf.ln(3)
+
+    # Totals block (right-aligned)
+    totals_w = 70
+    x_totals = pdf.w - pdf.r_margin - totals_w
+    def total_row(label, value, bold=False):
+        pdf.set_x(x_totals)
+        pdf.set_font("Helvetica", "B" if bold else "", 9)
+        pdf.cell(totals_w * 0.55, 5.5, safe(label), border=0, align="L")
+        pdf.cell(totals_w * 0.45, 5.5, safe(value), border=0, align="R", ln=True)
+
+    subtotal = sum((li.get("taxable_amount", (li.get("quantity", 0) or 0) * (li.get("rate", 0) or 0)) for li in line_items))
+    total_cgst = sum((li.get("cgst", 0) or 0) for li in line_items)
+    total_sgst = sum((li.get("sgst", 0) or 0) for li in line_items)
+    total_igst = sum((li.get("igst", 0) or 0) for li in line_items)
+    round_off = invoice.get("round_off", 0) or 0
+    grand_total = invoice.get("grand_total", subtotal + total_cgst + total_sgst + total_igst) or 0
+
+    total_row("Subtotal", rs(subtotal))
+    if is_gst:
+        if total_cgst:
+            total_row("CGST", rs(total_cgst))
+        if total_sgst:
+            total_row("SGST", rs(total_sgst))
+        if total_igst:
+            total_row("IGST", rs(total_igst))
+    if round_off:
+        total_row("Round Off", rs(round_off))
+    pdf.ln(1)
+    pdf.set_draw_color(26, 54, 45)
+    pdf.line(x_totals, pdf.get_y(), pdf.w - pdf.r_margin, pdf.get_y())
+    pdf.ln(1)
+    total_row("GRAND TOTAL", rs(grand_total), bold=True)
+    pdf.ln(6)
+
+    # Bank details
+    if doc_kind != "bill" and any([bank_name, bank_acc, bank_ifsc, bank_branch]):
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.cell(0, 5, "Bank Details", ln=True)
+        pdf.set_font("Helvetica", "", 8)
+        if bank_name:   pdf.cell(0, 4.5, safe(f"Bank: {bank_name}"), ln=True)
+        if bank_acc:    pdf.cell(0, 4.5, safe(f"Account No.: {bank_acc}"), ln=True)
+        if bank_ifsc:   pdf.cell(0, 4.5, safe(f"IFSC: {bank_ifsc}"), ln=True)
+        if bank_branch: pdf.cell(0, 4.5, safe(f"Branch: {bank_branch}"), ln=True)
+        pdf.ln(4)
+
+    # Notes
+    if notes:
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.cell(0, 5, "Notes", ln=True)
+        pdf.set_font("Helvetica", "", 8)
+        pdf.multi_cell(0, 4.5, safe(notes))
+        pdf.ln(2)
+
+    # Signature
+    pdf.set_font("Helvetica", "", 8)
+    pdf.ln(8)
+    pdf.cell(0, 4.5, safe(f"For {firm_name}"), ln=True, align="R")
+    pdf.ln(10)
+    pdf.cell(0, 4.5, safe("Authorised Signatory"), ln=True, align="R")
+
+    out = pdf.output()
+    return bytes(out)
+
+
 @app.get("/api/invoices/{invoice_id}/pdf")
 async def get_invoice_pdf(invoice_id: str, user: dict = Depends(get_current_user)):
-    """Generate a PDF for the invoice (returns HTML for now, clients render)."""
+    """Generate a real PDF for the invoice and return it as application/pdf."""
     invoice = await db.invoices.find_one(
         {"invoice_id": invoice_id, "user_id": user["user_id"]}, {"_id": 0}
     )
@@ -12607,28 +12833,13 @@ async def get_invoice_pdf(invoice_id: str, user: dict = Depends(get_current_user
         raise HTTPException(status_code=404, detail="Invoice not found")
 
     settings = await db.user_settings.find_one({"user_id": user["user_id"]}, {"_id": 0}) or {}
-
-    # Return invoice data with settings for client-side PDF generation
-    return {
-        "invoice": camelise(invoice),
-        "settings": {
-            "firm_name": settings.get("firm_name", ""),
-            "firm_address": settings.get("firm_address", ""),
-            "firm_city": settings.get("firm_city", ""),
-            "firm_state": settings.get("firm_state", ""),
-            "firm_pincode": settings.get("firm_pincode", ""),
-            "firm_gstin": settings.get("firm_gstin", ""),
-            "firm_pan": settings.get("firm_pan", ""),
-            "firm_phone": settings.get("firm_phone", ""),
-            "firm_email": settings.get("firm_email", ""),
-            "invoice_bank_name": settings.get("invoice_bank_name", ""),
-            "invoice_bank_account_no": settings.get("invoice_bank_account_no", ""),
-            "invoice_bank_ifsc": settings.get("invoice_bank_ifsc", ""),
-            "invoice_bank_branch": settings.get("invoice_bank_branch", ""),
-            "logo_url": settings.get("logo_url"),
-            "signature_url": settings.get("signature_url"),
-        },
-    }
+    pdf_bytes = _generate_invoice_pdf_bytes(invoice, settings, doc_kind="invoice")
+    filename = f"invoice_{invoice.get('invoice_number') or invoice_id}.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )
 
 
 @app.post("/api/invoices/{invoice_id}/mark-paid")
@@ -13296,7 +13507,7 @@ async def record_bill_payment(bill_id: str, request: Request, user: dict = Depen
 
 @app.get("/api/bills/{bill_id}/pdf")
 async def get_bill_pdf(bill_id: str, user: dict = Depends(get_current_user)):
-    """Return bill data with settings for client-side PDF generation."""
+    """Generate a real PDF for the purchase bill and return it as application/pdf."""
     bill = await db.bills.find_one(
         {"bill_id": bill_id, "user_id": user["user_id"]}, {"_id": 0}
     )
@@ -13304,20 +13515,13 @@ async def get_bill_pdf(bill_id: str, user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=404, detail="Bill not found")
 
     settings = await db.user_settings.find_one({"user_id": user["user_id"]}, {"_id": 0}) or {}
-
-    return {
-        "bill": bill,
-        "settings": {
-            "firm_name": settings.get("firm_name", ""),
-            "firm_address": settings.get("firm_address", ""),
-            "firm_city": settings.get("firm_city", ""),
-            "firm_state": settings.get("firm_state", ""),
-            "firm_pincode": settings.get("firm_pincode", ""),
-            "firm_gstin": settings.get("firm_gstin", ""),
-            "firm_pan": settings.get("firm_pan", ""),
-            "logo_url": settings.get("logo_url"),
-        },
-    }
+    pdf_bytes = _generate_invoice_pdf_bytes(bill, settings, doc_kind="bill")
+    filename = f"bill_{bill.get('bill_number') or bill_id}.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )
 
 
 @app.post("/api/bills/{bill_id}/mark-paid")
