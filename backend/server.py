@@ -560,13 +560,27 @@ async def google_mobile_login(request: Request, response: Response):
 @app.post("/api/auth/dev/simulator-login")
 async def simulator_login(request: Request):
     """DEV ONLY: Create a session for an existing user by email, bypassing Google OAuth.
-    Used by the iOS simulator when Google Sign-In is unavailable."""
+    Used by the iOS simulator when Google Sign-In is unavailable.
+
+    Security:
+      - Hard-disabled in production (returns 404 as if the route does not exist).
+      - Outside production, an explicit DEV_SIMULATOR_SECRET env var is required;
+        there is no default fallback.
+    """
+    # Hard-disable in production: behave as if the route does not exist.
+    env = (os.environ.get("ENV") or "").strip().lower()
+    if env in ("production", "prod"):
+        raise HTTPException(status_code=404, detail="Not found")
+
     body = await request.json()
     email = body.get("email")
     dev_secret = body.get("dev_secret")
 
-    # Guard: require a shared secret so this endpoint cannot be abused
-    expected_secret = os.environ.get("DEV_SIMULATOR_SECRET", "spenty-sim-bypass-2026")
+    # Guard: require a shared secret so this endpoint cannot be abused.
+    # No default fallback — env var must be explicitly set in non-prod environments.
+    expected_secret = os.environ.get("DEV_SIMULATOR_SECRET")
+    if not expected_secret:
+        raise HTTPException(status_code=503, detail="Dev endpoint not configured")
     if dev_secret != expected_secret:
         raise HTTPException(status_code=403, detail="Invalid dev secret")
 
