@@ -20,6 +20,7 @@ import Reports from './pages/Reports.jsx';
 import VerifyEmail from './pages/VerifyEmail.jsx';
 import Privacy from './pages/Privacy.jsx';
 import Terms from './pages/Terms.jsx';
+import RefundPolicy from './pages/RefundPolicy.jsx';
 import Records from './pages/Records.jsx';
 import TaxSummary from './pages/TaxSummary.jsx';
 import Settings from './pages/Settings.jsx';
@@ -88,6 +89,7 @@ export default function App() {
       <Route path="/verify-email" element={<VerifyEmail />} />
       <Route path="/privacy" element={<Privacy />} />
       <Route path="/terms" element={<Terms />} />
+      <Route path="/refund-policy" element={<RefundPolicy />} />
       <Route path="/dashboard" element={<ProtectedRoute><AppLayout><PageBoundary><Dashboard /></PageBoundary></AppLayout></ProtectedRoute>} />
       <Route path="/transactions" element={<ProtectedRoute><AppLayout><PageBoundary><Transactions /></PageBoundary></AppLayout></ProtectedRoute>} />
       <Route path="/accounts" element={<ProtectedRoute><AppLayout><PageBoundary><Accounts /></PageBoundary></AppLayout></ProtectedRoute>} />

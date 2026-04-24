@@ -251,6 +251,7 @@ export default function Landing() {
           <a href="/features" style={{ fontSize: 12, color: 'var(--text-muted)', textDecoration: 'underline' }}>Features</a>
           <a href="/privacy" style={{ fontSize: 12, color: 'var(--text-muted)', textDecoration: 'underline' }}>Privacy Policy</a>
           <a href="/terms" style={{ fontSize: 12, color: 'var(--text-muted)', textDecoration: 'underline' }}>Terms of Service</a>
+          <a href="/refund-policy" style={{ fontSize: 12, color: 'var(--text-muted)', textDecoration: 'underline' }}>Refund Policy</a>
         </div>
       </footer>
     </div>
