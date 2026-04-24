@@ -136,7 +136,7 @@ struct MarkdownText: View {
             return try AttributedString(
                 markdown: text,
                 options: AttributedString.MarkdownParsingOptions(
-                    interpretedSyntax: .inlineOnlyPreservingWhitespace
+                    interpretedSyntax: .full
                 )
             )
         } catch {
