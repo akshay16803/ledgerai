@@ -79,6 +79,15 @@ import com.spentyai.app.features.transactions.TransactionListScreen
 import com.spentyai.app.features.transactions.TransactionsViewModel
 import com.spentyai.app.features.vendors.VendorListScreen
 import com.spentyai.app.features.vendors.VendorsViewModel
+import com.spentyai.app.features.customers.CustomerDetailScreen
+import com.spentyai.app.features.invoices.InvoicePreviewScreen
+import com.spentyai.app.features.paymentplans.PaymentPlansScreen
+import com.spentyai.app.features.paymentplans.PaymentPlansViewModel
+import com.spentyai.app.features.purchases.PurchasePreviewScreen
+import com.spentyai.app.features.transactions.TransactionDetailScreen
+import com.spentyai.app.features.vendors.VendorDetailScreen
+import com.spentyai.app.core.components.LoadingView
+import androidx.compose.runtime.collectAsState
 
 @Composable
 fun AppNavigation(
@@ -109,6 +118,7 @@ fun AppNavigation(
     val purchasesViewModel = remember { PurchasesViewModel(apiClient) }
     val customersViewModel = remember { CustomersViewModel(apiClient) }
     val vendorsViewModel = remember { VendorsViewModel(apiClient) }
+    val paymentPlansViewModel = remember { PaymentPlansViewModel(apiClient) }
 
     val cashFlowRepository = remember { CashFlowRepository(apiClient) }
     val cashFlowViewModel = remember { CashFlowViewModel(cashFlowRepository) }
@@ -235,8 +245,19 @@ fun AppNavigation(
                 arguments = listOf(navArgument("id") { type = NavType.StringType })
             ) { backStackEntry ->
                 val id = backStackEntry.arguments?.getString("id") ?: ""
-                PlaceholderScreen("Transaction: $id")
-                // TransactionDetailScreen is invoked via bottom sheet from list screens
+                val txnState by transactionsViewModel.uiState.collectAsState()
+                val transaction = txnState.transactions.find { it.id == id }
+                if (transaction != null) {
+                    TransactionDetailScreen(
+                        transaction = transaction,
+                        apiClient = apiClient,
+                        onDismiss = { navController.popBackStack() },
+                        onEdit = { navController.navigate(Screen.Transactions.route) },
+                        onDeleted = { navController.popBackStack() }
+                    )
+                } else {
+                    LoadingView()
+                }
             }
 
             composable(
@@ -269,7 +290,19 @@ fun AppNavigation(
                 arguments = listOf(navArgument("id") { type = NavType.StringType })
             ) { backStackEntry ->
                 val id = backStackEntry.arguments?.getString("id") ?: ""
-                PlaceholderScreen("Invoice: $id")
+                val invState by invoicesViewModel.uiState.collectAsState()
+                val invoice = invState.invoices.find { it.id == id }
+                if (invoice != null) {
+                    InvoicePreviewScreen(
+                        invoice = invoice,
+                        viewModel = invoicesViewModel,
+                        onNavigateBack = { navController.popBackStack() },
+                        onNavigateToEdit = { navController.popBackStack() },
+                        onNavigateToRecordPayment = { navController.popBackStack() }
+                    )
+                } else {
+                    LoadingView()
+                }
             }
 
             composable(Screen.Bills.route) {
@@ -287,7 +320,19 @@ fun AppNavigation(
                 arguments = listOf(navArgument("id") { type = NavType.StringType })
             ) { backStackEntry ->
                 val id = backStackEntry.arguments?.getString("id") ?: ""
-                PlaceholderScreen("Bill: $id")
+                val billState by purchasesViewModel.uiState.collectAsState()
+                val bill = billState.bills.find { it.id == id }
+                if (bill != null) {
+                    PurchasePreviewScreen(
+                        bill = bill,
+                        viewModel = purchasesViewModel,
+                        onNavigateBack = { navController.popBackStack() },
+                        onNavigateToEdit = { navController.popBackStack() },
+                        onNavigateToRecordPayment = { navController.popBackStack() }
+                    )
+                } else {
+                    LoadingView()
+                }
             }
 
             composable(Screen.Categories.route) {
@@ -299,7 +344,7 @@ fun AppNavigation(
             }
 
             composable(Screen.PaymentPlans.route) {
-                PlaceholderScreen("Payment Plans")
+                PaymentPlansScreen(viewModel = paymentPlansViewModel)
             }
 
             composable(Screen.TaxSummary.route) {
@@ -331,7 +376,18 @@ fun AppNavigation(
                 arguments = listOf(navArgument("id") { type = NavType.StringType })
             ) { backStackEntry ->
                 val id = backStackEntry.arguments?.getString("id") ?: ""
-                PlaceholderScreen("Customer: $id")
+                val custState by customersViewModel.uiState.collectAsState()
+                val customer = custState.customers.find { it.id == id }
+                if (customer != null) {
+                    CustomerDetailScreen(
+                        customer = customer,
+                        viewModel = customersViewModel,
+                        onNavigateBack = { navController.popBackStack() },
+                        onNavigateToEdit = { navController.popBackStack() }
+                    )
+                } else {
+                    LoadingView()
+                }
             }
 
             composable(Screen.Vendors.route) {
@@ -349,7 +405,18 @@ fun AppNavigation(
                 arguments = listOf(navArgument("id") { type = NavType.StringType })
             ) { backStackEntry ->
                 val id = backStackEntry.arguments?.getString("id") ?: ""
-                PlaceholderScreen("Vendor: $id")
+                val vendState by vendorsViewModel.uiState.collectAsState()
+                val vendor = vendState.vendors.find { it.id == id }
+                if (vendor != null) {
+                    VendorDetailScreen(
+                        vendor = vendor,
+                        viewModel = vendorsViewModel,
+                        onNavigateBack = { navController.popBackStack() },
+                        onNavigateToEdit = { navController.popBackStack() }
+                    )
+                } else {
+                    LoadingView()
+                }
             }
 
             // ═══════════════════════════════════════════
@@ -506,7 +573,10 @@ fun AppNavigation(
             }
 
             composable(Screen.Profile.route) {
-                PlaceholderScreen("Profile")
+                BusinessProfileScreen(
+                    viewModel = settingsViewModel,
+                    onNavigateBack = { navController.popBackStack() }
+                )
             }
 
             // ═══════════════════════════════════════════
@@ -529,7 +599,11 @@ fun AppNavigation(
             }
 
             composable(Screen.Subscription.route) {
-                PlaceholderScreen("Subscription")
+                SubscriptionPaywallScreen(
+                    viewModel = billingViewModel,
+                    onDismiss = { navController.popBackStack() },
+                    onSubscribed = { navController.popBackStack() }
+                )
             }
 
             // Subscription Paywall

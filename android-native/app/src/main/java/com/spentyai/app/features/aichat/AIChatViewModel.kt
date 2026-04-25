@@ -1,10 +1,12 @@
 package com.spentyai.app.features.aichat
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.spentyai.app.core.models.ChatMessage
 import com.spentyai.app.core.models.ChatRole
 import com.spentyai.app.core.network.ApiResult
+import com.spentyai.app.core.services.AndroidSpeechManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -32,6 +34,18 @@ class AIChatViewModel(
     val canSend: Boolean
         get() = _uiState.value.input.isNotBlank() && !_uiState.value.isSending
 
+    // ─── Voice ────────────────────────────────────────────────────────────────
+
+    val speechManager = AndroidSpeechManager()
+
+    private val _isVoiceResponseEnabled = MutableStateFlow(false)
+    val isVoiceResponseEnabled: StateFlow<Boolean> = _isVoiceResponseEnabled.asStateFlow()
+
+    private val _isVoiceModeActive = MutableStateFlow(false)
+    val isVoiceModeActive: StateFlow<Boolean> = _isVoiceModeActive.asStateFlow()
+
+    // ─── Chat ─────────────────────────────────────────────────────────────────
+
     fun loadSuggestions() {
         _uiState.update { it.copy(suggestions = repository.getDefaultSuggestions()) }
     }
@@ -58,7 +72,7 @@ class AIChatViewModel(
         _uiState.update { it.copy(input = text) }
     }
 
-    fun sendMessage() {
+    fun sendMessage(context: Context? = null) {
         val text = _uiState.value.input.trim()
         if (text.isEmpty()) return
 
@@ -87,6 +101,19 @@ class AIChatViewModel(
                             isSending = false,
                             scrollToBottomTrigger = it.scrollToBottomTrigger + 1
                         )
+                    }
+                    // Speak the AI response if voice response or voice mode is active.
+                    if (context != null && (_isVoiceResponseEnabled.value || _isVoiceModeActive.value)) {
+                        val content = result.data.content
+                        // In voice mode, after speaking restart listening.
+                        if (_isVoiceModeActive.value) {
+                            speechManager.onTtsFinished = {
+                                if (_isVoiceModeActive.value) {
+                                    speechManager.startListening(context)
+                                }
+                            }
+                        }
+                        speechManager.speak(content, context)
                     }
                 }
                 is ApiResult.Failure -> {
@@ -129,5 +156,90 @@ class AIChatViewModel(
 
     fun dismissError() {
         _uiState.update { it.copy(errorMessage = null) }
+    }
+
+    // ─── Voice actions ────────────────────────────────────────────────────────
+
+    /**
+     * Toggle the microphone on/off.
+     * If currently listening: stop and send the transcribed text if any.
+     * If not listening: start listening (caller must have already obtained the permission).
+     */
+    suspend fun toggleMicrophone(context: Context) {
+        if (speechManager.isListening.value) {
+            speechManager.stopListening()
+            val transcribed = speechManager.transcribedText.value.trim()
+            if (transcribed.isNotEmpty()) {
+                _uiState.update { it.copy(input = transcribed) }
+                speechManager.resetTranscription()
+                sendMessage(context)
+            }
+        } else {
+            speechManager.checkPermissions(context)
+            if (speechManager.hasMicrophonePermission.value) {
+                speechManager.resetTranscription()
+                speechManager.startListening(context)
+            }
+        }
+    }
+
+    /** Toggle TTS for AI responses (voice response mode). */
+    fun toggleVoiceResponse() {
+        _isVoiceResponseEnabled.value = !_isVoiceResponseEnabled.value
+    }
+
+    /** Enter or exit voice mode. */
+    suspend fun toggleVoiceMode(context: Context) {
+        if (_isVoiceModeActive.value) {
+            exitVoiceMode()
+        } else {
+            enterVoiceMode(context)
+        }
+    }
+
+    /** Enter voice mode: check permissions, activate, start listening. */
+    suspend fun enterVoiceMode(context: Context) {
+        speechManager.checkPermissions(context)
+        if (!speechManager.hasMicrophonePermission.value) {
+            // Caller (Composable) is responsible for requesting the runtime permission.
+            // We set a flag so the UI knows to show the permission rationale.
+            return
+        }
+        _isVoiceModeActive.value = true
+        speechManager.resetTranscription()
+        speechManager.startListening(context)
+    }
+
+    /** Exit voice mode: stop all audio activity. */
+    fun exitVoiceMode() {
+        _isVoiceModeActive.value = false
+        speechManager.stopListening()
+        speechManager.stopSpeaking()
+        speechManager.onTtsFinished = null
+        speechManager.resetTranscription()
+    }
+
+    /**
+     * Send the current voice input, or restart listening if the transcript is empty.
+     * Used by the "Send" button inside the voice mode overlay.
+     */
+    suspend fun sendVoiceInput(context: Context) {
+        speechManager.stopListening()
+        val transcribed = speechManager.transcribedText.value.trim()
+        if (transcribed.isNotEmpty()) {
+            _uiState.update { it.copy(input = transcribed) }
+            speechManager.resetTranscription()
+            sendMessage(context)
+        } else {
+            // Nothing to send — restart listening.
+            speechManager.startListening(context)
+        }
+    }
+
+    // ─── Lifecycle ────────────────────────────────────────────────────────────
+
+    override fun onCleared() {
+        super.onCleared()
+        speechManager.destroy()
     }
 }

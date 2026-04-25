@@ -24,10 +24,20 @@ android {
         buildConfigField("String", "API_BASE_URL", "\"https://api.spentyai.com\"")
     }
 
+    signingConfigs {
+        create("release") {
+            storeFile = System.getenv("KEYSTORE_PATH")?.let { file(it) }
+            storePassword = System.getenv("KEYSTORE_PASSWORD") ?: ""
+            keyAlias = System.getenv("KEY_ALIAS") ?: "spentyai"
+            keyPassword = System.getenv("KEY_PASSWORD") ?: ""
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
+            signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -108,6 +118,9 @@ dependencies {
 
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.0")
+
+    // Google Play Billing
+    implementation("com.android.billingclient:billing-ktx:7.0.0")
 
     // Debug
     debugImplementation("androidx.compose.ui:ui-tooling")

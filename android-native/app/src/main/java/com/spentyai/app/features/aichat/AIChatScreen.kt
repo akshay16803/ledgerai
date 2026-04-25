@@ -1,7 +1,17 @@
 package com.spentyai.app.features.aichat
 
+import android.Manifest
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -22,14 +32,21 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.VolumeOff
+import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -51,18 +68,24 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.spentyai.app.core.theme.SpentyError
 import com.spentyai.app.core.theme.SpentyPrimary
 import com.spentyai.app.core.theme.SpentyStyle
 import com.spentyai.app.core.theme.SpentyType
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -74,15 +97,36 @@ fun AIChatScreen(
     val listState = rememberLazyListState()
     var showMenu by remember { mutableStateOf(false) }
 
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    // Voice state
+    val isVoiceModeActive by viewModel.isVoiceModeActive.collectAsState()
+    val isVoiceResponseEnabled by viewModel.isVoiceResponseEnabled.collectAsState()
+    val isListening by viewModel.speechManager.isListening.collectAsState()
+    val isSpeaking by viewModel.speechManager.isSpeaking.collectAsState()
+    val transcribedText by viewModel.speechManager.transcribedText.collectAsState()
+    val hasMicPermission by viewModel.speechManager.hasMicrophonePermission.collectAsState()
+
+    // Runtime RECORD_AUDIO permission launcher
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        viewModel.speechManager.checkPermissions(context)
+        if (granted) {
+            scope.launch { viewModel.enterVoiceMode(context) }
+        }
+    }
+
     LaunchedEffect(Unit) {
         viewModel.loadSuggestions()
         viewModel.loadHistory()
+        viewModel.speechManager.checkPermissions(context)
     }
 
     LaunchedEffect(state.scrollToBottomTrigger) {
         if (state.messages.isNotEmpty()) {
             listState.animateScrollToItem(
-                // messages + possible typing indicator + bottom spacer
                 state.messages.size + if (state.isSending) 1 else 0
             )
         }
@@ -131,11 +175,44 @@ fun AIChatScreen(
             TopAppBar(
                 title = { Text("AI Assistant", style = SpentyType.Headline) },
                 navigationIcon = {
-                    IconButton(onClick = onClose) {
+                    IconButton(onClick = {
+                        if (isVoiceModeActive) viewModel.exitVoiceMode() else onClose()
+                    }) {
                         Icon(Icons.Default.Close, contentDescription = "Close")
                     }
                 },
                 actions = {
+                    // Voice response (speaker) toggle
+                    IconButton(onClick = { viewModel.toggleVoiceResponse() }) {
+                        Icon(
+                            imageVector = if (isVoiceResponseEnabled) Icons.Default.VolumeUp else Icons.Default.VolumeOff,
+                            contentDescription = if (isVoiceResponseEnabled) "Disable voice response" else "Enable voice response",
+                            tint = if (isVoiceResponseEnabled) SpentyPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    // Voice mode toggle
+                    IconButton(onClick = {
+                        scope.launch {
+                            if (isVoiceModeActive) {
+                                viewModel.exitVoiceMode()
+                            } else {
+                                if (hasMicPermission) {
+                                    viewModel.enterVoiceMode(context)
+                                } else {
+                                    permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                }
+                            }
+                        }
+                    }) {
+                        Icon(
+                            imageVector = Icons.Default.GraphicEq,
+                            contentDescription = if (isVoiceModeActive) "Exit voice mode" else "Enter voice mode",
+                            tint = if (isVoiceModeActive) SpentyPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    // Overflow menu
                     Box {
                         IconButton(onClick = { showMenu = true }) {
                             Icon(
@@ -164,6 +241,26 @@ fun AIChatScreen(
             )
         }
     ) { padding ->
+
+        // ── Voice mode full-screen overlay ────────────────────────────────────
+        if (isVoiceModeActive) {
+            VoiceModeOverlay(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding),
+                isListening = isListening,
+                isSpeaking = isSpeaking,
+                isSending = state.isSending,
+                transcribedText = transcribedText,
+                lastAiMessage = state.messages.lastOrNull { it.role.name == "ASSISTANT" }?.content,
+                onSend = { scope.launch { viewModel.sendVoiceInput(context) } },
+                onToggleMic = { scope.launch { viewModel.toggleMicrophone(context) } },
+                onExit = { viewModel.exitVoiceMode() }
+            )
+            return@Scaffold
+        }
+
+        // ── Normal chat layout ─────────────────────────────────────────────────
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -178,30 +275,32 @@ fun AIChatScreen(
                     .fillMaxWidth(),
                 contentPadding = PaddingValues(vertical = 8.dp)
             ) {
-                // Welcome section when empty
                 if (state.messages.isEmpty() && !state.isSending) {
                     item { WelcomeSection(state.suggestions, viewModel::sendSuggestion) }
                 }
 
-                // Suggestion chips when messages exist
                 if (state.messages.isNotEmpty()) {
-                    item {
-                        SuggestionStrip(state.suggestions, viewModel::sendSuggestion)
-                    }
+                    item { SuggestionStrip(state.suggestions, viewModel::sendSuggestion) }
                 }
 
-                // Messages
                 items(state.messages, key = { it.id }) { message ->
                     ChatBubble(message = message)
                 }
 
-                // Typing indicator
                 if (state.isSending) {
                     item { TypingIndicator() }
                 }
 
-                // Bottom spacer
                 item { Spacer(modifier = Modifier.height(4.dp)) }
+            }
+
+            // Live transcription preview strip (shown while listening + text exists)
+            AnimatedVisibility(
+                visible = isListening && transcribedText.isNotEmpty(),
+                enter = fadeIn() + slideInVertically { it },
+                exit = fadeOut()
+            ) {
+                TranscriptionPreviewStrip(transcribedText = transcribedText)
             }
 
             // Input bar
@@ -209,12 +308,247 @@ fun AIChatScreen(
             InputBar(
                 input = state.input,
                 onInputChange = viewModel::onInputChange,
-                onSend = { viewModel.sendMessage() },
-                canSend = state.input.isNotBlank() && !state.isSending
+                onSend = { viewModel.sendMessage(context) },
+                canSend = state.input.isNotBlank() && !state.isSending,
+                isListening = isListening,
+                onToggleMic = {
+                    scope.launch {
+                        if (hasMicPermission) {
+                            viewModel.toggleMicrophone(context)
+                        } else {
+                            permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                        }
+                    }
+                }
             )
         }
     }
 }
+
+// ─── Voice Mode Overlay ───────────────────────────────────────────────────────
+
+@Composable
+private fun VoiceModeOverlay(
+    modifier: Modifier = Modifier,
+    isListening: Boolean,
+    isSpeaking: Boolean,
+    isSending: Boolean,
+    transcribedText: String,
+    lastAiMessage: String?,
+    onSend: () -> Unit,
+    onToggleMic: () -> Unit,
+    onExit: () -> Unit
+) {
+    val statusText = when {
+        isSpeaking -> "Speaking…"
+        isListening -> "Listening…"
+        isSending  -> "Thinking…"
+        else       -> "Tap to speak"
+    }
+
+    Column(
+        modifier = modifier
+            .background(MaterialTheme.colorScheme.background)
+            .padding(horizontal = 24.dp, vertical = 16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.SpaceBetween
+    ) {
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Pulsing mic circle
+        PulsingMicCircle(isListening = isListening)
+
+        // Status label
+        Text(
+            text = statusText,
+            style = SpentyType.Title3,
+            color = MaterialTheme.colorScheme.onSurface,
+            textAlign = TextAlign.Center
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Live transcription text
+        AnimatedVisibility(visible = transcribedText.isNotEmpty()) {
+            Text(
+                text = "\"$transcribedText\"",
+                style = SpentyType.Body,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp)
+            )
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Last AI response (scrollable)
+        if (!lastAiMessage.isNullOrBlank()) {
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(MaterialTheme.colorScheme.surface)
+                    .padding(16.dp)
+                    .verticalScroll(rememberScrollState())
+            ) {
+                Text(
+                    text = lastAiMessage,
+                    style = SpentyType.Callout,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+        } else {
+            Spacer(modifier = Modifier.weight(1f))
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // Bottom action row: Send | Mute/Unmute | Exit
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Send button
+            val canSend = transcribedText.isNotEmpty()
+            IconButton(
+                onClick = onSend,
+                enabled = canSend,
+                modifier = Modifier
+                    .size(56.dp)
+                    .clip(CircleShape)
+                    .background(
+                        if (canSend) SpentyPrimary else SpentyPrimary.copy(alpha = 0.3f)
+                    )
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.Send,
+                    contentDescription = "Send",
+                    tint = Color.White,
+                    modifier = Modifier.size(22.dp)
+                )
+            }
+
+            // Mic toggle (red when listening)
+            IconButton(
+                onClick = onToggleMic,
+                modifier = Modifier
+                    .size(72.dp)
+                    .clip(CircleShape)
+                    .background(if (isListening) SpentyError else MaterialTheme.colorScheme.surfaceVariant)
+            ) {
+                Icon(
+                    imageVector = if (isListening) Icons.Default.MicOff else Icons.Default.Mic,
+                    contentDescription = if (isListening) "Stop listening" else "Start listening",
+                    tint = if (isListening) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(28.dp)
+                )
+            }
+
+            // Exit voice mode
+            IconButton(
+                onClick = onExit,
+                modifier = Modifier
+                    .size(56.dp)
+                    .clip(CircleShape)
+                    .background(SpentyError.copy(alpha = 0.15f))
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "Exit voice mode",
+                    tint = SpentyError,
+                    modifier = Modifier.size(22.dp)
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+    }
+}
+
+// ─── Pulsing Mic Circle ───────────────────────────────────────────────────────
+
+@Composable
+private fun PulsingMicCircle(isListening: Boolean) {
+    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+    val pulseScale by infiniteTransition.animateFloat(
+        initialValue = 1f,
+        targetValue = if (isListening) 1.18f else 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 700, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pulseScale"
+    )
+
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier.size(140.dp)
+    ) {
+        // Outer pulse ring
+        if (isListening) {
+            Box(
+                modifier = Modifier
+                    .size(140.dp)
+                    .scale(pulseScale)
+                    .clip(CircleShape)
+                    .background(SpentyPrimary.copy(alpha = 0.15f))
+            )
+        }
+
+        // Inner circle with mic icon
+        Box(
+            modifier = Modifier
+                .size(100.dp)
+                .clip(CircleShape)
+                .background(if (isListening) SpentyPrimary else SpentyPrimary.copy(alpha = 0.15f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Default.Mic,
+                contentDescription = "Microphone",
+                tint = if (isListening) Color.White else SpentyPrimary,
+                modifier = Modifier.size(44.dp)
+            )
+        }
+    }
+
+    Spacer(modifier = Modifier.height(24.dp))
+}
+
+// ─── Transcription Preview Strip ──────────────────────────────────────────────
+
+@Composable
+private fun TranscriptionPreviewStrip(transcribedText: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(SpentyPrimary.copy(alpha = 0.06f))
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = Icons.Default.Mic,
+            contentDescription = null,
+            tint = SpentyPrimary,
+            modifier = Modifier.size(14.dp)
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(
+            text = transcribedText,
+            style = SpentyType.Footnote,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f)
+        )
+    }
+}
+
+// ─── Welcome Section ─────────────────────────────────────────────────────────
 
 @Composable
 private fun WelcomeSection(
@@ -262,7 +596,6 @@ private fun WelcomeSection(
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        // Suggestion cards
         suggestions.forEach { suggestion ->
             Row(
                 modifier = Modifier
@@ -302,6 +635,8 @@ private fun WelcomeSection(
     }
 }
 
+// ─── Suggestion Strip ─────────────────────────────────────────────────────────
+
 @Composable
 private fun SuggestionStrip(
     suggestions: List<String>,
@@ -327,12 +662,16 @@ private fun SuggestionStrip(
     }
 }
 
+// ─── Input Bar ────────────────────────────────────────────────────────────────
+
 @Composable
 private fun InputBar(
     input: String,
     onInputChange: (String) -> Unit,
     onSend: () -> Unit,
-    canSend: Boolean
+    canSend: Boolean,
+    isListening: Boolean,
+    onToggleMic: () -> Unit
 ) {
     Row(
         modifier = Modifier
@@ -341,6 +680,24 @@ private fun InputBar(
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.Bottom
     ) {
+        // Mic button (left of text field)
+        IconButton(
+            onClick = onToggleMic,
+            modifier = Modifier
+                .size(40.dp)
+                .clip(CircleShape)
+                .background(if (isListening) SpentyError else SpentyPrimary.copy(alpha = 0.12f))
+        ) {
+            Icon(
+                imageVector = if (isListening) Icons.Default.MicOff else Icons.Default.Mic,
+                contentDescription = if (isListening) "Stop listening" else "Start voice input",
+                tint = if (isListening) Color.White else SpentyPrimary,
+                modifier = Modifier.size(18.dp)
+            )
+        }
+
+        Spacer(modifier = Modifier.width(8.dp))
+
         OutlinedTextField(
             value = input,
             onValueChange = onInputChange,

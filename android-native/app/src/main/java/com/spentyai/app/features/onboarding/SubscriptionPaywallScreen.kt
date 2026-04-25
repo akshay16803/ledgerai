@@ -63,11 +63,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
+import com.android.billingclient.api.ProductDetails
 import com.spentyai.app.core.theme.SpentyError
 import com.spentyai.app.core.theme.SpentyPrimary
 import com.spentyai.app.core.theme.SpentyStyle
@@ -84,8 +86,9 @@ fun SubscriptionPaywallScreen(
     onSubscribed: () -> Unit
 ) {
     val state by viewModel.uiState.collectAsState()
-    var selectedProductId by remember { mutableStateOf("com.spentyai.yearly") }
+    var selectedProductId by remember { mutableStateOf("spenty_yearly") }
     var showPromoSection by remember { mutableStateOf(false) }
+    val context = LocalContext.current
 
     LaunchedEffect(Unit) {
         viewModel.loadAll()
@@ -137,16 +140,32 @@ fun SubscriptionPaywallScreen(
                 // Hero section
                 HeroSection()
 
-                // Plan selection
-                PlanSelectionSection(
-                    plans = BillingRepository.fallbackPlans,
-                    selectedProductId = selectedProductId,
-                    onSelectPlan = { selectedProductId = it }
-                )
+                // Plan selection — prefer Play Store product details, fall back to static plans
+                if (state.productDetailsList.isNotEmpty()) {
+                    PlayProductSelectionSection(
+                        productDetailsList = state.productDetailsList,
+                        selectedProductId = selectedProductId,
+                        onSelectPlan = { selectedProductId = it }
+                    )
+                } else {
+                    PlanSelectionSection(
+                        plans = BillingRepository.fallbackPlans,
+                        selectedProductId = selectedProductId,
+                        onSelectPlan = { selectedProductId = it }
+                    )
+                }
 
                 // Subscribe button
                 Button(
-                    onClick = { viewModel.purchasePlan(selectedProductId) },
+                    onClick = {
+                        val activity = context as? android.app.Activity
+                        val productDetails = state.productDetailsList.find { it.productId == selectedProductId }
+                        if (activity != null && productDetails != null) {
+                            viewModel.purchaseSubscription(productDetails, activity)
+                        } else {
+                            viewModel.purchasePlan(selectedProductId)
+                        }
+                    },
                     enabled = !state.isPurchasing,
                     colors = SpentyStyle.primaryButtonColors(),
                     shape = RoundedCornerShape(14.dp),
@@ -209,6 +228,134 @@ fun SubscriptionPaywallScreen(
         }
     }
 }
+
+// --- Play Store product details section ---
+
+@Composable
+private fun PlayProductSelectionSection(
+    productDetailsList: List<ProductDetails>,
+    selectedProductId: String,
+    onSelectPlan: (String) -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        productDetailsList.forEach { productDetails ->
+            PlayProductOption(
+                productDetails = productDetails,
+                isSelected = selectedProductId == productDetails.productId,
+                onSelect = { onSelectPlan(productDetails.productId) }
+            )
+        }
+    }
+}
+
+@Composable
+private fun PlayProductOption(
+    productDetails: ProductDetails,
+    isSelected: Boolean,
+    onSelect: () -> Unit
+) {
+    // Pick the cheapest offer's pricing phase for display
+    val offerDetails = productDetails.subscriptionOfferDetails?.firstOrNull()
+    val pricingPhase = offerDetails?.pricingPhases?.pricingPhaseList?.lastOrNull()
+    val displayPrice = pricingPhase?.formattedPrice ?: ""
+    val billingPeriod = when (pricingPhase?.billingPeriod) {
+        "P1M" -> "/month"
+        "P1Y" -> "/year"
+        "P3M" -> "/3 months"
+        else -> ""
+    }
+    val isYearly = productDetails.productId.contains("year", ignoreCase = true)
+    val badge = if (isYearly) "Popular" else null
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(
+                if (isSelected) SpentyPrimary.copy(alpha = 0.06f)
+                else MaterialTheme.colorScheme.surface
+            )
+            .border(
+                width = if (isSelected) 2.dp else 1.dp,
+                color = if (isSelected) SpentyPrimary else Color.Gray.copy(alpha = 0.12f),
+                shape = RoundedCornerShape(12.dp)
+            )
+            .clickable(onClick = onSelect)
+            .padding(14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        // Radio button
+        Box(
+            modifier = Modifier
+                .size(22.dp)
+                .border(
+                    width = 2.dp,
+                    color = if (isSelected) SpentyPrimary else Color.Gray.copy(alpha = 0.3f),
+                    shape = CircleShape
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            if (isSelected) {
+                Box(
+                    modifier = Modifier
+                        .size(12.dp)
+                        .clip(CircleShape)
+                        .background(SpentyPrimary)
+                )
+            }
+        }
+
+        // Name + badge
+        Column(modifier = Modifier.weight(1f)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Text(
+                    productDetails.name,
+                    style = SpentyType.Subheadline.copy(fontWeight = FontWeight.SemiBold)
+                )
+                badge?.let {
+                    Text(
+                        text = it,
+                        style = SpentyType.Caption2.copy(fontWeight = FontWeight.Bold),
+                        color = Color.White,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(Color(0xFFFF9500))
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
+            }
+            productDetails.description.takeIf { it.isNotEmpty() }?.let {
+                Text(
+                    it,
+                    style = SpentyType.Caption1,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+
+        // Price
+        Column(horizontalAlignment = Alignment.End) {
+            Text(
+                displayPrice,
+                style = SpentyType.Subheadline.copy(fontWeight = FontWeight.Bold),
+                color = SpentyPrimary
+            )
+            if (billingPeriod.isNotEmpty()) {
+                Text(
+                    billingPeriod,
+                    style = SpentyType.Caption2,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+// --- Fallback static plan section (unchanged) ---
 
 @Composable
 private fun HeroSection() {
@@ -560,7 +707,7 @@ private fun TermsSection() {
                 modifier = Modifier.clickable { uriHandler.openUri("https://spentyai.com/terms") }
             )
             Text(
-                "\u00B7",
+                "·",
                 style = SpentyType.Caption2,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -571,7 +718,7 @@ private fun TermsSection() {
                 modifier = Modifier.clickable { uriHandler.openUri("https://spentyai.com/privacy") }
             )
             Text(
-                "\u00B7",
+                "·",
                 style = SpentyType.Caption2,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
