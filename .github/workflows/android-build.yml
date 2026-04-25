@@ -30,9 +30,6 @@ jobs:
       - name: Accept SDK licenses
         run: yes | sdkmanager --licenses || true
 
-      - name: Grant Gradle wrapper permission
-        run: chmod +x android-native/gradlew
-
       - name: Cache Gradle packages
         uses: actions/cache@v4
         with:
@@ -44,7 +41,9 @@ jobs:
 
       - name: Build Debug APK
         working-directory: android-native
-        run: ./gradlew assembleDebug --no-daemon --stacktrace
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon --stacktrace 2>&1
         env:
           ANDROID_HOME: ${{ env.ANDROID_SDK_ROOT }}
 
