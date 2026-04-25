@@ -88,6 +88,7 @@ import com.spentyai.app.features.transactions.TransactionDetailScreen
 import com.spentyai.app.features.vendors.VendorDetailScreen
 import com.spentyai.app.core.components.LoadingView
 import androidx.compose.runtime.collectAsState
+import androidx.compose.ui.platform.LocalContext
 
 @Composable
 fun AppNavigation(
@@ -135,8 +136,9 @@ fun AppNavigation(
     val settingsRepository = remember { SettingsRepository(apiClient) }
     val settingsViewModel = remember { SettingsViewModel(settingsRepository, authManager) }
 
+    val context = LocalContext.current
     val billingRepository = remember { BillingRepository(apiClient) }
-    val billingViewModel = remember { BillingViewModel(billingRepository) }
+    val billingViewModel = remember { BillingViewModel(context.applicationContext as android.app.Application, billingRepository) }
 
     val pastInsightsRepository = remember { PastInsightsRepository(apiClient) }
     val pastInsightsViewModel = remember { PastInsightsViewModel(pastInsightsRepository) }
