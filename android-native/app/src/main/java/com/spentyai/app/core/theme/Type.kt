@@ -2,14 +2,12 @@ package com.spentyai.app.core.theme
 
 import androidx.compose.material3.Typography
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
-import com.spentyai.app.R
 
-// Inter via Google Fonts downloadable font provider
-val InterFontFamily = FontFamily(Font(R.font.inter_variable))
+// Using system default sans-serif (Inter will be bundled as a TTF in next step)
+val InterFontFamily = FontFamily.SansSerif
 
 // Fallback aliases kept for compatibility
 val RoundedFontFamily = InterFontFamily
