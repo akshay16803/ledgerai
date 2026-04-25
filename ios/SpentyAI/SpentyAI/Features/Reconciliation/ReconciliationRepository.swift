@@ -196,7 +196,8 @@ final class ReconciliationRepository: Sendable {
     }
 
     func fetchAccountSubTypes() async throws -> [AccountSubType] {
-        return try await api.get(APIEndpoints.accountSubTypes)
+        let response: AccountSubTypesResponse = try await api.get(APIEndpoints.accountSubTypes)
+        return response.subTypes
     }
 
     func fetchCategories() async throws -> [Category] {

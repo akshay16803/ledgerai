@@ -4925,8 +4925,18 @@ def _post_process_entries(entries: list, statement_type: str) -> list:
             except (ValueError, TypeError):
                 balance = None
 
-        # Dedupe key tolerates slight description variation across chunk overlap.
-        dedupe_key = (date, amount, final_type, description.lower()[:40])
+        # Stronger dedupe key to eliminate chunk-overlap phantoms.
+        # Strategy: if the statement includes a running balance, that value is
+        # unique per transaction (each debit/credit moves the balance by exactly
+        # the transaction amount) so (date, amount, type, balance) is a perfect
+        # identity key.  Fall back to a whitespace-normalised description[:60]
+        # when balance is absent so we still catch overlaps in credit-card or
+        # balance-less statements.
+        norm_desc = " ".join(description.lower().split())[:60]
+        if balance is not None:
+            dedupe_key = (date, amount, final_type, balance)
+        else:
+            dedupe_key = (date, amount, final_type, norm_desc)
         if dedupe_key in seen:
             continue
         seen.add(dedupe_key)

@@ -64,12 +64,22 @@ struct StatementUploadView: View {
             Menu {
                 Button("All Types") {
                     viewModel.selectedSubType = ""
-                    viewModel.selectedAccountId = ""
+                    // Keep account — all types shows all accounts so the
+                    // current selection remains valid.
                 }
                 ForEach(viewModel.accountSubTypes) { subType in
                     Button(subType.name ?? "Unnamed") {
-                        viewModel.selectedSubType = subType.name ?? ""
-                        viewModel.selectedAccountId = ""
+                        let newSubType = subType.name ?? ""
+                        viewModel.selectedSubType = newSubType
+                        // Only clear the account if it no longer appears in
+                        // the filtered list for the newly-selected sub-type.
+                        let stillValid = viewModel.accounts.contains {
+                            $0.id == viewModel.selectedAccountId &&
+                            $0.subType?.lowercased() == newSubType.lowercased()
+                        }
+                        if !stillValid {
+                            viewModel.selectedAccountId = ""
+                        }
                     }
                 }
             } label: {

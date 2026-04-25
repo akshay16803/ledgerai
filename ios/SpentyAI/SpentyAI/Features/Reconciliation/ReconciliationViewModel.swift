@@ -18,7 +18,7 @@ final class ReconciliationViewModel {
 
     var selectedSubType: String = ""
     var selectedAccountId: String = ""
-    var periodFrom: Date = Date()
+    var periodFrom: Date = Self.startOfCurrentMonth()
     var periodTo: Date = Date()
     var isUploading: Bool = false
     var uploadProgress: Double = 0
@@ -105,9 +105,15 @@ final class ReconciliationViewModel {
         do { statements = try await stmts } catch {
             errorMessage = error.localizedDescription
         }
-        do { accounts = try await accts } catch { /* non-fatal */ }
-        do { accountSubTypes = try await subTypes } catch { /* non-fatal */ }
-        do { categories = try await cats } catch { /* non-fatal */ }
+        do { accounts = try await accts } catch {
+            print("⚠️ [Reconciliation] fetchAccounts failed: \(error)")
+        }
+        do { accountSubTypes = try await subTypes } catch {
+            print("⚠️ [Reconciliation] fetchAccountSubTypes failed: \(error)")
+        }
+        do { categories = try await cats } catch {
+            print("⚠️ [Reconciliation] fetchCategories failed: \(error)")
+        }
 
         isLoading = false
     }
@@ -167,8 +173,15 @@ final class ReconciliationViewModel {
     private func resetUploadForm() {
         selectedSubType = ""
         selectedAccountId = ""
-        periodFrom = Date()
+        periodFrom = Self.startOfCurrentMonth()
         periodTo = Date()
+    }
+
+    /// Returns midnight on the 1st of the current month in the current calendar.
+    private static func startOfCurrentMonth() -> Date {
+        let cal = Calendar.current
+        let comps = cal.dateComponents([.year, .month], from: Date())
+        return cal.date(from: comps) ?? Date()
     }
 
     // MARK: - Statement Detail

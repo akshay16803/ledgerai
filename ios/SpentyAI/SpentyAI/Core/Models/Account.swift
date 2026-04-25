@@ -62,3 +62,8 @@ struct AccountSubType: Codable, Identifiable {
         case icon
     }
 }
+
+// Backend wraps sub-type list as {"sub_types": [...], "grouped": {...}}
+struct AccountSubTypesResponse: Decodable {
+    let subTypes: [AccountSubType]
+}

@@ -87,5 +87,9 @@
     <string>SpentyAI needs microphone access for voice commands and live voice conversation with the AI assistant.</string>
     <key>NSSpeechRecognitionUsageDescription</key>
     <string>SpentyAI uses speech recognition to transcribe your voice into text for the AI chat and Siri shortcuts.</string>
+    <key>UIFileSharingEnabled</key>
+    <true/>
+    <key>LSSupportsOpeningDocumentsInPlace</key>
+    <true/>
 </dict>
 </plist>
