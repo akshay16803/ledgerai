@@ -18,7 +18,11 @@ final class ReconciliationViewModel {
 
     var selectedSubType: String = ""
     var selectedAccountId: String = ""
-    var periodFrom: Date = Self.startOfCurrentMonth()
+    var periodFrom: Date = {
+        let cal = Calendar.current
+        let comps = cal.dateComponents([.year, .month], from: Date())
+        return cal.date(from: comps) ?? Date()
+    }()
     var periodTo: Date = Date()
     var isUploading: Bool = false
     var uploadProgress: Double = 0
