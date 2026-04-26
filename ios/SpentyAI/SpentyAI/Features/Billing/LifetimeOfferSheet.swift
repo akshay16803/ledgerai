@@ -1,21 +1,27 @@
 import SwiftUI
 
 // MARK: - Lifetime Offer Sheet
-// Shown as a bottom sheet when the user taps Monthly plan.
-// Upsells lifetime access at ₹4,999 (vs regular ₹9,999).
+// Two modes:
+//   showTimer = true  → non-subscriber monthly intercept; 1-hour countdown displayed
+//   showTimer = false → existing subscriber upgrade; no timer, always available
 
 struct LifetimeOfferSheet: View {
 
-    // MARK: - Callbacks
-    let onAccept: () async -> Void   // perform lifetime_offer purchase
-    let onDecline: () -> Void         // proceed with monthly purchase
+    // MARK: - Params
+    var showTimer: Bool = true
+    let onAccept: () async -> Void
+    let onDecline: () -> Void
 
     // MARK: - State
     @State private var isPurchasing = false
+    @State private var displayTime: String = ""
+
+    // MARK: - Timer
+    private let clock = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     // MARK: - Palette
-    private let accentGold = Color(red: 0.831, green: 0.686, blue: 0.216)  // #D4AF37
-    private let darkBg     = Color(red: 0.055, green: 0.122, blue: 0.071)  // #0E1F12
+    private let accentGold = Color(red: 0.831, green: 0.686, blue: 0.216)
+    private let darkBg     = Color(red: 0.055, green: 0.122, blue: 0.071)
 
     // MARK: - Body
     var body: some View {
@@ -26,6 +32,21 @@ struct LifetimeOfferSheet: View {
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
         .interactiveDismissDisabled(isPurchasing)
+        .onAppear {
+            if showTimer {
+                LifetimeOfferManager.shared.recordFirstShown()
+                displayTime = LifetimeOfferManager.shared.formattedTimeRemaining()
+            }
+        }
+        .onReceive(clock) { _ in
+            guard showTimer, !isPurchasing else { return }
+            let remaining = LifetimeOfferManager.shared.timeRemaining
+            if remaining <= 0 {
+                onDecline()
+            } else {
+                displayTime = LifetimeOfferManager.shared.formattedTimeRemaining()
+            }
+        }
     }
 
     // MARK: - Dark premium header
@@ -35,9 +56,9 @@ struct LifetimeOfferSheet: View {
 
             // Badge
             HStack(spacing: 5) {
-                Image(systemName: "bolt.fill")
+                Image(systemName: showTimer ? "bolt.fill" : "star.fill")
                     .font(.system(size: 10, weight: .bold))
-                Text("ONE-TIME SPECIAL OFFER")
+                Text(showTimer ? "ONE-TIME SPECIAL OFFER" : "SUBSCRIBER EXCLUSIVE")
                     .font(.system(size: 11, weight: .bold))
                     .tracking(1.1)
             }
@@ -96,31 +117,22 @@ struct LifetimeOfferSheet: View {
     // MARK: - Light content section
     private var offerContent: some View {
         VStack(spacing: 0) {
+            // Feature rows
             VStack(spacing: 0) {
-                offerRow(icon: "infinity",               title: "Use forever, no renewals",      sub: "No annual fees, ever")
+                offerRow(icon: "infinity",               title: "Use forever, no renewals",     sub: "No annual fees, ever")
                 Divider().padding(.leading, 60).padding(.trailing, 20)
-                offerRow(icon: "arrow.up.circle.fill",   title: "All future updates included",   sub: "Everything we build, free")
+                offerRow(icon: "arrow.up.circle.fill",   title: "All future updates included",  sub: "Everything we build, free")
                 Divider().padding(.leading, 60).padding(.trailing, 20)
-                offerRow(icon: "brain.head.profile",     title: "Full AI features",              sub: "Unlimited insights & analysis")
+                offerRow(icon: "brain.head.profile",     title: "Full AI features",             sub: "Unlimited insights & analysis")
                 Divider().padding(.leading, 60).padding(.trailing, 20)
-                offerRow(icon: "shield.lefthalf.filled", title: "Priority support",              sub: "We're here when you need us")
+                offerRow(icon: "shield.lefthalf.filled", title: "Priority support",             sub: "We're here when you need us")
             }
             .padding(.top, 20)
 
-            // Urgency note
-            HStack(spacing: 8) {
-                Image(systemName: "clock.badge.exclamationmark.fill")
-                    .foregroundStyle(.orange)
-                Text("This offer disappears when you close this screen")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.orange.opacity(0.08))
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-            .padding(.horizontal, 20)
-            .padding(.top, 20)
+            // Urgency / info note
+            urgencyNote
+                .padding(.horizontal, 20)
+                .padding(.top, 20)
 
             // Buttons
             VStack(spacing: 14) {
@@ -140,7 +152,7 @@ struct LifetimeOfferSheet: View {
                         } else {
                             HStack(spacing: 0) {
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text("Get Lifetime Access")
+                                    Text(showTimer ? "Get Lifetime Access" : "Upgrade to Lifetime")
                                         .font(.headline)
                                     Text("One-time · no subscriptions")
                                         .font(.caption)
@@ -163,7 +175,7 @@ struct LifetimeOfferSheet: View {
                 Button {
                     onDecline()
                 } label: {
-                    Text("No thanks, I'll pay ₹199/month")
+                    Text(showTimer ? "No thanks, I'll pay ₹199/month" : "Maybe later")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
@@ -178,6 +190,54 @@ struct LifetimeOfferSheet: View {
             .padding(.bottom, 36)
         }
         .background(Color.spentyBgPrimary)
+    }
+
+    // MARK: - Urgency / info note (context-aware)
+    @ViewBuilder
+    private var urgencyNote: some View {
+        if showTimer {
+            // Timer countdown
+            HStack(spacing: 10) {
+                Image(systemName: "clock.fill")
+                    .foregroundStyle(.orange)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Offer expires in")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(displayTime)
+                        .font(.system(size: 20, weight: .bold, design: .monospaced))
+                        .foregroundStyle(.orange)
+                }
+                Spacer()
+                Text("1 hour only")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.orange)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.orange.opacity(0.12))
+                    .clipShape(Capsule())
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity)
+            .background(Color.orange.opacity(0.08))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.orange.opacity(0.2), lineWidth: 1))
+        } else {
+            // Subscriber exclusive note
+            HStack(spacing: 8) {
+                Image(systemName: "star.fill")
+                    .font(.caption)
+                    .foregroundStyle(Color(red: 0.831, green: 0.686, blue: 0.216))
+                Text("Always available — exclusive rate for SpentyAI subscribers")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(red: 0.831, green: 0.686, blue: 0.216).opacity(0.07))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(red: 0.831, green: 0.686, blue: 0.216).opacity(0.2), lineWidth: 1))
+        }
     }
 
     // MARK: - Feature row
@@ -210,5 +270,5 @@ struct LifetimeOfferSheet: View {
 }
 
 #Preview {
-    LifetimeOfferSheet(onAccept: {}, onDecline: {})
+    LifetimeOfferSheet(showTimer: true, onAccept: {}, onDecline: {})
 }

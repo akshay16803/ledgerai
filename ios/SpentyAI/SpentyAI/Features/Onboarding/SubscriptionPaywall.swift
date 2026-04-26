@@ -57,6 +57,7 @@ struct SubscriptionPaywall: View {
         }
         .sheet(isPresented: $showLifetimeOffer) {
             LifetimeOfferSheet(
+                showTimer: true,
                 onAccept: {
                     await viewModel.purchasePlan("com.spentyai.lifetime_offer")
                     showLifetimeOffer = false
@@ -223,7 +224,7 @@ struct SubscriptionPaywall: View {
 
     private var subscribeButton: some View {
         Button {
-            if selectedProductId == "com.spentyai.monthly" {
+            if selectedProductId == "com.spentyai.monthly" && LifetimeOfferManager.shared.isOfferActive {
                 showLifetimeOffer = true
             } else {
                 Task {

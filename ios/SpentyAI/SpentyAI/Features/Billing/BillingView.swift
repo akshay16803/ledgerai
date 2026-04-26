@@ -7,6 +7,7 @@ struct BillingView: View {
     @Environment(LocalizationManager.self) var lang
     @State private var viewModel = BillingViewModel()
     @State private var showLifetimeOffer = false
+    @State private var isUpgradeMode = false
 
     // MARK: - Brand Colors
 
@@ -18,6 +19,8 @@ struct BillingView: View {
         ScrollView {
             VStack(spacing: 24) {
                 currentPlanHeader
+
+                subscriberUpgradeBanner
 
                 planCardsSection
 
@@ -62,14 +65,21 @@ struct BillingView: View {
             }
         }
         .sheet(isPresented: $showLifetimeOffer) {
+            let upgrade = isUpgradeMode
             LifetimeOfferSheet(
+                showTimer: !upgrade,
                 onAccept: {
                     await viewModel.purchasePlan("com.spentyai.lifetime_offer")
                     showLifetimeOffer = false
+                    isUpgradeMode = false
                 },
                 onDecline: {
+                    let wasUpgrade = isUpgradeMode
                     showLifetimeOffer = false
-                    Task { await viewModel.purchasePlan("com.spentyai.monthly") }
+                    isUpgradeMode = false
+                    if !wasUpgrade {
+                        Task { await viewModel.purchasePlan("com.spentyai.monthly") }
+                    }
                 }
             )
         }
@@ -184,7 +194,8 @@ struct BillingView: View {
 
             if !isCurrent && !viewModel.isLifetime {
                 Button {
-                    if plan.productId == "com.spentyai.monthly" {
+                    if plan.productId == "com.spentyai.monthly" && LifetimeOfferManager.shared.isOfferActive {
+                        isUpgradeMode = false
                         showLifetimeOffer = true
                     } else {
                         Task { await viewModel.purchasePlan(plan.productId) }
@@ -359,6 +370,82 @@ struct BillingView: View {
             return String(dateString.prefix(10))
         }
         return dateString
+    }
+
+    // MARK: - Subscriber Upgrade Banner
+
+    @ViewBuilder
+    private var subscriberUpgradeBanner: some View {
+        if viewModel.isSubscribed && !viewModel.isLifetime {
+            let gold = Color(red: 0.831, green: 0.686, blue: 0.216)
+            VStack(alignment: .leading, spacing: 14) {
+
+                // Badge
+                HStack(spacing: 4) {
+                    Image(systemName: "star.fill")
+                        .font(.system(size: 9, weight: .bold))
+                    Text("SUBSCRIBER EXCLUSIVE")
+                        .font(.system(size: 10, weight: .bold))
+                        .tracking(0.8)
+                }
+                .foregroundStyle(gold)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(gold.opacity(0.12))
+                .clipShape(Capsule())
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Upgrade to Lifetime Access")
+                        .font(.title3.weight(.bold))
+                    Text("Pay once and never subscribe again.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+
+                HStack(alignment: .bottom, spacing: 10) {
+                    Text("₹9,999")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .strikethrough(true, color: .secondary)
+                    Text("₹4,999")
+                        .font(.title2.weight(.bold))
+                        .foregroundStyle(brandPrimary)
+                    Text("50% OFF")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.orange)
+                        .clipShape(Capsule())
+                }
+
+                Button {
+                    isUpgradeMode = true
+                    showLifetimeOffer = true
+                } label: {
+                    HStack {
+                        Text("Upgrade Now")
+                            .font(.headline)
+                        Spacer()
+                        Text("₹4,999")
+                            .font(.headline)
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 14)
+                    .frame(maxWidth: .infinity)
+                    .background(brandPrimary, in: RoundedRectangle(cornerRadius: 12))
+                }
+            }
+            .padding(18)
+            .background(Color.spentyCardBg)
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(gold.opacity(0.3), lineWidth: 1.5)
+            )
+            .shadow(color: .black.opacity(0.05), radius: 8, y: 2)
+        }
     }
 
     // MARK: - Cancel
