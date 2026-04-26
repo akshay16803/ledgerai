@@ -5699,14 +5699,21 @@ def _find_best_match(entry: dict, candidates: list, account_id: str = "") -> tup
         if entry_type != "unknown" and ledger_type != "unknown" and entry_type != ledger_type:
             continue
 
+        # Require at least some amount similarity (within 10%) before pairing.
+        # A date-only match (40pts) or description-only match should never link
+        # two transactions with wildly different amounts.
+        amt_score = _score_amount_match(entry["amount"], ltxn["amount"])
+        if amt_score == 0:
+            continue
+
         score = (
             _score_date_match(entry["date"], ltxn["date"])
-            + _score_amount_match(entry["amount"], ltxn["amount"])
+            + amt_score
             + _score_description_match(entry.get("description", ""), ltxn.get("description", ""))
         )
 
-        # Lower threshold: 40 means date-match(40) alone works, or amount(40) alone,
-        # or date-close(35) + any description(5+), etc.
+        # Lower threshold: 40 means date-match(40)+amount(>0) or amount(40) alone,
+        # or date-close(35) + amount(>0) + any description(5+), etc.
         if score > best_score and score >= 40:
             best_score = score
             best_match = ltxn
@@ -5741,9 +5748,15 @@ def reconcile_entries(parsed: list, ledger_txns: list, account_id: str) -> dict:
             ledger_type = _determine_ledger_type(ltxn, account_id)
             if entry_type != "unknown" and ledger_type != "unknown" and entry_type != ledger_type:
                 continue
+            # Require at least some amount similarity (within 10%) before pairing.
+            # Without this gate, date-only + description matches can falsely pair
+            # completely different transactions (e.g. 822 vs 60,000).
+            amt_score = _score_amount_match(entry["amount"], ltxn["amount"])
+            if amt_score == 0:
+                continue
             score = (
                 _score_date_match(entry["date"], ltxn["date"])
-                + _score_amount_match(entry["amount"], ltxn["amount"])
+                + amt_score
                 + _score_description_match(entry.get("description", ""), ltxn.get("description", ""))
             )
             if score > best_score and score >= 60:
