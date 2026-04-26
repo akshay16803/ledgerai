@@ -81,7 +81,7 @@
   ],
   "products" : [
     {
-      "displayPrice" : "4999",
+      "displayPrice" : "9999",
       "familyShareable" : false,
       "internalID" : "M3N4O5P6",
       "localizations" : [
@@ -93,6 +93,21 @@
       ],
       "productID" : "com.spentyai.lifetime",
       "referenceName" : "Lifetime",
+      "type" : "NonConsumable"
+    },
+    {
+      "displayPrice" : "4999",
+      "familyShareable" : false,
+      "internalID" : "Q7R8S9T0",
+      "localizations" : [
+        {
+          "description" : "Special one-time offer: Lifetime access to SpentyAI",
+          "displayName" : "Lifetime Plan — Special Offer",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "com.spentyai.lifetime_offer",
+      "referenceName" : "Lifetime Offer",
       "type" : "NonConsumable"
     }
   ],

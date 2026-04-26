@@ -6,6 +6,7 @@ struct BillingView: View {
 
     @Environment(LocalizationManager.self) var lang
     @State private var viewModel = BillingViewModel()
+    @State private var showLifetimeOffer = false
 
     // MARK: - Brand Colors
 
@@ -59,6 +60,18 @@ struct BillingView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(.ultraThinMaterial)
             }
+        }
+        .sheet(isPresented: $showLifetimeOffer) {
+            LifetimeOfferSheet(
+                onAccept: {
+                    await viewModel.purchasePlan("com.spentyai.lifetime_offer")
+                    showLifetimeOffer = false
+                },
+                onDecline: {
+                    showLifetimeOffer = false
+                    Task { await viewModel.purchasePlan("com.spentyai.monthly") }
+                }
+            )
         }
     }
 
@@ -171,7 +184,11 @@ struct BillingView: View {
 
             if !isCurrent && !viewModel.isLifetime {
                 Button {
-                    Task { await viewModel.purchasePlan(plan.productId) }
+                    if plan.productId == "com.spentyai.monthly" {
+                        showLifetimeOffer = true
+                    } else {
+                        Task { await viewModel.purchasePlan(plan.productId) }
+                    }
                 } label: {
                     Group {
                         if isPurchasingThis {
@@ -377,7 +394,7 @@ struct BillingView: View {
         FallbackPlan(name: "Monthly",  productId: "com.spentyai.monthly",  displayPrice: "\u{20B9}199",   perUnit: "/month",   subtitle: "Flexible, cancel anytime",                 badge: nil),
         FallbackPlan(name: "Quarterly", productId: "com.spentyai.quarterly", displayPrice: "\u{20B9}449",  perUnit: "/3 months", subtitle: "Save 25% vs monthly",                     badge: nil),
         FallbackPlan(name: "Yearly",   productId: "com.spentyai.yearly",   displayPrice: "\u{20B9}1,499", perUnit: "/year",     subtitle: "Save 37% — most popular",                  badge: "Popular"),
-        FallbackPlan(name: "Lifetime", productId: "com.spentyai.lifetime", displayPrice: "\u{20B9}4,999", perUnit: "one-time",  subtitle: "Pay once, use forever",                    badge: "Best Value"),
+        FallbackPlan(name: "Lifetime", productId: "com.spentyai.lifetime", displayPrice: "\u{20B9}9,999", perUnit: "one-time",  subtitle: "Pay once, use forever",                    badge: "Best Value"),
     ]
 }
 

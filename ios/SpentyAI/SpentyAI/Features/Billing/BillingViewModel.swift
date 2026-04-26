@@ -45,7 +45,8 @@ final class BillingViewModel {
         "com.spentyai.monthly",
         "com.spentyai.quarterly",
         "com.spentyai.yearly",
-        "com.spentyai.lifetime"
+        "com.spentyai.lifetime",
+        "com.spentyai.lifetime_offer"
     ]
 
     // MARK: - Init
@@ -281,7 +282,8 @@ final class BillingViewModel {
     var isLifetime: Bool {
         currentStatus?.isActive == true &&
         (currentStatus?.plan?.lowercased() == "lifetime" ||
-         currentStatus?.productId == "com.spentyai.lifetime")
+         currentStatus?.productId == "com.spentyai.lifetime" ||
+         currentStatus?.productId == "com.spentyai.lifetime_offer")
     }
 
     var currentPlanName: String? {

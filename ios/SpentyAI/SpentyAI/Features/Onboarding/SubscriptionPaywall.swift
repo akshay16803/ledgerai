@@ -8,6 +8,7 @@ struct SubscriptionPaywall: View {
     @State private var viewModel = BillingViewModel()
     @State private var selectedProductId: String = "com.spentyai.yearly"
     @State private var showPromoSection = false
+    @State private var showLifetimeOffer = false
 
     var onSubscribed: (() -> Void)?
 
@@ -53,6 +54,22 @@ struct SubscriptionPaywall: View {
             Button(lang.s("ok")) { viewModel.showError = false }
         } message: {
             Text(viewModel.errorMessage)
+        }
+        .sheet(isPresented: $showLifetimeOffer) {
+            LifetimeOfferSheet(
+                onAccept: {
+                    await viewModel.purchasePlan("com.spentyai.lifetime_offer")
+                    showLifetimeOffer = false
+                    if viewModel.isSubscribed { onSubscribed?() }
+                },
+                onDecline: {
+                    showLifetimeOffer = false
+                    Task {
+                        await viewModel.purchasePlan("com.spentyai.monthly")
+                        if viewModel.isSubscribed { onSubscribed?() }
+                    }
+                }
+            )
         }
         .overlay {
             if viewModel.isPurchasing {
@@ -206,10 +223,14 @@ struct SubscriptionPaywall: View {
 
     private var subscribeButton: some View {
         Button {
-            Task {
-                await viewModel.purchasePlan(selectedProductId)
-                if viewModel.isSubscribed {
-                    onSubscribed?()
+            if selectedProductId == "com.spentyai.monthly" {
+                showLifetimeOffer = true
+            } else {
+                Task {
+                    await viewModel.purchasePlan(selectedProductId)
+                    if viewModel.isSubscribed {
+                        onSubscribed?()
+                    }
                 }
             }
         } label: {
