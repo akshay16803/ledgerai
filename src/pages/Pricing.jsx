@@ -44,11 +44,11 @@ const plans = [
   {
     key: 'lifetime',
     name: 'Lifetime',
-    price: 4999,
+    price: 9999,
     period: 'one-time',
     effective: 'Pay once, use forever',
-    desc: 'Limited launch offer.',
-    badge: 'LIMITED • BEST DEAL',
+    desc: 'One-time payment, no renewals.',
+    badge: 'BEST VALUE',
     cta: 'Get Lifetime Access',
     highlighted: false,
     lifetime: true,
@@ -363,6 +363,8 @@ export default function Pricing() {
         }}>
           Prices in INR. GST extra where applicable. Cancel anytime during trial — no charge.
           Lifetime offer available for a limited time only.
+          AI email &amp; SMS processing is included under fair use. Pricing may be adjusted with 30 days' advance notice if AI infrastructure costs change significantly.{' '}
+          <a href="/terms" style={{ color: 'inherit', textDecoration: 'underline', opacity: 0.8 }}>Terms apply.</a>
         </p>
       </div>
     </div>
