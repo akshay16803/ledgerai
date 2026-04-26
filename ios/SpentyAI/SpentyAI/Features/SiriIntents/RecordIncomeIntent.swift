@@ -3,7 +3,6 @@ import Foundation
 
 /// Siri Intent: "Record income of [amount] from [description]"
 struct RecordIncomeIntent: AppIntent {
-
     static var title: LocalizedStringResource = "Record Income"
     static var description = IntentDescription("Record a new income transaction in SpentyAI.")
 

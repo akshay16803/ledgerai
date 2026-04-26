@@ -65,6 +65,17 @@ struct MainTabView: View {
                 .tag(Tab.more)
         }
         .tint(Color.spentyPrimary)
+        .onOpenURL { url in
+            // spentyai://nav/<tab> — used by the SpentyAI Brain simulator automation
+            guard url.scheme == "spentyai", url.host == "nav" else { return }
+            switch url.path {
+            case "/dashboard":    selectedTab = .dashboard
+            case "/transactions": selectedTab = .transactions
+            case "/accounts":     selectedTab = .accounts
+            case "/reports":      selectedTab = .reports
+            default:              break
+            }
+        }
     }
 }
 

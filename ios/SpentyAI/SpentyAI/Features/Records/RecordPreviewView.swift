@@ -95,18 +95,7 @@ struct RecordPreviewView: View {
                     .font(.system(size: 32))
                     .foregroundColor(.spentyPrimary)
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(preview.sender ?? "Unknown Sender")
-                        .font(SpentyFonts.subheadline)
-                        .fontWeight(.medium)
-                        .foregroundColor(.spentyTextPrimary)
-
-                    if let date = preview.receivedDate {
-                        Text(Self.dateFormatter.string(from: date))
-                            .font(SpentyFonts.caption1)
-                            .foregroundColor(.spentyTextSecondary)
-                    }
-                }
+                senderInfoView(sender: preview.sender, date: preview.receivedDate)
 
                 Spacer()
 
@@ -262,6 +251,46 @@ struct RecordPreviewView: View {
                     .font(.system(size: 20))
             }
         }
+    }
+
+    // MARK: - Helpers
+
+    /// Renders sender name + email as two separate Text rows.
+    /// Computed outside ViewBuilder to avoid tuple-binding limitations.
+    private func senderInfoView(sender: String?, date: Date?) -> some View {
+        let (name, email) = parseSender(sender)
+        return VStack(alignment: .leading, spacing: 2) {
+            Text(name)
+                .font(SpentyFonts.subheadline)
+                .fontWeight(.medium)
+                .foregroundColor(.spentyTextPrimary)
+            if let em = email {
+                Text(em)
+                    .font(SpentyFonts.caption1)
+                    .foregroundColor(.spentyTextSecondary)
+                    .lineLimit(1)
+            }
+            if let d = date {
+                Text(Self.dateFormatter.string(from: d))
+                    .font(SpentyFonts.caption1)
+                    .foregroundColor(.spentyTextSecondary)
+            }
+        }
+    }
+
+    /// Parses "Display Name <email@domain.com>" → ("Display Name", "email@domain.com")
+    /// Falls back to showing the raw string as the name if not in that format.
+    private func parseSender(_ raw: String?) -> (String, String?) {
+        guard let raw = raw?.trimmingCharacters(in: .whitespaces), !raw.isEmpty else {
+            return ("Unknown Sender", nil)
+        }
+        // Split on "<" — handles RFC 2822 "Display Name <email>" format
+        let parts = raw.components(separatedBy: "<")
+        guard parts.count >= 2 else { return (raw, nil) }
+        let name = parts[0].trimmingCharacters(in: .whitespaces)
+        let emailPart = parts[1].components(separatedBy: ">").first ?? ""
+        let email = emailPart.trimmingCharacters(in: .whitespaces)
+        return (name.isEmpty ? email : name, email.isEmpty ? nil : email)
     }
 
     // MARK: - Load

@@ -44,9 +44,6 @@ struct RecordsView: View {
         .navigationTitle(lang.s("records"))
         .navigationBarTitleDisplayMode(.large)
         .toolbar { toolbarContent }
-        .navigationDestination(for: String.self) { recordId in
-            RecordPreviewView(recordId: recordId, viewModel: viewModel)
-        }
         .sheet(item: $viewModel.shareItem) { item in
             RecordsShareSheet(activityItems: [item.url])
         }
@@ -338,7 +335,9 @@ struct RecordsView: View {
             } else {
                 List {
                     ForEach(viewModel.records) { record in
-                        NavigationLink(value: record.id) {
+                        NavigationLink {
+                            RecordPreviewView(recordId: record.id, viewModel: viewModel)
+                        } label: {
                             emailRow(record)
                         }
                         .listRowBackground(Color.spentyCardBg)
@@ -385,7 +384,7 @@ struct RecordsView: View {
                     .foregroundColor(.spentyTextPrimary)
                     .lineLimit(1)
 
-                Text(record.sender ?? "Unknown Sender")
+                Text(parseSenderName(record.sender))
                     .font(SpentyFonts.caption1)
                     .foregroundColor(.spentyTextSecondary)
                     .lineLimit(1)
@@ -442,6 +441,18 @@ struct RecordsView: View {
             .font(.system(size: 24))
             .foregroundColor(color)
             .frame(width: 36, height: 36)
+    }
+
+    /// Returns just the display name from "Name <email>" format, or the raw string.
+    private func parseSenderName(_ raw: String?) -> String {
+        guard let raw = raw?.trimmingCharacters(in: .whitespaces), !raw.isEmpty else {
+            return "Unknown Sender"
+        }
+        // Split on "<" — handles "Display Name <email>" RFC 2822 format
+        let parts = raw.components(separatedBy: "<")
+        guard parts.count >= 2 else { return raw }
+        let name = parts[0].trimmingCharacters(in: .whitespaces)
+        return name.isEmpty ? raw : name
     }
 
     private func amountColor(for type: String?) -> Color {
