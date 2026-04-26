@@ -117,7 +117,7 @@ struct BubbleShape: Shape {
     }
 }
 
-// MARK: - Markdown Text (basic: bold, italic, lists)
+// MARK: - Markdown Text (bold, italic, lists, headers)
 
 struct MarkdownText: View {
     let text: String
@@ -132,16 +132,73 @@ struct MarkdownText: View {
     }
 
     private var attributedString: AttributedString {
+        let processed = Self.preprocessMarkdown(text)
         do {
+            // Use inlineOnlyPreservingWhitespace so newlines are kept intact.
+            // Block-level elements (lists, headers) are converted to inline
+            // equivalents by preprocessMarkdown before we get here.
             return try AttributedString(
-                markdown: text,
+                markdown: processed,
                 options: AttributedString.MarkdownParsingOptions(
-                    interpretedSyntax: .full
+                    interpretedSyntax: .inlineOnlyPreservingWhitespace
                 )
             )
         } catch {
-            return AttributedString(text)
+            return AttributedString(processed)
         }
+    }
+
+    // Converts block-level markdown into inline text that SwiftUI Text can render.
+    // - ATX headers  (# Title)    → plain text line
+    // - Unordered lists (- / * )  → • bullet
+    // - Ordered lists  (1. )      → kept as-is (numbers already readable)
+    // - Horizontal rules          → stripped
+    // Inline syntax (bold, italic, `code`, links) is left untouched for AttributedString.
+    static func preprocessMarkdown(_ input: String) -> String {
+        var result = input
+
+        // Normalise Windows line endings
+        result = result.replacingOccurrences(of: "\r\n", with: "\n")
+        result = result.replacingOccurrences(of: "\r", with: "\n")
+
+        // Strip ATX headers: "# ", "## ", … at the start of a line
+        if let headerRx = try? NSRegularExpression(
+            pattern: #"^#{1,6}[ \t]+"#,
+            options: .anchorsMatchLines
+        ) {
+            result = headerRx.stringByReplacingMatches(
+                in: result,
+                range: NSRange(result.startIndex..., in: result),
+                withTemplate: ""
+            )
+        }
+
+        // Convert unordered list items "- " or "* " at line start → "• "
+        // The pattern matches exactly one - or * (not **bold**) followed by whitespace.
+        if let ulRx = try? NSRegularExpression(
+            pattern: #"^[ \t]*[-*][ \t]+"#,
+            options: .anchorsMatchLines
+        ) {
+            result = ulRx.stringByReplacingMatches(
+                in: result,
+                range: NSRange(result.startIndex..., in: result),
+                withTemplate: "• "
+            )
+        }
+
+        // Strip horizontal rules (--- or *** or ___)
+        if let hrRx = try? NSRegularExpression(
+            pattern: #"^[ \t]*([*\-_][ \t]*){3,}[ \t]*$"#,
+            options: .anchorsMatchLines
+        ) {
+            result = hrRx.stringByReplacingMatches(
+                in: result,
+                range: NSRange(result.startIndex..., in: result),
+                withTemplate: ""
+            )
+        }
+
+        return result
     }
 }
 
