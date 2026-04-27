@@ -122,6 +122,11 @@ class AuthManager(
         }
     }
 
+    fun setSignInError(message: String) {
+        _isLoading.value = false
+        _error.value = message
+    }
+
     fun clearError() {
         _error.value = null
     }

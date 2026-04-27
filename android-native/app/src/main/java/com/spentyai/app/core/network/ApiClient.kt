@@ -89,6 +89,8 @@ class ApiClient(private val tokenStore: TokenStore) {
             ApiResult.Failure(ApiError.NoConnection)
         } catch (e: java.net.ConnectException) {
             ApiResult.Failure(ApiError.NoConnection)
+        } catch (e: java.net.SocketTimeoutException) {
+            ApiResult.Failure(ApiError.Unknown("Request timed out. Please try again."))
         } catch (e: kotlinx.serialization.SerializationException) {
             ApiResult.Failure(ApiError.DecodingError(e))
         } catch (e: Exception) {

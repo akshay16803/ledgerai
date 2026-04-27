@@ -40,6 +40,9 @@ class InvoicesViewModel(apiClient: ApiClient) : ViewModel() {
     private val _uiState = MutableStateFlow(InvoicesUiState())
     val uiState: StateFlow<InvoicesUiState> = _uiState.asStateFlow()
 
+    private val _isSaving = MutableStateFlow(false)
+    val isSaving: StateFlow<Boolean> = _isSaving.asStateFlow()
+
     val filteredInvoices: StateFlow<List<Invoice>> = combine(
         _uiState
     ) { states ->
@@ -186,13 +189,16 @@ class InvoicesViewModel(apiClient: ApiClient) : ViewModel() {
     }
 
     fun createInvoice(payload: JsonObject, onSuccess: () -> Unit) {
+        if (_isSaving.value) return
         viewModelScope.launch {
+            _isSaving.value = true
             _uiState.value = _uiState.value.copy(isLoading = true, errorMessage = null)
             when (val result = repository.create(payload)) {
                 is ApiResult.Success -> {
                     val updated = listOf(result.data) + _uiState.value.invoices
                     _uiState.value = _uiState.value.copy(invoices = updated, isLoading = false)
                     computeStats()
+                    _isSaving.value = false
                     onSuccess()
                 }
                 is ApiResult.Failure -> {
@@ -200,13 +206,16 @@ class InvoicesViewModel(apiClient: ApiClient) : ViewModel() {
                         errorMessage = result.error.message,
                         isLoading = false
                     )
+                    _isSaving.value = false
                 }
             }
         }
     }
 
     fun updateInvoice(id: String, payload: JsonObject, onSuccess: () -> Unit) {
+        if (_isSaving.value) return
         viewModelScope.launch {
+            _isSaving.value = true
             _uiState.value = _uiState.value.copy(isLoading = true, errorMessage = null)
             when (val result = repository.update(id, payload)) {
                 is ApiResult.Success -> {
@@ -215,6 +224,7 @@ class InvoicesViewModel(apiClient: ApiClient) : ViewModel() {
                     }
                     _uiState.value = _uiState.value.copy(invoices = updated, isLoading = false)
                     computeStats()
+                    _isSaving.value = false
                     onSuccess()
                 }
                 is ApiResult.Failure -> {
@@ -222,6 +232,7 @@ class InvoicesViewModel(apiClient: ApiClient) : ViewModel() {
                         errorMessage = result.error.message,
                         isLoading = false
                     )
+                    _isSaving.value = false
                 }
             }
         }

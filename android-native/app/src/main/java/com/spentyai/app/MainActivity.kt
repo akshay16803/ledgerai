@@ -40,9 +40,11 @@ class MainActivity : ComponentActivity() {
                 authManager.signInWithGoogle(idToken)
             } else {
                 Log.e("MainActivity", "Google Sign-In: ID token was null")
+                authManager.setSignInError("Sign-in failed: could not retrieve ID token")
             }
         } catch (e: ApiException) {
             Log.e("MainActivity", "Google Sign-In failed: ${e.statusCode}", e)
+            authManager.setSignInError(e.message ?: "Sign-in failed")
         }
     }
 

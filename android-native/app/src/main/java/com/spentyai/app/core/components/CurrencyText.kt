@@ -20,7 +20,7 @@ enum class CurrencySize {
 @Composable
 fun CurrencyText(
     amount: Double,
-    currencyCode: String = "USD",
+    currencyCode: String = "INR",
     size: CurrencySize = CurrencySize.SMALL,
     colorBySign: Boolean = false,
     modifier: Modifier = Modifier,
@@ -48,7 +48,7 @@ fun CurrencyText(
     )
 }
 
-fun formatCurrency(amount: Double, currencyCode: String = "USD"): String {
+fun formatCurrency(amount: Double, currencyCode: String = "INR"): String {
     return try {
         val format = NumberFormat.getCurrencyInstance(Locale.US)
         format.currency = Currency.getInstance(currencyCode)
@@ -56,6 +56,6 @@ fun formatCurrency(amount: Double, currencyCode: String = "USD"): String {
         format.minimumFractionDigits = 2
         format.format(amount)
     } catch (e: Exception) {
-        "$${String.format("%.2f", amount)}"
+        "₹${String.format("%.2f", amount)}"
     }
 }

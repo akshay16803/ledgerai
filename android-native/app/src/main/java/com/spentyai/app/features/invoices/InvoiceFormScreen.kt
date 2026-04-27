@@ -74,6 +74,7 @@ fun InvoiceFormScreen(
     onNavigateBack: () -> Unit
 ) {
     val state by viewModel.uiState.collectAsState()
+    val isSaving by viewModel.isSaving.collectAsState()
     val isEditing = editingInvoice != null
 
     var invoiceNumber by remember { mutableStateOf(editingInvoice?.invoiceNumber ?: "") }
@@ -130,10 +131,15 @@ fun InvoiceFormScreen(
     val igst = 0.0
     val grandTotal = subtotal + totalTax
 
+    val dueDateBeforeIssueDate = try {
+        LocalDate.parse(dueDate.take(10)).isBefore(LocalDate.parse(issueDate.take(10)))
+    } catch (_: Exception) { false }
+
     val isValid = invoiceNumber.isNotBlank() &&
         (selectedCustomerId != null || customerName.isNotBlank()) &&
         lineItems.isNotEmpty() &&
-        lineItems.all { it.description.isNotBlank() && it.quantity > 0 && it.rate > 0 }
+        lineItems.all { it.description.isNotBlank() && it.quantity > 0 && it.rate > 0 } &&
+        !dueDateBeforeIssueDate
 
     fun save() {
         showValidation = true
@@ -186,7 +192,7 @@ fun InvoiceFormScreen(
                 actions = {
                     TextButton(
                         onClick = { save() },
-                        enabled = !state.isLoading
+                        enabled = !state.isLoading && !isSaving
                     ) {
                         Text(
                             "Save",
@@ -264,6 +270,13 @@ fun InvoiceFormScreen(
                     dateString = dueDate,
                     onClick = { showDueDatePicker = true }
                 )
+                if (showValidation && dueDateBeforeIssueDate) {
+                    Text(
+                        "Due date cannot be before issue date.",
+                        style = SpentyType.Caption1,
+                        color = SpentyError
+                    )
+                }
             }
 
             // Line Items
