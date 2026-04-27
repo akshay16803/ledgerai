@@ -8,7 +8,7 @@ Generated: 2026-04-27 | **Updated after parity sprint: 2026-04-27**
 
 Of the original 50 Critical + 81 Major + 125 Minor = 257 gaps:
 
-- **Critical gaps resolved: 49/50** — all except #9 (Monthly Calendar View, complex feature)
+- **Critical gaps resolved: 50/50** — ALL CRITICAL GAPS RESOLVED ✅
 - **Major gaps resolved: ~70/81**
 - **Minor gaps resolved: ~100/125**
 - Estimated remaining work: 1 Critical, ~11 Major, ~25 Minor
@@ -41,7 +41,7 @@ Already implemented in EditTransactionModal. **Fixed this sprint:** Display subc
 ### 8. RECORDS — Receipt upload ✅
 Already implemented: handleReceiptUpload, Receipts tab in Records page.
 
-### 9. CASHFLOW — Monthly Calendar View ❌ OPEN
+### 9. CASHFLOW — Monthly Calendar View ✅ RESOLVED (fe2aa88)
 - **iOS:** Full interactive monthly calendar showing projected outflows per day
 - **Web:** Not implemented — large complex feature, deferred
 - **Impact:** Significant — users can't see day-by-day cashflow projection
@@ -100,7 +100,7 @@ Already implemented: MagnifyingGlass search input.
 - [x] Mandate edit full modal ✅ (fixed this sprint)
 - [x] Mandate source doc viewer ✅ (fixed this sprint)
 - [x] Compact currency (Cr/L/K) in summary cards ✅ (fixed this sprint)
-- [ ] Monthly Calendar View ❌ (deferred — complex feature)
+- [x] Monthly Calendar View ✅ fe2aa88
 - [ ] Recurring transactions section could be more prominent
 - [ ] "Upcoming" mandates not separated from "All"
 
