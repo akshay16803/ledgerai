@@ -20,6 +20,7 @@ data class SettingsUiState(
     val showError: Boolean = false,
     val errorMessage: String = "",
     val showSaveSuccess: Boolean = false,
+    val showSignOutConfirm: Boolean = false,
     val showDeleteConfirm: Boolean = false,
     val showResetWarning: Boolean = false,
     val showResetConfirmInput: Boolean = false,
@@ -144,6 +145,14 @@ class SettingsViewModel(
                 }
             }
         }
+    }
+
+    fun showSignOutConfirm() {
+        _uiState.update { it.copy(showSignOutConfirm = true) }
+    }
+
+    fun dismissSignOutConfirm() {
+        _uiState.update { it.copy(showSignOutConfirm = false) }
     }
 
     fun showDeleteConfirm() {

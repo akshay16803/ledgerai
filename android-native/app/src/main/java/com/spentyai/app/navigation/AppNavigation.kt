@@ -22,6 +22,7 @@ import com.spentyai.app.core.theme.SpentyType
 import com.spentyai.app.features.accounts.AccountDetailScreen
 import com.spentyai.app.features.accounts.AccountListScreen
 import com.spentyai.app.features.accounts.AccountsViewModel
+import com.spentyai.app.features.accounts.SubTypeManagerScreen
 import com.spentyai.app.features.aichat.AIChatRepository
 import com.spentyai.app.features.aichat.AIChatScreen
 import com.spentyai.app.features.aichat.AIChatViewModel
@@ -223,8 +224,15 @@ fun AppNavigation(
                         navController.navigate(Screen.AccountDetail.createRoute(id))
                     },
                     onSubTypeManager = {
-                        // Sub-type manager is handled internally via bottom sheet
+                        navController.navigate(Screen.SubTypeManager.route)
                     }
+                )
+            }
+
+            composable(Screen.SubTypeManager.route) {
+                SubTypeManagerScreen(
+                    viewModel = accountsViewModel,
+                    onBack = { navController.popBackStack() }
                 )
             }
 
@@ -345,6 +353,11 @@ fun AppNavigation(
                 CashFlowScreen(viewModel = cashFlowViewModel)
             }
 
+            // Alias used by MoreMenuScreen ("cash_flow" → CashFlow)
+            composable("cash_flow") {
+                CashFlowScreen(viewModel = cashFlowViewModel)
+            }
+
             composable(Screen.PaymentPlans.route) {
                 PaymentPlansScreen(viewModel = paymentPlansViewModel)
             }
@@ -454,6 +467,21 @@ fun AppNavigation(
                         navController.navigate("statement_detail/$id")
                     }
                 )
+            }
+
+            // Alias used by MoreMenuScreen ("reconciliation" → Reconciliation)
+            composable("reconciliation") {
+                ReconciliationScreen(
+                    viewModel = reconciliationViewModel,
+                    onStatementClick = { id ->
+                        navController.navigate("statement_detail/$id")
+                    }
+                )
+            }
+
+            // SMS Sync — placeholder (feature not yet built on Android)
+            composable("sms_sync") {
+                PlaceholderScreen("SMS Sync — Coming Soon")
             }
 
             composable(

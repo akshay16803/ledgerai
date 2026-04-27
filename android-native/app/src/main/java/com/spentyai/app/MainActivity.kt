@@ -44,7 +44,17 @@ class MainActivity : ComponentActivity() {
             }
         } catch (e: ApiException) {
             Log.e("MainActivity", "Google Sign-In failed: ${e.statusCode}", e)
-            authManager.setSignInError(e.message ?: "Sign-in failed")
+            val friendlyMessage = when (e.statusCode) {
+                12501 -> null // User cancelled — show nothing
+                12502 -> "Sign-in timed out. Please try again."
+                7    -> "No internet connection. Please check your network and try again."
+                8    -> "An internal error occurred. Please try again."
+                10   -> "Sign-in configuration error. Please contact support."
+                else -> "Google Sign-In failed. Please try again."
+            }
+            if (friendlyMessage != null) {
+                authManager.setSignInError(friendlyMessage)
+            }
         }
     }
 
@@ -53,7 +63,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         val app = application as SpentyApp
-        authManager = AuthManager(app.tokenStore, app.apiClient)
+        authManager = app.authManager
 
         // Configure Google Sign-In
         val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)

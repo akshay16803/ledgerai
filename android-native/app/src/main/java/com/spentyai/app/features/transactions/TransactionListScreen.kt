@@ -21,7 +21,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -38,6 +41,7 @@ fun TransactionListScreen(
     onTransactionClick: (Transaction) -> Unit
 ) {
     val state by viewModel.uiState.collectAsState()
+    val focusManager = LocalFocusManager.current
 
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var deleteTargetId by remember { mutableStateOf<String?>(null) }
@@ -151,7 +155,10 @@ fun TransactionListScreen(
                 hasDateFilter = state.dateFrom != null || state.dateTo != null,
                 onFilterTypeChange = { viewModel.updateFilterType(it) },
                 onAccountChange = { viewModel.updateFilterAccountId(it) },
-                onDateFilterClick = { showDateFilter = true },
+                onDateFilterClick = {
+                    focusManager.clearFocus()
+                    showDateFilter = true
+                },
                 onClearDateFilter = { viewModel.clearDateRange() },
                 accountNameResolver = { viewModel.accountName(it) }
             )
@@ -685,6 +692,11 @@ private fun DateFilterDialog(
 ) {
     var fromText by remember { mutableStateOf(dateFrom ?: "") }
     var toText by remember { mutableStateOf(dateTo ?: "") }
+    val fromFocusRequester = remember { FocusRequester() }
+
+    LaunchedEffect(Unit) {
+        fromFocusRequester.requestFocus()
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -698,7 +710,7 @@ private fun DateFilterDialog(
                     onValueChange = { fromText = it },
                     label = { Text("From (yyyy-MM-dd)") },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().focusRequester(fromFocusRequester),
                     shape = SpentyStyle.inputShape,
                     colors = SpentyStyle.inputColors()
                 )

@@ -182,12 +182,12 @@ fun TransactionFormScreen(
                     text = if (isEditing) "Edit Transaction" else "New Transaction",
                     style = SpentyType.Headline
                 )
-                TextButton(onClick = { doSave() }, enabled = canSave) {
+                TextButton(onClick = { doSave() }, enabled = !isSaving) {
                     Text(
                         text = if (isEditing) "Save" else "Create",
                         style = SpentyType.Headline,
                         fontWeight = FontWeight.SemiBold,
-                        color = if (canSave) SpentyPrimary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                        color = SpentyPrimary
                     )
                 }
             }
@@ -564,7 +564,7 @@ fun TransactionFormScreen(
                 modifier = SpentyStyle.primaryButtonModifier,
                 colors = SpentyStyle.primaryButtonColors(),
                 shape = SpentyStyle.primaryButtonShape,
-                enabled = canSave
+                enabled = !isSaving
             ) {
                 if (isSaving) {
                     CircularProgressIndicator(

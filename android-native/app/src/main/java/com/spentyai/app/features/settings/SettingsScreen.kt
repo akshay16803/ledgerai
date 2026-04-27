@@ -84,6 +84,36 @@ fun SettingsScreen(
         )
     }
 
+    // Sign out confirm
+    if (state.showSignOutConfirm) {
+        AlertDialog(
+            onDismissRequest = { viewModel.dismissSignOutConfirm() },
+            title = { Text("Sign Out?", style = SpentyType.Headline) },
+            text = {
+                Text(
+                    "You'll need to sign in again to access your data.",
+                    style = SpentyType.Body
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.dismissSignOutConfirm()
+                        viewModel.signOut()
+                    },
+                    colors = SpentyStyle.destructiveButtonColors()
+                ) {
+                    Text("Sign Out")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { viewModel.dismissSignOutConfirm() }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
     // Delete account confirm
     if (state.showDeleteConfirm) {
         AlertDialog(
@@ -310,7 +340,7 @@ fun SettingsScreen(
                         iconColor = SpentyWarning,
                         title = "Sign Out",
                         textColor = MaterialTheme.colorScheme.onSurface,
-                        onClick = { viewModel.signOut() }
+                        onClick = { viewModel.showSignOutConfirm() }
                     )
                     HorizontalDivider(
                         modifier = Modifier.padding(start = 56.dp),

@@ -60,6 +60,9 @@ fun AccountFormScreen(
     var expandedType by remember { mutableStateOf(false) }
     var expandedSubType by remember { mutableStateOf(false) }
     var expandedCurrency by remember { mutableStateOf(false) }
+    var attempted by remember { mutableStateOf(false) }
+
+    val nameError = attempted && name.trim().isEmpty()
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -84,6 +87,8 @@ fun AccountFormScreen(
                     actions = {
                         TextButton(
                             onClick = {
+                                attempted = true
+                                if (!isFormValid) return@TextButton
                                 val payload = mutableMapOf<String, Any?>(
                                     "name" to name.trim(),
                                     "accountType" to accountType,
@@ -109,12 +114,12 @@ fun AccountFormScreen(
 
                                 viewModel.saveAccount(payload, account?.id)
                             },
-                            enabled = isFormValid && !state.isSaving
+                            enabled = !state.isSaving
                         ) {
                             Text(
                                 if (isEditing) "Save" else "Add",
                                 style = SpentyType.Headline.copy(fontWeight = FontWeight.SemiBold),
-                                color = if (isFormValid) SpentyPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                                color = SpentyPrimary
                             )
                         }
                     },
@@ -141,7 +146,11 @@ fun AccountFormScreen(
                         modifier = Modifier.fillMaxWidth(),
                         shape = SpentyStyle.inputShape,
                         colors = SpentyStyle.inputColors(),
-                        textStyle = SpentyType.Body
+                        textStyle = SpentyType.Body,
+                        isError = nameError,
+                        supportingText = if (nameError) {
+                            { Text("Account name is required", color = MaterialTheme.colorScheme.error) }
+                        } else null
                     )
 
                     // Account Type picker

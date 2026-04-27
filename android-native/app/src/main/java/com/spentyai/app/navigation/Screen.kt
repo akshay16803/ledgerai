@@ -32,6 +32,9 @@ sealed class Screen(val route: String, val title: String) {
         fun createRoute(id: String) = "account/$id"
     }
 
+    // Accounts sub-section
+    object SubTypeManager : Screen("sub_type_manager", "Sub-Types")
+
     // Finance section (under More)
     object Invoices : Screen("invoices", "Invoices")
     object InvoiceDetail : Screen("invoice/{id}", "Invoice") {
