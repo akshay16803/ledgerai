@@ -744,12 +744,20 @@ export default function CashFlow() {
               </tr>
             </thead>
             <tbody>
-              {(mandates || []).map(m => {
+              {/* Section header for active mandates */}
+              {(mandates || []).some(m => m.status === 'active') && (
+                <tr>
+                  <td colSpan={9} style={{ padding: '8px 16px', background: 'rgba(58,92,74,0.06)', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--success)' }}>
+                    ● Active
+                  </td>
+                </tr>
+              )}
+              {(mandates || []).filter(m => m.status === 'active').map(m => {
                 const monthlyEq = m.frequency === 'weekly' ? m.amount * (52 / 12)
                   : m.frequency === 'yearly' ? m.amount / 12
                   : m.frequency === 'quarterly' ? m.amount / 3
                   : m.amount;
-                const paused = m.status !== 'active';
+                const paused = false;
                 const busy = mandateBusyId === m.mandate_id;
                 return (
                   <tr key={m.mandate_id} data-testid={`mandate-${m.mandate_id}`}
@@ -851,6 +859,74 @@ export default function CashFlow() {
                             borderRadius: 2, padding: '4px 8px', cursor: busy ? 'not-allowed' : 'pointer',
                             fontSize: 11,
                           }}>
+                          <Trash size={12} weight="bold" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+              {/* Section header for paused mandates */}
+              {(mandates || []).some(m => m.status !== 'active') && (
+                <tr>
+                  <td colSpan={9} style={{ padding: '8px 16px', background: 'var(--bg-secondary)', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-muted)' }}>
+                    ○ Paused
+                  </td>
+                </tr>
+              )}
+              {(mandates || []).filter(m => m.status !== 'active').map(m => {
+                const monthlyEq = m.frequency === 'weekly' ? m.amount * (52 / 12)
+                  : m.frequency === 'yearly' ? m.amount / 12
+                  : m.frequency === 'quarterly' ? m.amount / 3
+                  : m.amount;
+                const paused = true;
+                const busy = mandateBusyId === m.mandate_id;
+                return (
+                  <tr key={`paused-${m.mandate_id}`} data-testid={`mandate-${m.mandate_id}`}
+                    style={{ borderBottom: '1px solid var(--border-subtle)', opacity: 0.55 }}>
+                    <td style={tdStyle}>
+                      <div style={{ fontWeight: 600 }}>{m.merchant || '—'}</div>
+                      {m.source_email_subject && (
+                        <div className="mono" style={{ fontSize: 10.5, color: 'var(--text-muted)', marginTop: 2 }}>
+                          {m.source_email_subject.length > 60 ? m.source_email_subject.slice(0, 57) + '…' : m.source_email_subject}
+                        </div>
+                      )}
+                    </td>
+                    <td style={{ ...tdStyle, fontSize: 11, textTransform: 'uppercase', color: 'var(--text-muted)' }}>{m.mandate_type || '—'}</td>
+                    <td className="mono" style={{ ...tdStyle, fontWeight: 600, textAlign: 'right' }}>
+                      <input type="number" defaultValue={m.amount} disabled={busy}
+                        onBlur={(ev) => { const v = Number(ev.target.value); if (v > 0 && v !== m.amount) updateMandateAmount(m.mandate_id, v); }}
+                        style={{ width: 100, textAlign: 'right', padding: '4px 6px', fontSize: 13, border: '1px solid var(--border-subtle)', borderRadius: 2, fontFamily: 'var(--font-mono)', background: '#fff' }} />
+                    </td>
+                    <td style={tdStyle}>{m.frequency || 'monthly'}</td>
+                    <td className="mono" style={{ ...tdStyle, textAlign: 'right', color: 'var(--text-muted)' }}>{formatCurrency(monthlyEq)}/mo</td>
+                    <td className="mono" style={{ ...tdStyle, fontSize: 12 }}>{m.start_date || '—'}</td>
+                    <td style={tdStyle}>
+                      <span style={{ padding: '2px 8px', borderRadius: 2, fontSize: 11, fontWeight: 600, textTransform: 'uppercase', color: 'var(--text-muted)', background: 'var(--bg-secondary)' }}>paused</span>
+                    </td>
+                    <td style={{ ...tdStyle, fontSize: 11 }}>
+                      <span style={{ padding: '2px 6px', borderRadius: 2, fontSize: 10, fontWeight: 600, background: (m.source || '').startsWith('email') ? '#2563EB18' : '#00000010', color: (m.source || '').startsWith('email') ? '#2563EB' : 'var(--text-muted)', textTransform: 'uppercase' }}>
+                        {(m.source || 'manual').replace(/^email:/, '')}
+                      </span>
+                    </td>
+                    <td style={{ ...tdStyle, textAlign: 'center' }}>
+                      <div style={{ display: 'inline-flex', gap: 4 }}>
+                        {(m.source_email_id || m.source_sms_id || m.source_email_subject) && (
+                          <button data-testid={`mandate-view-source-${m.mandate_id}`} onClick={() => handleViewMandateSource(m)} disabled={mandateSourceLoading} title="View source email"
+                            style={{ background: 'none', border: '1px solid var(--border-strong)', borderRadius: 2, padding: '4px 8px', cursor: 'pointer', fontSize: 11, color: 'var(--text-muted)' }}>
+                            <Eye size={12} weight="bold" />
+                          </button>
+                        )}
+                        <button data-testid={`mandate-edit-${m.mandate_id}`} onClick={() => setEditingMandate(m)} disabled={busy} title="Edit"
+                          style={{ background: 'none', border: '1px solid var(--border-strong)', borderRadius: 2, padding: '4px 8px', cursor: 'pointer', fontSize: 11, color: 'var(--brand-primary)' }}>
+                          <PencilSimple size={12} weight="bold" />
+                        </button>
+                        <button data-testid={`mandate-toggle-${m.mandate_id}`} onClick={() => toggleMandateStatus(m.mandate_id, m.status)} disabled={busy} title="Resume"
+                          style={{ background: 'none', border: '1px solid var(--border-strong)', borderRadius: 2, padding: '4px 8px', cursor: 'pointer', fontSize: 11, color: 'var(--text-primary)' }}>
+                          <Play size={12} weight="bold" />
+                        </button>
+                        <button data-testid={`mandate-delete-${m.mandate_id}`} data-guard onClick={() => deleteMandate(m.mandate_id)} disabled={busy}
+                          style={{ background: 'none', border: '1px solid var(--error)', color: 'var(--error)', borderRadius: 2, padding: '4px 8px', cursor: 'pointer', fontSize: 11 }}>
                           <Trash size={12} weight="bold" />
                         </button>
                       </div>

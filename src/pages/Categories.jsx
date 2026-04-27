@@ -2,7 +2,7 @@ import { s, getCurrentLanguage } from '../lib/localization';
 import { useState, useEffect } from 'react';
 import { api } from '../lib/api';
 import { getCached, setCache } from '../lib/cache';
-import { Plus, Trash, CaretRight, PencilSimple } from '@phosphor-icons/react';
+import { Plus, Trash, CaretRight, PencilSimple, Folder, Tag } from '@phosphor-icons/react';
 
 export default function Categories() {
   const [lang, setLang] = useState(getCurrentLanguage());
@@ -179,7 +179,10 @@ export default function Categories() {
                   padding: '14px 20px', background: subcats.length ? 'var(--bg-secondary)' : '#fff'
                 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    {subcats.length > 0 && <CaretRight size={14} style={{ color: 'var(--text-muted)' }} />}
+                    {subcats.length > 0
+                      ? <Folder size={16} weight="duotone" style={{ color: 'var(--brand-primary)', flexShrink: 0 }} />
+                      : <Tag size={16} weight="duotone" style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
+                    }
                     <span style={{ fontSize: 14, fontWeight: 600 }}>{cat.name}</span>
                     {subcats.length > 0 && (
                       <span className="mono" style={{ fontSize: 11, color: 'var(--text-muted)' }}>({subcats.length})</span>
