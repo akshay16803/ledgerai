@@ -2,7 +2,7 @@ import { useNavigate } from 'react-router-dom';
 
 export default function Privacy() {
   const navigate = useNavigate();
-  const lastUpdated = 'April 14, 2026';
+  const lastUpdated = 'April 27, 2026';
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg-primary)', padding: '48px 24px' }}>
@@ -99,13 +99,38 @@ export default function Privacy() {
             </ul>
           </Section>
 
-          <Section title="4. Third-Party Services">
+          <Section title="4. Payment Data">
+            <p>
+              SpentyAI collects subscription payments through authorised third-party payment gateways
+              (including <strong>PhonePe</strong>, Razorpay, and UPI networks). We do <strong>not</strong> collect,
+              store, or process your card number, UPI PIN, CVV, net-banking credentials, or any other
+              sensitive payment authentication data. All payment transactions are processed directly by
+              the payment gateway on their PCI-DSS compliant infrastructure.
+            </p>
+            <p>
+              When you make a payment, the gateway may share with us:
+            </p>
+            <ul style={{ paddingLeft: 20, margin: '8px 0' }}>
+              <li>Transaction reference ID and status (success/failure)</li>
+              <li>Payment method type (UPI, card, net-banking) — without specific credentials</li>
+              <li>Amount and currency</li>
+              <li>Timestamp of the transaction</li>
+            </ul>
+            <p>
+              This information is used solely to activate or renew your subscription and to resolve billing
+              disputes. It is stored securely and never shared with third parties for marketing purposes.
+            </p>
+          </Section>
+
+          <Section title="5. Third-Party Services">
             <p>We use the following third-party services to operate SpentyAI:</p>
             <ul style={{ paddingLeft: 20, margin: '8px 0' }}>
               <li><strong>Google OAuth</strong> &mdash; for sign-in authentication and Gmail access.</li>
               <li><strong>Microsoft Graph API</strong> &mdash; for Outlook email access.</li>
               <li><strong>OpenAI</strong> &mdash; to analyze email and SMS content and extract transaction data.
                 Email/SMS content is sent to OpenAI's API for processing. OpenAI's data usage policy applies.</li>
+              <li><strong>PhonePe / Razorpay</strong> &mdash; to process subscription payments. Payment data is
+                governed by their respective privacy policies and PCI-DSS standards.</li>
               <li><strong>Resend</strong> &mdash; to deliver verification and welcome emails to your address.</li>
               <li><strong>MongoDB Atlas</strong> &mdash; to securely store your account and financial data.</li>
               <li><strong>Railway</strong> &mdash; to host our application infrastructure.</li>
@@ -113,7 +138,7 @@ export default function Privacy() {
             <p>We do not sell, rent, or share your personal or financial data with advertisers or data brokers.</p>
           </Section>
 
-          <Section title="5. Data Retention">
+          <Section title="6. Data Retention">
             <p>
               Your data is retained as long as your account is active. If you wish to delete your account and
               all associated data, contact us at the email below. We will permanently remove your records
@@ -121,7 +146,7 @@ export default function Privacy() {
             </p>
           </Section>
 
-          <Section title="6. Data Security">
+          <Section title="7. Data Security">
             <p>
               All data is transmitted over HTTPS with TLS encryption. Session cookies are httpOnly and secure.
               Database access is restricted and authenticated. Email OAuth tokens are stored securely and can
@@ -129,7 +154,7 @@ export default function Privacy() {
             </p>
           </Section>
 
-          <Section title="7. Your Rights">
+          <Section title="8. Your Rights">
             <p>You have the right to:</p>
             <ul style={{ paddingLeft: 20, margin: '8px 0' }}>
               <li><strong>Access</strong> your data through the app's dashboard, transactions, and reports pages.</li>
@@ -140,26 +165,45 @@ export default function Privacy() {
             </ul>
           </Section>
 
-          <Section title="8. Children's Privacy">
+          <Section title="9. Children's Privacy">
             <p>
               SpentyAI is not intended for use by anyone under the age of 18. We do not knowingly collect
               data from minors.
             </p>
           </Section>
 
-          <Section title="9. Changes to This Policy">
+          <Section title="10. Changes to This Policy">
             <p>
               We may update this policy from time to time. Changes will be posted on this page with an
               updated date. Continued use of SpentyAI after changes constitutes acceptance of the revised policy.
             </p>
           </Section>
 
-          <Section title="10. Contact Us">
+          <Section title="11. Grievance Officer">
+            <p>
+              In accordance with the Information Technology Act, 2000 and the Information Technology
+              (Intermediary Guidelines and Digital Media Ethics Code) Rules, 2021, if you have any grievance
+              regarding this Privacy Policy or our data handling practices, you may contact our Grievance Officer:
+            </p>
+            <p style={{ marginTop: 12 }}>
+              <strong>Grievance Officer:</strong> Akshay Chouhan<br />
+              <strong>Designation:</strong> Founder &amp; Grievance Officer<br />
+              <strong>Company:</strong> SpentyAI<br />
+              <strong>Address:</strong> 102, Midrise Street, M27, SS Infinitus Phase 2-B, Lasudiya Mauri, Indore, Madhya Pradesh – 452001, India<br />
+              <strong>Email:</strong> customersupport@spentyai.com<br />
+              <strong>Response time:</strong> Grievances will be acknowledged within 24 hours and resolved within 15 business days.
+            </p>
+          </Section>
+
+          <Section title="12. Contact Us">
             <p>
               If you have questions about this Privacy Policy or want to request data deletion, contact us at:
             </p>
             <p style={{ marginTop: 8 }}>
-              <strong>Email:</strong> privacy@spentyai.com
+              <strong>Business Name:</strong> SpentyAI<br />
+              <strong>Address:</strong> 102, Midrise Street, M27, SS Infinitus Phase 2-B, Lasudiya Mauri, Indore, Madhya Pradesh – 452001, India<br />
+              <strong>Email:</strong> customersupport@spentyai.com<br />
+              <strong>Website:</strong> www.spentyai.com
             </p>
           </Section>
         </div>

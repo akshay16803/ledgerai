@@ -2,7 +2,7 @@ import { useNavigate } from 'react-router-dom';
 
 export default function Terms() {
   const navigate = useNavigate();
-  const lastUpdated = 'April 14, 2026';
+  const lastUpdated = 'April 27, 2026';
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg-primary)', padding: '48px 24px' }}>
@@ -122,7 +122,32 @@ export default function Terms() {
             </p>
           </Section>
 
-          <Section title="10. Limitation of Liability">
+          <Section title="10. Payments and Subscriptions">
+            <p>
+              SpentyAI offers subscription plans (monthly, quarterly, annual, and lifetime) billed in advance.
+              Prices are listed in Indian Rupees (INR) inclusive of applicable taxes. Current plans are:
+            </p>
+            <ul style={{ paddingLeft: 20, margin: '8px 0' }}>
+              <li><strong>Monthly:</strong> ₹199/month</li>
+              <li><strong>Quarterly:</strong> ₹449 per 3 months</li>
+              <li><strong>Yearly:</strong> ₹1,499/year</li>
+              <li><strong>Lifetime:</strong> ₹9,999 one-time payment</li>
+            </ul>
+            <p>
+              Payments are processed by authorised third-party payment gateways including PhonePe, Razorpay,
+              and UPI payment networks. SpentyAI does <strong>not</strong> store your card number, UPI PIN, or
+              net-banking credentials. All payment data is handled exclusively by the payment gateway and is
+              subject to PCI-DSS compliant processing. By completing a payment, you agree to the payment
+              gateway's terms and conditions in addition to these Terms.
+            </p>
+            <p>
+              Subscriptions auto-renew at the end of each billing period unless cancelled before the renewal date.
+              Access to paid features is granted immediately upon successful payment confirmation. For refund and
+              cancellation terms, see our <a href="/refund-policy" style={{ color: 'var(--brand-primary)', textDecoration: 'underline' }}>Refund &amp; Cancellation Policy</a>.
+            </p>
+          </Section>
+
+          <Section title="11. Limitation of Liability">
             <p>
               SpentyAI is a financial record-keeping tool, <strong>not a licensed accounting firm, tax advisor,
               or financial advisor</strong>. The Service is provided "as is" without warranties of any kind.
@@ -136,7 +161,7 @@ export default function Terms() {
             </ul>
           </Section>
 
-          <Section title="11. Account Termination">
+          <Section title="12. Account Termination">
             <p>
               You may stop using the Service at any time. We may suspend or terminate your account if you
               violate these terms. Upon termination, your data will be retained for 30 days to allow
@@ -144,7 +169,7 @@ export default function Terms() {
             </p>
           </Section>
 
-          <Section title="12. Intellectual Property">
+          <Section title="13. Intellectual Property">
             <p>
               The SpentyAI name, logo, design, and software are the intellectual property of SpentyAI.
               You may not copy, modify, or distribute any part of the Service without written permission.
@@ -152,20 +177,47 @@ export default function Terms() {
             </p>
           </Section>
 
-          <Section title="13. Governing Law">
+          <Section title="14. Governing Law and Dispute Resolution">
             <p>
-              These Terms are governed by and construed in accordance with applicable laws. Any disputes
-              arising from or related to the Service shall be resolved through good-faith negotiation
-              before pursuing formal legal proceedings.
+              These Terms of Service are governed by and construed in accordance with the laws of India,
+              including but not limited to the <strong>Information Technology Act, 2000</strong>, the
+              <strong> Consumer Protection Act, 2019</strong>, the <strong>Consumer Protection (E-Commerce)
+              Rules, 2020</strong>, and applicable Reserve Bank of India (RBI) guidelines on digital payments.
+            </p>
+            <p>
+              Any dispute, claim, or controversy arising out of or relating to these Terms or the use of
+              SpentyAI shall first be attempted to be resolved through good-faith negotiation between the
+              parties. If unresolved within 30 days, disputes shall be subject to the exclusive jurisdiction
+              of the competent courts located in <strong>Indore, Madhya Pradesh, India</strong>.
             </p>
           </Section>
 
-          <Section title="14. Contact Us">
+          <Section title="15. Grievance Officer">
+            <p>
+              In accordance with the Information Technology Act, 2000 and the Information Technology
+              (Intermediary Guidelines and Digital Media Ethics Code) Rules, 2021, the name and contact
+              details of the Grievance Officer are provided below. Any complaints or concerns regarding
+              the Service may be addressed to:
+            </p>
+            <p style={{ marginTop: 12 }}>
+              <strong>Grievance Officer:</strong> Akshay Chouhan<br />
+              <strong>Designation:</strong> Founder &amp; Grievance Officer<br />
+              <strong>Company:</strong> SpentyAI<br />
+              <strong>Address:</strong> 102, Midrise Street, M27, SS Infinitus Phase 2-B, Lasudiya Mauri, Indore, Madhya Pradesh – 452001, India<br />
+              <strong>Email:</strong> customersupport@spentyai.com<br />
+              <strong>Response time:</strong> We will acknowledge your grievance within 24 hours and resolve it within 15 business days.
+            </p>
+          </Section>
+
+          <Section title="16. Contact Us">
             <p>
               If you have questions about these Terms of Service, contact us at:
             </p>
             <p style={{ marginTop: 8 }}>
-              <strong>Email:</strong> customersupport@spentyai.com
+              <strong>Business Name:</strong> SpentyAI<br />
+              <strong>Address:</strong> 102, Midrise Street, M27, SS Infinitus Phase 2-B, Lasudiya Mauri, Indore, Madhya Pradesh – 452001, India<br />
+              <strong>Email:</strong> customersupport@spentyai.com<br />
+              <strong>Website:</strong> www.spentyai.com
             </p>
           </Section>
         </div>

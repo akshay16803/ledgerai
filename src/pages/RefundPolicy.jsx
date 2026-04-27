@@ -2,7 +2,7 @@ import { useNavigate } from 'react-router-dom';
 
 export default function RefundPolicy() {
   const navigate = useNavigate();
-  const lastUpdated = 'April 24, 2026';
+  const lastUpdated = 'April 27, 2026';
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg-primary)', padding: '48px 24px' }}>
@@ -175,20 +175,59 @@ export default function RefundPolicy() {
             </p>
           </Section>
 
-          <Section title="12. Changes to This Policy">
+          <Section title="12. Payment Gateway">
+            <p>
+              SpentyAI processes all subscription payments through authorised third-party payment gateways
+              including <strong>PhonePe</strong>, Razorpay, and UPI payment networks regulated by the
+              National Payments Corporation of India (NPCI) and the Reserve Bank of India (RBI).
+              SpentyAI does <strong>not</strong> store your card number, UPI PIN, CVV, or net-banking
+              credentials at any point. All sensitive payment data is handled exclusively by the payment
+              gateway on PCI-DSS compliant infrastructure.
+            </p>
+            <p>
+              Refunds are initiated by SpentyAI through the same payment gateway used for the original
+              transaction and are credited back to the original payment instrument.
+            </p>
+          </Section>
+
+          <Section title="13. Governing Law">
+            <p>
+              This Refund &amp; Cancellation Policy is governed by the laws of India, including the
+              Consumer Protection Act, 2019 and the Consumer Protection (E-Commerce) Rules, 2020.
+              Any disputes arising out of this policy shall be subject to the exclusive jurisdiction of
+              the competent courts in <strong>Indore, Madhya Pradesh, India</strong>.
+            </p>
+          </Section>
+
+          <Section title="14. Grievance Officer">
+            <p>
+              If you have an unresolved billing or refund grievance, you may contact our Grievance Officer
+              as required under the Information Technology Act, 2000:
+            </p>
+            <p style={{ marginTop: 12 }}>
+              <strong>Grievance Officer:</strong> Akshay Chouhan<br />
+              <strong>Company:</strong> SpentyAI<br />
+              <strong>Address:</strong> 102, Midrise Street, M27, SS Infinitus Phase 2-B, Lasudiya Mauri, Indore, Madhya Pradesh – 452001, India<br />
+              <strong>Email:</strong> customersupport@spentyai.com<br />
+              <strong>Response time:</strong> Acknowledged within 24 hours, resolved within 15 business days.
+            </p>
+          </Section>
+
+          <Section title="15. Changes to This Policy">
             <p>
               We may update this refund policy from time to time. Material changes will be communicated by email
               and posted on this page with a new &ldquo;Last updated&rdquo; date.
             </p>
           </Section>
 
-          <Section title="13. Contact Us">
+          <Section title="16. Contact Us">
             <p>
               For any refund or billing question, contact:
             </p>
             <p style={{ marginTop: 8 }}>
               <strong>Email:</strong> customersupport@spentyai.com<br />
               <strong>Business name:</strong> SpentyAI<br />
+              <strong>Address:</strong> 102, Midrise Street, M27, SS Infinitus Phase 2-B, Lasudiya Mauri, Indore, Madhya Pradesh – 452001, India<br />
               <strong>Website:</strong> www.spentyai.com<br />
               <strong>Contact page:</strong> <a href="/contact" style={{ color: 'inherit' }}>www.spentyai.com/contact</a>
             </p>
