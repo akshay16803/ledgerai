@@ -58,6 +58,125 @@ function SummaryCard({ label, value, color, sub, onClick, active }) {
   );
 }
 
+const CALENDAR_MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+const CALENDAR_DAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+
+function getMandateDueDays(mandates, year, month) {
+  const days = {};
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const active = (mandates || []).filter(m => m.status === 'active' && m.start_date);
+  for (const m of active) {
+    const start = new Date(m.start_date);
+    for (let day = 1; day <= daysInMonth; day++) {
+      const date = new Date(year, month, day);
+      if (date < start) continue;
+      let isDue = false;
+      switch (m.frequency) {
+        case 'daily': isDue = true; break;
+        case 'weekly': { const d = Math.round((date - start) / 86400000); isDue = d % 7 === 0; break; }
+        case 'biweekly': { const d = Math.round((date - start) / 86400000); isDue = d % 14 === 0; break; }
+        case 'monthly': isDue = date.getDate() === start.getDate(); break;
+        case 'quarterly': {
+          const mDiff = (year - start.getFullYear()) * 12 + (month - start.getMonth());
+          isDue = mDiff % 3 === 0 && date.getDate() === start.getDate(); break;
+        }
+        case 'yearly': isDue = date.getDate() === start.getDate() && date.getMonth() === start.getMonth(); break;
+        default: break;
+      }
+      if (isDue) { if (!days[day]) days[day] = []; days[day].push(m); }
+    }
+  }
+  return days;
+}
+
+function MonthlyCalendarView({ mandates }) {
+  const today = new Date();
+  const [viewYear, setViewYear] = useState(today.getFullYear());
+  const [viewMonth, setViewMonth] = useState(today.getMonth());
+
+  const prevMonth = () => { if (viewMonth === 0) { setViewYear(y => y - 1); setViewMonth(11); } else setViewMonth(m => m - 1); };
+  const nextMonth = () => { if (viewMonth === 11) { setViewYear(y => y + 1); setViewMonth(0); } else setViewMonth(m => m + 1); };
+
+  const dueDays = getMandateDueDays(mandates, viewYear, viewMonth);
+  const firstDow = new Date(viewYear, viewMonth, 1).getDay();
+  const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
+  const isToday = d => d === today.getDate() && viewMonth === today.getMonth() && viewYear === today.getFullYear();
+
+  const cells = [];
+  for (let i = 0; i < firstDow; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+  while (cells.length % 7 !== 0) cells.push(null);
+
+  const totalOutflow = Object.values(dueDays).reduce((sum, ms) => sum + ms.reduce((s, m) => s + (m.amount || 0), 0), 0);
+
+  return (
+    <div>
+      {/* Month navigation */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+        <button onClick={prevMonth} style={{ background: 'none', border: '1px solid var(--border-subtle)', borderRadius: 2, padding: '5px 14px', cursor: 'pointer', fontSize: 16, lineHeight: 1 }}>‹</button>
+        <div style={{ flex: 1, textAlign: 'center' }}>
+          <span style={{ fontSize: 15, fontWeight: 600 }}>{CALENDAR_MONTHS[viewMonth]} {viewYear}</span>
+          {totalOutflow > 0 && (
+            <span className="mono" style={{ fontSize: 11, color: 'var(--error)', marginLeft: 10, fontWeight: 700 }}>
+              {formatCurrencyCompact(totalOutflow)} total due
+            </span>
+          )}
+        </div>
+        <button onClick={nextMonth} style={{ background: 'none', border: '1px solid var(--border-subtle)', borderRadius: 2, padding: '5px 14px', cursor: 'pointer', fontSize: 16, lineHeight: 1 }}>›</button>
+      </div>
+
+      {/* Day-of-week headers */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 3, marginBottom: 3 }}>
+        {CALENDAR_DAYS.map(d => (
+          <div key={d} className="mono" style={{ textAlign: 'center', fontSize: 10, fontWeight: 600, color: 'var(--text-muted)', padding: '4px 0', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{d}</div>
+        ))}
+      </div>
+
+      {/* Grid */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 3 }}>
+        {cells.map((day, idx) => {
+          if (!day) return <div key={`e-${idx}`} style={{ minHeight: 68, background: 'var(--bg-secondary)', borderRadius: 2 }} />;
+          const dues = dueDays[day] || [];
+          const hasDues = dues.length > 0;
+          const dayTotal = dues.reduce((s, m) => s + (m.amount || 0), 0);
+          return (
+            <div key={day} data-testid={`cal-day-${day}`} style={{
+              minHeight: 68, padding: '6px 7px',
+              background: hasDues ? 'rgba(220,38,38,0.05)' : '#fff',
+              border: hasDues ? '1px solid rgba(220,38,38,0.22)' : '1px solid var(--border-subtle)',
+              borderRadius: 2,
+              ...(isToday(day) ? { outline: '2px solid var(--brand-primary)', outlineOffset: '-1px' } : {}),
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 3 }}>
+                <span className="mono" style={{ fontSize: 11, fontWeight: isToday(day) ? 700 : 500, color: isToday(day) ? 'var(--brand-primary)' : 'var(--text-primary)' }}>{day}</span>
+                {hasDues && <span className="mono" style={{ fontSize: 9, color: 'var(--error)', fontWeight: 700 }}>{formatCurrencyCompact(dayTotal)}</span>}
+              </div>
+              {dues.slice(0, 2).map((m, i) => (
+                <div key={i} style={{ fontSize: 9, color: 'var(--error)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', lineHeight: 1.5 }}>
+                  {m.merchant || m.description || '—'}
+                </div>
+              ))}
+              {dues.length > 2 && <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 1 }}>+{dues.length - 2} more</div>}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Legend */}
+      <div style={{ display: 'flex', gap: 16, marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border-subtle)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <div style={{ width: 12, height: 12, background: 'rgba(220,38,38,0.05)', border: '1px solid rgba(220,38,38,0.22)', borderRadius: 2 }} />
+          <span className="mono" style={{ fontSize: 10, color: 'var(--text-muted)' }}>Mandate due</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <div style={{ width: 12, height: 12, background: '#fff', border: '2px solid var(--brand-primary)', borderRadius: 2 }} />
+          <span className="mono" style={{ fontSize: 10, color: 'var(--text-muted)' }}>Today</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ProjectionChart({ data }) {
   if (!data || data.length === 0) return null;
 
@@ -130,6 +249,7 @@ export default function CashFlow() {
   const [mandates, setMandates] = useState(cached?.mandates || []);
   const [mandateBusyId, setMandateBusyId] = useState('');
   const [expandedTile, setExpandedTile] = useState(null);
+  const [showCalendar, setShowCalendar] = useState(true);
   const [editTxn, setEditTxn] = useState(null);
   const [showEditModal, setShowEditModal] = useState(false);
   const [loadingTxnId, setLoadingTxnId] = useState(null);
@@ -587,6 +707,45 @@ export default function CashFlow() {
           <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)', fontSize: 14 }}>
             No recurring transactions yet. Mark transactions as recurring below to generate projections.
           </div>
+        )}
+      </div>
+
+      {/* Monthly Calendar View */}
+      <div data-testid="monthly-calendar-section" style={{
+        background: '#fff', border: '1px solid var(--border-subtle)', borderRadius: 2,
+        padding: '24px', marginBottom: 32
+      }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: showCalendar ? 20 : 0 }}>
+          <div>
+            <h2 style={{ fontSize: 18, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <CalendarBlank size={20} weight="duotone" style={{ color: 'var(--accent-1)' }} />
+              Monthly Calendar
+            </h2>
+            <p className="mono" style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
+              Projected mandate due dates — active mandates only
+            </p>
+          </div>
+          <button
+            data-testid="toggle-calendar-btn"
+            onClick={() => setShowCalendar(c => !c)}
+            style={{
+              background: 'none', border: '1px solid var(--border-subtle)', borderRadius: 2,
+              padding: '6px 14px', cursor: 'pointer', fontSize: 12, fontWeight: 600,
+              color: 'var(--text-muted)', fontFamily: 'var(--font-body)',
+              display: 'flex', alignItems: 'center', gap: 6,
+            }}>
+            <CalendarBlank size={14} />
+            {showCalendar ? 'Hide' : 'Show'}
+          </button>
+        </div>
+        {showCalendar && (
+          (mandates || []).filter(m => m.status === 'active').length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '32px 0', color: 'var(--text-muted)', fontSize: 13 }}>
+              No active mandates to display. Activate mandates above to see projected due dates.
+            </div>
+          ) : (
+            <MonthlyCalendarView mandates={mandates} />
+          )
         )}
       </div>
 
