@@ -292,34 +292,63 @@ function EmailAccountCard({ acct, provider, onSetupSync, onRetry, onDisconnect, 
         <div data-testid={`sync-form-${email}`} style={{
           padding: '16px 24px', background: 'rgba(194,109,92,0.05)',
           borderBottom: '1px solid var(--border-subtle)',
-          display: 'flex', alignItems: 'center', gap: 16
         }}>
-          <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
-            Sync emails from:
-          </label>
-          <input data-testid="sync-date-input" type="date" value={syncDate}
-            onChange={e => setSyncDate(e.target.value)}
-            style={{
-              padding: '8px 14px', border: '1px solid var(--border-strong)', borderRadius: 2,
-              fontSize: 13, fontFamily: 'var(--font-body)', background: '#fff'
-            }} />
-          <button data-testid="start-sync-btn" data-guard onClick={() => onStartSync(email)}
-            disabled={syncing || !syncDate}
-            style={{
-              background: 'var(--brand-primary)', color: '#fff', border: 'none',
-              padding: '8px 20px', borderRadius: 2, fontSize: 13, fontWeight: 600,
-              cursor: syncing ? 'not-allowed' : 'pointer', fontFamily: 'var(--font-body)',
-              opacity: syncing || !syncDate ? 0.6 : 1
-            }}>
-            {syncing ? 'Starting...' : 'Start Sync'}
-          </button>
-          <button onClick={onCancelSync}
-            style={{
-              background: 'none', border: 'none', color: 'var(--text-muted)',
-              cursor: 'pointer', fontSize: 12, fontFamily: 'var(--font-body)'
-            }}>
-            Cancel
-          </button>
+          {/* Quick presets */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+            <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 600, whiteSpace: 'nowrap' }}>Quick select:</span>
+            {[
+              { label: 'Last 7 days', days: 7 },
+              { label: 'Last 30 days', days: 30 },
+              { label: 'Last 3 months', days: 90 },
+              { label: 'Last 6 months', days: 180 },
+            ].map(({ label, days }) => {
+              const d = new Date();
+              d.setDate(d.getDate() - days);
+              const val = d.toISOString().slice(0, 10);
+              return (
+                <button key={days} data-testid={`preset-${days}d`}
+                  onClick={() => setSyncDate(val)}
+                  style={{
+                    padding: '4px 10px', fontSize: 12, fontWeight: 500,
+                    background: syncDate === val ? 'var(--brand-primary)' : '#fff',
+                    color: syncDate === val ? '#fff' : 'var(--text-secondary)',
+                    border: `1px solid ${syncDate === val ? 'var(--brand-primary)' : 'var(--border-strong)'}`,
+                    borderRadius: 2, cursor: 'pointer', fontFamily: 'var(--font-body)',
+                  }}>
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+          {/* Date input row */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+            <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
+              Sync emails from:
+            </label>
+            <input data-testid="sync-date-input" type="date" value={syncDate}
+              onChange={e => setSyncDate(e.target.value)}
+              style={{
+                padding: '8px 14px', border: '1px solid var(--border-strong)', borderRadius: 2,
+                fontSize: 13, fontFamily: 'var(--font-body)', background: '#fff'
+              }} />
+            <button data-testid="start-sync-btn" data-guard onClick={() => onStartSync(email)}
+              disabled={syncing || !syncDate}
+              style={{
+                background: 'var(--brand-primary)', color: '#fff', border: 'none',
+                padding: '8px 20px', borderRadius: 2, fontSize: 13, fontWeight: 600,
+                cursor: syncing ? 'not-allowed' : 'pointer', fontFamily: 'var(--font-body)',
+                opacity: syncing || !syncDate ? 0.6 : 1
+              }}>
+              {syncing ? 'Starting...' : 'Start Sync'}
+            </button>
+            <button onClick={onCancelSync}
+              style={{
+                background: 'none', border: 'none', color: 'var(--text-muted)',
+                cursor: 'pointer', fontSize: 12, fontFamily: 'var(--font-body)'
+              }}>
+              Cancel
+            </button>
+          </div>
         </div>
       )}
 
@@ -391,6 +420,8 @@ export default function EmailSync() {
   const [viewingSource, setViewingSource] = useState(null);
   const [pendingTxns, setPendingTxns] = useState([]);
   const [pendingTotal, setPendingTotal] = useState(0);
+  const [bulkApproving, setBulkApproving] = useState(false);
+  const [bulkRejecting, setBulkRejecting] = useState(false);
   const [accounts, setAccounts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [error, setError] = useState('');
@@ -597,6 +628,46 @@ export default function EmailSync() {
       setPendingTxns(prevTxns);
       setPendingTotal(prevTotal);
       alert(err.message);
+    }
+  };
+
+  const handleApproveAll = async () => {
+    if (pendingTxns.length === 0) return;
+    if (!window.confirm(`Approve all ${pendingTxns.length} pending transaction${pendingTxns.length !== 1 ? 's' : ''}?`)) return;
+    setBulkApproving(true);
+    try {
+      await Promise.all(pendingTxns.map(t => api.post(`/api/transactions/${t.transaction_id}/approve`)));
+      const [review, accs] = await Promise.all([
+        api.get('/api/email/pending-review', { bypassCache: true }),
+        api.get('/api/accounts'),
+      ]);
+      setPendingTxns(review.transactions);
+      setPendingTotal(review.total);
+      setAccounts(accs);
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setBulkApproving(false);
+    }
+  };
+
+  const handleRejectAll = async () => {
+    if (pendingTxns.length === 0) return;
+    if (!window.confirm(`Reject all ${pendingTxns.length} pending transaction${pendingTxns.length !== 1 ? 's' : ''}? This cannot be undone.`)) return;
+    setBulkRejecting(true);
+    try {
+      await Promise.all(pendingTxns.map(t => api.post(`/api/transactions/${t.transaction_id}/reject`)));
+      const [review, accs] = await Promise.all([
+        api.get('/api/email/pending-review', { bypassCache: true }),
+        api.get('/api/accounts'),
+      ]);
+      setPendingTxns(review.transactions);
+      setPendingTotal(review.total);
+      setAccounts(accs);
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setBulkRejecting(false);
     }
   };
 
@@ -818,14 +889,46 @@ export default function EmailSync() {
       {/* Pending Review Transactions */}
       {pendingTotal > 0 && (
         <div data-testid="pending-review-section" style={{ marginTop: 32 }}>
-          <h2 style={{ fontSize: 20, fontWeight: 500, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Clock size={20} weight="duotone" style={{ color: 'var(--warning)' }} />
-            Pending Review
-            <span className="mono" style={{
-              fontSize: 12, padding: '2px 8px', background: 'rgba(194,140,60,0.15)',
-              color: 'var(--warning)', borderRadius: 2, fontWeight: 600
-            }}>{pendingTotal}</span>
-          </h2>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+            <h2 style={{ fontSize: 20, fontWeight: 500, margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Clock size={20} weight="duotone" style={{ color: 'var(--warning)' }} />
+              Pending Review
+              <span className="mono" style={{
+                fontSize: 12, padding: '2px 8px', background: 'rgba(194,140,60,0.15)',
+                color: 'var(--warning)', borderRadius: 2, fontWeight: 600
+              }}>{pendingTotal}</span>
+            </h2>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                data-testid="bulk-approve-all-btn"
+                onClick={handleApproveAll}
+                disabled={bulkApproving || bulkRejecting || pendingTxns.length === 0}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px',
+                  background: 'var(--success)', color: '#fff', border: 'none',
+                  borderRadius: 2, fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                  opacity: (bulkApproving || bulkRejecting) ? 0.7 : 1,
+                }}
+              >
+                <Check size={13} weight="bold" />
+                {bulkApproving ? 'Approving…' : 'Approve All'}
+              </button>
+              <button
+                data-testid="bulk-reject-all-btn"
+                onClick={handleRejectAll}
+                disabled={bulkApproving || bulkRejecting || pendingTxns.length === 0}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px',
+                  background: 'none', color: 'var(--error)', border: '1px solid var(--error)',
+                  borderRadius: 2, fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                  opacity: (bulkApproving || bulkRejecting) ? 0.7 : 1,
+                }}
+              >
+                <X size={13} weight="bold" />
+                {bulkRejecting ? 'Rejecting…' : 'Reject All'}
+              </button>
+            </div>
+          </div>
 
           <div style={{ background: '#fff', border: '1px solid var(--border-subtle)', borderRadius: 2, overflow: 'hidden' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 650 }}>
