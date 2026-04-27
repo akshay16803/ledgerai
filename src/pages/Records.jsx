@@ -4,7 +4,7 @@ import { api } from '../lib/api';
 import { useNavigate } from 'react-router-dom';
 import {
   MagnifyingGlass, DownloadSimple, FileText, Paperclip,
-  FunnelSimple, CaretDown, CaretUp, EnvelopeSimple, Archive, Eye, X, Receipt, Image as ImageIcon, ArrowsLeftRight
+  FunnelSimple, CaretDown, CaretUp, EnvelopeSimple, Archive, Eye, X, Receipt, Image as ImageIcon, ArrowsLeftRight, UploadSimple
 } from '@phosphor-icons/react';
 
 const API = import.meta.env.REACT_APP_BACKEND_URL || '';
@@ -38,6 +38,7 @@ export default function Records() {
   const [receiptsLoading, setReceiptsLoading] = useState(false);
   const [receiptPreviewUrl, setReceiptPreviewUrl] = useState(null);
   const [receiptPreviewData, setReceiptPreviewData] = useState(null);
+  const [receiptUploading, setReceiptUploading] = useState(false);
   const limit = 25;
 
   const loadReceipts = useCallback(async () => {
@@ -138,6 +139,24 @@ export default function Records() {
     } finally { setDownloading(false); }
   };
 
+  const handleReceiptUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    e.target.value = '';
+    setReceiptUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await fetch(`${API}/api/receipts`, { method: 'POST', body: fd, credentials: 'include' });
+      if (!res.ok) throw new Error('Upload failed');
+      loadReceipts();
+    } catch (err) {
+      alert('Receipt upload failed. Please try again.');
+    } finally {
+      setReceiptUploading(false);
+    }
+  };
+
   const clearFilters = () => {
     setSearch('');
     setDateFrom('');
@@ -163,6 +182,30 @@ export default function Records() {
             Emails & receipts — {activeTab === 'emails' ? total : receiptsTotal} records
           </p>
         </div>
+        {activeTab === 'receipts' && (
+          <label
+            data-testid="upload-receipt-btn"
+            htmlFor="receipt-upload-input"
+            style={{
+              background: 'var(--brand-primary)', color: '#fff', border: 'none',
+              padding: '10px 20px', borderRadius: 2, fontSize: 13, fontWeight: 600,
+              cursor: receiptUploading ? 'not-allowed' : 'pointer',
+              fontFamily: 'var(--font-body)', display: 'flex', alignItems: 'center', gap: 6,
+              opacity: receiptUploading ? 0.6 : 1,
+            }}
+          >
+            <UploadSimple size={16} weight="bold" />
+            {receiptUploading ? 'Uploading...' : 'Upload Receipt'}
+            <input
+              id="receipt-upload-input"
+              type="file"
+              accept="image/*,application/pdf"
+              style={{ display: 'none' }}
+              onChange={handleReceiptUpload}
+              disabled={receiptUploading}
+            />
+          </label>
+        )}
         {activeTab === 'emails' && (
           <div style={{ display: 'flex', gap: 8 }}>
             <button

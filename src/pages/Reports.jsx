@@ -113,7 +113,8 @@ function PeriodChart({ data }) {
   );
 }
 
-function DonutChart({ data, total, typeLabel }) {
+function DonutChart({ data, total, typeLabel, onSliceClick }) {
+  const [hoveredSlice, setHoveredSlice] = useState(null);
   if (!data || data.length === 0) return (
     <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)', fontSize: 14 }}>
       No data for this view.
@@ -143,7 +144,7 @@ function DonutChart({ data, total, typeLabel }) {
 
     const path = `M ${x1} ${y1} A ${r} ${r} 0 ${largeArc} 1 ${x2} ${y2} L ${ix1} ${iy1} A ${innerR} ${innerR} 0 ${largeArc} 0 ${ix2} ${iy2} Z`;
 
-    slices.push({ path, color: COLORS[i % COLORS.length], name: cat.category_name, val });
+    slices.push({ path, color: COLORS[i % COLORS.length], name: cat.category_name, val, cat: data[i] });
     startAngle = endAngle;
   }
 
@@ -151,7 +152,16 @@ function DonutChart({ data, total, typeLabel }) {
     <div data-testid="donut-chart" style={{ display: 'flex', gap: 32, alignItems: 'center', flexWrap: 'wrap' }}>
       <svg width={240} height={240} viewBox="0 0 240 240">
         {slices.map((s, i) => (
-          <path key={`slice-${s.name}`} d={s.path} fill={s.color} opacity="0.85" />
+          <path
+            key={`slice-${s.name}`}
+            d={s.path}
+            fill={s.color}
+            opacity={hoveredSlice === i ? 1 : 0.85}
+            style={{ cursor: onSliceClick ? 'pointer' : 'default', transition: 'opacity 0.15s' }}
+            onClick={() => onSliceClick?.(s.cat)}
+            onMouseEnter={() => setHoveredSlice(i)}
+            onMouseLeave={() => setHoveredSlice(null)}
+          />
         ))}
         <text x={cx} y={cy - 6} textAnchor="middle"
           style={{ fontSize: 10, fill: 'var(--text-muted)', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
@@ -163,8 +173,14 @@ function DonutChart({ data, total, typeLabel }) {
         </text>
       </svg>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1, minWidth: 200 }}>
-        {slices.map((s) => (
-          <div key={`legend-${s.name}`} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
+        {slices.map((s, i) => (
+          <div
+            key={`legend-${s.name}`}
+            style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: onSliceClick ? 'pointer' : 'default', borderRadius: 2, padding: '3px 6px', background: hoveredSlice === i ? 'rgba(0,0,0,0.04)' : 'transparent', transition: 'background 0.1s' }}
+            onClick={() => onSliceClick?.(s.cat)}
+            onMouseEnter={() => setHoveredSlice(i)}
+            onMouseLeave={() => setHoveredSlice(null)}
+          >
             <span style={{ width: 12, height: 12, borderRadius: 2, background: s.color, flexShrink: 0 }} />
             <span style={{ flex: 1 }}>{s.name}</span>
             <span className="mono" style={{ fontWeight: 600 }}>{formatCurrency(s.val)}</span>
@@ -562,7 +578,7 @@ export default function Reports() {
         </div>
 
         <div style={{ padding: '24px' }}>
-          <DonutChart data={catData} total={catTotal} typeLabel={catType} />
+          <DonutChart data={catData} total={catTotal} typeLabel={catType} onSliceClick={handleCategoryClick} />
         </div>
 
         {/* Category Table with Subcategory Drilldown */}
