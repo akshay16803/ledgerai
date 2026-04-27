@@ -574,7 +574,8 @@ async def simulator_login(request: Request):
 
     body = await request.json()
     email = body.get("email")
-    dev_secret = body.get("dev_secret")
+    # Accept both snake_case and camelCase — iOS sends devSecret, some clients send dev_secret
+    dev_secret = body.get("dev_secret") or body.get("devSecret")
 
     # Guard: require a shared secret so this endpoint cannot be abused.
     # No default fallback — env var must be explicitly set in non-prod environments.
