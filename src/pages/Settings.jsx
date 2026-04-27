@@ -3,7 +3,9 @@ import { useState, useEffect, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
-import { Check, Globe, CalendarBlank, Buildings, Bank, Warning, ArrowLeft, Receipt, MapPin, ArrowCounterClockwise, Trash } from '@phosphor-icons/react';
+import { Check, Globe, CalendarBlank, Buildings, Bank, Warning, ArrowLeft, Receipt, MapPin, ArrowCounterClockwise, Trash, UploadSimple, Image, X } from '@phosphor-icons/react';
+
+const API = import.meta.env.REACT_APP_BACKEND_URL || '';
 import { COUNTRIES } from '../lib/countryConfig';
 
 const INDIAN_STATES = [
@@ -123,6 +125,11 @@ export default function Settings() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [isDeleting, setIsDeleting] = useState(false);
+  // Logo / Signature upload
+  const [logoUrl, setLogoUrl] = useState('');
+  const [signatureUrl, setSignatureUrl] = useState('');
+  const [logoUploading, setLogoUploading] = useState(false);
+  const [signatureUploading, setSignatureUploading] = useState(false);
 
   useEffect(() => {
     api.get('/api/settings').then(s => {
@@ -146,6 +153,8 @@ export default function Settings() {
       setBillPrefix(s.bill_prefix || 'BILL-');
       setBillTerms(s.bill_terms || '');
       setBusinessCountry(s.business_country || 'IN');
+      setLogoUrl(s.logo_url || '');
+      setSignatureUrl(s.signature_url || '');
     }).catch(() => {}).finally(() => setLoading(false));
   }, []);
 
@@ -231,6 +240,36 @@ export default function Settings() {
     } finally {
       setIsDeleting(false);
     }
+  };
+
+  const handleLogoUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setLogoUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await fetch(`${API}/api/settings/logo`, { method: 'POST', body: fd, credentials: 'include' });
+      if (!res.ok) throw new Error('Upload failed');
+      const data = await res.json();
+      setLogoUrl(data.url || data.logo_url || '');
+    } catch { alert('Logo upload failed. Please try again.'); }
+    finally { setLogoUploading(false); }
+  };
+
+  const handleSignatureUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setSignatureUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await fetch(`${API}/api/settings/signature`, { method: 'POST', body: fd, credentials: 'include' });
+      if (!res.ok) throw new Error('Upload failed');
+      const data = await res.json();
+      setSignatureUrl(data.url || data.signature_url || '');
+    } catch { alert('Signature upload failed. Please try again.'); }
+    finally { setSignatureUploading(false); }
   };
 
   const selectedCurrency = CURRENCIES.find(c => c.code === baseCurrency);
@@ -528,6 +567,97 @@ export default function Settings() {
               <textarea data-testid="invoice-terms" value={invoiceTerms} onChange={e => setInvoiceTerms(e.target.value)}
                 placeholder="e.g. Payment is due within 30 days of invoice date. Late payments may attract interest at 18% p.a."
                 rows={3} style={{ ...fieldStyle, resize: 'vertical', minHeight: 60 }} />
+            </div>
+          </div>
+        </div>
+
+        <div style={{ borderTop: '1px solid var(--border-subtle)', marginBottom: 24 }} />
+
+        {/* Logo & Signature */}
+        <div style={{ marginBottom: 24 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+            <Image size={16} weight="duotone" style={{ color: 'var(--info)' }} />
+            <h3 style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              Business Logo & Signature
+            </h3>
+          </div>
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 16 }}>
+            These will be printed on your invoices and purchase bills. Recommended: PNG with transparent background.
+          </p>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, maxWidth: 700 }}>
+            {/* Logo */}
+            <div>
+              <label style={labelStyle}>Company Logo</label>
+              {logoUrl ? (
+                <div style={{ border: '1px solid var(--border-subtle)', borderRadius: 2, padding: 16, background: 'var(--bg-secondary)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, position: 'relative' }}>
+                  <img src={logoUrl} alt="Company logo" style={{ maxHeight: 80, maxWidth: '100%', objectFit: 'contain' }} />
+                  <button
+                    data-testid="remove-logo-btn"
+                    type="button"
+                    onClick={() => setLogoUrl('')}
+                    style={{ position: 'absolute', top: 6, right: 6, background: 'rgba(0,0,0,0.4)', color: '#fff', border: 'none', borderRadius: '50%', width: 22, height: 22, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0 }}
+                  ><X size={12} /></button>
+                  <label htmlFor="logo-upload-replace" style={{ fontSize: 11, color: 'var(--brand-primary)', cursor: 'pointer', fontWeight: 600 }}>
+                    Replace
+                    <input id="logo-upload-replace" type="file" accept="image/*" style={{ display: 'none' }} onChange={handleLogoUpload} />
+                  </label>
+                </div>
+              ) : (
+                <label
+                  data-testid="logo-upload-area"
+                  htmlFor="logo-upload"
+                  style={{
+                    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                    border: '2px dashed var(--border-strong)', borderRadius: 2, padding: '24px 16px',
+                    cursor: logoUploading ? 'not-allowed' : 'pointer', background: 'var(--bg-secondary)',
+                    gap: 8, opacity: logoUploading ? 0.6 : 1,
+                  }}
+                >
+                  <UploadSimple size={24} style={{ color: 'var(--text-muted)' }} />
+                  <span style={{ fontSize: 13, color: 'var(--text-secondary)', fontWeight: 500 }}>
+                    {logoUploading ? 'Uploading...' : 'Click to upload logo'}
+                  </span>
+                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>PNG, JPG up to 5MB</span>
+                  <input id="logo-upload" type="file" accept="image/*" style={{ display: 'none' }} onChange={handleLogoUpload} disabled={logoUploading} />
+                </label>
+              )}
+            </div>
+            {/* Signature */}
+            <div>
+              <label style={labelStyle}>Authorized Signature</label>
+              {signatureUrl ? (
+                <div style={{ border: '1px solid var(--border-subtle)', borderRadius: 2, padding: 16, background: 'var(--bg-secondary)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, position: 'relative' }}>
+                  <img src={signatureUrl} alt="Signature" style={{ maxHeight: 80, maxWidth: '100%', objectFit: 'contain' }} />
+                  <button
+                    data-testid="remove-signature-btn"
+                    type="button"
+                    onClick={() => setSignatureUrl('')}
+                    style={{ position: 'absolute', top: 6, right: 6, background: 'rgba(0,0,0,0.4)', color: '#fff', border: 'none', borderRadius: '50%', width: 22, height: 22, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0 }}
+                  ><X size={12} /></button>
+                  <label htmlFor="sig-upload-replace" style={{ fontSize: 11, color: 'var(--brand-primary)', cursor: 'pointer', fontWeight: 600 }}>
+                    Replace
+                    <input id="sig-upload-replace" type="file" accept="image/*" style={{ display: 'none' }} onChange={handleSignatureUpload} />
+                  </label>
+                </div>
+              ) : (
+                <label
+                  data-testid="signature-upload-area"
+                  htmlFor="signature-upload"
+                  style={{
+                    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                    border: '2px dashed var(--border-strong)', borderRadius: 2, padding: '24px 16px',
+                    cursor: signatureUploading ? 'not-allowed' : 'pointer', background: 'var(--bg-secondary)',
+                    gap: 8, opacity: signatureUploading ? 0.6 : 1,
+                  }}
+                >
+                  <UploadSimple size={24} style={{ color: 'var(--text-muted)' }} />
+                  <span style={{ fontSize: 13, color: 'var(--text-secondary)', fontWeight: 500 }}>
+                    {signatureUploading ? 'Uploading...' : 'Click to upload signature'}
+                  </span>
+                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>PNG, JPG up to 5MB</span>
+                  <input id="signature-upload" type="file" accept="image/*" style={{ display: 'none' }} onChange={handleSignatureUpload} disabled={signatureUploading} />
+                </label>
+              )}
             </div>
           </div>
         </div>

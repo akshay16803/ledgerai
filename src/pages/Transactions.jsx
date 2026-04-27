@@ -2,7 +2,7 @@ import { s, getCurrentLanguage } from '../lib/localization';
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../lib/api';
 import { getCached, setCache } from '../lib/cache';
-import { Plus, X, Funnel, PencilSimple, Robot, Receipt, BookOpen, ListBullets, MagnifyingGlass } from '@phosphor-icons/react';
+import { Plus, X, Funnel, PencilSimple, Robot, Receipt, BookOpen, ListBullets, MagnifyingGlass, Trash, CheckSquare, Square } from '@phosphor-icons/react';
 import { useNavigate } from 'react-router-dom';
 import { EditTransactionModal } from '../components/EditTransactionModal';
 import { SalesInvoiceModal } from '../components/SalesInvoiceModal';
@@ -31,6 +31,7 @@ export default function Transactions() {
   const [filterDateTo, setFilterDateTo] = useState('');
   const [filterSearch, setFilterSearch] = useState('');
   const [editingTxn, setEditingTxn] = useState(null);
+  const [selectedIds, setSelectedIds] = useState(new Set());
   const [showSalesInvoice, setShowSalesInvoice] = useState(false);
   const [showPurchaseInvoice, setShowPurchaseInvoice] = useState(false);
   const [businessCountry, setBusinessCountry] = useState('IN');
@@ -55,6 +56,7 @@ export default function Transactions() {
   };
 
   const loadData = useCallback(async () => {
+    setSelectedIds(new Set());
     try {
       const params = new URLSearchParams();
       if (filterType) params.set('transaction_type', filterType);
@@ -101,6 +103,32 @@ export default function Transactions() {
     catch (err) { alert(err.message); }
   };
 
+  const handleBulkDelete = async () => {
+    if (selectedIds.size === 0) return;
+    if (!confirm(`Delete ${selectedIds.size} selected transaction${selectedIds.size !== 1 ? 's' : ''}? This cannot be undone.`)) return;
+    try {
+      await Promise.all([...selectedIds].map(id => api.del(`/api/transactions/${id}`)));
+      setSelectedIds(new Set());
+      loadData();
+    } catch (err) { alert(err.message); }
+  };
+
+  const toggleSelect = (id) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === transactions.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(transactions.map(t => t.transaction_id)));
+    }
+  };
+
   const getAccountName = (id) => accounts.find(a => a.account_id === id)?.name || 'Unidentified Account';
   const getCategoryName = (id) => categories.find(c => c.category_id === id)?.name || '';
 
@@ -121,6 +149,36 @@ export default function Transactions() {
           <Plus size={14} weight="bold" /> {s('new_transaction')}
         </button>
       </div>
+
+      {/* Bulk Delete Bar */}
+      {selectedIds.size > 0 && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8,
+          padding: '10px 16px', background: 'rgba(194,109,92,0.08)', border: '1px solid rgba(194,109,92,0.3)',
+          borderRadius: 2,
+        }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--brand-primary)' }}>
+            {selectedIds.size} selected
+          </span>
+          <button
+            data-testid="bulk-delete-btn"
+            onClick={handleBulkDelete}
+            style={{
+              background: '#dc3545', color: '#fff', border: 'none', borderRadius: 2,
+              padding: '6px 16px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+              fontFamily: 'var(--font-body)', display: 'flex', alignItems: 'center', gap: 5,
+            }}
+          >
+            <Trash size={13} weight="bold" /> Delete selected
+          </button>
+          <button
+            onClick={() => setSelectedIds(new Set())}
+            style={{ background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: 12, cursor: 'pointer', fontFamily: 'var(--font-body)' }}
+          >
+            Clear
+          </button>
+        </div>
+      )}
 
       {/* Filter Bar */}
       <div style={{
@@ -339,6 +397,13 @@ export default function Transactions() {
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 700 }}>
             <thead>
               <tr style={{ borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-secondary)' }}>
+                <th style={{ padding: '12px 16px', width: 36 }}>
+                  <button onClick={toggleSelectAll} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center', color: 'var(--text-muted)' }}>
+                    {selectedIds.size === transactions.length && transactions.length > 0
+                      ? <CheckSquare size={16} weight="fill" style={{ color: 'var(--brand-primary)' }} />
+                      : <Square size={16} />}
+                  </button>
+                </th>
                 <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>{s('date')}</th>
                 <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>{s('type')}</th>
                 <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>{s('description')}</th>
@@ -350,9 +415,16 @@ export default function Transactions() {
             </thead>
             <tbody>
               {transactions.map(txn => (
-                <tr key={txn.transaction_id} data-testid={`txn-row-${txn.transaction_id}`} style={{ borderBottom: '1px solid var(--border-subtle)', transition: 'background 0.1s' }}
-                  onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-secondary)'}
-                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                <tr key={txn.transaction_id} data-testid={`txn-row-${txn.transaction_id}`} style={{ borderBottom: '1px solid var(--border-subtle)', transition: 'background 0.1s', background: selectedIds.has(txn.transaction_id) ? 'rgba(194,109,92,0.05)' : 'transparent' }}
+                  onMouseEnter={e => { if (!selectedIds.has(txn.transaction_id)) e.currentTarget.style.background = 'var(--bg-secondary)'; }}
+                  onMouseLeave={e => { if (!selectedIds.has(txn.transaction_id)) e.currentTarget.style.background = 'transparent'; }}>
+                  <td style={{ padding: '12px 16px', width: 36 }}>
+                    <button onClick={() => toggleSelect(txn.transaction_id)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center', color: 'var(--text-muted)' }}>
+                      {selectedIds.has(txn.transaction_id)
+                        ? <CheckSquare size={16} weight="fill" style={{ color: 'var(--brand-primary)' }} />
+                        : <Square size={16} />}
+                    </button>
+                  </td>
                   <td className="mono" style={{ padding: '12px 16px', fontSize: 12 }}>{txn.date}</td>
                   <td style={{ padding: '12px 16px' }}>
                     <span style={{
