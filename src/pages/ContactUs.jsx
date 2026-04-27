@@ -42,7 +42,7 @@ export default function ContactUs() {
                 {[
                   ['Trade Name', 'SpentyAI'],
                   ['Legal Entity', 'SpentyAI (Sole Proprietorship)'],
-                  ['Registered Address', 'India'],
+                  ['Registered Address', '102, Midrise Street, M27, SS Infinitus Phase 2-B, Lasudiya Mauri, Indore, Madhya Pradesh, India'],
                   ['Website', 'www.spentyai.com'],
                   ['Customer Support Email', 'support@spentyai.com'],
                   ['Business Email', 'hello@spentyai.com'],
