@@ -899,7 +899,7 @@ export default function EmailSync() {
       )}
 
       {/* Pending Review Transactions */}
-      {pendingTotal > 0 && (
+      {!loading && (
         <div data-testid="pending-review-section" style={{ marginTop: 32 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
             <h2 style={{ fontSize: 20, fontWeight: 500, margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -957,6 +957,17 @@ export default function EmailSync() {
                 </tr>
               </thead>
               <tbody>
+                {pendingTxns.length === 0 && (
+                  <tr>
+                    <td colSpan={8} style={{ padding: '36px 20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+                        <Check size={28} weight="duotone" style={{ color: 'var(--success)', opacity: 0.6 }} />
+                        <span style={{ fontWeight: 600 }}>All caught up!</span>
+                        <span style={{ fontSize: 12 }}>No transactions are waiting for review right now.</span>
+                      </div>
+                    </td>
+                  </tr>
+                )}
                 {pendingTxns.map(txn => (
                   <tr key={txn.transaction_id} data-testid={`review-txn-${txn.transaction_id}`}
                     style={{ borderBottom: '1px solid var(--border-subtle)' }}>

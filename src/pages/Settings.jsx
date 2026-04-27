@@ -478,7 +478,7 @@ export default function Settings() {
             </div>
             <div style={{ gridColumn: '1 / -1' }}>
               <label style={labelStyle}>Address</label>
-              <input data-testid="firm-address" value={firmAddress} onChange={e => setFirmAddress(e.target.value)} placeholder="Street address, building, floor" style={fieldStyle} />
+              <textarea data-testid="firm-address" value={firmAddress} onChange={e => setFirmAddress(e.target.value)} placeholder="Street address, building, floor" rows={3} style={{ ...fieldStyle, resize: 'vertical', minHeight: 72 }} />
             </div>
             <div>
               <label style={labelStyle}>City</label>

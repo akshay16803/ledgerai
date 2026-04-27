@@ -552,9 +552,9 @@ export default function Transactions() {
                       {txn.transaction_type}
                     </span>
                   </td>
-                  <td style={{ padding: '12px 16px', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                      {txn.description || '-'}
+                  <td style={{ padding: '12px 16px', maxWidth: 220 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{txn.description || '-'}</span>
                       {txn.source === 'ai_chat' && (
                         <span title="Posted by AI Assistant" style={{
                           display: 'inline-flex', alignItems: 'center', gap: 3,
@@ -565,7 +565,12 @@ export default function Transactions() {
                           <Robot size={10} weight="fill" /> AI
                         </span>
                       )}
-                    </span>
+                    </div>
+                    {txn.payment_method && (
+                      <div className="mono" style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                        {txn.payment_method.replace(/_/g, ' ')}
+                      </div>
+                    )}
                   </td>
                   <td style={{ padding: '12px 16px', fontSize: 12 }}>
                     {getAccountName(txn.account_id)}
