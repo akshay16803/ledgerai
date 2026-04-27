@@ -2,7 +2,7 @@ import { s, getCurrentLanguage } from '../lib/localization';
 import { useState, useEffect } from 'react';
 import { api } from '../lib/api';
 import { getCached, setCache } from '../lib/cache';
-import { PaperPlaneRight, Clock, CheckCircle } from '@phosphor-icons/react';
+import { PaperPlaneRight, Clock, CheckCircle, ArrowUp } from '@phosphor-icons/react';
 
 export default function FeatureRequests() {
   const [lang, setLang] = useState(getCurrentLanguage());
@@ -14,12 +14,26 @@ export default function FeatureRequests() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [voting, setVoting] = useState({});
 
   const load = () => {
     api.get('/api/feature-requests').then(data => { setRequests(data); setCache('featurerequests', data); }).catch(() => {}).finally(() => setLoading(false));
   };
 
   useEffect(() => { load(); }, []);
+
+  const handleVote = async (requestId) => {
+    if (voting[requestId]) return;
+    setVoting(v => ({ ...v, [requestId]: true }));
+    try {
+      await api.post(`/api/feature-requests/${requestId}/vote`);
+      load(); // refresh to get updated vote count
+    } catch (err) {
+      // silent fail — voting may already be counted
+    } finally {
+      setVoting(v => ({ ...v, [requestId]: false }));
+    }
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -137,6 +151,21 @@ export default function FeatureRequests() {
               </div>
               <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: 12 }}>{req.description}</p>
               <div style={{ display: 'flex', gap: 16 }}>
+                <button
+                  data-testid={`vote-${req.request_id}`}
+                  onClick={() => handleVote(req.request_id)}
+                  disabled={voting[req.request_id]}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 4,
+                    background: 'none', border: '1px solid var(--border-strong)',
+                    borderRadius: 2, padding: '3px 10px', cursor: 'pointer',
+                    fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)',
+                    fontFamily: 'var(--font-mono)',
+                  }}
+                >
+                  <ArrowUp size={11} weight="bold" />
+                  {req.votes ?? 0}
+                </button>
                 <span className="mono" style={{ fontSize: 11, color: 'var(--text-muted)' }}>
                   <Clock size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} />
                   {new Date(req.created_at).toLocaleDateString()}

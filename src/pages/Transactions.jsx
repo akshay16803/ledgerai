@@ -2,7 +2,7 @@ import { s, getCurrentLanguage } from '../lib/localization';
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../lib/api';
 import { getCached, setCache } from '../lib/cache';
-import { Plus, X, Funnel, PencilSimple, Robot, Receipt, BookOpen, ListBullets } from '@phosphor-icons/react';
+import { Plus, X, Funnel, PencilSimple, Robot, Receipt, BookOpen, ListBullets, MagnifyingGlass } from '@phosphor-icons/react';
 import { useNavigate } from 'react-router-dom';
 import { EditTransactionModal } from '../components/EditTransactionModal';
 import { SalesInvoiceModal } from '../components/SalesInvoiceModal';
@@ -29,6 +29,7 @@ export default function Transactions() {
   const [filterAccount, setFilterAccount] = useState('');
   const [filterDateFrom, setFilterDateFrom] = useState('');
   const [filterDateTo, setFilterDateTo] = useState('');
+  const [filterSearch, setFilterSearch] = useState('');
   const [editingTxn, setEditingTxn] = useState(null);
   const [showSalesInvoice, setShowSalesInvoice] = useState(false);
   const [showPurchaseInvoice, setShowPurchaseInvoice] = useState(false);
@@ -60,6 +61,7 @@ export default function Transactions() {
       if (filterAccount) params.set('account_id', filterAccount);
       if (filterDateFrom) params.set('from_date', filterDateFrom);
       if (filterDateTo) params.set('to_date', filterDateTo);
+      if (filterSearch.trim()) params.set('search', filterSearch.trim());
       params.set('status', 'approved');
       params.set('limit', viewMode === 'ledger' ? '500' : '100');
       const [txnRes, accs, cats] = await Promise.all([
@@ -76,9 +78,15 @@ export default function Transactions() {
       }
     } catch (err) { /* Error handled silently - data will show empty state */ }
     setLoading(false);
-  }, [filterType, filterAccount, filterDateFrom, filterDateTo, viewMode]);
+  }, [filterType, filterAccount, filterDateFrom, filterDateTo, filterSearch, viewMode]);
 
   useEffect(() => { loadData(); }, [loadData]); // eslint-disable-line react-hooks/set-state-in-effect
+
+  // Debounce search
+  useEffect(() => {
+    const t = setTimeout(() => { loadData(); }, 400);
+    return () => clearTimeout(t);
+  }, [filterSearch]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch pending count for empty state messaging
   useEffect(() => {
@@ -120,6 +128,26 @@ export default function Transactions() {
         background: '#fff', border: '1px solid var(--border-subtle)', borderRadius: 2, padding: '12px 16px',
       }}>
         <Funnel size={16} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
+        {/* Search */}
+        <div style={{ position: 'relative' }}>
+          <MagnifyingGlass size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', pointerEvents: 'none' }} />
+          <input
+            data-testid="txn-search"
+            type="text"
+            value={filterSearch}
+            onChange={e => setFilterSearch(e.target.value)}
+            placeholder={s('search') || 'Search transactions...'}
+            style={{
+              padding: '8px 12px 8px 32px',
+              border: '1px solid var(--border-strong)',
+              borderRadius: 2, fontSize: 13,
+              fontFamily: 'var(--font-body)',
+              background: 'var(--bg-primary)',
+              width: 220,
+              outline: 'none',
+            }}
+          />
+        </div>
         <select data-testid="filter-type" value={filterType} onChange={e => setFilterType(e.target.value)}
           style={{ padding: '8px 14px', border: '1px solid var(--border-strong)', borderRadius: 2, fontSize: 13, fontFamily: 'var(--font-body)', background: '#fff' }}>
           <option value="">{s('all')}</option>
@@ -139,8 +167,8 @@ export default function Transactions() {
         <input data-testid="filter-date-to" type="date" value={filterDateTo} onChange={e => setFilterDateTo(e.target.value)}
           style={{ padding: '8px 14px', border: '1px solid var(--border-strong)', borderRadius: 2, fontSize: 13, fontFamily: 'var(--font-body)', background: '#fff' }}
           title={s('to_date')} />
-        {(filterType || filterAccount || filterDateFrom || filterDateTo) && (
-          <button onClick={() => { setFilterType(''); setFilterAccount(''); setFilterDateFrom(''); setFilterDateTo(''); }}
+        {(filterType || filterAccount || filterDateFrom || filterDateTo || filterSearch) && (
+          <button onClick={() => { setFilterType(''); setFilterAccount(''); setFilterDateFrom(''); setFilterDateTo(''); setFilterSearch(''); }}
             style={{ background: 'none', border: 'none', color: 'var(--accent-1)', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font-body)' }}>
             Clear filters
           </button>

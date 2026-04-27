@@ -2,7 +2,7 @@ import { s, getCurrentLanguage } from '../lib/localization';
 import { useState, useEffect } from 'react';
 import { api } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
-import { Headset, PaperPlaneTilt, CheckCircle, Warning, CaretDown } from '@phosphor-icons/react';
+import { Headset, PaperPlaneTilt, CheckCircle, Warning, CaretDown, Question } from '@phosphor-icons/react';
 
 const CATEGORIES = [
   { value: 'bug', label: 'Bug Report', description: 'Something is not working correctly' },
@@ -32,6 +32,15 @@ export default function Support() {
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState('');
+  const [faqs, setFaqs] = useState([]);
+  const [faqLoading, setFaqLoading] = useState(true);
+  const [expandedFaq, setExpandedFaq] = useState(null);
+
+  useEffect(() => {
+    api.get('/api/faq').then(data => {
+      setFaqs(Array.isArray(data) ? data : (data?.faqs || []));
+    }).catch(() => {}).finally(() => setFaqLoading(false));
+  }, []);
 
   const handleChange = (field, value) => {
     setForm(prev => ({ ...prev, [field]: value }));
@@ -335,6 +344,43 @@ export default function Support() {
           {submitting ? s('syncing') : s('submit')}
         </button>
       </form>
+
+      {/* FAQ Section */}
+      {(faqLoading || faqs.length > 0) && (
+        <div style={{ maxWidth: 640, marginTop: 48 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 20 }}>
+            <Question size={20} weight="duotone" style={{ color: 'var(--brand-primary)' }} />
+            <h2 style={{ fontSize: 18, fontWeight: 600, letterSpacing: '-0.01em' }}>Frequently Asked Questions</h2>
+          </div>
+          {faqLoading ? (
+            <div className="mono" style={{ color: 'var(--text-muted)', fontSize: 13 }}>Loading FAQs...</div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {faqs.map((faq, i) => (
+                <div key={faq.faq_id || i} style={{ background: '#fff', border: '1px solid var(--border-subtle)', borderRadius: 2, overflow: 'hidden' }}>
+                  <button
+                    onClick={() => setExpandedFaq(expandedFaq === i ? null : i)}
+                    style={{
+                      width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                      padding: '14px 20px', background: 'none', border: 'none', cursor: 'pointer',
+                      textAlign: 'left', fontFamily: 'var(--font-body)',
+                    }}
+                  >
+                    <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>{faq.question}</span>
+                    <CaretDown size={16} style={{ color: 'var(--text-muted)', flexShrink: 0, marginLeft: 12,
+                      transform: expandedFaq === i ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.15s' }} />
+                  </button>
+                  {expandedFaq === i && (
+                    <div style={{ padding: '0 20px 16px', fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.7, borderTop: '1px solid var(--border-subtle)', paddingTop: 12 }}>
+                      {faq.answer}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

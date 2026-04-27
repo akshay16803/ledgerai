@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { getCached, setCache } from '../lib/cache';
 import { s, getCurrentLanguage } from '../lib/localization';
-import { Plus, Trash, PencilSimple, Bank, Wallet, CreditCard, X, Gear, Tag, Check, Warning, CaretRight, CaretDown, CalendarBlank, CurrencyCircleDollar, SpinnerGap, ChartLineUp, UploadSimple, PencilLine, FileText, Robot } from '@phosphor-icons/react';
+import { Plus, Trash, PencilSimple, Bank, Wallet, CreditCard, X, Gear, Tag, Check, Warning, CaretRight, CaretDown, CalendarBlank, CurrencyCircleDollar, SpinnerGap, ChartLineUp, UploadSimple, PencilLine, FileText, Robot, MagnifyingGlass } from '@phosphor-icons/react';
 
 const accountTypes = [
   { value: 'asset', label: s('asset') },
@@ -1360,6 +1360,9 @@ export default function Accounts() {
     return accounts.filter(acc => !acc.balance_as_of_date);
   }, [accounts]);
 
+  // Search / filter state
+  const [searchQuery, setSearchQuery] = useState('');
+
   // Expanded sub-type accordion state
   const [expandedSubTypes, setExpandedSubTypes] = useState({});
   const toggleSubType = useCallback((key) => {
@@ -1383,7 +1386,26 @@ export default function Accounts() {
           <h1 className="page-title" style={{ fontSize: 28, fontWeight: 500, letterSpacing: '-0.02em' }}>{s('accounts')}</h1>
           <p className="mono page-subtitle" style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>Manage your financial accounts</p>
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <div style={{ position: 'relative' }}>
+            <MagnifyingGlass size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', pointerEvents: 'none' }} />
+            <input
+              data-testid="account-search"
+              type="text"
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              placeholder="Search accounts..."
+              style={{
+                padding: '8px 12px 8px 32px',
+                border: '1px solid var(--border-strong)',
+                borderRadius: 2, fontSize: 13,
+                fontFamily: 'var(--font-body)',
+                background: 'var(--bg-primary)',
+                width: 200,
+                outline: 'none',
+              }}
+            />
+          </div>
           <button data-testid="manage-subtypes-btn" onClick={() => setShowSubTypeManager(true)} style={{
             background: 'none', color: 'var(--text-secondary)', border: '1px solid var(--border-strong)',
             padding: '10px 16px', borderRadius: 2, fontSize: 13, fontWeight: 500,
@@ -1702,20 +1724,49 @@ export default function Accounts() {
         <div style={{ textAlign: 'center', padding: 60, background: '#fff', border: '1px solid var(--border-subtle)', borderRadius: 2 }}>
           <p style={{ color: 'var(--text-muted)', fontSize: 14 }}>{s('no_accounts_yet')}</p>
         </div>
-      ) : (
-        <AccountsGroupedList
-          accounts={accounts}
-          onEdit={openEdit}
-          onDelete={handleDelete}
-          expandedSubTypes={expandedSubTypes}
-          toggleSubType={toggleSubType}
-          onViewSchedule={(acc) => setAmortAcc(acc)}
-          onCalcInterest={(acc) => setInterestAcc(acc)}
-          onUploadStatement={(acc) => setUploadStatementAcc(acc)}
-          onManualEntry={(acc) => setManualEntryAcc(acc)}
-          onViewDetail={(acc) => navigate(`/accounts/${acc.account_id}`)}
-        />
-      )}
+      ) : (() => {
+        const totalBalance = accounts.reduce((sum, a) => sum + (Number(a.current_balance) || 0), 0);
+        const filteredAccounts = accounts.filter(a =>
+          !searchQuery || a.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          a.sub_type?.toLowerCase().includes(searchQuery.toLowerCase())
+        );
+        return (
+          <>
+            {/* Total Balance Card */}
+            {accounts.length > 0 && (
+              <div style={{
+                background: 'var(--brand-primary)', color: '#fff',
+                borderRadius: 2, padding: '20px 24px', marginBottom: 20,
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center'
+              }}>
+                <div>
+                  <div className="mono" style={{ fontSize: 11, letterSpacing: '0.08em', textTransform: 'uppercase', opacity: 0.8, marginBottom: 6 }}>
+                    Total Balance
+                  </div>
+                  <div style={{ fontSize: 28, fontWeight: 700, letterSpacing: '-0.02em' }}>
+                    {formatCurrency(totalBalance)}
+                  </div>
+                </div>
+                <div className="mono" style={{ fontSize: 12, opacity: 0.7 }}>
+                  {accounts.length} account{accounts.length !== 1 ? 's' : ''}
+                </div>
+              </div>
+            )}
+            <AccountsGroupedList
+              accounts={filteredAccounts}
+              onEdit={openEdit}
+              onDelete={handleDelete}
+              expandedSubTypes={expandedSubTypes}
+              toggleSubType={toggleSubType}
+              onViewSchedule={(acc) => setAmortAcc(acc)}
+              onCalcInterest={(acc) => setInterestAcc(acc)}
+              onUploadStatement={(acc) => setUploadStatementAcc(acc)}
+              onManualEntry={(acc) => setManualEntryAcc(acc)}
+              onViewDetail={(acc) => navigate(`/accounts/${acc.account_id}`)}
+            />
+          </>
+        );
+      })()}
 
       {/* OD Interest Calculator Modal */}
       {interestAcc && (

@@ -2,7 +2,7 @@ import { s, getCurrentLanguage } from '../lib/localization';
 import { useState, useEffect } from 'react';
 import { api } from '../lib/api';
 import { getCached, setCache } from '../lib/cache';
-import { Plus, Trash, CaretRight } from '@phosphor-icons/react';
+import { Plus, Trash, CaretRight, PencilSimple } from '@phosphor-icons/react';
 
 export default function Categories() {
   const [lang, setLang] = useState(getCurrentLanguage());
@@ -14,6 +14,7 @@ export default function Categories() {
   const [form, setForm] = useState({ name: '', parent_id: '' });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [editingCat, setEditingCat] = useState(null);
 
   const load = () => {
     api.get('/api/categories').then(data => { setCategories(data); setCache('categories', data); }).catch(() => {}).finally(() => setLoading(false));
@@ -37,6 +38,14 @@ export default function Categories() {
     setShowForm(false);
     setForm({ name: '', parent_id: '' });
     setError('');
+    setEditingCat(null);
+  };
+
+  const openEditCategory = (cat) => {
+    setEditingCat(cat);
+    setForm({ name: cat.name, parent_id: cat.parent_id || '' });
+    setError('');
+    setShowForm(true);
   };
 
   const handleSubmit = async (e) => {
@@ -46,11 +55,15 @@ export default function Categories() {
     if (!form.name.trim()) { setError('Name is required'); return; }
     setSaving(true);
     try {
-      await api.post('/api/categories', {
-        name: form.name.trim(),
-        category_type: activeTab,
-        parent_id: form.parent_id || null,
-      });
+      if (editingCat) {
+        await api.put('/api/categories/' + editingCat.category_id, { name: form.name.trim() });
+      } else {
+        await api.post('/api/categories', {
+          name: form.name.trim(),
+          category_type: activeTab,
+          parent_id: form.parent_id || null,
+        });
+      }
       closeForm();
       load();
     } catch (err) { setError(err.message); } finally { setSaving(false); }
@@ -108,7 +121,12 @@ export default function Categories() {
         <div data-testid="add-category-form" style={{
           background: '#fff', border: '1px solid var(--border-subtle)', borderRadius: 2, padding: 24, marginBottom: 24
         }}>
-          {selectedParent && (
+          {editingCat && (
+            <div className="mono" style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 14, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              Editing: <span style={{ color: 'var(--text-primary)' }}>{editingCat.name}</span>
+            </div>
+          )}
+          {selectedParent && !editingCat && (
             <div className="mono" style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 14, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
               Adding sub-category under <span style={{ color: 'var(--text-primary)' }}>{selectedParent.name}</span>
             </div>
@@ -123,6 +141,7 @@ export default function Categories() {
               <div>
                 <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 6 }}>{s('parent')} ({s('leave_empty_info')})</label>
                 <select data-testid="category-parent-select" value={form.parent_id} onChange={e => setForm(f => ({...f, parent_id: e.target.value}))}
+                  disabled={!!editingCat}
                   style={inputStyle}>
                   <option value="">{s('none_top_level')}</option>
                   {parentCats.map(c => <option key={c.category_id} value={c.category_id}>{c.name}</option>)}
@@ -134,7 +153,7 @@ export default function Categories() {
               <button data-testid="save-category-btn" type="submit" disabled={saving} style={{
                 background: 'var(--brand-primary)', color: '#fff', border: 'none',
                 padding: '10px 24px', borderRadius: 2, fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font-body)'
-              }}>{saving ? 'Saving...' : 'Save'}</button>
+              }}>{saving ? 'Saving...' : editingCat ? 'Update' : 'Save'}</button>
               <button type="button" onClick={closeForm} style={{
                 background: 'none', border: '1px solid var(--border-strong)', color: 'var(--text-secondary)',
                 padding: '10px 24px', borderRadius: 2, fontSize: 13, cursor: 'pointer', fontFamily: 'var(--font-body)'
@@ -176,6 +195,11 @@ export default function Categories() {
                       }}>
                       <Plus size={11} weight="bold" /> {s('add_subcategory')}
                     </button>
+                    <button data-testid={`edit-category-${cat.category_id}`} onClick={() => openEditCategory(cat)}
+                      title="Edit category"
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4 }}>
+                      <PencilSimple size={14} />
+                    </button>
                     <button data-testid={`delete-category-${cat.category_id}`} data-guard onClick={() => handleDelete(cat.category_id)}
                       style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4 }}>
                       <Trash size={14} />
@@ -190,10 +214,17 @@ export default function Categories() {
                         padding: '10px 20px 10px 44px', borderBottom: '1px solid var(--border-subtle)'
                       }}>
                         <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{sub.name}</span>
-                        <button data-testid={`delete-subcategory-${sub.category_id}`} data-guard onClick={() => handleDelete(sub.category_id)}
-                          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4 }}>
-                          <Trash size={12} />
-                        </button>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <button data-testid={`edit-subcategory-${sub.category_id}`} onClick={() => openEditCategory(sub)}
+                            title="Edit subcategory"
+                            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4 }}>
+                            <PencilSimple size={12} />
+                          </button>
+                          <button data-testid={`delete-subcategory-${sub.category_id}`} data-guard onClick={() => handleDelete(sub.category_id)}
+                            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4 }}>
+                            <Trash size={12} />
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>
