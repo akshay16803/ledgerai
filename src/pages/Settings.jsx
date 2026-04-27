@@ -3,7 +3,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
-import { Check, Globe, CalendarBlank, Buildings, Bank, Warning, ArrowLeft, Receipt, MapPin, ArrowCounterClockwise, Trash, UploadSimple, Image, X } from '@phosphor-icons/react';
+import { Check, Globe, CalendarBlank, Buildings, Bank, Warning, ArrowLeft, ArrowRight, Receipt, MapPin, ArrowCounterClockwise, Trash, UploadSimple, Image, X } from '@phosphor-icons/react';
 
 const API = import.meta.env.REACT_APP_BACKEND_URL || '';
 import { COUNTRIES } from '../lib/countryConfig';
@@ -720,6 +720,52 @@ export default function Settings() {
           </span>
         )}
       </div>
+
+      {/* Help & Support */}
+      {!setupMode && (
+        <div style={{
+          background: '#fff', border: '1px solid var(--border-subtle)', borderRadius: 2,
+          padding: 28, marginTop: 32,
+        }}>
+          <h2 style={{ fontSize: 15, fontWeight: 600, marginBottom: 16 }}>Help & Support</h2>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <a
+              href="https://www.spentyai.com/help"
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '14px 18px', border: '1px solid var(--border-subtle)', borderRadius: 2,
+                textDecoration: 'none', color: 'var(--text-primary)', transition: 'background 0.1s',
+              }}
+              onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-secondary)'}
+              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+            >
+              <div>
+                <div style={{ fontWeight: 600, fontSize: 13 }}>Help Center</div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>Guides, FAQs, and how-to articles</div>
+              </div>
+              <ArrowRight size={16} style={{ color: 'var(--text-muted)' }} />
+            </a>
+            <a
+              href="mailto:support@spentyai.com"
+              style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '14px 18px', border: '1px solid var(--border-subtle)', borderRadius: 2,
+                textDecoration: 'none', color: 'var(--text-primary)', transition: 'background 0.1s',
+              }}
+              onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-secondary)'}
+              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+            >
+              <div>
+                <div style={{ fontWeight: 600, fontSize: 13 }}>Contact Support</div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>support@spentyai.com</div>
+              </div>
+              <ArrowRight size={16} style={{ color: 'var(--text-muted)' }} />
+            </a>
+          </div>
+        </div>
+      )}
 
       {/* Danger Zone */}
       {!setupMode && (
