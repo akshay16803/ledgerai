@@ -235,6 +235,38 @@ export default function CashFlow() {
   };
 
   const [editingMandate, setEditingMandate] = useState(null);
+  const [viewingMandateSource, setViewingMandateSource] = useState(null); // { subject, body, type, from, date } or null
+  const [mandateSourceLoading, setMandateSourceLoading] = useState(false);
+
+  const handleViewMandateSource = async (m) => {
+    const sourceId = m.source_email_id || m.source_sms_id;
+    if (sourceId) {
+      setMandateSourceLoading(true);
+      try {
+        const data = await api.get(`/api/source/${sourceId}`);
+        setViewingMandateSource(data);
+      } catch {
+        // Fallback: show subject only
+        setViewingMandateSource({
+          type: 'email',
+          subject: m.source_email_subject || '(no subject)',
+          body: '(Full email body not available)',
+          from: m.source || '',
+          date: '',
+        });
+      } finally {
+        setMandateSourceLoading(false);
+      }
+    } else if (m.source_email_subject) {
+      setViewingMandateSource({
+        type: 'email',
+        subject: m.source_email_subject,
+        body: '(Full email body not available — connect email to view)',
+        from: m.source || '',
+        date: '',
+      });
+    }
+  };
 
   const handleMandateUpdate = async (mandateId, fields) => {
     const prev = mandates;
@@ -771,6 +803,20 @@ export default function CashFlow() {
                     </td>
                     <td style={{ ...tdStyle, textAlign: 'center' }}>
                       <div style={{ display: 'inline-flex', gap: 4 }}>
+                        {(m.source_email_id || m.source_sms_id || m.source_email_subject) && (
+                          <button
+                            data-testid={`mandate-view-source-${m.mandate_id}`}
+                            onClick={() => handleViewMandateSource(m)}
+                            disabled={mandateSourceLoading}
+                            title="View source email"
+                            style={{
+                              background: 'none', border: '1px solid var(--border-strong)',
+                              borderRadius: 2, padding: '4px 8px', cursor: mandateSourceLoading ? 'wait' : 'pointer',
+                              fontSize: 11, color: 'var(--text-muted)',
+                            }}>
+                            <Eye size={12} weight="bold" />
+                          </button>
+                        )}
                         <button
                           data-testid={`mandate-edit-${m.mandate_id}`}
                           onClick={() => setEditingMandate(m)}
@@ -937,6 +983,70 @@ export default function CashFlow() {
           onClose={() => setEditingMandate(null)}
         />
       )}
+
+      {/* Mandate Source Viewer */}
+      {viewingMandateSource && (
+        <MandateSourceModal
+          source={viewingMandateSource}
+          onClose={() => setViewingMandateSource(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+function MandateSourceModal({ source, onClose }) {
+  const overlayStyle = {
+    position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1000,
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+  };
+  return (
+    <div style={overlayStyle} onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: '#fff', borderRadius: 4, width: 560, maxWidth: '94vw', maxHeight: '80vh', display: 'flex', flexDirection: 'column', boxShadow: '0 8px 32px rgba(0,0,0,0.18)' }}>
+        <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--bg-secondary)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Eye size={16} weight="bold" style={{ color: 'var(--brand-primary)' }} />
+            <span style={{ fontSize: 15, fontWeight: 600 }}>
+              {source.type === 'sms' ? 'Original SMS' : 'Source Email'}
+            </span>
+          </div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
+            <X size={16} weight="bold" />
+          </button>
+        </div>
+        <div style={{ padding: '20px 24px', overflowY: 'auto', flex: 1 }}>
+          {source.subject && (
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)', marginBottom: 4 }}>Subject</div>
+              <div style={{ fontSize: 14, fontWeight: 600 }}>{source.subject}</div>
+            </div>
+          )}
+          {(source.from || source.date) && (
+            <div style={{ display: 'flex', gap: 24, marginBottom: 14 }}>
+              {source.from && (
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)', marginBottom: 4 }}>From</div>
+                  <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{source.from}</div>
+                </div>
+              )}
+              {source.date && (
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)', marginBottom: 4 }}>Date</div>
+                  <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{source.date}</div>
+                </div>
+              )}
+            </div>
+          )}
+          {source.body && (
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)', marginBottom: 8 }}>Body</div>
+              <div style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--text-secondary)', whiteSpace: 'pre-wrap', wordBreak: 'break-word', background: 'var(--bg-secondary)', padding: 16, borderRadius: 2, border: '1px solid var(--border-subtle)', maxHeight: 280, overflowY: 'auto' }}>
+                {source.body}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

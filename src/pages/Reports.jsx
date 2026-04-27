@@ -516,9 +516,9 @@ export default function Reports() {
           <button key={p.label} data-testid={`period-btn-${i}`}
             onClick={() => handlePreset(i)}
             style={{
-              padding: '7px 16px', borderRadius: 2, fontSize: 12, fontWeight: 600,
+              padding: '6px 18px', borderRadius: 20, fontSize: 12, fontWeight: 600,
               fontFamily: 'var(--font-body)', cursor: 'pointer', transition: 'all 0.15s',
-              background: activePreset === i ? 'var(--brand-primary)' : '#fff',
+              background: activePreset === i ? 'var(--brand-primary)' : 'transparent',
               color: activePreset === i ? '#fff' : 'var(--text-secondary)',
               border: activePreset === i ? '1px solid var(--brand-primary)' : '1px solid var(--border-strong)',
             }}>
