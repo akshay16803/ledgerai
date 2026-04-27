@@ -182,7 +182,7 @@ function DonutChart({ data, total, typeLabel, onSliceClick }) {
         </text>
       </svg>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1, minWidth: 200 }}>
-        {slices.map((s, i) => (
+        {slices.slice(0, 6).map((s, i) => (
           <div
             key={`legend-${s.name}`}
             style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: onSliceClick ? 'pointer' : 'default', borderRadius: 2, padding: '3px 6px', background: hoveredSlice === i ? 'rgba(0,0,0,0.04)' : 'transparent', transition: 'background 0.1s' }}
@@ -198,6 +198,15 @@ function DonutChart({ data, total, typeLabel, onSliceClick }) {
             </span>
           </div>
         ))}
+        {slices.length > 6 && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, padding: '3px 6px', color: 'var(--text-muted)' }}>
+            <span style={{ width: 12, height: 12, borderRadius: 2, background: '#ccc', flexShrink: 0 }} />
+            <span style={{ flex: 1 }}>+{slices.length - 6} more categories</span>
+            <span className="mono" style={{ fontWeight: 600 }}>
+              {formatCurrency(slices.slice(6).reduce((sum, s) => sum + s.val, 0))}
+            </span>
+          </div>
+        )}
       </div>
     </div>
   );

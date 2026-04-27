@@ -16,6 +16,16 @@ function formatCurrency(amount) {
   return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(amount);
 }
 
+function formatCurrencyCompact(amount) {
+  if (amount == null) return '—';
+  const abs = Math.abs(amount);
+  const sign = amount < 0 ? '-' : '';
+  if (abs >= 10000000) return `${sign}₹${(abs / 10000000).toFixed(2).replace(/\.?0+$/, '')}Cr`;
+  if (abs >= 100000) return `${sign}₹${(abs / 100000).toFixed(2).replace(/\.?0+$/, '')}L`;
+  if (abs >= 1000) return `${sign}₹${(abs / 1000).toFixed(1).replace(/\.?0+$/, '')}K`;
+  return `${sign}₹${abs.toFixed(0)}`;
+}
+
 const FREQ_OPTIONS = [
   { value: 'daily', label: 'Daily' },
   { value: 'weekly', label: 'Weekly' },
@@ -41,7 +51,7 @@ function SummaryCard({ label, value, color, sub, onClick, active }) {
         {onClick && (active ? <CaretUp size={14} style={{ color: 'var(--brand-primary)' }} /> : <CaretDown size={14} style={{ color: 'var(--text-muted)' }} />)}
       </div>
       <div className="mono" style={{ fontSize: 26, fontWeight: 700, color, letterSpacing: '-0.02em' }}>
-        {formatCurrency(value)}
+        {formatCurrencyCompact(value)}
       </div>
       {sub && <div className="mono" style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>{sub}</div>}
     </div>
