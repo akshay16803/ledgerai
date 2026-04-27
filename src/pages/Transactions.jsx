@@ -2,7 +2,7 @@ import { s, getCurrentLanguage } from '../lib/localization';
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../lib/api';
 import { getCached, setCache } from '../lib/cache';
-import { Plus, X, Funnel, PencilSimple, Robot, Receipt, BookOpen, ListBullets, MagnifyingGlass, Trash, CheckSquare, Square } from '@phosphor-icons/react';
+import { Plus, X, Funnel, PencilSimple, Robot, Receipt, BookOpen, ListBullets, MagnifyingGlass, Trash, CheckSquare, Square, Check, Clock } from '@phosphor-icons/react';
 import { useNavigate } from 'react-router-dom';
 import { EditTransactionModal } from '../components/EditTransactionModal';
 import { SalesInvoiceModal } from '../components/SalesInvoiceModal';
@@ -36,6 +36,10 @@ export default function Transactions() {
   const [showPurchaseInvoice, setShowPurchaseInvoice] = useState(false);
   const [businessCountry, setBusinessCountry] = useState('IN');
   const [pendingCount, setPendingCount] = useState(0);
+  const [viewTab, setViewTab] = useState('approved'); // 'approved' | 'pending'
+  const [pendingTxns, setPendingTxns] = useState([]);
+  const [pendingLoading, setPendingLoading] = useState(false);
+  const [pendingTotal, setPendingTotal] = useState(0);
   const navigate = useNavigate();
   const [lang, setLang] = useState(getCurrentLanguage());
   useEffect(() => { const h = () => setLang(getCurrentLanguage()); window.addEventListener('languageChanged', h); return () => window.removeEventListener('languageChanged', h); }, []);
@@ -132,6 +136,37 @@ export default function Transactions() {
   const getAccountName = (id) => accounts.find(a => a.account_id === id)?.name || 'Unidentified Account';
   const getCategoryName = (id) => categories.find(c => c.category_id === id)?.name || '';
 
+  // ── Pending tab ──────────────────────────────────────────────────────
+  const loadPending = useCallback(async () => {
+    setPendingLoading(true);
+    try {
+      const res = await api.get('/api/transactions?status=pending_review&limit=100');
+      setPendingTxns(res.transactions || []);
+      setPendingTotal(res.total || 0);
+      setPendingCount(res.total || 0);
+    } catch { setPendingTxns([]); setPendingTotal(0); }
+    finally { setPendingLoading(false); }
+  }, []);
+
+  useEffect(() => {
+    if (viewTab === 'pending') loadPending();
+  }, [viewTab, loadPending]);
+
+  const handleApproveTxn = async (txnId) => {
+    try {
+      await api.post(`/api/transactions/${txnId}/approve`);
+      loadPending();
+    } catch (err) { alert(err.message); }
+  };
+
+  const handleRejectTxn = async (txnId) => {
+    if (!confirm('Reject this transaction? It will be removed from pending.')) return;
+    try {
+      await api.post(`/api/transactions/${txnId}/reject`);
+      loadPending();
+    } catch (err) { alert(err.message); }
+  };
+
   return (
     <div data-testid="transactions-page">
       <div className="action-bar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 32 }}>
@@ -149,6 +184,88 @@ export default function Transactions() {
           <Plus size={14} weight="bold" /> {s('new_transaction')}
         </button>
       </div>
+
+      {/* Tab Bar */}
+      <div style={{ display: 'flex', borderBottom: '2px solid var(--border-subtle)', marginBottom: 20 }}>
+        <button data-testid="tab-approved" onClick={() => setViewTab('approved')}
+          style={{ padding: '10px 20px', fontSize: 13, fontWeight: 600, background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-body)', color: viewTab === 'approved' ? 'var(--brand-primary)' : 'var(--text-muted)', borderBottom: viewTab === 'approved' ? '2px solid var(--brand-primary)' : '2px solid transparent', marginBottom: -2, transition: 'all 0.15s' }}>
+          {s('transactions') || 'Transactions'}
+        </button>
+        <button data-testid="tab-pending" onClick={() => setViewTab('pending')}
+          style={{ padding: '10px 20px', fontSize: 13, fontWeight: 600, background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-body)', color: viewTab === 'pending' ? 'var(--warning)' : 'var(--text-muted)', borderBottom: viewTab === 'pending' ? '2px solid var(--warning)' : '2px solid transparent', marginBottom: -2, transition: 'all 0.15s', display: 'flex', alignItems: 'center', gap: 6 }}>
+          <Clock size={13} weight="duotone" />
+          Pending Review
+          {pendingCount > 0 && (
+            <span className="mono" style={{ fontSize: 11, padding: '2px 6px', background: 'rgba(194,140,60,0.15)', color: 'var(--warning)', borderRadius: 10, fontWeight: 700 }}>{pendingCount}</span>
+          )}
+        </button>
+      </div>
+
+      {/* Pending Tab Content */}
+      {viewTab === 'pending' && (
+        <div data-testid="pending-transactions-section">
+          {pendingLoading ? (
+            <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Loading pending transactions...</div>
+          ) : pendingTxns.length === 0 ? (
+            <div style={{ padding: '40px 20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13, background: '#fff', border: '1px solid var(--border-subtle)', borderRadius: 2 }}>
+              <Check size={32} weight="duotone" style={{ color: 'var(--success)', marginBottom: 12, display: 'block', margin: '0 auto 12px' }} />
+              No pending transactions — you're all caught up!
+            </div>
+          ) : (
+            <div style={{ background: '#fff', border: '1px solid var(--border-subtle)', borderRadius: 2, overflow: 'hidden' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 640 }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-secondary)' }}>
+                    <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Date</th>
+                    <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Description</th>
+                    <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Type</th>
+                    <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Account</th>
+                    <th style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Amount</th>
+                    <th style={{ padding: '10px 16px', textAlign: 'center', fontWeight: 600, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pendingTxns.map(txn => (
+                    <tr key={txn.transaction_id} data-testid={`pending-txn-${txn.transaction_id}`}
+                      style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                      <td className="mono" style={{ padding: '10px 16px', fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{txn.date}</td>
+                      <td style={{ padding: '10px 16px', maxWidth: 280 }}>
+                        <div style={{ fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{txn.description || '—'}</div>
+                        {txn.category_name && <div className="mono" style={{ fontSize: 11, color: 'var(--text-muted)' }}>{txn.category_name}</div>}
+                      </td>
+                      <td style={{ padding: '10px 16px' }}>
+                        <span style={{ fontSize: 11, fontWeight: 600, padding: '3px 8px', borderRadius: 10, background: txn.transaction_type === 'income' ? 'rgba(58,92,74,0.1)' : 'rgba(150,69,58,0.1)', color: txn.transaction_type === 'income' ? 'var(--success)' : txn.transaction_type === 'expense' ? 'var(--error)' : 'var(--info)' }}>
+                          {txn.transaction_type}
+                        </span>
+                      </td>
+                      <td style={{ padding: '10px 16px', fontSize: 12, color: 'var(--text-secondary)' }}>{getAccountName(txn.account_id)}</td>
+                      <td className="mono" style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 600, color: txn.transaction_type === 'income' ? 'var(--success)' : 'var(--error)' }}>
+                        {txn.transaction_type === 'income' ? '+' : '-'}{formatCurrency(txn.amount)}
+                      </td>
+                      <td style={{ padding: '10px 16px', textAlign: 'center' }}>
+                        <div style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
+                          <button data-testid={`approve-txn-${txn.transaction_id}`}
+                            onClick={() => handleApproveTxn(txn.transaction_id)}
+                            style={{ background: 'var(--success)', color: '#fff', border: 'none', borderRadius: 2, padding: '5px 12px', fontSize: 11, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}>
+                            <Check size={11} weight="bold" /> Approve
+                          </button>
+                          <button data-testid={`reject-txn-${txn.transaction_id}`}
+                            onClick={() => handleRejectTxn(txn.transaction_id)}
+                            style={{ background: 'none', color: 'var(--error)', border: '1px solid var(--error)', borderRadius: 2, padding: '5px 12px', fontSize: 11, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}>
+                            <X size={11} weight="bold" /> Reject
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {viewTab === 'approved' && <>
 
       {/* Bulk Delete Bar */}
       {selectedIds.size > 0 && (
@@ -494,6 +611,7 @@ export default function Transactions() {
           </table>
         </div>
       )}
+      </>}
 
       {/* New Transaction Modal */}
       {showNewTxn && (
