@@ -4,8 +4,11 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import {
   ArrowLeft, MagnifyingGlass, Funnel, X, TrendUp, TrendDown,
-  ArrowsLeftRight, SpinnerGap, CaretDown
+  ArrowsLeftRight, SpinnerGap, CaretDown, Check, Warning,
+  ChartLineUp, UploadSimple, PencilLine, CalendarBlank,
 } from '@phosphor-icons/react';
+
+const API = import.meta.env.REACT_APP_BACKEND_URL || '';
 
 function formatCurrency(amount) {
   if (Math.abs(amount) >= 1_00_00_000) {
@@ -97,6 +100,109 @@ export default function AccountDetail() {
     } finally {
       setObSaving(false);
     }
+  };
+
+  // ── Tab state ────────────────────────────────────────────────────────
+  const [activeTab, setActiveTab] = useState('transactions');
+
+  // ── Amortization tab ─────────────────────────────────────────────────
+  const [amortData, setAmortData] = useState(null);
+  const [amortLoading, setAmortLoading] = useState(false);
+  const [amortError, setAmortError] = useState('');
+
+  const loadAmortization = useCallback(() => {
+    if (!accountId) return;
+    setAmortLoading(true); setAmortError('');
+    api.get(`/api/accounts/${accountId}/amortization`)
+      .then(d => { setAmortData(d); setAmortLoading(false); })
+      .catch(e => { setAmortError(e.message); setAmortLoading(false); });
+  }, [accountId]);
+
+  useEffect(() => {
+    if (activeTab === 'amortization') loadAmortization();
+  }, [activeTab, loadAmortization]);
+
+  // ── OD Interest tab ──────────────────────────────────────────────────
+  const now = new Date();
+  const defaultMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const [odMonth, setOdMonth] = useState(defaultMonth);
+  const [odData, setOdData] = useState(null);
+  const [odLoading, setOdLoading] = useState(false);
+  const [odSaving, setOdSaving] = useState(false);
+  const [odEditAmount, setOdEditAmount] = useState('');
+  const [odError, setOdError] = useState('');
+  const [odSaved, setOdSaved] = useState(false);
+
+  const calculateOD = async () => {
+    setOdLoading(true); setOdError(''); setOdData(null); setOdSaved(false);
+    try {
+      const res = await api.get(`/api/accounts/${accountId}/od-interest?month=${odMonth}`);
+      setOdData(res); setOdEditAmount(String(res.total_interest));
+    } catch (err) { setOdError(err.message); } finally { setOdLoading(false); }
+  };
+
+  const saveODInterest = async () => {
+    if (odSaving) return;
+    const amt = parseFloat(odEditAmount);
+    if (!amt || amt <= 0) { setOdError('Enter a valid amount'); return; }
+    setOdSaving(true); setOdError('');
+    try {
+      const [y, m] = odMonth.split('-').map(Number);
+      const lastDay = new Date(y, m, 0).getDate();
+      const txnDate = `${odMonth}-${String(lastDay).padStart(2, '0')}`;
+      await api.post(`/api/accounts/${accountId}/od-interest`, {
+        amount: amt, date: txnDate, month: odMonth,
+        description: `OD Interest — ${odMonth}`,
+      });
+      setOdSaved(true);
+    } catch (err) { setOdError(err.message); } finally { setOdSaving(false); }
+  };
+
+  // ── Demat tab ────────────────────────────────────────────────────────
+  const [dematFile, setDematFile] = useState(null);
+  const [dematUploading, setDematUploading] = useState(false);
+  const [dematUploadError, setDematUploadError] = useState('');
+  const [dematUploadDone, setDematUploadDone] = useState(false);
+  const [dematManual, setDematManual] = useState({
+    date: new Date().toISOString().split('T')[0],
+    description: '',
+    amount: '',
+    transaction_type: 'income',
+  });
+  const [dematManualSaving, setDematManualSaving] = useState(false);
+  const [dematManualError, setDematManualError] = useState('');
+  const [dematManualDone, setDematManualDone] = useState(false);
+
+  const handleDematUpload = async () => {
+    if (!dematFile) return;
+    setDematUploading(true); setDematUploadError(''); setDematUploadDone(false);
+    try {
+      const fd = new FormData();
+      fd.append('file', dematFile);
+      const res = await fetch(`${API}/api/accounts/${accountId}/demat-statement`, { method: 'POST', body: fd, credentials: 'include' });
+      if (!res.ok) throw new Error('Upload failed');
+      setDematUploadDone(true); setDematFile(null);
+    } catch (err) { setDematUploadError(err.message || 'Upload failed'); }
+    finally { setDematUploading(false); }
+  };
+
+  const handleDematManual = async () => {
+    if (!dematManual.description.trim() || !dematManual.amount) { setDematManualError('Fill all fields'); return; }
+    setDematManualSaving(true); setDematManualError(''); setDematManualDone(false);
+    try {
+      await api.post('/api/transactions', {
+        account_id: accountId,
+        date: dematManual.date,
+        description: dematManual.description.trim(),
+        amount: parseFloat(dematManual.amount),
+        transaction_type: dematManual.transaction_type,
+        status: 'approved',
+      });
+      setDematManualDone(true);
+      setDematManual({ date: new Date().toISOString().split('T')[0], description: '', amount: '', transaction_type: 'income' });
+      loadAccount();
+    } catch (err) { setDematManualError(err.message); }
+    finally { setDematManualSaving(false); }
   };
 
   // Load categories for filter
@@ -316,6 +422,232 @@ export default function AccountDetail() {
           <div className="mono" style={{ fontSize: 18, fontWeight: 600 }}>{total}</div>
         </div>
       </div>
+
+      {/* ── Tab Bar (only if account has special sub-type) ─────────────────── */}
+      {(() => {
+        const sub = account.sub_type || '';
+        const isLoan = (sub === 'loan' || sub === 'mortgage') && account.loan_emi_amount;
+        const isOD = sub === 'overdraft' && account.loan_interest_rate;
+        const isDemat = sub === 'demat';
+        if (!isLoan && !isOD && !isDemat) return null;
+        const tabs = [
+          { key: 'transactions', label: 'Transactions' },
+          ...(isLoan ? [{ key: 'amortization', label: 'Loan Schedule' }] : []),
+          ...(isOD ? [{ key: 'od_interest', label: 'OD Interest' }] : []),
+          ...(isDemat ? [{ key: 'demat', label: 'Demat' }] : []),
+        ];
+        return (
+          <div data-testid="account-tabs" style={{
+            display: 'flex', borderBottom: '2px solid var(--border-subtle)',
+            marginBottom: 20, gap: 0,
+          }}>
+            {tabs.map(tab => (
+              <button key={tab.key} data-testid={`tab-${tab.key}`}
+                onClick={() => setActiveTab(tab.key)}
+                style={{
+                  padding: '10px 20px', fontSize: 13, fontWeight: 600,
+                  background: 'none', border: 'none', cursor: 'pointer',
+                  fontFamily: 'var(--font-body)',
+                  color: activeTab === tab.key ? 'var(--brand-primary)' : 'var(--text-muted)',
+                  borderBottom: activeTab === tab.key ? '2px solid var(--brand-primary)' : '2px solid transparent',
+                  marginBottom: -2, transition: 'all 0.15s',
+                }}>
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        );
+      })()}
+
+      {/* ── Amortization Tab ─────────────────────────────────────────────── */}
+      {activeTab === 'amortization' && (
+        <div data-testid="amortization-tab" style={{ background: '#fff', border: '1px solid var(--border-subtle)', borderRadius: 2, padding: '24px 28px' }}>
+          {amortLoading ? (
+            <div style={{ padding: 40, textAlign: 'center' }}>
+              <SpinnerGap size={24} className="spin" style={{ color: 'var(--text-muted)' }} />
+              <style>{`.spin{animation:spin-anim 1s linear infinite}@keyframes spin-anim{from{transform:rotate(0)}to{transform:rotate(360deg)}}`}</style>
+            </div>
+          ) : amortError ? (
+            <div style={{ color: 'var(--error)', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Warning size={16} /> {amortError}
+            </div>
+          ) : amortData ? (
+            <>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(140px,1fr))', gap: 12, marginBottom: 24 }}>
+                {[
+                  { label: 'Outstanding', value: formatCurrency(amortData.outstanding_balance), color: 'var(--text-primary)' },
+                  { label: 'Interest Rate', value: `${amortData.interest_rate}% p.a.`, color: 'var(--info)' },
+                  { label: 'Monthly EMI', value: formatCurrency(amortData.emi_amount), color: 'var(--accent-1)' },
+                  { label: 'Total Interest', value: formatCurrency(amortData.total_interest), color: 'var(--warning)' },
+                  { label: 'EMIs Paid', value: `${amortData.payments_made} / ${amortData.tenure_months}`, color: 'var(--success)' },
+                  { label: 'Remaining', value: `${amortData.months_remaining} months`, color: 'var(--text-secondary)' },
+                ].map(c => (
+                  <div key={c.label} style={{ padding: '14px 16px', background: 'var(--bg-secondary)', borderRadius: 2 }}>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 500, marginBottom: 4 }}>{c.label}</div>
+                    <div className="mono" style={{ fontSize: 15, fontWeight: 600, color: c.color }}>{c.value}</div>
+                  </div>
+                ))}
+              </div>
+              <div style={{ overflow: 'auto', border: '1px solid var(--border-subtle)', borderRadius: 2 }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                  <thead>
+                    <tr style={{ background: 'var(--bg-secondary)', borderBottom: '2px solid var(--border-strong)' }}>
+                      {['#', 'Due Date', 'EMI', 'Principal', 'Interest', 'Outstanding'].map(h => (
+                        <th key={h} style={{ padding: '10px 12px', textAlign: h === '#' ? 'center' : 'right', fontWeight: 600, fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {amortData.schedule.map((row, i) => {
+                      const isPaid = i < amortData.payments_made;
+                      return (
+                        <tr key={row.month} data-testid={`amort-row-${row.month}`} style={{ borderBottom: '1px solid var(--border-subtle)', background: isPaid ? 'rgba(58,92,74,0.04)' : 'transparent', opacity: isPaid ? 0.7 : 1 }}>
+                          <td className="mono" style={{ padding: '8px 12px', textAlign: 'center', fontWeight: 500 }}>
+                            {isPaid ? <Check size={12} weight="bold" style={{ color: 'var(--success)' }} /> : row.month}
+                          </td>
+                          <td className="mono" style={{ padding: '8px 12px', textAlign: 'right', whiteSpace: 'nowrap' }}>{row.due_date}</td>
+                          <td className="mono" style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 500 }}>{formatCurrency(row.emi)}</td>
+                          <td className="mono" style={{ padding: '8px 12px', textAlign: 'right', color: 'var(--success)' }}>{formatCurrency(row.principal)}</td>
+                          <td className="mono" style={{ padding: '8px 12px', textAlign: 'right', color: 'var(--warning)' }}>{formatCurrency(row.interest)}</td>
+                          <td className="mono" style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 500 }}>{formatCurrency(row.outstanding)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          ) : null}
+        </div>
+      )}
+
+      {/* ── OD Interest Tab ──────────────────────────────────────────────── */}
+      {activeTab === 'od_interest' && (
+        <div data-testid="od-interest-tab" style={{ background: '#fff', border: '1px solid var(--border-subtle)', borderRadius: 2, padding: '24px 28px', maxWidth: 640 }}>
+          <div style={{ padding: '12px 16px', background: 'rgba(74,110,125,0.06)', borderRadius: 2, marginBottom: 20, fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+            Interest is calculated daily on your outstanding balance. Select a month, calculate, then save to record the expense.
+          </div>
+          <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', marginBottom: 20 }}>
+            <div>
+              <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 6 }}>Month</label>
+              <input data-testid="od-month-input" type="month" value={odMonth}
+                onChange={e => { setOdMonth(e.target.value); setOdData(null); setOdSaved(false); }}
+                style={{ padding: '10px 14px', border: '1px solid var(--border-strong)', borderRadius: 2, fontSize: 14, fontFamily: 'var(--font-body)' }} />
+            </div>
+            <button data-testid="od-calc-btn" onClick={calculateOD} disabled={odLoading}
+              style={{ background: 'var(--brand-primary)', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: 2, fontSize: 13, fontWeight: 600, cursor: odLoading ? 'not-allowed' : 'pointer', fontFamily: 'var(--font-body)', opacity: odLoading ? 0.6 : 1, display: 'flex', alignItems: 'center', gap: 6 }}>
+              {odLoading ? <><SpinnerGap size={14} className="spin" /> Calculating...</> : 'Calculate'}
+            </button>
+          </div>
+          {odError && <div style={{ background: 'rgba(150,69,58,0.1)', border: '1px solid var(--error)', borderRadius: 2, padding: '10px 16px', marginBottom: 16, fontSize: 13, color: 'var(--error)' }}>{odError}</div>}
+          {odData && (
+            <>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 20 }}>
+                <div style={{ padding: '14px 16px', background: 'var(--bg-secondary)', borderRadius: 2, textAlign: 'center' }}>
+                  <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 }}>Opening Outstanding</div>
+                  <div className="mono" style={{ fontSize: 16, fontWeight: 700 }}>{formatCurrency(odData.daily_breakdown?.[0]?.outstanding || 0)}</div>
+                </div>
+                <div style={{ padding: '14px 16px', background: 'var(--bg-secondary)', borderRadius: 2, textAlign: 'center' }}>
+                  <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 }}>Closing Outstanding</div>
+                  <div className="mono" style={{ fontSize: 16, fontWeight: 700 }}>{formatCurrency(odData.closing_outstanding)}</div>
+                </div>
+                <div style={{ padding: '14px 16px', background: 'rgba(150,69,58,0.06)', borderRadius: 2, textAlign: 'center' }}>
+                  <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--error)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 }}>Total Interest</div>
+                  <div className="mono" style={{ fontSize: 16, fontWeight: 700, color: 'var(--error)' }}>{formatCurrency(odData.total_interest)}</div>
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', marginBottom: 20 }}>
+                <div>
+                  <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 6 }}>Adjust Amount (if needed)</label>
+                  <input data-testid="od-amount-input" type="number" step="0.01" value={odEditAmount} onChange={e => setOdEditAmount(e.target.value)}
+                    style={{ padding: '10px 14px', border: '1px solid var(--border-strong)', borderRadius: 2, fontSize: 14, fontFamily: 'var(--font-mono)', width: 160 }} />
+                </div>
+                {odSaved ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--success)', fontWeight: 600, fontSize: 13 }}>
+                    <Check size={16} weight="bold" /> Recorded!
+                  </div>
+                ) : (
+                  <button data-testid="od-save-btn" onClick={saveODInterest} disabled={odSaving}
+                    style={{ background: 'var(--success)', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: 2, fontSize: 13, fontWeight: 600, cursor: odSaving ? 'not-allowed' : 'pointer', fontFamily: 'var(--font-body)', opacity: odSaving ? 0.6 : 1 }}>
+                    {odSaving ? 'Saving...' : 'Record as Expense'}
+                  </button>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ── Demat Tab ────────────────────────────────────────────────────── */}
+      {activeTab === 'demat' && (
+        <div data-testid="demat-tab" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, alignItems: 'start' }}>
+          {/* Upload Statement */}
+          <div style={{ background: '#fff', border: '1px solid var(--border-subtle)', borderRadius: 2, padding: '24px 28px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+              <UploadSimple size={18} weight="duotone" style={{ color: 'var(--brand-primary)' }} />
+              <h3 style={{ fontSize: 15, fontWeight: 600 }}>Upload Statement</h3>
+            </div>
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 20, lineHeight: 1.6 }}>
+              Upload your broker's statement (PDF or CSV) to automatically import trades and P&L entries.
+            </p>
+            <input data-testid="demat-file-input" type="file" accept=".pdf,.csv,.xlsx,.xls"
+              onChange={e => { setDematFile(e.target.files[0] || null); setDematUploadDone(false); setDematUploadError(''); }}
+              style={{ fontSize: 12, marginBottom: 16 }} />
+            {dematUploadError && <div style={{ color: 'var(--error)', fontSize: 12, marginBottom: 12 }}>{dematUploadError}</div>}
+            {dematUploadDone && <div style={{ color: 'var(--success)', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12 }}><Check size={14} weight="bold" /> Uploaded successfully</div>}
+            <button data-testid="demat-upload-btn" onClick={handleDematUpload}
+              disabled={!dematFile || dematUploading}
+              style={{ background: 'var(--brand-primary)', color: '#fff', border: 'none', padding: '9px 20px', borderRadius: 2, fontSize: 13, fontWeight: 600, cursor: (!dematFile || dematUploading) ? 'not-allowed' : 'pointer', fontFamily: 'var(--font-body)', opacity: (!dematFile || dematUploading) ? 0.6 : 1 }}>
+              {dematUploading ? 'Uploading...' : 'Upload'}
+            </button>
+          </div>
+          {/* Manual Entry */}
+          <div style={{ background: '#fff', border: '1px solid var(--border-subtle)', borderRadius: 2, padding: '24px 28px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+              <PencilLine size={18} weight="duotone" style={{ color: 'var(--accent-1)' }} />
+              <h3 style={{ fontSize: 15, fontWeight: 600 }}>Manual P&L Entry</h3>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div>
+                <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>Date</label>
+                <input type="date" value={dematManual.date} onChange={e => setDematManual(p => ({ ...p, date: e.target.value }))}
+                  style={{ padding: '8px 12px', border: '1px solid var(--border-strong)', borderRadius: 2, fontSize: 13, fontFamily: 'var(--font-body)', width: '100%' }} />
+              </div>
+              <div>
+                <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>Description</label>
+                <input type="text" value={dematManual.description} onChange={e => setDematManual(p => ({ ...p, description: e.target.value }))}
+                  placeholder="e.g. NIFTY50 options profit"
+                  style={{ padding: '8px 12px', border: '1px solid var(--border-strong)', borderRadius: 2, fontSize: 13, fontFamily: 'var(--font-body)', width: '100%' }} />
+              </div>
+              <div style={{ display: 'flex', gap: 12 }}>
+                <div style={{ flex: 1 }}>
+                  <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>Amount (₹)</label>
+                  <input type="number" step="0.01" value={dematManual.amount} onChange={e => setDematManual(p => ({ ...p, amount: e.target.value }))}
+                    placeholder="0.00"
+                    style={{ padding: '8px 12px', border: '1px solid var(--border-strong)', borderRadius: 2, fontSize: 13, fontFamily: 'var(--font-mono)', width: '100%' }} />
+                </div>
+                <div>
+                  <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>Type</label>
+                  <select value={dematManual.transaction_type} onChange={e => setDematManual(p => ({ ...p, transaction_type: e.target.value }))}
+                    style={{ padding: '8px 12px', border: '1px solid var(--border-strong)', borderRadius: 2, fontSize: 13, fontFamily: 'var(--font-body)' }}>
+                    <option value="income">Profit / Gain</option>
+                    <option value="expense">Loss</option>
+                  </select>
+                </div>
+              </div>
+              {dematManualError && <div style={{ color: 'var(--error)', fontSize: 12 }}>{dematManualError}</div>}
+              {dematManualDone && <div style={{ color: 'var(--success)', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}><Check size={14} weight="bold" /> Entry recorded</div>}
+              <button data-testid="demat-manual-save-btn" onClick={handleDematManual} disabled={dematManualSaving}
+                style={{ background: 'var(--success)', color: '#fff', border: 'none', padding: '9px 20px', borderRadius: 2, fontSize: 13, fontWeight: 600, cursor: dematManualSaving ? 'not-allowed' : 'pointer', fontFamily: 'var(--font-body)', opacity: dematManualSaving ? 0.6 : 1, alignSelf: 'flex-start' }}>
+                {dematManualSaving ? 'Saving...' : 'Save Entry'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Transactions Tab (default) ───────────────────────────────────── */}
+      {activeTab === 'transactions' && <>
 
       {/* Filter Bar */}
       <div data-testid="filter-bar" style={{
@@ -576,6 +908,7 @@ export default function AccountDetail() {
           </>
         )}
       </div>
+      </>}
     </div>
   );
 }
