@@ -5,7 +5,7 @@ import { api } from '../lib/api';
 import { PurchaseBillModal } from '../components/PurchaseBillModal';
 import { InternationalInvoiceModal } from '../components/InternationalInvoiceModal';
 import { usesExistingForms, getCountryConfig, formatCountryCurrency } from '../lib/countryConfig';
-import { Plus, Eye, PencilSimple, Trash, Printer, CurrencyInr, Package, X, Gear, UploadSimple, SpinnerGap, Robot } from '@phosphor-icons/react';
+import { Plus, Eye, PencilSimple, Trash, Printer, CurrencyInr, Package, X, Gear, UploadSimple, SpinnerGap, Robot, Copy, Check } from '@phosphor-icons/react';
 
 const PAYMENT_METHODS = [
   { value: 'upi', label: 'UPI' },
@@ -582,6 +582,24 @@ export default function Purchases() {
     } catch (e) { alert(`Failed to delete: ${e.message}`); }
   };
 
+  const handleDuplicate = async (b) => {
+    const id = b.id || b.bill_id;
+    try {
+      await api.post(`/api/bills/${id}/duplicate`);
+      loadBills();
+    } catch (e) { alert(`Failed to duplicate: ${e.message}`); }
+  };
+
+  const handleMarkPaid = async (b) => {
+    const id = b.id || b.bill_id;
+    const total = b.grand_total ?? b.total;
+    if (!confirm(`Mark bill ${b.bill_number || `#${id}`} as fully paid (${formatCurrency(total)})?`)) return;
+    try {
+      await api.post(`/api/bills/${id}/mark-paid`);
+      loadBills();
+    } catch (e) { alert(`Failed to mark paid: ${e.message}`); }
+  };
+
   const handleBillSaved = () => {
     setShowNewBill(false);
     setEditingBill(null);
@@ -735,12 +753,20 @@ export default function Purchases() {
                           <ActionBtn title="Edit" onClick={() => setEditingBill(b)}>
                             <PencilSimple size={16} />
                           </ActionBtn>
+                          <ActionBtn title="Duplicate" onClick={() => handleDuplicate(b)}>
+                            <Copy size={16} />
+                          </ActionBtn>
                           <ActionBtn title="Delete" onClick={() => handleDelete(b)} danger>
                             <Trash size={16} />
                           </ActionBtn>
                           {(status === 'unpaid' || status === 'partial') && (
                             <ActionBtn title="Record Payment" onClick={() => setRecordingPayment(b)}>
                               <CurrencyInr size={16} />
+                            </ActionBtn>
+                          )}
+                          {(status === 'unpaid' || status === 'partial') && (
+                            <ActionBtn title="Mark as Paid" onClick={() => handleMarkPaid(b)}>
+                              <Check size={16} weight="bold" />
                             </ActionBtn>
                           )}
                         </div>

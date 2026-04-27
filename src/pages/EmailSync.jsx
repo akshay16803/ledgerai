@@ -143,6 +143,15 @@ function SourceBadge({ source }) {
   );
 }
 
+function timeAgo(ts) {
+  if (!ts) return null;
+  const diff = Math.floor((Date.now() - new Date(ts).getTime()) / 1000);
+  if (diff < 60) return 'just now';
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  return `${Math.floor(diff / 86400)}d ago`;
+}
+
 function EmailAccountCard({ acct, provider, onSetupSync, onRetry, onDisconnect, onReconnect, showSyncForm, syncDate, setSyncDate, syncing, retrying, onStartSync, onCancelSync }) {
   const email = provider === 'gmail' ? acct.gmail_email : acct.outlook_email;
   const providerLabel = provider === 'gmail' ? 'Gmail' : 'Outlook';
@@ -226,6 +235,9 @@ function EmailAccountCard({ acct, provider, onSetupSync, onRetry, onDisconnect, 
             <span className="mono" style={{ fontSize: 11, color: 'var(--text-muted)' }}>
               Connected {acct.connected_at ? new Date(acct.connected_at).toLocaleDateString() : ''}
               {acct.sync_from_date ? ` | Syncing from ${acct.sync_from_date} | Auto-syncs every 2 min` : ' | Set a sync date to start'}
+              {(acct.stats?.last_sync_at || acct.last_sync_at) && (
+                <> · Last checked {timeAgo(acct.stats?.last_sync_at || acct.last_sync_at)}</>
+              )}
             </span>
           </div>
         </div>
