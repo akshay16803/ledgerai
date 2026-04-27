@@ -5,7 +5,7 @@ import { getCached, setCache } from '../lib/cache';
 import {
   TrendUp, TrendDown, Repeat, ArrowRight,
   CurrencyInr, CalendarBlank, Check, X, CaretDown, Receipt, Pause, Play, Trash,
-  CaretUp, Eye
+  CaretUp, Eye, PencilSimple
 } from '@phosphor-icons/react';
 import { EditTransactionModal } from '../components/EditTransactionModal.jsx';
 
@@ -217,6 +217,21 @@ export default function CashFlow() {
     setMandates(prev.map(m => m.mandate_id === mandateId ? { ...m, amount: amt } : m));
     try {
       await api.patch(`/api/mandates/${mandateId}`, { amount: amt });
+      loadData();
+    } catch (err) {
+      setMandates(prev);
+      alert(err.message);
+    }
+  };
+
+  const [editingMandate, setEditingMandate] = useState(null);
+
+  const handleMandateUpdate = async (mandateId, fields) => {
+    const prev = mandates;
+    setMandates(prev.map(m => m.mandate_id === mandateId ? { ...m, ...fields } : m));
+    setEditingMandate(null);
+    try {
+      await api.patch(`/api/mandates/${mandateId}`, fields);
       loadData();
     } catch (err) {
       setMandates(prev);
@@ -747,6 +762,18 @@ export default function CashFlow() {
                     <td style={{ ...tdStyle, textAlign: 'center' }}>
                       <div style={{ display: 'inline-flex', gap: 4 }}>
                         <button
+                          data-testid={`mandate-edit-${m.mandate_id}`}
+                          onClick={() => setEditingMandate(m)}
+                          disabled={busy}
+                          title="Edit"
+                          style={{
+                            background: 'none', border: '1px solid var(--border-strong)',
+                            borderRadius: 2, padding: '4px 8px', cursor: busy ? 'not-allowed' : 'pointer',
+                            fontSize: 11, color: 'var(--brand-primary)',
+                          }}>
+                          <PencilSimple size={12} weight="bold" />
+                        </button>
+                        <button
                           data-testid={`mandate-toggle-${m.mandate_id}`}
                           onClick={() => toggleMandateStatus(m.mandate_id, m.status)}
                           disabled={busy}
@@ -891,6 +918,140 @@ export default function CashFlow() {
           onClose={handleEditModalClose}
         />
       )}
+
+      {/* Mandate Edit Modal */}
+      {editingMandate && (
+        <MandateEditModal
+          mandate={editingMandate}
+          onSave={(fields) => handleMandateUpdate(editingMandate.mandate_id, fields)}
+          onClose={() => setEditingMandate(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+function MandateEditModal({ mandate, onSave, onClose }) {
+  const [merchant, setMerchant] = useState(mandate.merchant || '');
+  const [amount, setAmount] = useState(mandate.amount || '');
+  const [frequency, setFrequency] = useState(mandate.frequency || 'monthly');
+  const [mandateType, setMandateType] = useState(mandate.mandate_type || '');
+  const [status, setStatus] = useState(mandate.status || 'active');
+  const [saving, setSaving] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!merchant.trim() || !amount || Number(amount) <= 0) {
+      alert('Please enter a valid merchant name and amount.');
+      return;
+    }
+    setSaving(true);
+    try {
+      await onSave({
+        merchant: merchant.trim(),
+        amount: Number(amount),
+        frequency,
+        mandate_type: mandateType,
+        status,
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const overlayStyle = {
+    position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1000,
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+  };
+  const modalStyle = {
+    background: '#fff', borderRadius: 4, padding: '28px 32px', width: 420, maxWidth: '94vw',
+    boxShadow: '0 8px 32px rgba(0,0,0,0.18)',
+  };
+  const labelStyle = {
+    display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--text-muted)',
+    textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 6,
+  };
+  const inputStyle = {
+    width: '100%', padding: '8px 10px', fontSize: 14, border: '1px solid var(--border-strong)',
+    borderRadius: 2, fontFamily: 'var(--font-body)', boxSizing: 'border-box',
+  };
+
+  return (
+    <div style={overlayStyle} onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={modalStyle}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+          <h3 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>Edit Mandate</h3>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
+            <X size={18} weight="bold" />
+          </button>
+        </div>
+        <form onSubmit={handleSubmit}>
+          <div style={{ marginBottom: 16 }}>
+            <label style={labelStyle}>Merchant / Description</label>
+            <input
+              style={inputStyle}
+              value={merchant}
+              onChange={e => setMerchant(e.target.value)}
+              placeholder="e.g. Netflix, Rent, SIP"
+              required
+            />
+          </div>
+          <div style={{ marginBottom: 16 }}>
+            <label style={labelStyle}>Amount (₹)</label>
+            <input
+              style={inputStyle}
+              type="number"
+              min="1"
+              step="1"
+              value={amount}
+              onChange={e => setAmount(e.target.value)}
+              required
+            />
+          </div>
+          <div style={{ marginBottom: 16 }}>
+            <label style={labelStyle}>Frequency</label>
+            <select style={inputStyle} value={frequency} onChange={e => setFrequency(e.target.value)}>
+              {FREQ_OPTIONS.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
+            </select>
+          </div>
+          <div style={{ marginBottom: 16 }}>
+            <label style={labelStyle}>Type</label>
+            <select style={inputStyle} value={mandateType} onChange={e => setMandateType(e.target.value)}>
+              <option value="">— Select —</option>
+              <option value="nach">NACH</option>
+              <option value="emandate">E-Mandate</option>
+              <option value="upi_autopay">UPI AutoPay</option>
+              <option value="emi">EMI</option>
+              <option value="subscription">Subscription</option>
+              <option value="other">Other</option>
+            </select>
+          </div>
+          <div style={{ marginBottom: 24 }}>
+            <label style={labelStyle}>Status</label>
+            <select style={inputStyle} value={status} onChange={e => setStatus(e.target.value)}>
+              <option value="active">Active</option>
+              <option value="paused">Paused</option>
+            </select>
+          </div>
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+            <button type="button" onClick={onClose}
+              style={{
+                background: 'none', border: '1px solid var(--border-strong)', borderRadius: 2,
+                padding: '8px 18px', cursor: 'pointer', fontSize: 13, fontFamily: 'var(--font-body)',
+              }}>
+              Cancel
+            </button>
+            <button type="submit" disabled={saving}
+              style={{
+                background: 'var(--brand-primary)', color: '#fff', border: 'none', borderRadius: 2,
+                padding: '8px 22px', cursor: saving ? 'not-allowed' : 'pointer',
+                fontSize: 13, fontWeight: 600, fontFamily: 'var(--font-body)',
+              }}>
+              {saving ? 'Saving…' : 'Save Changes'}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }
