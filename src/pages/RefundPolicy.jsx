@@ -147,21 +147,50 @@ export default function RefundPolicy() {
             </p>
           </Section>
 
-          <Section title="10. Changes to This Policy">
+          <Section title="10. Delivery of Service">
+            <p>
+              SpentyAI is a fully digital subscription service. There is no physical product, no shipping, and no
+              delivery lead time. Access to the paid plan is activated <strong>immediately</strong> upon
+              successful payment confirmation. If payment succeeds but your account is not upgraded within
+              10 minutes, please write to <strong>support@spentyai.com</strong> with your payment reference.
+            </p>
+            <p style={{ marginTop: 12 }}>
+              Subscription features include access to the SpentyAI web application (www.spentyai.com),
+              iOS app, and Android app — all governed by the same plan. No physical goods are shipped
+              at any point.
+            </p>
+          </Section>
+
+          <Section title="11. Services Covered">
+            <p>This policy applies to the following SpentyAI services and subscription plans:</p>
+            <ul style={{ paddingLeft: 20, margin: '8px 0' }}>
+              <li><strong>Monthly Plan (&#8377;199/month):</strong> Full access, billed every 30 days.</li>
+              <li><strong>Quarterly Plan (&#8377;449/3 months):</strong> Full access, billed every 90 days.</li>
+              <li><strong>Yearly Plan (&#8377;1,499/year):</strong> Full access, billed annually.</li>
+              <li><strong>Lifetime Plan (&#8377;9,999 one-time):</strong> Permanent access, single payment.</li>
+            </ul>
+            <p style={{ marginTop: 12 }}>
+              All plans include: AI-assisted transaction logging, email and SMS sync, invoicing, reports,
+              reconciliation, and mobile app access. No additional charges apply within the subscription period.
+            </p>
+          </Section>
+
+          <Section title="12. Changes to This Policy">
             <p>
               We may update this refund policy from time to time. Material changes will be communicated by email
               and posted on this page with a new &ldquo;Last updated&rdquo; date.
             </p>
           </Section>
 
-          <Section title="11. Contact Us">
+          <Section title="13. Contact Us">
             <p>
               For any refund or billing question, contact:
             </p>
             <p style={{ marginTop: 8 }}>
               <strong>Email:</strong> support@spentyai.com<br />
               <strong>Business name:</strong> SpentyAI<br />
-              <strong>Website:</strong> www.spentyai.com
+              <strong>Website:</strong> www.spentyai.com<br />
+              <strong>Contact page:</strong> <a href="/contact" style={{ color: 'inherit' }}>www.spentyai.com/contact</a>
             </p>
           </Section>
         </div>

@@ -247,8 +247,11 @@ export default function Landing() {
         <p className="mono" style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>
           SpentyAI {new Date().getFullYear()}. Autonomous accounting software.
         </p>
-        <div style={{ display: 'flex', justifyContent: 'center', gap: 16 }}>
+        <div style={{ display: 'flex', justifyContent: 'center', flexWrap: 'wrap', gap: 16 }}>
           <a href="/features" style={{ fontSize: 12, color: 'var(--text-muted)', textDecoration: 'underline' }}>Features</a>
+          <a href="/about" style={{ fontSize: 12, color: 'var(--text-muted)', textDecoration: 'underline' }}>About Us</a>
+          <a href="/contact" style={{ fontSize: 12, color: 'var(--text-muted)', textDecoration: 'underline' }}>Contact Us</a>
+          <a href="/pricing" style={{ fontSize: 12, color: 'var(--text-muted)', textDecoration: 'underline' }}>Pricing</a>
           <a href="/privacy" style={{ fontSize: 12, color: 'var(--text-muted)', textDecoration: 'underline' }}>Privacy Policy</a>
           <a href="/terms" style={{ fontSize: 12, color: 'var(--text-muted)', textDecoration: 'underline' }}>Terms of Service</a>
           <a href="/refund-policy" style={{ fontSize: 12, color: 'var(--text-muted)', textDecoration: 'underline' }}>Refund Policy</a>

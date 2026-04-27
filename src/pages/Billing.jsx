@@ -510,6 +510,30 @@ export default function Billing() {
           Prices in INR. GST extra where applicable. Cancel anytime during trial — no charge.
           Lifetime offer available for a limited time only.
         </p>
+
+        {/* PayUMoney compliance: T&C + policy links at checkout */}
+        <div style={{
+          textAlign: 'center',
+          fontSize: 12,
+          color: 'var(--text-muted)',
+          marginTop: 20,
+          maxWidth: 560,
+          marginLeft: 'auto',
+          marginRight: 'auto',
+          lineHeight: 1.8,
+          borderTop: '1px solid var(--border-subtle)',
+          paddingTop: 20,
+        }}>
+          By subscribing you agree to our{' '}
+          <a href="/terms" style={{ color: 'var(--text-secondary)', textDecoration: 'underline' }}>Terms of Service</a>
+          {' '}&amp;{' '}
+          <a href="/privacy" style={{ color: 'var(--text-secondary)', textDecoration: 'underline' }}>Privacy Policy</a>.
+          {' '}See our{' '}
+          <a href="/refund-policy" style={{ color: 'var(--text-secondary)', textDecoration: 'underline' }}>Refund &amp; Cancellation Policy</a>
+          {' '}for refund timelines. Payments processed securely. Immediate digital access upon payment confirmation.{' '}
+          Questions?{' '}
+          <a href="/contact" style={{ color: 'var(--text-secondary)', textDecoration: 'underline' }}>Contact us</a>.
+        </div>
       </div>
     </div>
   );
