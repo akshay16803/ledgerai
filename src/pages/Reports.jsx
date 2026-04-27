@@ -14,6 +14,15 @@ function formatCurrency(amount) {
   return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(amount);
 }
 
+function formatMonthLabel(monthStr) {
+  if (!monthStr) return '';
+  // Handles "2025-01" → "Jan '25"
+  const [year, month] = monthStr.split('-');
+  if (!year || !month) return monthStr;
+  const date = new Date(Number(year), Number(month) - 1, 1);
+  return date.toLocaleString('en-US', { month: 'short' }) + " '" + String(year).slice(2);
+}
+
 const COLORS = [
   '#34C759', '#2EB34D', '#4A6E7D', '#C28C3C', '#7C3AED',
   '#E53E3E', '#38A169', '#3182CE', '#D69E2E', '#9F7AEA',
@@ -88,7 +97,7 @@ function PeriodChart({ data }) {
                 fill="var(--error)" opacity="0.8" rx="2" />
               <text x={x + barGroupW / 2 - 8} y={chartH + 16} textAnchor="middle"
                 style={{ fontSize: 10, fill: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-                {d.month}
+                {formatMonthLabel(d.month)}
               </text>
               {d.net !== 0 && (
                 <text x={x + barGroupW / 2 - 8} y={chartH + 30}
@@ -627,8 +636,13 @@ export default function Reports() {
                         <td className="mono" style={{ ...tdStyle, textAlign: 'right', fontWeight: 600 }}>
                           {formatCurrency(val)}
                         </td>
-                        <td className="mono" style={{ ...tdStyle, textAlign: 'right', color: 'var(--text-muted)' }}>
-                          {pct}%
+                        <td style={{ ...tdStyle, minWidth: 140 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <div style={{ flex: 1, height: 6, background: 'var(--bg-secondary)', borderRadius: 3, overflow: 'hidden' }}>
+                              <div style={{ width: `${pct}%`, height: '100%', background: COLORS[ci % COLORS.length], borderRadius: 3, transition: 'width 0.4s ease' }} />
+                            </div>
+                            <span className="mono" style={{ fontSize: 11, color: 'var(--text-muted)', minWidth: 36, textAlign: 'right' }}>{pct}%</span>
+                          </div>
                         </td>
                         <td className="mono" style={{ ...tdStyle, textAlign: 'center', color: 'var(--text-muted)' }}>
                           {cat.count}
@@ -656,8 +670,13 @@ export default function Reports() {
                                 <td className="mono" style={{ ...tdStyle, textAlign: 'right', fontSize: 12 }}>
                                   {formatCurrency(subVal)}
                                 </td>
-                                <td className="mono" style={{ ...tdStyle, textAlign: 'right', fontSize: 11, color: 'var(--text-muted)' }}>
-                                  {subPct}%
+                                <td style={{ ...tdStyle, minWidth: 140 }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                    <div style={{ flex: 1, height: 4, background: 'var(--bg-secondary)', borderRadius: 2, overflow: 'hidden' }}>
+                                      <div style={{ width: `${subPct}%`, height: '100%', background: 'var(--text-muted)', borderRadius: 2, opacity: 0.5 }} />
+                                    </div>
+                                    <span className="mono" style={{ fontSize: 10, color: 'var(--text-muted)', minWidth: 36, textAlign: 'right' }}>{subPct}%</span>
+                                  </div>
                                 </td>
                                 <td className="mono" style={{ ...tdStyle, textAlign: 'center', fontSize: 12, color: 'var(--text-muted)' }}>
                                   {sub.count}
@@ -711,7 +730,7 @@ export default function Reports() {
                   borderBottom: '1px solid var(--border-subtle)',
                   background: i % 2 === 0 ? '#fff' : 'var(--bg-secondary)'
                 }}>
-                  <td style={tdStyle}>{p.month}</td>
+                  <td style={tdStyle}>{formatMonthLabel(p.month)}</td>
                   <td className="mono" style={{ ...tdStyle, textAlign: 'right', color: 'var(--success)', fontWeight: 500 }}>
                     {formatCurrency(p.income)}
                   </td>

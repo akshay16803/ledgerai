@@ -571,7 +571,22 @@ export default function Transactions() {
                     {getAccountName(txn.account_id)}
                     {txn.to_account_id && <span style={{ color: 'var(--text-muted)' }}> → {getAccountName(txn.to_account_id)}</span>}
                   </td>
-                  <td style={{ padding: '12px 16px', fontSize: 12 }}>{getCategoryName(txn.category_id)}</td>
+                  <td style={{ padding: '12px 16px', fontSize: 12 }}>
+                    <div>{getCategoryName(txn.category_id)}</div>
+                    {txn.subcategory_name && (
+                      <div className="mono" style={{ fontSize: 10.5, color: 'var(--text-muted)', marginTop: 1 }}>
+                        ↳ {txn.subcategory_name}
+                      </div>
+                    )}
+                    {txn.status === 'pending_review' && (
+                      <span style={{
+                        display: 'inline-block', marginTop: 3,
+                        padding: '1px 6px', borderRadius: 2, fontSize: 10, fontWeight: 600,
+                        background: 'rgba(234,179,8,0.12)', color: 'var(--warning)',
+                        textTransform: 'uppercase', letterSpacing: '0.05em',
+                      }}>pending</span>
+                    )}
+                  </td>
                   <td className="mono" style={{
                     padding: '12px 16px', textAlign: 'right', fontWeight: 600,
                     color: txn.transaction_type === 'income' ? 'var(--success)' : txn.transaction_type === 'expense' ? 'var(--error)' : 'var(--text-primary)'
