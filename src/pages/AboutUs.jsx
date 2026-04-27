@@ -136,7 +136,7 @@ export default function AboutUs() {
                 ['Legal Entity', 'SpentyAI (Sole Proprietorship)'],
                 ['Country of Operation', 'India'],
                 ['Website', 'www.spentyai.com'],
-                ['Support Email', 'support@spentyai.com'],
+                ['Support Email', 'customersupport@spentyai.com'],
                 ['Currency', 'Indian Rupees (INR, ₹)'],
               ].map(([label, value]) => (
                 <tr key={label} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
@@ -149,7 +149,7 @@ export default function AboutUs() {
                   </td>
                   <td style={{ padding: '12px 0 12px 16px', color: 'var(--text-secondary)', fontFamily: 'var(--font-body)' }}>
                     {label === 'Support Email' ? (
-                      <a href="mailto:support@spentyai.com" style={{ color: 'var(--accent)', textDecoration: 'none' }}>
+                      <a href="mailto:customersupport@spentyai.com" style={{ color: 'var(--accent)', textDecoration: 'none' }}>
                         {value}
                       </a>
                     ) : label === 'Website' ? (

@@ -51,7 +51,7 @@ export default function RefundPolicy() {
             <SubSection title="3.1 How to Cancel">
               <p>
                 You can cancel your subscription at any time from <strong>Settings &rarr; Billing</strong> inside the
-                SpentyAI app or by writing to us at <strong>support@spentyai.com</strong> from your registered email.
+                SpentyAI app or by writing to us at <strong>customersupport@spentyai.com</strong> from your registered email.
               </p>
             </SubSection>
             <SubSection title="3.2 What Happens After Cancellation">
@@ -104,7 +104,7 @@ export default function RefundPolicy() {
             <p>
               If a payment fails at your bank or payment gateway (UPI, card, net-banking), no charge is made and no
               refund is required. If money has been debited from your account but your SpentyAI subscription is not
-              active, please write to us at <strong>support@spentyai.com</strong> with a transaction reference and we
+              active, please write to us at <strong>customersupport@spentyai.com</strong> with a transaction reference and we
               will resolve it within 5-7 business days.
             </p>
           </Section>
@@ -134,7 +134,7 @@ export default function RefundPolicy() {
 
           <Section title="9. How to Request a Refund">
             <p>
-              Send an email to <strong>support@spentyai.com</strong> from your registered email address with:
+              Send an email to <strong>customersupport@spentyai.com</strong> from your registered email address with:
             </p>
             <ul style={{ paddingLeft: 20, margin: '8px 0' }}>
               <li>The email associated with your SpentyAI account.</li>
@@ -152,7 +152,7 @@ export default function RefundPolicy() {
               SpentyAI is a fully digital subscription service. There is no physical product, no shipping, and no
               delivery lead time. Access to the paid plan is activated <strong>immediately</strong> upon
               successful payment confirmation. If payment succeeds but your account is not upgraded within
-              10 minutes, please write to <strong>support@spentyai.com</strong> with your payment reference.
+              10 minutes, please write to <strong>customersupport@spentyai.com</strong> with your payment reference.
             </p>
             <p style={{ marginTop: 12 }}>
               Subscription features include access to the SpentyAI web application (www.spentyai.com),
@@ -187,7 +187,7 @@ export default function RefundPolicy() {
               For any refund or billing question, contact:
             </p>
             <p style={{ marginTop: 8 }}>
-              <strong>Email:</strong> support@spentyai.com<br />
+              <strong>Email:</strong> customersupport@spentyai.com<br />
               <strong>Business name:</strong> SpentyAI<br />
               <strong>Website:</strong> www.spentyai.com<br />
               <strong>Contact page:</strong> <a href="/contact" style={{ color: 'inherit' }}>www.spentyai.com/contact</a>

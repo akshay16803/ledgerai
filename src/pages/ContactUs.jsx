@@ -44,7 +44,7 @@ export default function ContactUs() {
                   ['Legal Entity', 'SpentyAI (Sole Proprietorship)'],
                   ['Registered Address', '102, Midrise Street, M27, SS Infinitus Phase 2-B, Lasudiya Mauri, Indore, Madhya Pradesh, India'],
                   ['Website', 'www.spentyai.com'],
-                  ['Customer Support Email', 'support@spentyai.com'],
+                  ['Customer Support Email', 'customersupport@spentyai.com'],
                   ['Business Email', 'hello@spentyai.com'],
                 ].map(([label, value]) => (
                   <tr key={label} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
@@ -85,8 +85,8 @@ export default function ContactUs() {
                 icon="✉️"
                 title="Email Support"
                 description="For billing, account issues, or general questions."
-                action="support@spentyai.com"
-                href="mailto:support@spentyai.com"
+                action="customersupport@spentyai.com"
+                href="mailto:customersupport@spentyai.com"
               />
               <ContactCard
                 icon="💬"
@@ -143,8 +143,8 @@ export default function ContactUs() {
               <p style={{ margin: 0 }}>
                 <strong>Grievance Officer:</strong> SpentyAI Support Team<br />
                 <strong>Email:</strong>{' '}
-                <a href="mailto:support@spentyai.com" style={{ color: 'var(--accent)', textDecoration: 'none' }}>
-                  support@spentyai.com
+                <a href="mailto:customersupport@spentyai.com" style={{ color: 'var(--accent)', textDecoration: 'none' }}>
+                  customersupport@spentyai.com
                 </a><br />
                 <strong>Website:</strong>{' '}
                 <a href="https://www.spentyai.com" style={{ color: 'var(--accent)', textDecoration: 'none' }}>

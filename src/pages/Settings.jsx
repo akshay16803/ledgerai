@@ -748,7 +748,7 @@ export default function Settings() {
               <ArrowRight size={16} style={{ color: 'var(--text-muted)' }} />
             </a>
             <a
-              href="mailto:support@spentyai.com"
+              href="mailto:customersupport@spentyai.com"
               style={{
                 display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                 padding: '14px 18px', border: '1px solid var(--border-subtle)', borderRadius: 2,
@@ -759,7 +759,7 @@ export default function Settings() {
             >
               <div>
                 <div style={{ fontWeight: 600, fontSize: 13 }}>Contact Support</div>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>support@spentyai.com</div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>customersupport@spentyai.com</div>
               </div>
               <ArrowRight size={16} style={{ color: 'var(--text-muted)' }} />
             </a>

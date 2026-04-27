@@ -44,6 +44,341 @@ const dayBeats = [
   },
 ];
 
+// ---- App screen mock components (replace missing screenshots) ---------------
+function MockFrame({ children }) {
+  return (
+    <div style={{
+      aspectRatio: '16 / 10', background: '#fff', borderRadius: 8,
+      border: '1px solid var(--border-subtle)', overflow: 'hidden',
+      boxShadow: '0 20px 60px rgba(26,54,45,0.10)', fontFamily: 'var(--font-body)',
+      display: 'flex', flexDirection: 'column',
+    }}>
+      <div style={{
+        background: 'var(--bg-secondary)', borderBottom: '1px solid var(--border-subtle)',
+        padding: '7px 12px', display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0,
+      }}>
+        {['#ff5f57','#ffbd2e','#28ca41'].map(c => (
+          <div key={c} style={{ width: 8, height: 8, borderRadius: '50%', background: c }} />
+        ))}
+        <div style={{ flex: 1, marginLeft: 8, background: 'rgba(0,0,0,0.05)', borderRadius: 4, padding: '3px 10px', fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+          spentyai.com
+        </div>
+      </div>
+      <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+        <div style={{ width: 40, background: '#1a362d', display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: 12, gap: 10, flexShrink: 0 }}>
+          {[0,1,2,3,4].map(i => (
+            <div key={i} style={{ width: 22, height: 22, borderRadius: 4, background: i === 0 ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.07)' }} />
+          ))}
+        </div>
+        <div style={{ flex: 1, padding: '14px 16px', overflowY: 'hidden' }}>{children}</div>
+      </div>
+    </div>
+  );
+}
+
+function MockTile({ value, label, color }) {
+  return (
+    <div style={{ background: 'var(--bg-secondary)', borderRadius: 4, padding: '8px 12px', border: '1px solid var(--border-subtle)' }}>
+      <div style={{ fontSize: 15, fontWeight: 700, color: color || 'var(--text-primary)', fontFamily: 'var(--font-mono)', letterSpacing: '-0.02em' }}>{value}</div>
+      <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 2, textTransform: 'uppercase', letterSpacing: '0.07em' }}>{label}</div>
+    </div>
+  );
+}
+
+function MockEmailSync() {
+  const txns = [
+    { d: 'Swiggy Order #4928', a: '₹284', c: 'Food', b: 'HDFC', t: 'Today 09:03' },
+    { d: 'Uber Technologies', a: '₹520', c: 'Travel', b: 'ICICI', t: 'Today 08:41' },
+    { d: 'Netflix Subscription', a: '₹649', c: 'Entertainment', b: 'Axis', t: 'Yesterday' },
+    { d: 'Amazon.in Purchase', a: '₹1,299', c: 'Shopping', b: 'HDFC', t: '25 Apr' },
+    { d: 'HDFC Car Loan EMI', a: '₹8,500', c: 'Loan EMI', b: 'HDFC', t: '25 Apr' },
+    { d: 'Zomato Order #1021', a: '₹420', c: 'Food', b: 'Axis CC', t: '24 Apr' },
+  ];
+  return (
+    <MockFrame>
+      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 10 }}>Email Sync</div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6, marginBottom: 12 }}>
+        <MockTile value="1,962" label="Emails scanned" />
+        <MockTile value="47" label="Txns found" color="#16a34a" />
+        <MockTile value="12" label="Pending" color="#d97706" />
+      </div>
+      {txns.map((t, i) => (
+        <div key={i} style={{ display: 'flex', alignItems: 'center', padding: '5px 0', borderBottom: '1px solid var(--border-subtle)', gap: 8 }}>
+          <div style={{ width: 5, height: 5, borderRadius: '50%', background: '#16a34a', flexShrink: 0 }} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.d}</div>
+            <div style={{ fontSize: 9, color: 'var(--text-muted)' }}>{t.b} · {t.c} · {t.t}</div>
+          </div>
+          <span style={{ fontSize: 11, fontWeight: 700, color: '#dc2626', fontFamily: 'var(--font-mono)', flexShrink: 0 }}>{t.a}</span>
+        </div>
+      ))}
+    </MockFrame>
+  );
+}
+
+function MockPendingReview() {
+  const items = [
+    { d: 'Ola Cabs Ride', a: '₹284', c: 'Travel', src: 'SMS · HDFC', ok: true },
+    { d: 'Zomato Order', a: '₹450', c: 'Food & Dining', src: 'Email · Axis CC', ok: true },
+    { d: 'SIP — Mirae Asset', a: '₹5,000', c: 'Investments', src: 'Email · ICICI', ok: false },
+    { d: 'HDFC Credit Card Bill', a: '₹12,400', c: 'Credit Card', src: 'Email · HDFC', ok: false },
+    { d: 'Blinkit Delivery', a: '₹186', c: 'Groceries', src: 'SMS · SBI', ok: false },
+  ];
+  return (
+    <MockFrame>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>Pending Review</div>
+        <span style={{ fontSize: 9, background: '#d97706', color: '#fff', borderRadius: 4, padding: '2px 7px', fontWeight: 700 }}>12 items</span>
+      </div>
+      {items.map((item, i) => (
+        <div key={i} style={{
+          display: 'flex', alignItems: 'center', gap: 8, padding: '7px 8px', marginBottom: 5,
+          background: item.ok ? 'rgba(22,163,74,0.06)' : 'var(--bg-secondary)',
+          border: `1px solid ${item.ok ? 'rgba(22,163,74,0.2)' : 'var(--border-subtle)'}`,
+          borderRadius: 4,
+        }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.d}</div>
+            <div style={{ fontSize: 9, color: 'var(--text-muted)' }}>{item.src} · {item.c}</div>
+          </div>
+          <span style={{ fontSize: 11, fontWeight: 700, color: '#dc2626', fontFamily: 'var(--font-mono)', flexShrink: 0 }}>{item.a}</span>
+          <div style={{ display: 'flex', gap: 3, flexShrink: 0 }}>
+            <div style={{ width: 20, height: 20, borderRadius: 3, background: item.ok ? '#16a34a' : 'rgba(22,163,74,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, color: item.ok ? '#fff' : '#16a34a' }}>✓</div>
+            {!item.ok && <div style={{ width: 20, height: 20, borderRadius: 3, background: 'rgba(220,38,38,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, color: '#dc2626' }}>✕</div>}
+          </div>
+        </div>
+      ))}
+    </MockFrame>
+  );
+}
+
+function MockDashboard() {
+  const accounts = [
+    { name: 'HDFC Savings', bal: '₹4,24,000', pos: true },
+    { name: 'ICICI Credit Card', bal: '-₹12,450', pos: false },
+    { name: 'SBI Fixed Deposit', bal: '₹2,00,000', pos: true },
+    { name: 'Axis Business CA', bal: '₹1,88,200', pos: true },
+  ];
+  return (
+    <MockFrame>
+      <div style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 2 }}>Net Worth</div>
+      <div style={{ fontSize: 24, fontWeight: 700, color: '#1a362d', fontFamily: 'var(--font-mono)', letterSpacing: '-0.03em', marginBottom: 10 }}>₹8,24,350</div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6, marginBottom: 10 }}>
+        <MockTile value="₹1.42L" label="Income" color="#16a34a" />
+        <MockTile value="₹68,240" label="Expenses" color="#dc2626" />
+        <MockTile value="12" label="Pending" color="#d97706" />
+      </div>
+      <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 6 }}>Your Accounts</div>
+      {accounts.map((a, i) => (
+        <div key={i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '5px 0', borderBottom: '1px solid var(--border-subtle)' }}>
+          <div style={{ fontSize: 11, color: 'var(--text-primary)' }}>{a.name}</div>
+          <div style={{ fontSize: 11, fontWeight: 700, color: a.pos ? '#16a34a' : '#dc2626', fontFamily: 'var(--font-mono)' }}>{a.bal}</div>
+        </div>
+      ))}
+      <div style={{ marginTop: 10, background: 'var(--bg-secondary)', borderRadius: 4, padding: '7px 10px', border: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', gap: 6 }}>
+        <span style={{ fontSize: 12 }}>🤖</span>
+        <span style={{ fontSize: 10, color: 'var(--text-muted)', fontStyle: 'italic' }}>Ask AI anything about your finances…</span>
+      </div>
+    </MockFrame>
+  );
+}
+
+function MockCashFlow() {
+  const bars = [
+    { m: 'Nov', inc: 65, exp: 45 }, { m: 'Dec', inc: 80, exp: 55 },
+    { m: 'Jan', inc: 72, exp: 48 }, { m: 'Feb', inc: 90, exp: 52 },
+    { m: 'Mar', inc: 68, exp: 60 }, { m: 'Apr', inc: 85, exp: 50 },
+  ];
+  const mandates = [
+    { name: 'Netflix', amt: '₹649/mo' }, { name: 'Mirae Asset SIP', amt: '₹10,000/mo' },
+    { name: 'Home Loan EMI', amt: '₹35,000/mo' }, { name: 'Office Rent', amt: '₹28,000/mo' },
+  ];
+  return (
+    <MockFrame>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>Cash Flow</div>
+        <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: '#16a34a', fontWeight: 700 }}>Net ₹74,260/mo</div>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, height: 52, marginBottom: 12, paddingBottom: 4 }}>
+        {bars.map(b => (
+          <div key={b.m} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+            <div style={{ display: 'flex', gap: 1, alignItems: 'flex-end', height: 42, width: '100%' }}>
+              <div style={{ flex: 1, height: `${b.inc * 0.5}px`, background: '#16a34a', borderRadius: '2px 2px 0 0', opacity: 0.8 }} />
+              <div style={{ flex: 1, height: `${b.exp * 0.5}px`, background: '#dc2626', borderRadius: '2px 2px 0 0', opacity: 0.8 }} />
+            </div>
+            <div style={{ fontSize: 8, color: 'var(--text-muted)' }}>{b.m}</div>
+          </div>
+        ))}
+      </div>
+      <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 6 }}>Active Mandates</div>
+      {mandates.map((m, i) => (
+        <div key={i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '5px 0', borderBottom: '1px solid var(--border-subtle)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <div style={{ width: 5, height: 5, borderRadius: '50%', background: '#16a34a' }} />
+            <span style={{ fontSize: 11, color: 'var(--text-primary)' }}>{m.name}</span>
+          </div>
+          <span style={{ fontSize: 11, fontWeight: 700, color: '#dc2626', fontFamily: 'var(--font-mono)' }}>{m.amt}</span>
+        </div>
+      ))}
+    </MockFrame>
+  );
+}
+
+function MockReconciliation() {
+  const rows = [
+    { s: 'Swiggy ₹284', b: 'Swiggy ₹284', ok: true },
+    { s: 'HDFC EMI ₹8,500', b: 'HDFC Car Loan ₹8,500', ok: true },
+    { s: 'UPI-ZOMATO ₹450', b: 'Zomato ₹450', ok: true },
+    { s: 'NEFT-POLARIS ₹1,50,000', b: '— not in books', ok: false },
+    { s: 'Amazon ₹1,299', b: 'Amazon ₹1,299', ok: true },
+    { s: 'Netflix ₹649', b: 'Netflix ₹649', ok: true },
+  ];
+  return (
+    <MockFrame>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>Bank Reconciliation</div>
+        <div style={{ background: '#16a34a', color: '#fff', fontSize: 9, fontWeight: 700, borderRadius: 4, padding: '2px 8px' }}>94% matched</div>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 22px', gap: 4, marginBottom: 5 }}>
+        {['Bank Statement','Your Books',''].map((h, i) => (
+          <div key={i} style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>{h}</div>
+        ))}
+      </div>
+      {rows.map((r, i) => (
+        <div key={i} style={{
+          display: 'grid', gridTemplateColumns: '1fr 1fr 22px', gap: 4,
+          padding: '5px 6px', borderRadius: 3, marginBottom: 3,
+          background: r.ok ? 'rgba(22,163,74,0.05)' : 'rgba(220,38,38,0.06)',
+          border: `1px solid ${r.ok ? 'rgba(22,163,74,0.15)' : 'rgba(220,38,38,0.22)'}`,
+        }}>
+          <div style={{ fontSize: 10, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.s}</div>
+          <div style={{ fontSize: 10, color: r.ok ? 'var(--text-primary)' : '#dc2626', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.b}</div>
+          <div style={{ fontSize: 12, color: r.ok ? '#16a34a' : '#dc2626', textAlign: 'center' }}>{r.ok ? '✓' : '✕'}</div>
+        </div>
+      ))}
+    </MockFrame>
+  );
+}
+
+function MockAskAI() {
+  const msgs = [
+    { role: 'user', text: 'Record ₹2,500 Zomato expense from HDFC savings' },
+    { role: 'ai', text: '✓ Done! Expense ₹2,500 · Food & Dining · Zomato · HDFC Savings — queued for approval.' },
+    { role: 'user', text: 'Create invoice for Polaris Ventures ₹1,50,000 + 18% GST' },
+    { role: 'ai', text: '✓ Invoice #INV-0024 · Polaris Ventures · ₹1,77,000 (incl. GST) — PDF ready to send.' },
+    { role: 'user', text: 'What did I spend on food last month?' },
+    { role: 'ai', text: '₹8,240 on Food in March — Swiggy, Zomato, Blinkit ×3 and 1 restaurant.' },
+  ];
+  return (
+    <MockFrame>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+        <div style={{ width: 26, height: 26, borderRadius: '50%', background: '#1a362d', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13 }}>🤖</div>
+        <div>
+          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>Ask AI</div>
+          <div style={{ fontSize: 9, color: '#16a34a', fontWeight: 600 }}>● Online · knows your books</div>
+        </div>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {msgs.map((m, i) => (
+          <div key={i} style={{ display: 'flex', justifyContent: m.role === 'user' ? 'flex-end' : 'flex-start' }}>
+            <div style={{
+              maxWidth: '82%', padding: '6px 10px', fontSize: 10, lineHeight: 1.45,
+              borderRadius: m.role === 'user' ? '10px 10px 2px 10px' : '10px 10px 10px 2px',
+              background: m.role === 'user' ? '#1a362d' : 'var(--bg-secondary)',
+              border: m.role === 'ai' ? '1px solid var(--border-subtle)' : 'none',
+              color: m.role === 'user' ? '#fff' : 'var(--text-primary)',
+            }}>{m.text}</div>
+          </div>
+        ))}
+      </div>
+      <div style={{ marginTop: 8, display: 'flex', gap: 6, alignItems: 'center' }}>
+        <div style={{ flex: 1, background: 'var(--bg-secondary)', border: '1px solid var(--border-subtle)', borderRadius: 4, padding: '6px 10px', fontSize: 10, color: 'var(--text-muted)', fontStyle: 'italic' }}>Type what happened…</div>
+        <div style={{ width: 28, height: 28, borderRadius: 4, background: '#1a362d', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 13, cursor: 'pointer', flexShrink: 0 }}>↑</div>
+      </div>
+    </MockFrame>
+  );
+}
+
+function MockHero() {
+  const accounts = [
+    { name: 'HDFC Savings', bal: '₹4,24,000', pos: true },
+    { name: 'ICICI Credit Card', bal: '-₹12,450', pos: false },
+    { name: 'Axis Business CA', bal: '₹1,88,200', pos: true },
+  ];
+  const txns = [
+    { d: 'Swiggy Order', a: '₹284', c: 'Food', ok: true },
+    { d: 'Uber Ride', a: '₹520', c: 'Travel', ok: false },
+    { d: 'Netflix Sub', a: '₹649', c: 'Entertainment', ok: false },
+  ];
+  return (
+    <div style={{
+      aspectRatio: '16 / 9', background: 'linear-gradient(135deg, #1a362d 0%, #2d5a45 100%)',
+      borderRadius: 8, border: '1px solid var(--border-subtle)', overflow: 'hidden',
+      boxShadow: '0 24px 80px rgba(26,54,45,0.18)', fontFamily: 'var(--font-body)',
+      padding: 20, display: 'flex', gap: 16,
+    }}>
+      {/* Left — Dashboard */}
+      <div style={{ flex: 2, background: '#fff', borderRadius: 6, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ background: '#f4f3f0', borderBottom: '1px solid #e5e3df', padding: '8px 14px', display: 'flex', alignItems: 'center', gap: 5 }}>
+          {['#ff5f57','#ffbd2e','#28ca41'].map(c => <div key={c} style={{ width: 8, height: 8, borderRadius: '50%', background: c }} />)}
+          <span style={{ fontSize: 10, color: '#9c9a97', fontFamily: 'var(--font-mono)', marginLeft: 8 }}>spentyai.com/dashboard</span>
+        </div>
+        <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+          <div style={{ width: 36, background: '#1a362d', display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: 10, gap: 8 }}>
+            {[0,1,2,3].map(i => <div key={i} style={{ width: 18, height: 18, borderRadius: 3, background: i === 0 ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.07)' }} />)}
+          </div>
+          <div style={{ flex: 1, padding: '12px 14px' }}>
+            <div style={{ fontSize: 9, color: '#9c9a97', marginBottom: 2, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Net Worth</div>
+            <div style={{ fontSize: 20, fontWeight: 700, color: '#1a362d', fontFamily: 'var(--font-mono)', letterSpacing: '-0.03em', marginBottom: 8 }}>₹8,24,350</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 5, marginBottom: 8 }}>
+              {[{v:'₹1.42L',l:'Income',c:'#16a34a'},{v:'₹68,240',l:'Expenses',c:'#dc2626'},{v:'12',l:'Pending',c:'#d97706'}].map(t => (
+                <div key={t.l} style={{ background: '#f4f3f0', borderRadius: 3, padding: '6px 8px' }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: t.c, fontFamily: 'var(--font-mono)' }}>{t.v}</div>
+                  <div style={{ fontSize: 8, color: '#9c9a97' }}>{t.l}</div>
+                </div>
+              ))}
+            </div>
+            {accounts.map((a, i) => (
+              <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', borderBottom: '1px solid #f0eeeb' }}>
+                <span style={{ fontSize: 10, color: '#3a3835' }}>{a.name}</span>
+                <span style={{ fontSize: 10, fontWeight: 700, color: a.pos ? '#16a34a' : '#dc2626', fontFamily: 'var(--font-mono)' }}>{a.bal}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+      {/* Right — Pending + AI */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div style={{ background: '#fff', borderRadius: 6, padding: 12, flex: 1 }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: '#3a3835', marginBottom: 8 }}>Pending Review <span style={{ background: '#d97706', color: '#fff', borderRadius: 3, padding: '1px 5px', fontSize: 8, marginLeft: 4 }}>12</span></div>
+          {txns.map((t, i) => (
+            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 0', borderBottom: '1px solid #f0eeeb' }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 10, fontWeight: 600, color: '#3a3835' }}>{t.d}</div>
+                <div style={{ fontSize: 8, color: '#9c9a97' }}>{t.c}</div>
+              </div>
+              <span style={{ fontSize: 10, fontWeight: 700, color: '#dc2626', fontFamily: 'var(--font-mono)' }}>{t.a}</span>
+              <div style={{ display: 'flex', gap: 2 }}>
+                <div style={{ width: 16, height: 16, borderRadius: 2, background: t.ok ? '#16a34a' : 'rgba(22,163,74,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, color: t.ok ? '#fff' : '#16a34a' }}>✓</div>
+                {!t.ok && <div style={{ width: 16, height: 16, borderRadius: 2, background: 'rgba(220,38,38,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, color: '#dc2626' }}>✕</div>}
+              </div>
+            </div>
+          ))}
+        </div>
+        <div style={{ background: '#fff', borderRadius: 6, padding: 12 }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: '#3a3835', marginBottom: 8 }}>🤖 Ask AI</div>
+          <div style={{ background: '#f4f3f0', borderRadius: '8px 8px 8px 2px', padding: '6px 8px', fontSize: 9, color: '#3a3835', lineHeight: 1.4, marginBottom: 6 }}>
+            ✓ Invoice #INV-0024 for Polaris Ventures ₹1,77,000 — PDF ready.
+          </div>
+          <div style={{ background: '#1a362d', borderRadius: '8px 8px 2px 8px', padding: '6px 8px', fontSize: 9, color: '#fff', lineHeight: 1.4, textAlign: 'right' }}>
+            Create invoice ₹1.5L + GST for Polaris Ventures
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ---- Hero features (Tier 1 — the sell) --------------------------------------
 const heroFeatures = [
   {
@@ -57,8 +392,7 @@ const heroFeatures = [
       'Choose how far back to scan: 30 days, 6 months, all-time',
     ],
     icon: EnvelopeSimple,
-    image: '/features/web/01-email-sync.png',
-    imageAlt: 'SpentyAI Email Sync screen showing 1,962 emails scanned and transactions detected in real time',
+    Mockup: MockEmailSync,
   },
   {
     label: 'Feature 02',
@@ -71,8 +405,7 @@ const heroFeatures = [
       'See the original email or SMS for every detected transaction',
     ],
     icon: HandTap,
-    image: '/features/web/02-pending-review.png',
-    imageAlt: 'Pending Review page with AI-detected transactions ready for one-tap approval',
+    Mockup: MockPendingReview,
     flip: true,
   },
   {
@@ -86,8 +419,7 @@ const heroFeatures = [
       'Drill into any account to see its history and running balance',
     ],
     icon: ChartPie,
-    image: '/features/web/03-dashboard.png',
-    imageAlt: 'SpentyAI Dashboard with monthly P&L, account balances, and pending review count',
+    Mockup: MockDashboard,
   },
   {
     label: 'Feature 04',
@@ -100,23 +432,35 @@ const heroFeatures = [
       'Pause, resume, or edit recurring entries without losing history',
     ],
     icon: TrendUp,
-    image: '/features/web/04-cashflow.png',
-    imageAlt: 'Cash Flow projection calendar showing monthly recurring payments and balance forecast',
+    Mockup: MockCashFlow,
     flip: true,
   },
   {
     label: 'Feature 05',
-    eyebrow: 'Invoices + Tax',
-    title: 'ITR season is a ten-minute task.',
-    body: 'Create GST-ready invoices with HSN/SAC codes, CGST/SGST/IGST auto-calculated, amount in words, and a clean PDF your client can print. Track who owes you with debtor aging. At year-end, run a Past Insights summary for FY 2025-26 and export a CSV your CA will actually thank you for.',
+    eyebrow: 'Reconciliation',
+    title: 'Know in seconds if your books match the bank.',
+    body: 'Upload a bank statement — PDF, Excel, or CSV, even password-protected — and SpentyAI matches every line to your ledger automatically. Matched entries get a green tick. Unmatched entries are flagged with the amount so you can investigate and close. Complete audit trail, every time.',
     bullets: [
-      'GST invoices: CGST/SGST for same-state, IGST for inter-state — auto',
-      'Debtor aging: current / 1-30 / 31-60 / 61-90 / 90+ days',
-      'Past Insights: isolated FY summaries that never touch your live books',
+      'Parses HDFC, ICICI, Axis, SBI, and Kotak statement formats automatically',
+      'Every match is one-click confirmable; mismatches are flagged with reason',
+      'Reconciliation history stored — revisit any period at any time',
     ],
-    icon: FileText,
-    image: '/features/web/05-invoices.png',
-    imageAlt: 'Invoice editor with GST fields, HSN code, CGST + SGST breakdown, and customer debtor aging',
+    icon: ArrowsLeftRight,
+    Mockup: MockReconciliation,
+  },
+  {
+    label: 'Feature 06',
+    eyebrow: 'Ask AI',
+    title: 'Just tell it what happened. AI does the accounting.',
+    body: 'You don\'t need to know double-entry bookkeeping. Type what happened — "paid ₹2,500 to Zomato from HDFC card" — and SpentyAI posts the correct journal entry, picks the right account and category, and queues it for your approval. Create invoices, log expenses, record transfers — all in plain English.',
+    bullets: [
+      'Natural language entry: "record lunch ₹450" creates the full journal',
+      'Create GST invoices and purchase bills from a single sentence',
+      'Answers questions: "how much did I spend on food last quarter?"',
+    ],
+    icon: Brain,
+    Mockup: MockAskAI,
+    flip: true,
   },
 ];
 
@@ -308,11 +652,7 @@ export default function Features() {
 
         {/* Hero visual */}
         <div style={{ maxWidth: 960, margin: '0 auto' }}>
-          <FeatureImage
-            src="/features/web/00-hero.png"
-            alt="SpentyAI dashboard and mobile app side by side — your intelligent personal accountant"
-            aspect="16 / 9"
-          />
+          <MockHero />
         </div>
 
         {/* Trust strip */}
@@ -404,7 +744,7 @@ export default function Features() {
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 96 }}>
-            {heroFeatures.map(({ label, eyebrow: ey, title, body, bullets, icon: Icon, image, imageAlt, flip }, i) => (
+            {heroFeatures.map(({ label, eyebrow: ey, title, body, bullets, icon: Icon, Mockup, flip }, i) => (
               <div key={label} style={{
                 display: 'grid',
                 gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
@@ -447,7 +787,7 @@ export default function Features() {
                   </ul>
                 </div>
                 <div style={{ direction: 'ltr' }}>
-                  <FeatureImage src={image} alt={imageAlt} aspect="16 / 10" />
+                  <Mockup />
                 </div>
               </div>
             ))}

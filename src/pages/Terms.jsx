@@ -165,7 +165,7 @@ export default function Terms() {
               If you have questions about these Terms of Service, contact us at:
             </p>
             <p style={{ marginTop: 8 }}>
-              <strong>Email:</strong> support@spentyai.com
+              <strong>Email:</strong> customersupport@spentyai.com
             </p>
           </Section>
         </div>
