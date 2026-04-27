@@ -164,8 +164,8 @@ export default function Reconciliation() {
   const [lang, setLang] = useState(getCurrentLanguage());
   useEffect(() => { const h = () => setLang(getCurrentLanguage()); window.addEventListener('languageChanged', h); return () => window.removeEventListener('languageChanged', h); }, []);
   const cached = getCached('reconciliation');
-  const [statements, setStatements] = useState(cached?.statements || []);
-  const [accounts, setAccounts] = useState(cached?.accounts || []);
+  const [statements, setStatements] = useState(Array.isArray(cached?.statements) ? cached.statements : []);
+  const [accounts, setAccounts] = useState(Array.isArray(cached?.accounts) ? cached.accounts : []);
   const [loading, setLoading] = useState(!cached);
   const [uploading, setUploading] = useState(false);
   const [selectedSubType, setSelectedSubType] = useState('savings');
@@ -197,6 +197,8 @@ export default function Reconciliation() {
   const [approving, setApproving] = useState(false);
   const [rejecting, setRejecting] = useState(false);
   const [entriesCollapsed, setEntriesCollapsed] = useState(false);
+  const [bulkCatSheet, setBulkCatSheet] = useState(false);
+  const [bulkCatting, setBulkCatting] = useState(false);
 
   const SUB_TYPE_OPTIONS = [
     { value: 'savings', label: 'Savings', statementType: 'bank' },
@@ -220,13 +222,15 @@ export default function Reconciliation() {
         api.get('/api/accounts'),
         api.get('/api/categories').catch(() => []),
       ]);
-      setStatements(stmtRes.statements || []);
-      setAccounts(accs);
+      // Normalise to arrays — the API can return either [] or {accounts:[]} depending on version.
+      const accsArray = Array.isArray(accs) ? accs : (accs?.accounts || []);
+      setStatements(Array.isArray(stmtRes) ? stmtRes : (stmtRes?.statements || []));
+      setAccounts(accsArray);
       setCategories(Array.isArray(cats) ? cats : (cats?.categories || []));
-      setCache('reconciliation', { statements: stmtRes.statements || [], accounts: accs });
+      setCache('reconciliation', { statements: Array.isArray(stmtRes) ? stmtRes : (stmtRes?.statements || []), accounts: accsArray });
       // Keep selected account only if it still matches the chosen sub-type.
       setSelectedAccountId(prev => {
-        const match = accs.find(a => a.account_id === prev);
+        const match = accsArray.find(a => a.account_id === prev);
         return match ? prev : '';
       });
     } catch {
@@ -415,6 +419,27 @@ export default function Reconciliation() {
       setActiveStmt(stmt);
       loadData();
     } catch (err) { setError(err.message); } finally { setAddingMissing(false); }
+  };
+
+  // Bulk-apply one category (and optionally subcategory) to all parsed entries
+  // that currently have no category assigned — same behaviour as iOS.
+  const handleBulkCategorize = async ({ categoryId, subcategoryId }) => {
+    if (!activeStmt) return;
+    setBulkCatting(true);
+    setError('');
+    try {
+      const entries = (activeStmt.parsed_entries || [])
+        .map((e, i) => ({
+          entry_index: i,
+          category_id: categoryId || null,
+          subcategory_id: subcategoryId || null,
+        }));
+      await api.post(`/api/statements/${activeStmt.statement_id}/bulk-categorize`, { entries });
+      const stmt = await api.get(`/api/statements/${activeStmt.statement_id}`, { bypassCache: true });
+      setActiveStmt(stmt);
+      setBulkCatSheet(false);
+    } catch (err) { setError(err.message); }
+    setBulkCatting(false);
   };
 
   const handleApprove = async () => {
@@ -869,7 +894,7 @@ export default function Reconciliation() {
                 </span>
               </div>
               {(activeStmt.status === 'parsed' || activeStmt.status === 'reconciled') && (
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                   <button
                     data-testid="reaudit-btn"
                     onClick={handleReaudit}
@@ -885,6 +910,22 @@ export default function Reconciliation() {
                       opacity: (reauditing || reconciling) ? 0.6 : 1,
                     }}>
                     <ArrowClockwise size={16} weight="bold" /> {reauditing ? 'Starting...' : 'Re-run audit'}
+                  </button>
+                  <button
+                    data-testid="bulk-categorize-btn"
+                    onClick={() => setBulkCatSheet(true)}
+                    disabled={reconciling || reauditing || bulkCatting}
+                    title="Apply one category to all entries in bulk"
+                    style={{
+                      background: '#fff', color: 'var(--text-primary)',
+                      border: '1px solid var(--border-strong)',
+                      padding: '10px 18px', borderRadius: 2, fontSize: 13, fontWeight: 600,
+                      cursor: (reconciling || reauditing || bulkCatting) ? 'not-allowed' : 'pointer',
+                      fontFamily: 'var(--font-body)',
+                      display: 'flex', alignItems: 'center', gap: 6,
+                      opacity: (reconciling || reauditing || bulkCatting) ? 0.6 : 1,
+                    }}>
+                    <CheckCircle size={16} weight="duotone" /> {bulkCatting ? 'Applying...' : 'Bulk Categorize'}
                   </button>
                   <button data-testid="reconcile-btn" data-guard onClick={handleReconcile} disabled={reconciling}
                     style={{
@@ -1137,13 +1178,39 @@ export default function Reconciliation() {
           {/* Reconciliation Results */}
           {recon && (
             <div data-testid="reconciliation-results">
-              {/* Summary Cards */}
-              <div style={{ display: 'flex', gap: 12, marginBottom: 24, flexWrap: 'wrap' }}>
-                <SummaryPill icon={CheckCircle} label="Matched" value={recon.summary.matched} color="var(--success)" />
-                <SummaryPill icon={Question} label="Missing from Ledger" value={recon.summary.missing_from_ledger} color="var(--warning)" />
-                <SummaryPill icon={XCircle} label="Missing from Statement" value={recon.summary.missing_from_statement} color="var(--info)" />
-                <SummaryPill icon={Warning} label="Conflicts" value={recon.summary.conflicts} color="var(--error)" />
+              {/* Summary Cards — mirrors the iOS LazyVGrid (Total, Matched, Missing Ledger, Missing Statement, Conflicts) */}
+              <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
+                {recon.summary?.total != null && (
+                  <SummaryPill icon={FileText} label="Total" value={recon.summary.total} color="var(--text-secondary)" />
+                )}
+                <SummaryPill icon={CheckCircle} label="Matched" value={recon.summary?.matched ?? 0} color="var(--success)" />
+                <SummaryPill icon={Question} label="Missing from Ledger" value={recon.summary?.missing_from_ledger ?? 0} color="var(--warning)" />
+                <SummaryPill icon={XCircle} label="Missing from Statement" value={recon.summary?.missing_from_statement ?? 0} color="var(--info)" />
+                <SummaryPill icon={Warning} label="Conflicts" value={recon.summary?.conflicts ?? 0} color="var(--error)" />
               </div>
+
+              {/* Balance Summary — opening / closing / computed / difference (iOS parity) */}
+              {(recon.opening_balance != null || recon.closing_balance != null || recon.balance_difference != null) && (
+                <div style={{
+                  display: 'flex', gap: 12, marginBottom: 24, flexWrap: 'wrap',
+                  background: '#fff', border: '1px solid var(--border-subtle)', borderRadius: 2,
+                  padding: '16px 20px',
+                }}>
+                  {[
+                    { label: 'Opening Balance', value: recon.opening_balance },
+                    { label: 'Closing Balance', value: recon.closing_balance },
+                    { label: 'Computed Balance', value: recon.computed_balance },
+                    { label: 'Difference', value: recon.balance_difference, highlight: recon.balance_difference !== 0 },
+                  ].filter(r => r.value != null).map(({ label, value, highlight }) => (
+                    <div key={label} style={{ flex: '1 1 150px', minWidth: 120 }}>
+                      <div className="mono" style={{ fontSize: 10.5, color: 'var(--text-muted)', marginBottom: 4, letterSpacing: '0.06em', textTransform: 'uppercase' }}>{label}</div>
+                      <div className="mono" style={{ fontSize: 18, fontWeight: 700, color: highlight ? 'var(--error)' : 'var(--text-primary)', letterSpacing: '-0.02em' }}>
+                        {formatCurrency(value)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
 
               {/* Matched */}
               {recon.matched?.length > 0 && (
@@ -1373,6 +1440,15 @@ export default function Reconciliation() {
           onCreated={handleQuickCategoryCreated}
         />
       )}
+
+      {bulkCatSheet && (
+        <BulkCategorizeModal
+          categories={categories}
+          onClose={() => setBulkCatSheet(false)}
+          onApply={handleBulkCategorize}
+          applying={bulkCatting}
+        />
+      )}
     </div>
   );
 }
@@ -1388,6 +1464,118 @@ function SummaryPill({ icon: Icon, label, value, color }) {
       <div>
         <div className="mono" style={{ fontSize: 22, fontWeight: 700, color, letterSpacing: '-0.02em' }}>{value}</div>
         <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 500 }}>{label}</div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Bulk Categorize Modal ────────────────────────────────────────────────────
+// iOS-parity: lets the user pick one category (+ optional subcategory) and
+// apply it to every entry in the current statement in a single API call.
+function BulkCategorizeModal({ categories, onClose, onApply, applying }) {
+  const [selectedCatId, setSelectedCatId] = useState('');
+  const [selectedSubId, setSelectedSubId] = useState('');
+  const [type, setType] = useState('expense');
+
+  const topCats = categories.filter(c => !c.parent_id && c.category_type === type);
+  const subCats = categories.filter(c => c.parent_id === selectedCatId);
+
+  const handleCatChange = (id) => {
+    setSelectedCatId(id);
+    setSelectedSubId('');
+  };
+
+  const handleApply = () => {
+    if (!selectedCatId) return;
+    onApply({ categoryId: selectedCatId, subcategoryId: selectedSubId || null });
+  };
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 1200, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div onClick={onClose} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)' }} />
+      <div style={{
+        position: 'relative', background: '#fff', borderRadius: 2, width: '100%', maxWidth: 460,
+        boxShadow: '0 20px 60px rgba(0,0,0,0.2)', margin: '0 8px',
+      }}>
+        {/* Header */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '18px 24px', borderBottom: '1px solid var(--border-subtle)' }}>
+          <div>
+            <h2 style={{ fontSize: 16, fontWeight: 600, margin: 0 }}>Bulk Categorize</h2>
+            <p className="mono" style={{ fontSize: 10.5, color: 'var(--text-muted)', margin: '4px 0 0', letterSpacing: '0.02em' }}>
+              Apply one category to all entries in this statement
+            </p>
+          </div>
+          <button type="button" onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4 }}>
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {/* Type picker */}
+          <div>
+            <label className="mono" style={{ fontSize: 10.5, color: 'var(--text-muted)', display: 'block', marginBottom: 6, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Entry Type</label>
+            <div style={{ display: 'flex', gap: 8 }}>
+              {['expense', 'income'].map(t => (
+                <button key={t} type="button"
+                  onClick={() => { setType(t); setSelectedCatId(''); setSelectedSubId(''); }}
+                  style={{
+                    flex: 1, padding: '8px 0', borderRadius: 2, fontSize: 12.5, fontWeight: 600,
+                    fontFamily: 'var(--font-body)', cursor: 'pointer', textTransform: 'capitalize',
+                    background: type === t ? (t === 'income' ? 'rgba(58,92,74,0.12)' : 'rgba(150,69,58,0.12)') : '#fff',
+                    color: type === t ? (t === 'income' ? 'var(--success)' : 'var(--error)') : 'var(--text-secondary)',
+                    border: `1px solid ${type === t ? (t === 'income' ? 'var(--success)' : 'var(--error)') : 'var(--border-strong)'}`,
+                  }}>
+                  {t === 'income' ? 'Income' : 'Expense'}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Category */}
+          <div>
+            <label className="mono" style={{ fontSize: 10.5, color: 'var(--text-muted)', display: 'block', marginBottom: 6, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Category</label>
+            <select value={selectedCatId} onChange={e => handleCatChange(e.target.value)}
+              style={{ width: '100%', padding: '9px 12px', border: '1px solid var(--border-strong)', borderRadius: 2, fontSize: 13, fontFamily: 'var(--font-body)', background: '#fff' }}>
+              <option value="">— Select category —</option>
+              {topCats.map(c => (
+                <option key={c.category_id} value={c.category_id}>{c.name}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Subcategory (only when parent selected and subcats exist) */}
+          {selectedCatId && subCats.length > 0 && (
+            <div>
+              <label className="mono" style={{ fontSize: 10.5, color: 'var(--text-muted)', display: 'block', marginBottom: 6, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Subcategory <span style={{ fontWeight: 400 }}>(optional)</span></label>
+              <select value={selectedSubId} onChange={e => setSelectedSubId(e.target.value)}
+                style={{ width: '100%', padding: '9px 12px', border: '1px solid var(--border-strong)', borderRadius: 2, fontSize: 13, fontFamily: 'var(--font-body)', background: '#fff' }}>
+                <option value="">— None —</option>
+                {subCats.map(c => (
+                  <option key={c.category_id} value={c.category_id}>{c.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div style={{ display: 'flex', gap: 10, padding: '14px 24px', borderTop: '1px solid var(--border-subtle)', justifyContent: 'flex-end' }}>
+          <button type="button" onClick={onClose} style={{
+            background: 'none', border: '1px solid var(--border-strong)', color: 'var(--text-secondary)',
+            padding: '9px 20px', borderRadius: 2, fontSize: 13, cursor: 'pointer', fontFamily: 'var(--font-body)'
+          }}>Cancel</button>
+          <button type="button" onClick={handleApply} disabled={!selectedCatId || applying} style={{
+            background: !selectedCatId || applying ? 'var(--text-muted)' : 'var(--brand-primary)',
+            color: '#fff', border: 'none', padding: '9px 20px', borderRadius: 2,
+            fontSize: 13, fontWeight: 600, cursor: (!selectedCatId || applying) ? 'not-allowed' : 'pointer',
+            fontFamily: 'var(--font-body)', opacity: (!selectedCatId || applying) ? 0.6 : 1,
+            display: 'flex', alignItems: 'center', gap: 6,
+          }}>
+            <CheckCircle size={14} weight="bold" />
+            {applying ? 'Applying...' : 'Apply to All Entries'}
+          </button>
+        </div>
       </div>
     </div>
   );
