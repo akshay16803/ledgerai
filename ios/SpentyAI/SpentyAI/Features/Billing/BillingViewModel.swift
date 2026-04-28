@@ -115,7 +115,9 @@ final class BillingViewModel {
                 storeProducts[product.id] = product
             }
         } catch {
+            #if DEBUG
             print("[Billing] Failed to load StoreKit products: \(error)")
+            #endif
         }
     }
 

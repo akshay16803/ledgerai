@@ -30,6 +30,10 @@ interface ApiEndpoints {
     @GET("api/auth/me")
     suspend fun authMe(): Response<JsonObject>
 
+    // --- Dev bypass (debug builds only) ---
+    @POST("api/auth/dev/simulator-login")
+    suspend fun devSimulatorLogin(@Body body: JsonObject): Response<JsonObject>
+
     // --- Dashboard ---
     @GET("api/dashboard/summary")
     suspend fun getDashboardSummary(): Response<DashboardSummary>

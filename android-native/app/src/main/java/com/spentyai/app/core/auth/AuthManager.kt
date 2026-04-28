@@ -122,6 +122,65 @@ class AuthManager(
         }
     }
 
+    /**
+     * DEBUG ONLY — bypass Google Sign-In using the dev simulator login endpoint.
+     * Mirrors the iOS simulatorAutoLogin() flow exactly.
+     * Falls back to an offline token if the backend returns 503/404.
+     */
+    fun signInWithDevBypass(email: String = "akshaychouhan16803@gmail.com") {
+        scope.launch {
+            _isLoading.value = true
+            _error.value = null
+
+            val body = JsonObject(
+                mapOf(
+                    "email" to JsonPrimitive(email),
+                    "devSecret" to JsonPrimitive("spenty-sim-bypass-2026")
+                )
+            )
+
+            val result = apiClient.safeApiCall { apiClient.endpoints.devSimulatorLogin(body) }
+            when (result) {
+                is ApiResult.Success -> {
+                    val data = result.data
+                    val token = data["session_token"]?.jsonPrimitive?.content
+                    val userId = data["user_id"]?.jsonPrimitive?.content
+                    val userEmail = data["email"]?.jsonPrimitive?.content
+                    val subscription = data["subscription_status"]?.jsonPrimitive?.content
+
+                    if (token != null) {
+                        tokenStore.saveToken(token)
+                        userId?.let { tokenStore.saveUserId(it) }
+                        (userEmail ?: email).let { tokenStore.saveUserEmail(it) }
+                        subscription?.let { tokenStore.saveSubscriptionStatus(it) }
+                        _isAuthenticated.value = true
+                        _isSubscribed.value = tokenStore.isSubscribed()
+                        android.util.Log.d("AuthManager", "[DevBypass] API login successful")
+                    } else {
+                        // Fallback: offline token so UI can be tested
+                        _useOfflineDevBypass(email)
+                    }
+                }
+                is ApiResult.Failure -> {
+                    android.util.Log.w("AuthManager", "[DevBypass] API failed: ${result.error.message}. Using offline bypass.")
+                    _useOfflineDevBypass(email)
+                }
+            }
+            _isLoading.value = false
+        }
+    }
+
+    private fun _useOfflineDevBypass(email: String) {
+        val offlineToken = "sim-offline-token-${java.util.UUID.randomUUID()}"
+        tokenStore.saveToken(offlineToken)
+        tokenStore.saveUserId("user_simulator_offline")
+        tokenStore.saveUserEmail(email)
+        tokenStore.saveSubscriptionStatus("active")
+        _isAuthenticated.value = true
+        _isSubscribed.value = true
+        android.util.Log.d("AuthManager", "[DevBypass] Offline fallback login for $email")
+    }
+
     fun setSignInError(message: String) {
         _isLoading.value = false
         _error.value = message

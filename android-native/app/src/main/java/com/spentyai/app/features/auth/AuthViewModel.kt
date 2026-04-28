@@ -49,4 +49,11 @@ class AuthViewModel(
         _errorMessage.value = ""
         authManager.clearError()
     }
+
+    /** Debug bypass — only call from debug builds. */
+    fun devSignIn() {
+        _showError.value = false
+        _errorMessage.value = ""
+        authManager.signInWithDevBypass()
+    }
 }

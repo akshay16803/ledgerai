@@ -24,6 +24,10 @@ struct RecordExpenseIntent: AppIntent {
     // MARK: - Perform
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
+        // Auth check — if not logged in, prompt user to open the app
+        guard KeychainHelper.read(key: KeychainHelper.sessionTokenKey) != nil else {
+            return .result(dialog: "Please open SpentyAI and sign in first, then try again.")
+        }
         let body = SiriTransactionRequest(
             transactionType: "expense",
             amount: amount,

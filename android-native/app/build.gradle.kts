@@ -45,7 +45,7 @@ android {
         }
         debug {
             isMinifyEnabled = false
-            applicationIdSuffix = ".debug"
+            // applicationIdSuffix = ".debug"  // removed: debug must use com.spentyai.app to match registered Google OAuth client
             versionNameSuffix = "-debug"
         }
     }

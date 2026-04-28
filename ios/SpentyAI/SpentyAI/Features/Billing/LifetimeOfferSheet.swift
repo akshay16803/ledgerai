@@ -81,22 +81,16 @@ struct LifetimeOfferSheet: View {
 
             // Price display
             VStack(spacing: 8) {
-                Text("₹9,999")
+                Text("One-time purchase")
                     .font(.title3.weight(.medium))
                     .foregroundStyle(.white.opacity(0.38))
-                    .strikethrough(true, color: .white.opacity(0.38))
+                    .strikethrough(false)
 
-                HStack(alignment: .top, spacing: 2) {
-                    Text("₹")
-                        .font(.system(size: 22, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .offset(y: 8)
-                    Text("4,999")
-                        .font(.system(size: 54, weight: .bold))
-                        .foregroundStyle(.white)
-                }
+                Text("Special offer price")
+                    .font(.system(size: 36, weight: .bold))
+                    .foregroundStyle(.white)
 
-                Text("YOU SAVE ₹5,000  ·  50% OFF")
+                Text("LIMITED TIME OFFER  ·  50% OFF")
                     .font(.system(size: 11, weight: .bold))
                     .tracking(0.4)
                     .foregroundStyle(darkBg)
@@ -159,7 +153,7 @@ struct LifetimeOfferSheet: View {
                                         .opacity(0.8)
                                 }
                                 Spacer()
-                                Text("₹4,999")
+                                Text("Special offer price")
                                     .font(.headline)
                             }
                             .padding(.horizontal, 20)
@@ -175,7 +169,7 @@ struct LifetimeOfferSheet: View {
                 Button {
                     onDecline()
                 } label: {
-                    Text(showTimer ? "No thanks, I'll pay ₹199/month" : "Maybe later")
+                    Text(showTimer ? "No thanks, go back" : "Maybe later")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }

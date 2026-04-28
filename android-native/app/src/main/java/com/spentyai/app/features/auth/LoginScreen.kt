@@ -46,6 +46,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.spentyai.app.BuildConfig
 import com.spentyai.app.core.theme.SpentyPrimary
 import com.spentyai.app.core.theme.SpentyType
 import com.spentyai.app.core.theme.SpentyWarning
@@ -58,6 +59,7 @@ fun LoginScreen(
     val isLoading by viewModel.isLoading.collectAsState()
     val showError by viewModel.showError.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
+    val onDevSignIn: (() -> Unit)? = if (BuildConfig.DEBUG) ({ viewModel.devSignIn() }) else null
 
     Box(
         modifier = Modifier
@@ -83,7 +85,8 @@ fun LoginScreen(
                 showError = showError,
                 errorMessage = errorMessage,
                 onGoogleSignIn = onGoogleSignInRequest,
-                onDismissError = { viewModel.dismissError() }
+                onDismissError = { viewModel.dismissError() },
+                onDevSignIn = onDevSignIn
             )
 
             Spacer(modifier = Modifier.height(48.dp))
@@ -134,7 +137,8 @@ private fun SignInSection(
     showError: Boolean,
     errorMessage: String,
     onGoogleSignIn: () -> Unit,
-    onDismissError: () -> Unit
+    onDismissError: () -> Unit,
+    onDevSignIn: (() -> Unit)? = null
 ) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -196,6 +200,27 @@ private fun SignInSection(
                 color = SpentyPrimary,
                 strokeWidth = 2.dp
             )
+        }
+
+        // DEBUG ONLY: dev bypass button — not shown in release builds
+        if (onDevSignIn != null) {
+            Button(
+                onClick = onDevSignIn,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(44.dp),
+                shape = RoundedCornerShape(10.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFF6C757D),
+                    contentColor = Color.White
+                ),
+                enabled = !isLoading
+            ) {
+                Text(
+                    text = "🔧 Dev Login (Debug Only)",
+                    style = SpentyType.Caption1.copy(color = Color.White)
+                )
+            }
         }
 
         // Terms & Privacy footer

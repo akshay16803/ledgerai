@@ -15,6 +15,10 @@ struct CheckBalanceIntent: AppIntent {
     // MARK: - Perform
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
+        // Auth check — if not logged in, prompt user to open the app
+        guard KeychainHelper.read(key: KeychainHelper.sessionTokenKey) != nil else {
+            return .result(dialog: "Please open SpentyAI and sign in first, then try again.")
+        }
         do {
             let summary: SiriDashboardSummary = try await APIClient.shared.get(
                 APIEndpoints.dashboardSummary

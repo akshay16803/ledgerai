@@ -406,16 +406,24 @@ struct BillingView: View {
                 }
 
                 HStack(alignment: .bottom, spacing: 10) {
-                    // Show original price from StoreKit if available, else fallback
-                    Text(viewModel.displayPrice(for: "com.spentyai.lifetime") ?? "₹9,999")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .strikethrough(true, color: .secondary)
+                    // Show original price from StoreKit if available, else hide until loaded
+                    if let regularPrice = viewModel.displayPrice(for: "com.spentyai.lifetime") {
+                        Text(regularPrice)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .strikethrough(true, color: .secondary)
+                    }
                     // Show offer price from StoreKit — guideline 3.1.1 requires displayed
                     // price to match the actual App Store price in the user's currency.
-                    Text(viewModel.displayPrice(for: "com.spentyai.lifetime_offer") ?? "₹4,999")
-                        .font(.title2.weight(.bold))
-                        .foregroundStyle(brandPrimary)
+                    if let offerPrice = viewModel.displayPrice(for: "com.spentyai.lifetime_offer") {
+                        Text(offerPrice)
+                            .font(.title2.weight(.bold))
+                            .foregroundStyle(brandPrimary)
+                    } else {
+                        ProgressView()
+                            .scaleEffect(0.8)
+                            .tint(brandPrimary)
+                    }
                     Text("50% OFF")
                         .font(.caption.weight(.bold))
                         .foregroundStyle(.white)
@@ -433,8 +441,14 @@ struct BillingView: View {
                         Text("Upgrade Now")
                             .font(.headline)
                         Spacer()
-                        Text(viewModel.displayPrice(for: "com.spentyai.lifetime_offer") ?? "₹4,999")
-                            .font(.headline)
+                        if let offerPrice = viewModel.displayPrice(for: "com.spentyai.lifetime_offer") {
+                            Text(offerPrice)
+                                .font(.headline)
+                        } else {
+                            ProgressView()
+                                .scaleEffect(0.7)
+                                .tint(.white)
+                        }
                     }
                     .foregroundStyle(.white)
                     .padding(.horizontal, 20)
@@ -513,10 +527,10 @@ struct BillingView: View {
     }
 
     static let fallbackPlans: [FallbackPlan] = [
-        FallbackPlan(name: "Monthly",  productId: "com.spentyai.monthly",  displayPrice: "\u{20B9}199",   perUnit: "/month",   subtitle: "Flexible, cancel anytime",                 badge: nil),
-        FallbackPlan(name: "Quarterly", productId: "com.spentyai.quarterly", displayPrice: "\u{20B9}449",  perUnit: "/3 months", subtitle: "Save 25% vs monthly",                     badge: nil),
-        FallbackPlan(name: "Yearly",   productId: "com.spentyai.yearly",   displayPrice: "\u{20B9}1,499", perUnit: "/year",     subtitle: "Save 37% — most popular",                  badge: "Popular"),
-        FallbackPlan(name: "Lifetime", productId: "com.spentyai.lifetime", displayPrice: "\u{20B9}9,999", perUnit: "one-time",  subtitle: "Pay once, use forever",                    badge: "Best Value"),
+        FallbackPlan(name: "Monthly",  productId: "com.spentyai.monthly",  displayPrice: "Monthly",    perUnit: nil,         subtitle: "Flexible, cancel anytime",                 badge: nil),
+        FallbackPlan(name: "Quarterly", productId: "com.spentyai.quarterly", displayPrice: "Quarterly", perUnit: nil,         subtitle: "Save 25% vs monthly",                     badge: nil),
+        FallbackPlan(name: "Yearly",   productId: "com.spentyai.yearly",   displayPrice: "Yearly",     perUnit: nil,         subtitle: "Save 37% — most popular",                  badge: "Popular"),
+        FallbackPlan(name: "Lifetime", productId: "com.spentyai.lifetime", displayPrice: "Lifetime",   perUnit: "one-time",  subtitle: "Pay once, use forever",                    badge: "Best Value"),
     ]
 }
 

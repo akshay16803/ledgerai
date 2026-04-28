@@ -74,12 +74,8 @@ struct SubscriptionPaywall: View {
                     }
                 },
                 onDecline: {
-                    // onDecline is synchronous — set @State directly
+                    // User declined — return to plan selection, no automatic purchase
                     showLifetimeOffer = false
-                    Task {
-                        await viewModel.purchasePlan("com.spentyai.monthly")
-                        if viewModel.isSubscribed { onSubscribed?() }
-                    }
                 }
             )
         }
@@ -209,11 +205,17 @@ struct SubscriptionPaywall: View {
                 Spacer()
 
                 VStack(alignment: .trailing, spacing: 1) {
-                    Text(viewModel.displayPrice(for: plan.productId) ?? plan.displayPrice)
-                        .font(.subheadline.weight(.bold))
-                        .foregroundStyle(brandPrimary)
+                    if let price = viewModel.displayPrice(for: plan.productId) {
+                        Text(price)
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(brandPrimary)
+                    } else {
+                        ProgressView()
+                            .scaleEffect(0.7)
+                            .tint(brandPrimary)
+                    }
 
-                    if let per = plan.perUnit {
+                    if viewModel.displayPrice(for: plan.productId) != nil, let per = plan.perUnit {
                         Text(per)
                             .font(.caption2)
                             .foregroundStyle(.tertiary)

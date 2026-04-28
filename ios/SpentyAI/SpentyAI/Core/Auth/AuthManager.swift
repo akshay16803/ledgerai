@@ -52,20 +52,28 @@ final class AuthManager {
             }
         }
 
+        #if DEBUG
         print("[Auth] login() — calling /api/auth/google/mobile …")
         print("[Auth] login() — id_token prefix: \(idToken.prefix(20))…")
+        #endif
         do {
             let response: LoginResponse = try await APIClient.shared.post(
                 APIEndpoints.authGoogleMobile,
                 body: LoginRequest(idToken: idToken)
             )
+            #if DEBUG
             print("[Auth] login() — success, userId=\(response.user.id)")
+            #endif
             KeychainHelper.save(key: KeychainHelper.sessionTokenKey, value: response.sessionToken)
             self.user = response.user
             self.isAuthenticated = true
+            #if DEBUG
             print("[Auth] login() — isAuthenticated=\(isAuthenticated), user=\(response.user.email ?? "nil")")
+            #endif
         } catch {
+            #if DEBUG
             print("[Auth] login() — FAILED: \(error)")
+            #endif
             lastLoginError = (error as? APIError)?.localizedDescription ?? "Something went wrong. Please try again."
             throw error
         }
@@ -89,20 +97,28 @@ final class AuthManager {
         #endif
 
         guard let token = KeychainHelper.read(key: KeychainHelper.sessionTokenKey) else {
+            #if DEBUG
             print("[Auth] checkSession() — no token found, showing login")
+            #endif
             isAuthenticated = false
             return
         }
+        #if DEBUG
         print("[Auth] checkSession() — token found (\(token.prefix(8))…), calling /api/auth/me …")
+        #endif
         isLoading = true
         defer { isLoading = false }
         do {
             let fetchedUser: User = try await APIClient.shared.get(APIEndpoints.authMe)
+            #if DEBUG
             print("[Auth] checkSession() — success, userId=\(fetchedUser.id)")
+            #endif
             self.user = fetchedUser
             self.isAuthenticated = true
         } catch {
+            #if DEBUG
             print("[Auth] checkSession() — FAILED: \(error)")
+            #endif
             self.user = nil
             self.isAuthenticated = false
             KeychainHelper.delete(key: KeychainHelper.sessionTokenKey)
@@ -190,18 +206,24 @@ final class AuthManager {
             let user: User
         }
 
+        #if DEBUG
         print("[Auth] loginWithApple() — calling /api/auth/apple/mobile …")
+        #endif
         do {
             let response: LoginResponse = try await APIClient.shared.post(
                 APIEndpoints.authAppleMobile,
                 body: AppleLoginRequest(identityToken: identityToken, nonce: nonce)
             )
+            #if DEBUG
             print("[Auth] loginWithApple() — success, userId=\(response.user.id)")
+            #endif
             KeychainHelper.save(key: KeychainHelper.sessionTokenKey, value: response.sessionToken)
             self.user = response.user
             self.isAuthenticated = true
         } catch {
+            #if DEBUG
             print("[Auth] loginWithApple() — FAILED: \(error)")
+            #endif
             lastLoginError = (error as? APIError)?.localizedDescription ?? "Apple Sign-In failed. Please try again."
             throw error
         }
@@ -219,17 +241,23 @@ final class AuthManager {
             let user: User
         }
 
+        #if DEBUG
         print("[Auth] demoLogin() — calling /api/auth/demo-login …")
+        #endif
         do {
             let response: DemoLoginResponse = try await APIClient.shared.post(
                 APIEndpoints.authDemoLogin
             )
+            #if DEBUG
             print("[Auth] demoLogin() — success, userId=\(response.user.id)")
+            #endif
             KeychainHelper.save(key: KeychainHelper.sessionTokenKey, value: response.sessionToken)
             self.user = response.user
             self.isAuthenticated = true
         } catch {
+            #if DEBUG
             print("[Auth] demoLogin() — FAILED: \(error)")
+            #endif
             lastLoginError = (error as? APIError)?.localizedDescription ?? "Demo login unavailable. Please use Google or Apple sign-in."
         }
     }

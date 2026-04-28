@@ -159,6 +159,9 @@ final class SpeechManager: NSObject {
         recognitionTask?.cancel()
         recognitionTask = nil
         isListening = false
+        // Deactivate the audio session so the playAndRecord category is released,
+        // other apps' audio ducking is lifted, and the system audio routing is restored.
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
 
     /// Reset transcription text.
@@ -171,6 +174,16 @@ final class SpeechManager: NSObject {
 
     /// Speak the given text aloud using system TTS.
     func speak(_ text: String) {
+        // Configure the audio session for playback-only so that TTS output respects the
+        // device mute switch and does NOT use the loudspeaker-forced playAndRecord category.
+        do {
+            let audioSession = AVAudioSession.sharedInstance()
+            try audioSession.setCategory(.playback, mode: .spokenAudio, options: [.allowBluetooth])
+            try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
+        } catch {
+            // Non-fatal: synthesizer will still speak with whatever session is active.
+        }
+
         // Strip markdown formatting for cleaner speech
         let cleanText = text
             .replacingOccurrences(of: "**", with: "")
