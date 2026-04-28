@@ -74,7 +74,8 @@ struct SubscriptionPaywall: View {
                     }
                 },
                 onDecline: {
-                    await MainActor.run { showLifetimeOffer = false }
+                    // onDecline is synchronous — set @State directly
+                    showLifetimeOffer = false
                     Task {
                         await viewModel.purchasePlan("com.spentyai.monthly")
                         if viewModel.isSubscribed { onSubscribed?() }

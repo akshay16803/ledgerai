@@ -76,11 +76,10 @@ struct BillingView: View {
                     }
                 },
                 onDecline: {
+                    // onDecline is synchronous — set @State directly on the main thread
                     let wasUpgrade = isUpgradeMode
-                    await MainActor.run {
-                        showLifetimeOffer = false
-                        isUpgradeMode = false
-                    }
+                    showLifetimeOffer = false
+                    isUpgradeMode = false
                     if !wasUpgrade {
                         Task { await viewModel.purchasePlan("com.spentyai.monthly") }
                     }
