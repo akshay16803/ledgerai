@@ -157,7 +157,7 @@ struct LoginView: View {
                 }
             }
             .signInWithAppleButtonStyle(.black)
-            .frame(maxWidth: .infinity, minHeight: 52)
+            .frame(maxWidth: .infinity, minHeight: 52, maxHeight: 52)
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             .disabled(viewModel.isLoading)
             .opacity(viewModel.isLoading ? 0.6 : 1)

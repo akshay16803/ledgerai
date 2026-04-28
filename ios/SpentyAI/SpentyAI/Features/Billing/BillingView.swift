@@ -110,7 +110,7 @@ struct BillingView: View {
                 }
 
                 if let expires = status.expiresAt {
-                    Text("Renews \(expires)")
+                    Text("Renews \(Self.formatPaymentDate(expires))")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
