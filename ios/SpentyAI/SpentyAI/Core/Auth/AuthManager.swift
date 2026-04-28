@@ -173,6 +173,67 @@ final class AuthManager {
     }
     #endif
 
+    // MARK: - Apple Sign-In
+
+    func loginWithApple(identityToken: String, nonce: String) async throws {
+        isLoading = true
+        lastLoginError = nil
+        defer { isLoading = false }
+
+        struct AppleLoginRequest: Encodable {
+            let identityToken: String
+            let nonce: String
+        }
+
+        struct LoginResponse: Decodable {
+            let sessionToken: String
+            let user: User
+        }
+
+        print("[Auth] loginWithApple() — calling /api/auth/apple/mobile …")
+        do {
+            let response: LoginResponse = try await APIClient.shared.post(
+                APIEndpoints.authAppleMobile,
+                body: AppleLoginRequest(identityToken: identityToken, nonce: nonce)
+            )
+            print("[Auth] loginWithApple() — success, userId=\(response.user.id)")
+            KeychainHelper.save(key: KeychainHelper.sessionTokenKey, value: response.sessionToken)
+            self.user = response.user
+            self.isAuthenticated = true
+        } catch {
+            print("[Auth] loginWithApple() — FAILED: \(error)")
+            lastLoginError = (error as? APIError)?.localizedDescription ?? "Apple Sign-In failed. Please try again."
+            throw error
+        }
+    }
+
+    // MARK: - Demo Login (for App Review)
+
+    func demoLogin() async {
+        isLoading = true
+        lastLoginError = nil
+        defer { isLoading = false }
+
+        struct DemoLoginResponse: Decodable {
+            let sessionToken: String
+            let user: User
+        }
+
+        print("[Auth] demoLogin() — calling /api/auth/demo-login …")
+        do {
+            let response: DemoLoginResponse = try await APIClient.shared.post(
+                APIEndpoints.authDemoLogin
+            )
+            print("[Auth] demoLogin() — success, userId=\(response.user.id)")
+            KeychainHelper.save(key: KeychainHelper.sessionTokenKey, value: response.sessionToken)
+            self.user = response.user
+            self.isAuthenticated = true
+        } catch {
+            print("[Auth] demoLogin() — FAILED: \(error)")
+            lastLoginError = (error as? APIError)?.localizedDescription ?? "Demo login unavailable. Please use Google or Apple sign-in."
+        }
+    }
+
     func logout() async {
         do {
             let _: EmptyResponse = try await APIClient.shared.post(APIEndpoints.authLogout)

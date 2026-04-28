@@ -9,6 +9,9 @@ struct SubscriptionPaywall: View {
     @State private var selectedProductId: String = "com.spentyai.yearly"
     @State private var showPromoSection = false
     @State private var showLifetimeOffer = false
+    @State private var isRestoring = false
+    @State private var restoreResultMessage: String? = nil
+    @State private var showRestoreResult = false
 
     var onSubscribed: (() -> Void)?
 
@@ -54,6 +57,11 @@ struct SubscriptionPaywall: View {
             Button(lang.s("ok")) { viewModel.showError = false }
         } message: {
             Text(viewModel.errorMessage)
+        }
+        .alert("Restore Purchases", isPresented: $showRestoreResult) {
+            Button("OK") { showRestoreResult = false }
+        } message: {
+            Text(restoreResultMessage ?? "")
         }
         .sheet(isPresented: $showLifetimeOffer) {
             LifetimeOfferSheet(
@@ -353,7 +361,32 @@ struct SubscriptionPaywall: View {
                 Link("Privacy Policy", destination: URL(string: "https://spentyai.com/privacy")!)
                 Text("·")
                 Button("Restore Purchases") {
-                    Task { try? await AppStore.sync() }
+                    Task {
+                        isRestoring = true
+                        do {
+                            try await AppStore.sync()
+                            // Re-check entitlements after sync
+                            await viewModel.checkEntitlements()
+                            if viewModel.isSubscribed {
+                                onSubscribed?()
+                            } else {
+                                restoreResultMessage = "No active subscription found for this Apple ID."
+                                showRestoreResult = true
+                            }
+                        } catch {
+                            restoreResultMessage = "Restore failed. Please try again or contact support."
+                            showRestoreResult = true
+                        }
+                        isRestoring = false
+                    }
+                }
+                .disabled(isRestoring)
+                .overlay {
+                    if isRestoring {
+                        ProgressView()
+                            .scaleEffect(0.7)
+                            .offset(x: 48)
+                    }
                 }
             }
             .font(.caption2)

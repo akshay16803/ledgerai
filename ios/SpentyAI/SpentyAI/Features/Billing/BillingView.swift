@@ -448,22 +448,51 @@ struct BillingView: View {
         }
     }
 
-    // MARK: - Cancel
+    // MARK: - Cancel / Manage
 
+    /// For Apple IAP subscribers: opens the App Store subscription management
+    /// page (guideline 3.1.2 — cancellation must go through Apple).
+    /// For web / promo subscribers: shows the in-app cancel confirmation.
+    @ViewBuilder
     private var cancelSection: some View {
-        Button(role: .destructive) {
-            viewModel.showCancelConfirmation = true
-        } label: {
-            HStack {
-                Image(systemName: "xmark.circle")
-                Text(lang.s("cancel_subscription"))
+        let isAppleSubscriber = viewModel.currentStatus?.provider?.lowercased() == "apple"
+            || viewModel.currentStatus?.provider?.lowercased() == "ios"
+
+        if isAppleSubscriber {
+            // Guideline 3.1.2 — direct Apple subscribers to Apple's page.
+            Link(destination: URL(string: "https://apps.apple.com/account/subscriptions")!) {
+                HStack(spacing: 8) {
+                    Image(systemName: "arrow.up.right.square")
+                    Text("Manage Subscription")
+                }
+                .font(.subheadline)
+                .foregroundStyle(brandPrimary)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
             }
-            .font(.subheadline)
-            .foregroundStyle(brandError)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 12)
+            .padding(.top, 8)
+
+            Text("To cancel or change your plan, tap above to open your Apple subscription settings.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal)
+        } else {
+            // Web / promo subscribers — backend cancel is fine.
+            Button(role: .destructive) {
+                viewModel.showCancelConfirmation = true
+            } label: {
+                HStack {
+                    Image(systemName: "xmark.circle")
+                    Text(lang.s("cancel_subscription"))
+                }
+                .font(.subheadline)
+                .foregroundStyle(brandError)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+            }
+            .padding(.top, 8)
         }
-        .padding(.top, 8)
     }
 
     // MARK: - Fallback Plan Data

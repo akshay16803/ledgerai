@@ -1,13 +1,19 @@
+import AuthenticationServices
+import CryptoKit
 import SwiftUI
 
 struct LoginView: View {
 
     // MARK: - State
 
-
     @Environment(LocalizationManager.self) var lang
     @State private var viewModel: AuthViewModel
     var authManager: AuthManager
+
+    /// The raw (un-hashed) nonce used for the current Apple Sign-In request.
+    /// Must be stored in view state because the `onCompletion` closure fires
+    /// asynchronously after the nonce was passed to Apple.
+    @State private var currentAppleNonce: String = ""
 
     // MARK: - Init
 
@@ -81,22 +87,27 @@ struct LoginView: View {
     }
 
     private var signInSection: some View {
-        VStack(spacing: 20) {
+        VStack(spacing: 16) {
             // Error inline banner (secondary to the alert)
             if viewModel.showError {
                 errorBanner
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
 
-            // Google Sign-In button
+            // ── Google Sign-In ────────────────────────────────────
             Button {
                 Task { await viewModel.signInWithGoogle() }
             } label: {
                 HStack(spacing: 12) {
-                    // Google "G" placeholder (SF Symbol)
-                    Image(systemName: "g.circle.fill")
-                        .resizable()
-                        .frame(width: 22, height: 22)
+                    // Google "G" logo
+                    ZStack {
+                        Circle()
+                            .fill(Color.white)
+                            .frame(width: 26, height: 26)
+                        Text("G")
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundStyle(Color(red: 0.26, green: 0.52, blue: 0.96))
+                    }
 
                     Text(lang.s("sign_in_google"))
                         .font(.body.weight(.semibold))
@@ -110,6 +121,47 @@ struct LoginView: View {
             .disabled(viewModel.isLoading)
             .opacity(viewModel.isLoading ? 0.6 : 1)
 
+            // ── Sign in with Apple ────────────────────────────────
+            // Required by App Store guideline 4.8 when any third-party
+            // login (Google) is offered.
+            SignInWithAppleButton(.signIn) { request in
+                let nonce = randomNonceString()
+                currentAppleNonce = nonce
+                request.requestedScopes = [.fullName, .email]
+                request.nonce = sha256Hash(nonce)
+            } onCompletion: { result in
+                switch result {
+                case .success(let authorization):
+                    guard
+                        let credential = authorization.credential as? ASAuthorizationAppleIDCredential,
+                        let tokenData   = credential.identityToken,
+                        let idToken     = String(data: tokenData, encoding: .utf8)
+                    else {
+                        viewModel.errorMessage = "Apple Sign-In returned an invalid credential. Please try again."
+                        viewModel.showError    = true
+                        return
+                    }
+                    Task {
+                        await viewModel.signInWithApple(
+                            identityToken: idToken,
+                            nonce: currentAppleNonce
+                        )
+                    }
+                case .failure(let error):
+                    // Code 1001 = user cancelled — silently ignore.
+                    let nsError = error as NSError
+                    if nsError.code != ASAuthorizationError.canceled.rawValue {
+                        viewModel.errorMessage = "Apple Sign-In failed. Please try again."
+                        viewModel.showError    = true
+                    }
+                }
+            }
+            .signInWithAppleButtonStyle(.black)
+            .frame(maxWidth: .infinity, minHeight: 52)
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .disabled(viewModel.isLoading)
+            .opacity(viewModel.isLoading ? 0.6 : 1)
+
             // Loading indicator
             if viewModel.isLoading {
                 ProgressView()
@@ -117,13 +169,27 @@ struct LoginView: View {
                     .transition(.opacity)
             }
 
+            // ── Demo / Reviewer Account ───────────────────────────
+            // A low-profile entry point for App Review so reviewers can
+            // access a pre-seeded demo account without Google/Apple OAuth.
+            Button {
+                Task { await viewModel.signInWithDemo() }
+            } label: {
+                Text("View Demo Account")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .underline()
+            }
+            .disabled(viewModel.isLoading)
+            .padding(.top, 4)
+
             // Terms / footer
             Text("By continuing you agree to our\n[Terms of Service](https://spentyai.com/terms) & [Privacy Policy](https://spentyai.com/privacy)")
                 .font(.caption)
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
                 .tint(Color.spentyPrimary)
-                .padding(.top, 8)
+                .padding(.top, 4)
         }
         .animation(.easeInOut(duration: 0.25), value: viewModel.isLoading)
         .animation(.easeInOut(duration: 0.25), value: viewModel.showError)
@@ -147,6 +213,26 @@ struct LoginView: View {
         }
         .padding(12)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    // MARK: - Nonce Helpers (Apple Sign-In)
+
+    /// Generates a cryptographically random alphanumeric nonce (RFC 7636 style).
+    private func randomNonceString(length: Int = 32) -> String {
+        precondition(length > 0)
+        var randomBytes = [UInt8](repeating: 0, count: length)
+        _ = SecRandomCopyBytes(kSecRandomDefault, randomBytes.count, &randomBytes)
+        let charset: [Character] =
+            Array("0123456789ABCDEFGHIJKLMNOPQRSTUVXYZabcdefghijklmnopqrstuvwxyz-._")
+        return String(randomBytes.map { charset[Int($0) % charset.count] })
+    }
+
+    /// Returns the SHA-256 hex string of the input, as required by Apple's
+    /// identity token nonce validation.
+    private func sha256Hash(_ input: String) -> String {
+        let inputData  = Data(input.utf8)
+        let hashedData = SHA256.hash(data: inputData)
+        return hashedData.compactMap { String(format: "%02x", $0) }.joined()
     }
 }
 
