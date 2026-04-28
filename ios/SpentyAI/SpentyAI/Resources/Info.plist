@@ -44,7 +44,7 @@
     </array>
     <key>UIRequiredDeviceCapabilities</key>
     <array>
-        <string>armv7</string>
+        <string>arm64</string>
     </array>
     <key>UIApplicationSceneManifest</key>
     <dict>
@@ -87,9 +87,9 @@
     <string>SpentyAI needs microphone access for voice commands and live voice conversation with the AI assistant.</string>
     <key>NSSpeechRecognitionUsageDescription</key>
     <string>SpentyAI uses speech recognition to transcribe your voice into text for the AI chat and Siri shortcuts.</string>
-    <key>UIFileSharingEnabled</key>
-    <true/>
-    <key>LSSupportsOpeningDocumentsInPlace</key>
-    <true/>
+    <!-- UIFileSharingEnabled and LSSupportsOpeningDocumentsInPlace removed:
+         SpentyAI does not expose its Documents folder via the Files app.
+         Financial exports use share sheets, not Files app integration.
+         Keeping these keys on a financial app risks guideline 5.1.1. -->
 </dict>
 </plist>

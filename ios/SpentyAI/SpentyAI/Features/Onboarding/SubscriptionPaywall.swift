@@ -68,11 +68,13 @@ struct SubscriptionPaywall: View {
                 showTimer: true,
                 onAccept: {
                     await viewModel.purchasePlan("com.spentyai.lifetime_offer")
-                    showLifetimeOffer = false
-                    if viewModel.isSubscribed { onSubscribed?() }
+                    await MainActor.run {
+                        showLifetimeOffer = false
+                        if viewModel.isSubscribed { onSubscribed?() }
+                    }
                 },
                 onDecline: {
-                    showLifetimeOffer = false
+                    await MainActor.run { showLifetimeOffer = false }
                     Task {
                         await viewModel.purchasePlan("com.spentyai.monthly")
                         if viewModel.isSubscribed { onSubscribed?() }
@@ -374,7 +376,7 @@ struct SubscriptionPaywall: View {
                                 showRestoreResult = true
                             }
                         } catch {
-                            restoreResultMessage = "Restore failed. Please try again or contact support."
+                            restoreResultMessage = "Restore failed. Please try again or contact us at customersupport@spentyai.com."
                             showRestoreResult = true
                         }
                         isRestoring = false

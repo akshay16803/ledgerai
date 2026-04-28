@@ -616,6 +616,231 @@ async def simulator_login(request: Request):
     }
 
 
+@app.post("/api/auth/apple/mobile")
+async def apple_mobile_login(request: Request):
+    """Handle Sign in with Apple from the iOS app.
+
+    Flow:
+      1. iOS sends the identityToken (Apple-signed JWT) plus the raw nonce.
+      2. We fetch Apple's public JWKS, verify the JWT signature, audience, and issuer.
+      3. We verify the nonce: the JWT's `nonce` claim must equal SHA-256(raw_nonce).
+      4. We look up or create the user by apple_sub (stable Apple user ID).
+         On first sign-in Apple provides the email; on subsequent sign-ins it may be absent.
+      5. We mint a 30-day session token and return it.
+    """
+    import base64 as _base64
+    from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicNumbers
+    from cryptography.hazmat.backends import default_backend as _default_backend
+    import jwt as _pyjwt
+
+    body = await request.json()
+    identity_token = body.get("identityToken") or body.get("identity_token")
+    raw_nonce = body.get("nonce")
+
+    if not identity_token:
+        raise HTTPException(status_code=400, detail="identityToken is required")
+    if not raw_nonce:
+        raise HTTPException(status_code=400, detail="nonce is required")
+
+    # ── 1. Fetch Apple's public keys ──────────────────────────────────────
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as http_client:
+            keys_resp = await http_client.get("https://appleid.apple.com/auth/keys")
+        if keys_resp.status_code != 200:
+            raise HTTPException(status_code=502, detail="Failed to fetch Apple public keys")
+        apple_keys = keys_resp.json().get("keys", [])
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[AppleLogin] Failed to fetch Apple JWKS: {e}")
+        raise HTTPException(status_code=502, detail="Failed to reach Apple servers")
+
+    # ── 2. Match the kid from the token header ────────────────────────────
+    try:
+        header = _pyjwt.get_unverified_header(identity_token)
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid Apple identity token format")
+
+    kid = header.get("kid")
+    alg = header.get("alg", "RS256")
+
+    matching_jwk = next((k for k in apple_keys if k.get("kid") == kid), None)
+    if not matching_jwk:
+        raise HTTPException(status_code=401, detail="Apple signing key not found (kid mismatch)")
+
+    # ── 3. Build RSA public key from JWK ──────────────────────────────────
+    def _b64url_to_int(s: str) -> int:
+        padding = "=" * (4 - len(s) % 4)
+        return int.from_bytes(_base64.urlsafe_b64decode(s + padding), "big")
+
+    try:
+        n_int = _b64url_to_int(matching_jwk["n"])
+        e_int = _b64url_to_int(matching_jwk["e"])
+        public_key = RSAPublicNumbers(e_int, n_int).public_key(_default_backend())
+    except Exception as e:
+        logger.error(f"[AppleLogin] Failed to build public key: {e}")
+        raise HTTPException(status_code=502, detail="Failed to process Apple public key")
+
+    # ── 4. Verify JWT signature + standard claims ─────────────────────────
+    try:
+        payload = _pyjwt.decode(
+            identity_token,
+            public_key,
+            algorithms=[alg],
+            audience="com.spentyai.app",
+            issuer="https://appleid.apple.com",
+            options={"verify_exp": True},
+        )
+    except _pyjwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Apple identity token has expired")
+    except _pyjwt.InvalidAudienceError:
+        raise HTTPException(status_code=401, detail="Apple identity token audience mismatch")
+    except _pyjwt.DecodeError as e:
+        logger.error(f"[AppleLogin] JWT decode error: {e}")
+        raise HTTPException(status_code=401, detail="Apple identity token signature invalid")
+    except Exception as e:
+        logger.error(f"[AppleLogin] JWT verification error: {e}")
+        raise HTTPException(status_code=401, detail="Apple identity token verification failed")
+
+    # ── 5. Verify nonce (prevents replay attacks) ─────────────────────────
+    expected_nonce_hash = hashlib.sha256(raw_nonce.encode()).hexdigest()
+    token_nonce = payload.get("nonce")
+    if token_nonce and token_nonce != expected_nonce_hash:
+        logger.error(f"[AppleLogin] Nonce mismatch: expected {expected_nonce_hash[:8]}… got {str(token_nonce)[:8]}…")
+        raise HTTPException(status_code=401, detail="Nonce verification failed")
+
+    # ── 6. Extract identity ───────────────────────────────────────────────
+    apple_sub = payload.get("sub")         # Stable Apple user ID — always present
+    email     = payload.get("email", "")   # Only present on first sign-in
+    # Apple private relay emails look like abc@privaterelay.appleid.com — accept them.
+
+    if not apple_sub:
+        raise HTTPException(status_code=401, detail="Apple identity token missing sub claim")
+
+    logger.info(f"[AppleLogin] Verified token for apple_sub={apple_sub[:8]}…, email={email or '(hidden)'}")
+
+    # ── 7. Create or update user ──────────────────────────────────────────
+    # Primary lookup: apple_sub (stable across sign-ins even if email changes)
+    existing_user = await db.users.find_one({"apple_sub": apple_sub}, {"_id": 0})
+
+    # Fallback: if same email was registered via Google, link accounts
+    if not existing_user and email:
+        existing_user = await db.users.find_one({"email": email}, {"_id": 0})
+
+    if existing_user:
+        user_id = existing_user["user_id"]
+        update_fields = {"apple_sub": apple_sub, "updated_at": datetime.now(timezone.utc)}
+        if email:
+            update_fields["email"] = email
+        await db.users.update_one({"user_id": user_id}, {"$set": update_fields})
+    else:
+        user_id = f"user_{uuid.uuid4().hex[:12]}"
+        await db.users.insert_one({
+            "user_id": user_id,
+            "apple_sub": apple_sub,
+            "email": email or f"{apple_sub}@apple.private",
+            "name": "",  # Apple doesn't provide name in JWT (it's in the ASAuthorization result, not the token)
+            "picture": None,
+            "email_verified": True,  # Apple always verifies email
+            "auth_provider": "apple",
+            "created_at": datetime.now(timezone.utc),
+        })
+        await seed_default_data(user_id)
+
+    # ── 8. Mint session ───────────────────────────────────────────────────
+    session_token = secrets.token_urlsafe(48)
+    await db.user_sessions.insert_one({
+        "user_id": user_id,
+        "session_token": session_token,
+        "expires_at": datetime.now(timezone.utc) + timedelta(days=30),
+        "created_at": datetime.now(timezone.utc),
+    })
+
+    user_doc = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+    return {
+        "session_token": session_token,
+        "user": {
+            "user_id": user_id,
+            "email": (user_doc or {}).get("email", ""),
+            "name": (user_doc or {}).get("name", ""),
+            "picture": (user_doc or {}).get("picture"),
+            "subscription_plan": (user_doc or {}).get("subscription_plan"),
+            "subscription_status": (user_doc or {}).get("subscription_status"),
+        },
+    }
+
+
+@app.post("/api/auth/demo-login")
+async def demo_login(request: Request):
+    """Public demo login for App Store reviewers and first-time testers.
+
+    Returns a session for the pre-seeded demo account (spentyai6@gmail.com).
+    The account is created with sample data on first call.
+    No credentials required — this is intentionally open so Apple reviewers
+    can access the full app without a real Google/Apple account.
+    """
+    DEMO_EMAIL = "spentyai6@gmail.com"
+    DEMO_NAME  = "Demo User"
+
+    existing_user = await db.users.find_one({"email": DEMO_EMAIL}, {"_id": 0})
+
+    if existing_user:
+        user_id = existing_user["user_id"]
+    else:
+        # Create the demo account and seed it with sample data
+        user_id = f"user_demo_{uuid.uuid4().hex[:8]}"
+        await db.users.insert_one({
+            "user_id": user_id,
+            "email": DEMO_EMAIL,
+            "name": DEMO_NAME,
+            "picture": None,
+            "email_verified": True,
+            "auth_provider": "demo",
+            "subscription_plan": "yearly",
+            "subscription_status": "active",
+            "subscription_provider": "promo",
+            "subscription_expiry": (datetime.now(timezone.utc) + timedelta(days=365)).isoformat(),
+            "created_at": datetime.now(timezone.utc),
+        })
+        await seed_default_data(user_id)
+        logger.info(f"[DemoLogin] Created demo account: user_id={user_id}")
+
+    # Ensure demo user always has an active subscription so the paywall is skipped
+    await db.users.update_one(
+        {"user_id": user_id},
+        {"$set": {
+            "subscription_plan": "yearly",
+            "subscription_status": "active",
+            "subscription_provider": "promo",
+            "subscription_expiry": (datetime.now(timezone.utc) + timedelta(days=365)).isoformat(),
+        }}
+    )
+
+    # Mint a short-lived session (7 days) for demo accounts
+    session_token = secrets.token_urlsafe(48)
+    await db.user_sessions.insert_one({
+        "user_id": user_id,
+        "session_token": session_token,
+        "expires_at": datetime.now(timezone.utc) + timedelta(days=7),
+        "created_at": datetime.now(timezone.utc),
+        "is_demo": True,
+    })
+
+    user_doc = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+    logger.info(f"[DemoLogin] Session minted for demo user {user_id}")
+    return {
+        "session_token": session_token,
+        "user": {
+            "user_id": user_id,
+            "email": DEMO_EMAIL,
+            "name": DEMO_NAME,
+            "picture": None,
+            "subscription_plan": "yearly",
+            "subscription_status": "active",
+        },
+    }
+
+
 @app.delete("/api/auth/delete-account")
 async def delete_account(request: Request, user: dict = Depends(get_current_user)):
     """Permanently delete user account and all associated data."""

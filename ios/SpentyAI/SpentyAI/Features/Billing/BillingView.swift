@@ -70,13 +70,17 @@ struct BillingView: View {
                 showTimer: !upgrade,
                 onAccept: {
                     await viewModel.purchasePlan("com.spentyai.lifetime_offer")
-                    showLifetimeOffer = false
-                    isUpgradeMode = false
+                    await MainActor.run {
+                        showLifetimeOffer = false
+                        isUpgradeMode = false
+                    }
                 },
                 onDecline: {
                     let wasUpgrade = isUpgradeMode
-                    showLifetimeOffer = false
-                    isUpgradeMode = false
+                    await MainActor.run {
+                        showLifetimeOffer = false
+                        isUpgradeMode = false
+                    }
                     if !wasUpgrade {
                         Task { await viewModel.purchasePlan("com.spentyai.monthly") }
                     }
@@ -403,11 +407,14 @@ struct BillingView: View {
                 }
 
                 HStack(alignment: .bottom, spacing: 10) {
-                    Text("₹9,999")
+                    // Show original price from StoreKit if available, else fallback
+                    Text(viewModel.displayPrice(for: "com.spentyai.lifetime") ?? "₹9,999")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .strikethrough(true, color: .secondary)
-                    Text("₹4,999")
+                    // Show offer price from StoreKit — guideline 3.1.1 requires displayed
+                    // price to match the actual App Store price in the user's currency.
+                    Text(viewModel.displayPrice(for: "com.spentyai.lifetime_offer") ?? "₹4,999")
                         .font(.title2.weight(.bold))
                         .foregroundStyle(brandPrimary)
                     Text("50% OFF")
@@ -427,7 +434,7 @@ struct BillingView: View {
                         Text("Upgrade Now")
                             .font(.headline)
                         Spacer()
-                        Text("₹4,999")
+                        Text(viewModel.displayPrice(for: "com.spentyai.lifetime_offer") ?? "₹4,999")
                             .font(.headline)
                     }
                     .foregroundStyle(.white)
