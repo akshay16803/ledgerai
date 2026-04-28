@@ -68,6 +68,8 @@ struct BillingView: View {
             let upgrade = isUpgradeMode
             LifetimeOfferSheet(
                 showTimer: !upgrade,
+                // Pass the actual StoreKit price so it is visible before purchase (guideline 3.1.1).
+                offerPrice: viewModel.displayPrice(for: "com.spentyai.lifetime_offer"),
                 onAccept: {
                     await viewModel.purchasePlan("com.spentyai.lifetime_offer")
                     await MainActor.run {
@@ -76,13 +78,12 @@ struct BillingView: View {
                     }
                 },
                 onDecline: {
-                    // onDecline is synchronous — set @State directly on the main thread
-                    let wasUpgrade = isUpgradeMode
+                    // User declined the lifetime offer — close the sheet only.
+                    // Do NOT auto-purchase anything. If the user still wants the
+                    // monthly plan they originally tapped, they can tap Subscribe again.
+                    // (Auto-purchasing here would violate App Store guideline 3.1.1.)
                     showLifetimeOffer = false
                     isUpgradeMode = false
-                    if !wasUpgrade {
-                        Task { await viewModel.purchasePlan("com.spentyai.monthly") }
-                    }
                 }
             )
         }

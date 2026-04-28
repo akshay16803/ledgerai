@@ -66,6 +66,9 @@ struct SubscriptionPaywall: View {
         .sheet(isPresented: $showLifetimeOffer) {
             LifetimeOfferSheet(
                 showTimer: true,
+                // Pass the actual StoreKit price so the user sees it before
+                // confirming the purchase (required by guideline 3.1.1).
+                offerPrice: viewModel.displayPrice(for: "com.spentyai.lifetime_offer"),
                 onAccept: {
                     await viewModel.purchasePlan("com.spentyai.lifetime_offer")
                     await MainActor.run {

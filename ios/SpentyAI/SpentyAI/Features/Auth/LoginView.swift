@@ -94,36 +94,10 @@ struct LoginView: View {
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
 
-            // ── Google Sign-In ────────────────────────────────────
-            Button {
-                Task { await viewModel.signInWithGoogle() }
-            } label: {
-                HStack(spacing: 12) {
-                    // Google "G" logo
-                    ZStack {
-                        Circle()
-                            .fill(Color.white)
-                            .frame(width: 26, height: 26)
-                        Text("G")
-                            .font(.system(size: 15, weight: .bold))
-                            .foregroundStyle(Color(red: 0.26, green: 0.52, blue: 0.96))
-                    }
-
-                    Text(lang.s("sign_in_google"))
-                        .font(.body.weight(.semibold))
-                }
-                .frame(maxWidth: .infinity, minHeight: 52)
-                .foregroundStyle(.white)
-                .background(Color.spentyPrimary)
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .shadow(color: Color.spentyPrimary.opacity(0.3), radius: 8, y: 4)
-            }
-            .disabled(viewModel.isLoading)
-            .opacity(viewModel.isLoading ? 0.6 : 1)
-
             // ── Sign in with Apple ────────────────────────────────
-            // Required by App Store guideline 4.8 when any third-party
-            // login (Google) is offered.
+            // Guideline 4.8 — Sign in with Apple must appear AT LEAST as
+            // prominently as every other third-party login option.
+            // Placing it first satisfies this unambiguously.
             SignInWithAppleButton(.signIn) { request in
                 let nonce = randomNonceString()
                 currentAppleNonce = nonce
@@ -159,6 +133,33 @@ struct LoginView: View {
             .signInWithAppleButtonStyle(.black)
             .frame(maxWidth: .infinity, minHeight: 52, maxHeight: 52)
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .disabled(viewModel.isLoading)
+            .opacity(viewModel.isLoading ? 0.6 : 1)
+
+            // ── Google Sign-In ────────────────────────────────────
+            Button {
+                Task { await viewModel.signInWithGoogle() }
+            } label: {
+                HStack(spacing: 12) {
+                    // Google "G" logo
+                    ZStack {
+                        Circle()
+                            .fill(Color.white)
+                            .frame(width: 26, height: 26)
+                        Text("G")
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundStyle(Color(red: 0.26, green: 0.52, blue: 0.96))
+                    }
+
+                    Text(lang.s("sign_in_google"))
+                        .font(.body.weight(.semibold))
+                }
+                .frame(maxWidth: .infinity, minHeight: 52)
+                .foregroundStyle(.white)
+                .background(Color.spentyPrimary)
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .shadow(color: Color.spentyPrimary.opacity(0.3), radius: 8, y: 4)
+            }
             .disabled(viewModel.isLoading)
             .opacity(viewModel.isLoading ? 0.6 : 1)
 

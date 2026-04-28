@@ -9,6 +9,10 @@ struct LifetimeOfferSheet: View {
 
     // MARK: - Params
     var showTimer: Bool = true
+    /// The StoreKit-localised price string for the lifetime_offer product.
+    /// Displayed in the header and CTA button so the user sees the exact charge
+    /// before confirming (required by App Store guideline 3.1.1).
+    var offerPrice: String? = nil
     let onAccept: () async -> Void
     let onDecline: () -> Void
 
@@ -86,9 +90,18 @@ struct LifetimeOfferSheet: View {
                     .foregroundStyle(.white.opacity(0.38))
                     .strikethrough(false)
 
-                Text("Special offer price")
-                    .font(.system(size: 36, weight: .bold))
-                    .foregroundStyle(.white)
+                // Show the actual StoreKit price so the user sees the exact
+                // charge before confirming (guideline 3.1.1 price clarity).
+                if let price = offerPrice {
+                    Text(price)
+                        .font(.system(size: 36, weight: .bold))
+                        .foregroundStyle(.white)
+                } else {
+                    ProgressView()
+                        .tint(.white)
+                        .scaleEffect(1.2)
+                        .frame(height: 44)
+                }
 
                 Text("LIMITED TIME OFFER  ·  50% OFF")
                     .font(.system(size: 11, weight: .bold))
@@ -153,8 +166,15 @@ struct LifetimeOfferSheet: View {
                                         .opacity(0.8)
                                 }
                                 Spacer()
-                                Text("Special offer price")
-                                    .font(.headline)
+                                // Show actual price in button (guideline 3.1.1)
+                                if let price = offerPrice {
+                                    Text(price)
+                                        .font(.headline)
+                                } else {
+                                    ProgressView()
+                                        .tint(.white)
+                                        .scaleEffect(0.8)
+                                }
                             }
                             .padding(.horizontal, 20)
                             .padding(.vertical, 16)
@@ -264,5 +284,5 @@ struct LifetimeOfferSheet: View {
 }
 
 #Preview {
-    LifetimeOfferSheet(showTimer: true, onAccept: {}, onDecline: {})
+    LifetimeOfferSheet(showTimer: true, offerPrice: "₹4,999", onAccept: {}, onDecline: {})
 }
