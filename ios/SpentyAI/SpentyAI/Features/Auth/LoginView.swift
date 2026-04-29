@@ -63,18 +63,12 @@ struct LoginView: View {
 
     private var brandingSection: some View {
         VStack(spacing: 16) {
-            // App icon / logo mark
-            ZStack {
-                Circle()
-                    .fill(Color.spentyPrimary.opacity(0.12))
-                    .frame(width: 96, height: 96)
-
-                Image(systemName: "dollarsign.circle.fill")
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 56, height: 56)
-                    .foregroundStyle(Color.spentyPrimary)
-            }
+            // App icon — mirrors the real app icon for brand consistency
+            Image(uiImage: UIImage(named: "AppIcon") ?? UIImage())
+                .resizable()
+                .scaledToFit()
+                .frame(width: 96, height: 96)
+                .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
 
             Text(lang.s("spentyai"))
                 .font(.system(size: 34, weight: .bold, design: .rounded))
