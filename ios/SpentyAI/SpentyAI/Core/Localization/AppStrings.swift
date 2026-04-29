@@ -527,6 +527,27 @@ enum AppStrings {
         "describe_feature": ["en": "Describe what you'd like to see...", "hi": "आप क्या देखना चाहते हैं वर्णन करें..."],
         "new_request": ["en": "New Request", "hi": "नया अनुरोध"],
 
+        // MARK: - Onboarding Slider
+        "onboarding_skip": ["en": "Skip", "hi": "छोड़ें"],
+        "onboarding_next": ["en": "Next", "hi": "अगला"],
+        "onboarding_get_started": ["en": "Get Started", "hi": "शुरू करें"],
+        "onboarding_slide1_title": ["en": "Auto Email Tracking", "hi": "ऑटो ईमेल ट्रैकिंग"],
+        "onboarding_slide1_desc": ["en": "SpentyAI automatically captures every expense and income from your emails — no manual entry needed.", "hi": "SpentyAI आपके ईमेल से हर खर्च और आय अपने आप रिकॉर्ड करता है — कोई मैन्युअल एंट्री नहीं।"],
+        "onboarding_slide2_title": ["en": "AI-Powered Accounting", "hi": "एआई लेखा-जोखा"],
+        "onboarding_slide2_desc": ["en": "No accounting knowledge required. Just talk to the AI and it handles your books for you.", "hi": "लेखांकन की जानकारी जरूरी नहीं। बस एआई से बात करें और वह आपका हिसाब-किताब संभाल लेगा।"],
+        "onboarding_slide3_title": ["en": "Complete Dashboard", "hi": "पूरा डैशबोर्ड"],
+        "onboarding_slide3_desc": ["en": "See all your accounts, balances, and financial activity in one clear, detailed overview.", "hi": "एक जगह अपने सभी खाते, शेष राशि और वित्तीय गतिविधि का स्पष्ट विवरण देखें।"],
+        "onboarding_slide4_title": ["en": "AI Transaction Insights", "hi": "एआई लेन-देन जानकारी"],
+        "onboarding_slide4_desc": ["en": "Ask anything about your finances. The AI gives you instant insights from your transaction history.", "hi": "अपने वित्त के बारे में कुछ भी पूछें। एआई आपके लेन-देन इतिहास से तुरंत जानकारी देता है।"],
+        "onboarding_slide5_title": ["en": "Smart Reports", "hi": "स्मार्ट रिपोर्ट"],
+        "onboarding_slide5_desc": ["en": "Always know where your money is going with detailed, visual reports by category and period.", "hi": "श्रेणी और अवधि के अनुसार विस्तृत रिपोर्ट से हमेशा जानें आपका पैसा कहाँ जा रहा है।"],
+        "onboarding_slide6_title": ["en": "Mandate & Cash Flow", "hi": "मैंडेट और कैश फ्लो"],
+        "onboarding_slide6_desc": ["en": "SpentyAI detects your subscriptions and mandates from emails and shows your next month's outflow.", "hi": "SpentyAI आपके ईमेल से सब्सक्रिप्शन और मैंडेट खोजता है और अगले महीने का खर्च दिखाता है।"],
+        "onboarding_slide7_title": ["en": "Invoices & Vendors", "hi": "चालान और विक्रेता"],
+        "onboarding_slide7_desc": ["en": "Create GST invoices with your logo. Track customers, vendors, and purchases all in one place.", "hi": "अपने लोगो के साथ GST चालान बनाएं। ग्राहक, विक्रेता और खरीद एक ही जगह ट्रैक करें।"],
+        "onboarding_slide8_title": ["en": "Try Free for 7 Days", "hi": "7 दिन मुफ़्त आज़माएं"],
+        "onboarding_slide8_desc": ["en": "Try SpentyAI free for 7 days — then decide if you want to pay. No commitment required.", "hi": "SpentyAI को 7 दिन मुफ़्त आज़माएं — फिर तय करें कि भुगतान करना है या नहीं। कोई बाध्यता नहीं।"],
+
         // MARK: - Auth / Login
         "spentyai": ["en": "SpentyAI", "hi": "SpentyAI"],
         "smart_spending": ["en": "Smart spending starts here", "hi": "स्मार्ट खर्च यहाँ शुरू होता है"],
