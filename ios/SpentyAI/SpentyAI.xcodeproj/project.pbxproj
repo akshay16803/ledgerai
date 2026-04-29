@@ -100,6 +100,10 @@
 		1D89EDBC16AF1EC5CB8FB89C /* InvoicesViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF70E3C93F9FD75BF32E8693 /* InvoicesViewModel.swift */; };
 		8E0328B93E26DF508B970AE8 /* RecordPaymentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDCA45F3FD6F629B59408CD4 /* RecordPaymentView.swift */; };
 		0FA29023C287CA8CDF9F46D6 /* SubscriptionPaywall.swift in Sources */ = {isa = PBXBuildFile; fileRef = 835F7FC648257550DA637BAB /* SubscriptionPaywall.swift */; };
+		1122334455667788990011AA /* OnboardingManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE55FF66 /* OnboardingManager.swift */; };
+		2233445566778899001122BB /* OnboardingSlide.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB22CC33DD44EE55FF6600AA /* OnboardingSlide.swift */; };
+		3344556677889900112233CC /* OnboardingSliderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC33DD44EE55FF6600AABB22 /* OnboardingSliderView.swift */; };
+		4455667788990011223344DD /* OnboardingSlideCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD44EE55FF6600AABB2233CC /* OnboardingSlideCardView.swift */; };
 		24A42D672EC8DB93953220B3 /* PastInsightDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 192E5CF06F30FA207B2C4BA3 /* PastInsightDetailView.swift */; };
 		90F9FCB116BDBA1ECE778C75 /* PastInsightsRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9732229A36FE9D2DC7BC5FE6 /* PastInsightsRepository.swift */; };
 		029C26EC9FC50C3C17BCAC6E /* PastInsightsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C335577148E1544C8FFBD87C /* PastInsightsView.swift */; };
@@ -264,6 +268,10 @@
 		CF70E3C93F9FD75BF32E8693 /* InvoicesViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InvoicesViewModel.swift; sourceTree = "<group>"; };
 		FDCA45F3FD6F629B59408CD4 /* RecordPaymentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordPaymentView.swift; sourceTree = "<group>"; };
 		835F7FC648257550DA637BAB /* SubscriptionPaywall.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubscriptionPaywall.swift; sourceTree = "<group>"; };
+		AA11BB22CC33DD44EE55FF66 /* OnboardingManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingManager.swift; sourceTree = "<group>"; };
+		BB22CC33DD44EE55FF6600AA /* OnboardingSlide.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingSlide.swift; sourceTree = "<group>"; };
+		CC33DD44EE55FF6600AABB22 /* OnboardingSliderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingSliderView.swift; sourceTree = "<group>"; };
+		DD44EE55FF6600AABB2233CC /* OnboardingSlideCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingSlideCardView.swift; sourceTree = "<group>"; };
 		192E5CF06F30FA207B2C4BA3 /* PastInsightDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PastInsightDetailView.swift; sourceTree = "<group>"; };
 		9732229A36FE9D2DC7BC5FE6 /* PastInsightsRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PastInsightsRepository.swift; sourceTree = "<group>"; };
 		C335577148E1544C8FFBD87C /* PastInsightsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PastInsightsView.swift; sourceTree = "<group>"; };
@@ -666,6 +674,10 @@
 			isa = PBXGroup;
 			children = (
 				835F7FC648257550DA637BAB /* SubscriptionPaywall.swift */,
+				AA11BB22CC33DD44EE55FF66 /* OnboardingManager.swift */,
+				BB22CC33DD44EE55FF6600AA /* OnboardingSlide.swift */,
+				CC33DD44EE55FF6600AABB22 /* OnboardingSliderView.swift */,
+				DD44EE55FF6600AABB2233CC /* OnboardingSlideCardView.swift */,
 			);
 			path = Onboarding;
 			sourceTree = "<group>";
@@ -983,6 +995,10 @@
 				1D89EDBC16AF1EC5CB8FB89C /* InvoicesViewModel.swift in Sources */,
 				8E0328B93E26DF508B970AE8 /* RecordPaymentView.swift in Sources */,
 				0FA29023C287CA8CDF9F46D6 /* SubscriptionPaywall.swift in Sources */,
+				1122334455667788990011AA /* OnboardingManager.swift in Sources */,
+				2233445566778899001122BB /* OnboardingSlide.swift in Sources */,
+				3344556677889900112233CC /* OnboardingSliderView.swift in Sources */,
+				4455667788990011223344DD /* OnboardingSlideCardView.swift in Sources */,
 				24A42D672EC8DB93953220B3 /* PastInsightDetailView.swift in Sources */,
 				90F9FCB116BDBA1ECE778C75 /* PastInsightsRepository.swift in Sources */,
 				029C26EC9FC50C3C17BCAC6E /* PastInsightsView.swift in Sources */,
