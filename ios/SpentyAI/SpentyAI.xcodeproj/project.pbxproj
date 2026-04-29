@@ -334,6 +334,7 @@
 		632099D6EDE1972BC0A03128 /* CameraCaptureView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraCaptureView.swift; sourceTree = "<group>"; };
 		L0C1A2B3C4D5E6F7A8B9C0D1 /* LocalizationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalizationManager.swift; sourceTree = "<group>"; };
 		A5B6C7D8E9F0A1B2C3D4E5F6 /* AppStrings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppStrings.swift; sourceTree = "<group>"; };
+		F1A2B3C4D5E6F7A8B9C0D1E2 /* SpentyAI.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = SpentyAI.entitlements; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -385,6 +386,7 @@
 			isa = PBXGroup;
 			children = (
 				AA9FFFDA60288D717AE36C1C /* SpentyAIApp.swift */,
+				F1A2B3C4D5E6F7A8B9C0D1E2 /* SpentyAI.entitlements */,
 				9E0D8163FE50B71EF7B82DC5 /* Core */,
 				481AC2AD26572403D945F2BC /* Features */,
 				00A7FEBDF7601783286222E8 /* Navigation */,
@@ -1168,6 +1170,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = SpentyAI/SpentyAI.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = 857NZC8N95;
@@ -1199,6 +1202,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = SpentyAI/SpentyAI.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = 857NZC8N95;
