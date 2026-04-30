@@ -75,6 +75,9 @@ import com.spentyai.app.features.settings.SettingsScreen
 import com.spentyai.app.features.settings.SettingsViewModel
 import com.spentyai.app.features.support.SupportRepository
 import com.spentyai.app.features.support.SupportScreen
+import com.spentyai.app.features.help.HelpRepository
+import com.spentyai.app.features.help.HelpScreen
+import com.spentyai.app.features.help.HelpViewModel
 import com.spentyai.app.features.support.SupportViewModel
 import com.spentyai.app.features.transactions.TransactionListScreen
 import com.spentyai.app.features.transactions.TransactionsViewModel
@@ -190,6 +193,9 @@ fun AppNavigation(
 
     val supportRepository = remember { SupportRepository(apiClient) }
     val supportViewModel = remember { SupportViewModel(supportRepository) }
+
+    val helpRepository = remember { HelpRepository() }
+    val helpViewModel = remember { HelpViewModel(helpRepository) }
 
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
@@ -610,6 +616,14 @@ fun AppNavigation(
                 SupportScreen(
                     viewModel = supportViewModel,
                     onNavigateBack = { navController.popBackStack() }
+                )
+            }
+
+            composable(Screen.Help.route) {
+                HelpScreen(
+                    viewModel = helpViewModel,
+                    onNavigateBack = { navController.popBackStack() },
+                    onContactSupport = { /* mailto handled inside HelpScreen */ }
                 )
             }
 

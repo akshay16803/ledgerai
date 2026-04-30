@@ -97,6 +97,7 @@ fun MoreMenuScreen(
 
     val accountItems = listOf(
         MoreMenuItem(R.string.settings, Icons.Default.Settings, MaterialTheme.colorScheme.onSurfaceVariant, "settings"),
+        MoreMenuItem(R.string.help_center, Icons.AutoMirrored.Filled.HelpCenter, SpentyInfo, "help"),
         MoreMenuItem(R.string.billing, Icons.Default.CreditCard, SpentyPrimary, "billing")
     )
 

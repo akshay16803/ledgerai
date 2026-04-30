@@ -41,6 +41,7 @@ fun BottomNavBar(navController: NavController) {
                         Screen.Records.route, Screen.Statements.route,
                         Screen.EmailSync.route, Screen.AiChat.route,
                         Screen.FeatureRequests.route, Screen.Support.route,
+                        Screen.Help.route,
                         Screen.Settings.route, Screen.Profile.route,
                         Screen.Subscription.route
                     )

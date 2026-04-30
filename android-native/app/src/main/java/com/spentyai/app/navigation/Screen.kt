@@ -68,6 +68,7 @@ sealed class Screen(val route: String, val title: String) {
     object AiChat : Screen("ai_chat", "AI Chat")
     object FeatureRequests : Screen("feature_requests", "Feature Requests")
     object Support : Screen("support", "Support")
+    object Help : Screen("help", "Help Center")
 
     // Account section (under More)
     object Settings : Screen("settings", "Settings")
