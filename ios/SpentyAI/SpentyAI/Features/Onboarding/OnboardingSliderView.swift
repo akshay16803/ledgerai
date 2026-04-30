@@ -9,48 +9,53 @@ struct OnboardingSliderView: View {
     private let slides = OnboardingSlide.allSlides
 
     var body: some View {
-        ZStack(alignment: .top) {
+        GeometryReader { geo in
+            ZStack(alignment: .top) {
 
-            // ── Full-screen paged slides ──────────────────────────────
-            TabView(selection: $currentSlide) {
-                ForEach(slides.indices, id: \.self) { index in
-                    OnboardingSlideCardView(slide: slides[index], lang: lang)
-                        .tag(index)
-                }
-            }
-            .tabViewStyle(.page(indexDisplayMode: .never))
-            .ignoresSafeArea()
-
-            // ── Skip button ───────────────────────────────────────────
-            if currentSlide < slides.count - 1 {
-                HStack {
-                    Spacer()
-                    Button(lang.s("onboarding_skip")) {
-                        withAnimation(.easeInOut(duration: 0.3)) { onComplete() }
+                // ── Full-screen paged slides ──────────────────────────
+                TabView(selection: $currentSlide) {
+                    ForEach(slides.indices, id: \.self) { index in
+                        OnboardingSlideCardView(slide: slides[index], lang: lang)
+                            .tag(index)
                     }
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.85))
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .background(.white.opacity(0.12), in: Capsule())
                 }
-                .padding(.horizontal, 20)
-                .padding(.top, 56)
-                .transition(.opacity)
-                .animation(.easeInOut(duration: 0.2), value: currentSlide)
-            }
+                .tabViewStyle(.page(indexDisplayMode: .never))
+                .ignoresSafeArea()
 
-            // ── Bottom controls ───────────────────────────────────────
-            VStack {
-                Spacer()
-                VStack(spacing: 20) {
-                    dotIndicators
-                    bottomButton
-                        .padding(.horizontal, 24)
+                // ── Skip button — above safe area, never overlaps slides ──
+                if currentSlide < slides.count - 1 {
+                    HStack {
+                        Spacer()
+                        Button(lang.s("onboarding_skip")) {
+                            withAnimation(.easeInOut(duration: 0.3)) { onComplete() }
+                        }
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.85))
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .background(.white.opacity(0.14), in: Capsule())
+                        .overlay(Capsule().stroke(.white.opacity(0.22), lineWidth: 1))
+                    }
+                    .padding(.horizontal, 20)
+                    // Top padding = safe area height + comfortable gap below it
+                    .padding(.top, geo.safeAreaInsets.top + 10)
+                    .transition(.opacity)
+                    .animation(.easeInOut(duration: 0.2), value: currentSlide)
                 }
-                .padding(.bottom, 44)
+
+                // ── Bottom controls ───────────────────────────────────
+                VStack {
+                    Spacer()
+                    VStack(spacing: 18) {
+                        dotIndicators
+                        bottomButton
+                            .padding(.horizontal, 24)
+                    }
+                    .padding(.bottom, max(geo.safeAreaInsets.bottom, 20) + 20)
+                }
             }
         }
+        .ignoresSafeArea()
     }
 
     // MARK: - Dot Indicators

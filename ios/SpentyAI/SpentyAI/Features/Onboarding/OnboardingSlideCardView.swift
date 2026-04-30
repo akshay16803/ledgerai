@@ -1,8 +1,8 @@
 import SwiftUI
 
 // MARK: - Onboarding Slide Card View
-// Full-screen dark gradient + ambient glow + floating glass card with mock screen.
-// White text on dark. SF Symbols only (no emoji — renders as "?" in simulator).
+// Full-screen dark gradient + phone-frame mockup + polished text section.
+// SF Symbols only — no emoji (renders as "?" in simulator).
 
 struct OnboardingSlideCardView: View {
     let slide: OnboardingSlide
@@ -22,60 +22,103 @@ struct OnboardingSlideCardView: View {
 
     private func regularSlide(geo: GeometryProxy) -> some View {
         ZStack {
-            // ── 1. Full-screen gradient ──────────────────────────────────
+            // ── 1. Deep gradient background ──────────────────────────────
             LinearGradient(
                 colors: slide.gradientColors.isEmpty
                     ? [Color.black, Color(hex: 0x1C1C1E)]
                     : slide.gradientColors,
-                startPoint: .topLeading,
+                startPoint: .top,
                 endPoint: .bottomTrailing
             )
+            .ignoresSafeArea()
 
-            // ── 2. Ambient glow orbs ─────────────────────────────────────
-            Circle()
-                .fill(slide.accentColor.opacity(0.42))
-                .frame(width: 240, height: 240)
-                .blur(radius: 72)
-                .offset(x: -70, y: -(geo.size.height * 0.20))
+            // ── 2. Dot grid texture (very subtle) ────────────────────────
+            Canvas { ctx, size in
+                let spacing: CGFloat = 30
+                let dot: CGFloat = 1.4
+                var y: CGFloat = 0
+                while y < size.height {
+                    var x: CGFloat = 0
+                    while x < size.width {
+                        ctx.fill(
+                            Path(ellipseIn: CGRect(x: x, y: y, width: dot, height: dot)),
+                            with: .color(.white.opacity(0.055))
+                        )
+                        x += spacing
+                    }
+                    y += spacing
+                }
+            }
+            .allowsHitTesting(false)
 
-            Circle()
+            // ── 3. Primary glow — behind phone ───────────────────────────
+            Ellipse()
                 .fill(slide.accentColor.opacity(0.22))
-                .frame(width: 170, height: 170)
-                .blur(radius: 52)
-                .offset(x: 110, y: geo.size.height * 0.06)
+                .frame(width: 260, height: 180)
+                .blur(radius: 70)
+                .offset(x: geo.size.width * 0.06, y: -(geo.size.height * 0.16))
 
-            // ── 3. Content column ────────────────────────────────────────
+            // ── 4. Concentric accent rings ───────────────────────────────
+            let ringCX: CGFloat = geo.size.width * 0.60
+            let ringCY: CGFloat = -(geo.size.height * 0.14)
+            ForEach([280, 200, 130] as [CGFloat], id: \.self) { d in
+                Circle()
+                    .stroke(
+                        slide.accentColor.opacity(d == 280 ? 0.06 : d == 200 ? 0.10 : 0.16),
+                        lineWidth: 1
+                    )
+                    .frame(width: d, height: d)
+                    .offset(x: ringCX - geo.size.width / 2, y: ringCY)
+            }
+
+            // ── 5. Small secondary glow ──────────────────────────────────
+            Circle()
+                .fill(slide.accentColor.opacity(0.18))
+                .frame(width: 100, height: 100)
+                .blur(radius: 30)
+                .offset(x: geo.size.width * 0.28, y: -(geo.size.height * 0.24))
+
+            // ── 6. Content column ────────────────────────────────────────
             VStack(spacing: 0) {
-                Spacer().frame(height: 60)
+                // Reserve room for skip button + safe area
+                Spacer().frame(height: 118)
 
-                // Glass card containing mock screen
-                glassCard(geo: geo)
-                    .frame(height: geo.size.height * 0.40)
-                    .padding(.horizontal, 22)
+                // Phone frame mockup
+                phoneFrame(geo: geo)
+                    .frame(
+                        width:  geo.size.width * 0.56,
+                        height: geo.size.height * 0.41
+                    )
 
                 // Text block
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 11) {
+
                     if !slide.categoryLabel.isEmpty {
-                        Text(slide.categoryLabel)
-                            .font(.system(size: 10, weight: .bold))
-                            .tracking(1.5)
-                            .foregroundStyle(slide.accentColor)
-                            .padding(.horizontal, 11)
-                            .padding(.vertical, 5)
-                            .background(slide.accentColor.opacity(0.18))
-                            .clipShape(Capsule())
+                        HStack(spacing: 6) {
+                            Image(systemName: slideIcon(slide.id))
+                                .font(.system(size: 9, weight: .bold))
+                            Text(slide.categoryLabel)
+                                .font(.system(size: 10, weight: .bold))
+                                .tracking(1.3)
+                        }
+                        .foregroundStyle(slide.accentColor)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(slide.accentColor.opacity(0.15))
+                        .overlay(Capsule().stroke(slide.accentColor.opacity(0.35), lineWidth: 1))
+                        .clipShape(Capsule())
                     }
 
                     Text(lang.s(slide.titleKey))
-                        .font(.system(size: 24, weight: .bold, design: .rounded))
+                        .font(.system(size: 27, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
                         .lineSpacing(2)
                         .fixedSize(horizontal: false, vertical: true)
 
                     Text(lang.s(slide.descriptionKey))
                         .font(.system(size: 14))
-                        .foregroundStyle(.white.opacity(0.70))
-                        .lineSpacing(4)
+                        .foregroundStyle(.white.opacity(0.66))
+                        .lineSpacing(5)
                         .fixedSize(horizontal: false, vertical: true)
 
                     if !slide.statPills.isEmpty {
@@ -84,31 +127,84 @@ struct OnboardingSlideCardView: View {
                                 statPillView(pill)
                             }
                         }
-                        .padding(.top, 2)
+                        .padding(.top, 4)
                     }
                 }
-                .padding(.horizontal, 28)
+                .padding(.horizontal, 26)
                 .padding(.top, 22)
 
-                Spacer(minLength: 110)
+                Spacer(minLength: 100)
             }
+            .frame(maxWidth: .infinity)
         }
     }
 
-    // MARK: - Glass Card
+    // MARK: - SF Symbol per slide
 
-    private func glassCard(geo: GeometryProxy) -> some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .fill(.white.opacity(0.07))
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .stroke(.white.opacity(0.16), lineWidth: 1)
-
-            mockScreen(for: slide.id)
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .padding(10)
+    private func slideIcon(_ id: Int) -> String {
+        switch id {
+        case 1:  return "envelope.badge.fill"
+        case 2:  return "brain.head.profile"
+        case 3:  return "chart.bar.fill"
+        case 4:  return "bubble.left.and.bubble.right.fill"
+        case 5:  return "chart.line.uptrend.xyaxis"
+        case 6:  return "arrow.triangle.2.circlepath"
+        case 7:  return "doc.text.fill"
+        default: return "sparkles"
         }
-        .shadow(color: .black.opacity(0.38), radius: 26, x: 0, y: 14)
+    }
+
+    // MARK: - Phone Frame
+
+    private func phoneFrame(geo: GeometryProxy) -> some View {
+        ZStack(alignment: .top) {
+            // Body — near-black translucent
+            RoundedRectangle(cornerRadius: 30, style: .continuous)
+                .fill(Color.black.opacity(0.55))
+
+            // Gloss highlight — top-left diagonal sheen
+            RoundedRectangle(cornerRadius: 30, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [.white.opacity(0.13), .clear],
+                        startPoint: .topLeading,
+                        endPoint: UnitPoint(x: 0.55, y: 0.55)
+                    )
+                )
+
+            // Accent gradient border
+            RoundedRectangle(cornerRadius: 30, style: .continuous)
+                .stroke(
+                    LinearGradient(
+                        colors: [
+                            slide.accentColor.opacity(0.80),
+                            slide.accentColor.opacity(0.30),
+                            .white.opacity(0.06)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 1.5
+                )
+
+            VStack(spacing: 0) {
+                // Dynamic Island pill
+                Capsule()
+                    .fill(.black)
+                    .frame(width: 64, height: 13)
+                    .padding(.top, 9)
+
+                // App screen
+                mockScreen(for: slide.id)
+                    .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                    .padding(.horizontal, 5)
+                    .padding(.top, 3)
+                    .padding(.bottom, 5)
+            }
+        }
+        // Layered shadows — accent glow + dark base
+        .shadow(color: slide.accentColor.opacity(0.28), radius: 32, x: 0, y: 18)
+        .shadow(color: .black.opacity(0.60), radius: 16, x: 0, y: 8)
     }
 
     // MARK: - Stat Pill
@@ -120,11 +216,11 @@ struct OnboardingSlideCardView: View {
             Text(text)
                 .font(.system(size: 12, weight: .medium))
         }
-        .foregroundStyle(.white.opacity(0.92))
-        .padding(.horizontal, 11)
+        .foregroundStyle(.white.opacity(0.90))
+        .padding(.horizontal, 12)
         .padding(.vertical, 7)
-        .background(.white.opacity(0.11))
-        .overlay(Capsule().stroke(.white.opacity(0.22), lineWidth: 1))
+        .background(.white.opacity(0.10))
+        .overlay(Capsule().stroke(.white.opacity(0.20), lineWidth: 1))
         .clipShape(Capsule())
     }
 
@@ -194,17 +290,17 @@ struct OnboardingSlideCardView: View {
             .background(Color.spentyPrimary.opacity(0.09))
             Divider()
             VStack(spacing: 0) {
-                txnRow(sfSymbol: "fork.knife", iconColor: .orange,
-                       name: "Zomato", cat: "Food & Dining", amt: "−₹847", pos: false)
+                txnRow(sfSymbol: "fork.knife",             iconColor: .orange,
+                       name: "Zomato",      cat: "Food & Dining", amt: "−₹847",    pos: false)
                 Divider().padding(.leading, 40)
-                txnRow(sfSymbol: "bag.fill", iconColor: Color(hex: 0x0A84FF),
-                       name: "Amazon Pay", cat: "Shopping", amt: "−₹2,199", pos: false)
+                txnRow(sfSymbol: "bag.fill",               iconColor: Color(hex: 0x0A84FF),
+                       name: "Amazon Pay",  cat: "Shopping",      amt: "−₹2,199",  pos: false)
                 Divider().padding(.leading, 40)
                 txnRow(sfSymbol: "indianrupeesign.circle.fill", iconColor: Color.spentyPrimary,
-                       name: "HDFC Salary", cat: "Income", amt: "+₹45,000", pos: true)
+                       name: "HDFC Salary", cat: "Income",        amt: "+₹45,000", pos: true)
                 Divider().padding(.leading, 40)
-                txnRow(sfSymbol: "play.rectangle.fill", iconColor: Color(hex: 0xE50914),
-                       name: "Netflix", cat: "Entertainment", amt: "−₹649", pos: false)
+                txnRow(sfSymbol: "play.rectangle.fill",    iconColor: Color(hex: 0xE50914),
+                       name: "Netflix",     cat: "Entertainment", amt: "−₹649",    pos: false)
             }
             Spacer()
         }
@@ -352,7 +448,7 @@ struct OnboardingSlideCardView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 12)
                 HStack(alignment: .bottom, spacing: 5) {
-                    ForEach([0.42, 0.56, 0.48, 0.70, 0.62, 0.88], id: \.self) { h in
+                    ForEach([0.42, 0.56, 0.48, 0.70, 0.62, 0.88] as [Double], id: \.self) { h in
                         RoundedRectangle(cornerRadius: 3)
                             .fill(h == 0.88
                                   ? Color(hex: 0x5E5CE6)
@@ -368,9 +464,9 @@ struct OnboardingSlideCardView: View {
             Divider().padding(.horizontal, 12).padding(.top, 6)
             VStack(spacing: 0) {
                 acctRow(sfSymbol: "building.columns.fill", iconColor: Color(hex: 0x5E5CE6),
-                        name: "HDFC Bank", balance: "₹82,400", frac: 0.66)
+                        name: "HDFC Bank",    balance: "₹82,400", frac: 0.66)
                 Divider().padding(.leading, 40)
-                acctRow(sfSymbol: "creditcard.fill", iconColor: Color(hex: 0x0A84FF),
+                acctRow(sfSymbol: "creditcard.fill",       iconColor: Color(hex: 0x0A84FF),
                         name: "Paytm Wallet", balance: "₹42,160", frac: 0.34)
             }
             .padding(.horizontal, 12)
@@ -555,17 +651,17 @@ struct OnboardingSlideCardView: View {
             .background(Color.spentyError.opacity(0.09))
             Divider()
             VStack(spacing: 0) {
-                upcomingRow(sfSymbol: "house.fill", iconColor: Color.spentyError,
-                            name: "SBI Home EMI", amt: "₹22,500", date: "5 May", urgent: true)
+                upcomingRow(sfSymbol: "house.fill",          iconColor: Color.spentyError,
+                            name: "SBI Home EMI", amt: "₹22,500", date: "5 May",  urgent: true)
                 Divider().padding(.leading, 40)
                 upcomingRow(sfSymbol: "play.rectangle.fill", iconColor: Color(hex: 0xE50914),
-                            name: "Netflix", amt: "₹649", date: "8 May", urgent: false)
+                            name: "Netflix",       amt: "₹649",    date: "8 May",  urgent: false)
                 Divider().padding(.leading, 40)
-                upcomingRow(sfSymbol: "shield.fill", iconColor: Color(hex: 0x0A84FF),
-                            name: "LIC Insurance", amt: "₹3,200", date: "10 May", urgent: false)
+                upcomingRow(sfSymbol: "shield.fill",         iconColor: Color(hex: 0x0A84FF),
+                            name: "LIC Insurance", amt: "₹3,200",  date: "10 May", urgent: false)
                 Divider().padding(.leading, 40)
-                upcomingRow(sfSymbol: "figure.run", iconColor: Color.spentyPrimary,
-                            name: "Cult.fit", amt: "₹1,800", date: "15 May", urgent: false)
+                upcomingRow(sfSymbol: "figure.run",          iconColor: Color.spentyPrimary,
+                            name: "Cult.fit",      amt: "₹1,800",  date: "15 May", urgent: false)
             }
             Spacer()
         }
@@ -679,83 +775,154 @@ struct OnboardingSlideCardView: View {
     // MARK: - CTA Slide (Slide 8)
 
     private var ctaSlide: some View {
-        ZStack {
-            LinearGradient(
-                colors: slide.gradientColors.isEmpty
-                    ? [Color(hex: 0x111111), Color(hex: 0x1C1C1E)]
-                    : slide.gradientColors,
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
+        GeometryReader { geo in
+            ZStack {
+                // Background
+                LinearGradient(
+                    colors: slide.gradientColors.isEmpty
+                        ? [Color(hex: 0x111111), Color(hex: 0x1C1C1E)]
+                        : slide.gradientColors,
+                    startPoint: .top,
+                    endPoint: .bottomTrailing
+                )
+                .ignoresSafeArea()
 
-            // Ambient gold glows
-            Circle()
-                .fill(Color(hex: 0xD4AF37).opacity(0.20))
-                .frame(width: 300, height: 300)
-                .blur(radius: 80)
-                .offset(x: -80, y: -220)
-            Circle()
-                .fill(Color(hex: 0xD4AF37).opacity(0.12))
-                .frame(width: 220, height: 220)
-                .blur(radius: 60)
-                .offset(x: 140, y: 160)
+                // Dot grid
+                Canvas { ctx, size in
+                    let spacing: CGFloat = 30
+                    let dot: CGFloat = 1.4
+                    var y: CGFloat = 0
+                    while y < size.height {
+                        var x: CGFloat = 0
+                        while x < size.width {
+                            ctx.fill(
+                                Path(ellipseIn: CGRect(x: x, y: y, width: dot, height: dot)),
+                                with: .color(.white.opacity(0.05))
+                            )
+                            x += spacing
+                        }
+                        y += spacing
+                    }
+                }
+                .allowsHitTesting(false)
 
-            VStack(spacing: 26) {
-                Spacer()
-                // Crown badge
-                ZStack {
+                // Gold glows
+                Circle()
+                    .fill(Color(hex: 0xD4AF37).opacity(0.18))
+                    .frame(width: 320, height: 320)
+                    .blur(radius: 90)
+                    .offset(x: -60, y: -(geo.size.height * 0.25))
+
+                Circle()
+                    .fill(Color(hex: 0xD4AF37).opacity(0.10))
+                    .frame(width: 220, height: 220)
+                    .blur(radius: 60)
+                    .offset(x: 120, y: geo.size.height * 0.18)
+
+                // Concentric rings
+                ForEach([260, 180, 110] as [CGFloat], id: \.self) { d in
                     Circle()
-                        .fill(LinearGradient(
-                            colors: [Color(hex: 0xD4AF37), Color(hex: 0xF5E27A)],
-                            startPoint: .topLeading, endPoint: .bottomTrailing))
-                        .frame(width: 90, height: 90)
-                    Image(systemName: "crown.fill")
-                        .font(.system(size: 42))
-                        .foregroundStyle(.white)
+                        .stroke(Color(hex: 0xD4AF37).opacity(d == 260 ? 0.06 : d == 180 ? 0.10 : 0.16), lineWidth: 1)
+                        .frame(width: d, height: d)
+                        .offset(x: geo.size.width * 0.12, y: -(geo.size.height * 0.20))
                 }
-                // Text
-                VStack(spacing: 10) {
-                    Text(lang.s(slide.titleKey))
-                        .font(.system(size: 28, weight: .bold, design: .rounded))
-                        .foregroundStyle(.white)
-                        .multilineTextAlignment(.center)
-                    Text(lang.s(slide.descriptionKey))
-                        .font(.system(size: 15))
-                        .foregroundStyle(.white.opacity(0.68))
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 32)
-                        .lineSpacing(4)
+
+                VStack(spacing: 0) {
+                    Spacer()
+
+                    // Crown badge with glow ring
+                    ZStack {
+                        Circle()
+                            .fill(Color(hex: 0xD4AF37).opacity(0.15))
+                            .frame(width: 120, height: 120)
+                            .blur(radius: 20)
+
+                        Circle()
+                            .stroke(
+                                LinearGradient(
+                                    colors: [Color(hex: 0xF5D020).opacity(0.6), Color(hex: 0xD4AF37).opacity(0.2)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                                lineWidth: 1.5
+                            )
+                            .frame(width: 96, height: 96)
+
+                        Circle()
+                            .fill(
+                                LinearGradient(
+                                    colors: [Color(hex: 0xD4AF37), Color(hex: 0xF5E27A)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 80, height: 80)
+
+                        Image(systemName: "crown.fill")
+                            .font(.system(size: 36))
+                            .foregroundStyle(.white)
+                    }
+
+                    // Text
+                    VStack(spacing: 10) {
+                        Text(lang.s(slide.titleKey))
+                            .font(.system(size: 30, weight: .bold, design: .rounded))
+                            .foregroundStyle(.white)
+                            .multilineTextAlignment(.center)
+                        Text(lang.s(slide.descriptionKey))
+                            .font(.system(size: 14))
+                            .foregroundStyle(.white.opacity(0.65))
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 30)
+                            .lineSpacing(5)
+                    }
+                    .padding(.top, 24)
+
+                    // Feature rows
+                    VStack(spacing: 12) {
+                        ctaFeatureRow("All 7 features fully unlocked")
+                        ctaFeatureRow("Zero limits — all accounts & history")
+                        ctaFeatureRow("7-day trial — charged only after day 7")
+                    }
+                    .padding(.horizontal, 32)
+                    .padding(.top, 24)
+
+                    // Pricing nudge
+                    HStack(spacing: 8) {
+                        Image(systemName: "calendar.badge.checkmark")
+                            .font(.system(size: 13))
+                            .foregroundStyle(Color(hex: 0xD4AF37))
+                        Text("Monthly, yearly & lifetime plans available")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.80))
+                    }
+                    .padding(.horizontal, 22)
+                    .padding(.vertical, 13)
+                    .background(.white.opacity(0.08))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 24)
+                            .stroke(.white.opacity(0.12), lineWidth: 1)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 24))
+                    .padding(.top, 20)
+
+                    Spacer()
+                    Spacer()
                 }
-                // Feature checkmarks
-                VStack(spacing: 10) {
-                    ctaFeatureRow("All 7 features fully unlocked")
-                    ctaFeatureRow("Zero limits — all accounts & history")
-                    ctaFeatureRow("7-day trial — charged only after day 7")
-                }
-                .padding(.horizontal, 36)
-                // Trial note
-                HStack(spacing: 7) {
-                    Image(systemName: "calendar.badge.checkmark")
-                        .font(.system(size: 12))
-                        .foregroundStyle(Color(hex: 0xD4AF37))
-                    Text("Monthly, yearly & lifetime plans available")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.8))
-                }
-                .padding(.horizontal, 22).padding(.vertical, 12)
-                .background(.white.opacity(0.08))
-                .clipShape(RoundedRectangle(cornerRadius: 22))
-                Spacer()
-                Spacer()
             }
         }
     }
 
     private func ctaFeatureRow(_ text: String) -> some View {
         HStack(spacing: 10) {
-            Image(systemName: "checkmark.circle.fill")
-                .foregroundStyle(Color(hex: 0xD4AF37))
-                .font(.system(size: 15))
+            ZStack {
+                Circle()
+                    .fill(Color(hex: 0xD4AF37).opacity(0.18))
+                    .frame(width: 26, height: 26)
+                Image(systemName: "checkmark")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(Color(hex: 0xD4AF37))
+            }
             Text(text)
                 .font(.system(size: 14))
                 .foregroundStyle(.white.opacity(0.85))
