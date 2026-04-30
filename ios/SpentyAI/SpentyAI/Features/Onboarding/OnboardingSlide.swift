@@ -12,6 +12,7 @@ struct OnboardingSlide: Identifiable {
     let statPills: [String]
     let gradientColors: [Color]  // Deep dark full-screen gradient
     let isCTASlide: Bool
+    let assetName: String?       // Real app screenshot bundled in Assets.xcassets
 
     init(
         id: Int,
@@ -22,7 +23,8 @@ struct OnboardingSlide: Identifiable {
         categoryLabel: String = "",
         statPills: [String] = [],
         gradientColors: [Color] = [],
-        isCTASlide: Bool = false
+        isCTASlide: Bool = false,
+        assetName: String? = nil
     ) {
         self.id            = id
         self.symbolName    = symbolName
@@ -33,6 +35,7 @@ struct OnboardingSlide: Identifiable {
         self.statPills     = statPills
         self.gradientColors = gradientColors
         self.isCTASlide    = isCTASlide
+        self.assetName     = assetName
     }
 }
 
@@ -50,7 +53,8 @@ extension OnboardingSlide {
             descriptionKey: "onboarding_slide1_desc",
             categoryLabel: "AUTO TRACKING",
             statPills: ["Zero typing", "Auto-detected"],
-            gradientColors: [Color(hex: 0x060E2E), Color(hex: 0x0D2B6B), Color(hex: 0x1565C0)]
+            gradientColors: [Color(hex: 0x060E2E), Color(hex: 0x0D2B6B), Color(hex: 0x1565C0)],
+            assetName: "OnboardingShot1_AutoTrack"
         ),
 
         // 2 – AI Finance Buddy  →  Forest Green
@@ -62,7 +66,8 @@ extension OnboardingSlide {
             descriptionKey: "onboarding_slide2_desc",
             categoryLabel: "AI ASSISTANT",
             statPills: ["Instant answers", "No jargon"],
-            gradientColors: [Color(hex: 0x041A0C), Color(hex: 0x0A3D1E), Color(hex: 0x1B6B38)]
+            gradientColors: [Color(hex: 0x041A0C), Color(hex: 0x0A3D1E), Color(hex: 0x1B6B38)],
+            assetName: "OnboardingShot2_AIBuddy"
         ),
 
         // 3 – Dashboard  →  Deep Violet
@@ -74,7 +79,8 @@ extension OnboardingSlide {
             descriptionKey: "onboarding_slide3_desc",
             categoryLabel: "DASHBOARD",
             statPills: ["All accounts", "Real-time"],
-            gradientColors: [Color(hex: 0x0D0026), Color(hex: 0x2A0A5E), Color(hex: 0x4527A0)]
+            gradientColors: [Color(hex: 0x0D0026), Color(hex: 0x2A0A5E), Color(hex: 0x4527A0)],
+            assetName: "OnboardingShot3_Dashboard"
         ),
 
         // 4 – AI Insights  →  Sunset Orange
@@ -86,7 +92,8 @@ extension OnboardingSlide {
             descriptionKey: "onboarding_slide4_desc",
             categoryLabel: "SMART INSIGHTS",
             statPills: ["Ask anything", "Like a CA"],
-            gradientColors: [Color(hex: 0x200500), Color(hex: 0x6B1A00), Color(hex: 0xBF3200)]
+            gradientColors: [Color(hex: 0x200500), Color(hex: 0x6B1A00), Color(hex: 0xBF3200)],
+            assetName: "OnboardingShot4_AIInsights"
         ),
 
         // 5 – Reports  →  Emerald
@@ -98,7 +105,8 @@ extension OnboardingSlide {
             descriptionKey: "onboarding_slide5_desc",
             categoryLabel: "REPORTS",
             statPills: ["Visual charts", "Any period"],
-            gradientColors: [Color(hex: 0x001E18), Color(hex: 0x004A38), Color(hex: 0x00785A)]
+            gradientColors: [Color(hex: 0x001E18), Color(hex: 0x004A38), Color(hex: 0x00785A)],
+            assetName: "OnboardingShot5_Reports"
         ),
 
         // 6 – Cash Flow  →  Deep Indigo
@@ -110,7 +118,8 @@ extension OnboardingSlide {
             descriptionKey: "onboarding_slide6_desc",
             categoryLabel: "CASH FLOW",
             statPills: ["Never miss EMI", "Plan ahead"],
-            gradientColors: [Color(hex: 0x06082E), Color(hex: 0x111566), Color(hex: 0x1E2BA0)]
+            gradientColors: [Color(hex: 0x06082E), Color(hex: 0x111566), Color(hex: 0x1E2BA0)],
+            assetName: "OnboardingShot6_CashFlow"
         ),
 
         // 7 – Invoices  →  Ocean Blue
@@ -122,7 +131,8 @@ extension OnboardingSlide {
             descriptionKey: "onboarding_slide7_desc",
             categoryLabel: "INVOICING",
             statPills: ["GST ready", "Professional"],
-            gradientColors: [Color(hex: 0x001929), Color(hex: 0x003456), Color(hex: 0x015A8C)]
+            gradientColors: [Color(hex: 0x001929), Color(hex: 0x003456), Color(hex: 0x015A8C)],
+            assetName: "OnboardingShot7_Invoices"
         ),
 
         // 8 – CTA  →  Dark Gold

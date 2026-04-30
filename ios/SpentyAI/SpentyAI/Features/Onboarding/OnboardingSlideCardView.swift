@@ -1,11 +1,10 @@
 import SwiftUI
 
-// MARK: - Onboarding Slide Card View (modern, presentable rebuild)
-// Each slide keeps its existing dark gradient + accent colour identity but
-// the busy texture / concentric rings / tiny iPhone mockup are gone. In their
-// place: one large halo'd icon orb and a single floating "result card" that
-// shows the outcome of the feature in plain language. Every claim still maps
-// to a real backend endpoint — no new capabilities are invented here.
+// MARK: - Onboarding Slide Card View
+// Direction 1 — Real screenshots inside a clean iPhone frame.
+// Each slide shows a full-bleed screenshot from the actual SpentyAI iOS app
+// (bundled in Assets.xcassets) inside a minimal Space-Black titanium frame
+// floating on the per-slide gradient. No fake mocks. No invented capability.
 
 struct OnboardingSlideCardView: View {
     let slide: OnboardingSlide
@@ -24,8 +23,16 @@ struct OnboardingSlideCardView: View {
     // MARK: - Regular Slide
 
     private func regularSlide(geo: GeometryProxy) -> some View {
-        ZStack {
-            // 1. Full-screen dark gradient (per-slide identity)
+        // Phone frame proportions match real iPhone (≈ 1 : 2.04).
+        // Limit phone height so title + description + bottom controls all fit
+        // on 6.1" devices at the smallest supported safe-area.
+        let phoneAspect: CGFloat = 2.04
+        let availH = geo.size.height * 0.46
+        let phoneW = min(geo.size.width * 0.66, availH / phoneAspect)
+        let phoneH = phoneW * phoneAspect
+
+        return ZStack {
+            // 1. Full-screen gradient (per-slide identity)
             LinearGradient(
                 colors: slide.gradientColors.isEmpty
                     ? [Color.black, Color(hex: 0x1C1C1E)]
@@ -35,25 +42,19 @@ struct OnboardingSlideCardView: View {
             )
             .ignoresSafeArea()
 
-            // 2. One soft accent halo (replaces dot-grid + concentric rings)
+            // 2. Soft accent halo behind the phone
             Ellipse()
-                .fill(slide.accentColor.opacity(0.30))
-                .frame(width: geo.size.width * 1.1, height: geo.size.height * 0.55)
-                .blur(radius: 110)
-                .offset(x: -geo.size.width * 0.10,
-                        y: -geo.size.height * 0.25)
+                .fill(slide.accentColor.opacity(0.32))
+                .frame(width: phoneW * 1.6, height: phoneW * 1.4)
+                .blur(radius: 90)
+                .offset(x: 0, y: -phoneH * 0.35)
                 .allowsHitTesting(false)
 
-            // 3. Centre content
+            // 3. Centre content stack
             VStack(spacing: 0) {
-                Spacer().frame(height: 92) // breathe past skip + progress bar
+                Spacer().frame(height: 76) // breathe past skip + progress bar
 
-                heroOrb
-                    .padding(.top, 6)
-
-                resultCard
-                    .padding(.top, 26)
-                    .padding(.horizontal, 26)
+                phoneFrame(width: phoneW, height: phoneH)
 
                 VStack(alignment: .leading, spacing: 12) {
                     if !slide.categoryLabel.isEmpty {
@@ -61,14 +62,14 @@ struct OnboardingSlideCardView: View {
                     }
 
                     Text(lang.s(slide.titleKey))
-                        .font(.system(size: 30, weight: .bold, design: .rounded))
+                        .font(.system(size: 28, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
                         .lineSpacing(2)
                         .fixedSize(horizontal: false, vertical: true)
 
                     Text(lang.s(slide.descriptionKey))
-                        .font(.system(size: 15))
-                        .foregroundStyle(.white.opacity(0.72))
+                        .font(.system(size: 14.5))
+                        .foregroundStyle(.white.opacity(0.74))
                         .lineSpacing(5)
                         .fixedSize(horizontal: false, vertical: true)
 
@@ -82,43 +83,133 @@ struct OnboardingSlideCardView: View {
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 26)
-                .padding(.top, 28)
+                .padding(.horizontal, 28)
+                .padding(.top, 22)
 
-                Spacer(minLength: 150) // room for dots + Next button overlay
+                Spacer(minLength: 150)
             }
             .frame(maxWidth: .infinity)
         }
     }
 
-    // MARK: - Hero icon orb
+    // MARK: - Phone Frame (real screenshot inside)
+    // Calibrated to look like a Space Black iPhone 17 Pro:
+    // outer titanium shell, black bezel, rounded screen, Dynamic Island,
+    // tiny home indicator. Screenshot fills the inside.
 
-    private var heroOrb: some View {
-        ZStack {
-            Circle()
-                .fill(slide.accentColor.opacity(0.22))
-                .frame(width: 168, height: 168)
-                .blur(radius: 30)
+    private func phoneFrame(width: CGFloat, height: CGFloat) -> some View {
+        // Corner radii proportional to phone width (calibrated at 280pt)
+        let outerCR  = width * 0.128
+        let innerCR  = width * 0.102
+        let screenCR = width * 0.080
+        let bezel    = width * 0.018
+        let diW      = width * 0.245
+        let diH      = width * 0.046
+        let diPad    = width * 0.050
+        let hiW      = width * 0.176
+        let hiBot    = width * 0.025
 
-            Circle()
-                .stroke(slide.accentColor.opacity(0.45), lineWidth: 1)
-                .frame(width: 132, height: 132)
+        return ZStack {
+            // Side buttons behind body
+            phoneButtons(width: width, height: height)
 
-            Circle()
-                .fill(
-                    LinearGradient(
-                        colors: [slide.accentColor, slide.accentColor.opacity(0.65)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
+            // Main body
+            ZStack(alignment: .top) {
+                // Outer Space Black titanium shell
+                RoundedRectangle(cornerRadius: outerCR, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            stops: [
+                                .init(color: Color(white: 0.42), location: 0.00),
+                                .init(color: Color(white: 0.24), location: 0.28),
+                                .init(color: Color(white: 0.18), location: 0.55),
+                                .init(color: Color(white: 0.30), location: 0.78),
+                                .init(color: Color(white: 0.15), location: 1.00),
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
                     )
-                )
-                .frame(width: 108, height: 108)
-                .shadow(color: slide.accentColor.opacity(0.55), radius: 24, x: 0, y: 14)
 
-            Image(systemName: slide.symbolName)
-                .font(.system(size: 46, weight: .semibold))
-                .foregroundStyle(.white)
-                .shadow(color: .black.opacity(0.15), radius: 6, x: 0, y: 2)
+                // Faint accent tint to tie the phone to the slide colour
+                RoundedRectangle(cornerRadius: outerCR, style: .continuous)
+                    .fill(slide.accentColor.opacity(0.07))
+
+                // Top-edge highlight
+                RoundedRectangle(cornerRadius: outerCR, style: .continuous)
+                    .stroke(
+                        LinearGradient(
+                            colors: [.white.opacity(0.32), .white.opacity(0.09), .clear],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 1.0
+                    )
+
+                // Inner black bezel
+                RoundedRectangle(cornerRadius: innerCR, style: .continuous)
+                    .fill(Color.black)
+                    .padding(bezel)
+
+                // Real app screenshot
+                screenshotImage()
+                    .clipShape(RoundedRectangle(cornerRadius: screenCR, style: .continuous))
+                    .padding(bezel + 0.5)
+
+                // Dynamic Island pill on top of the screenshot
+                Capsule()
+                    .fill(Color.black)
+                    .frame(width: diW, height: diH)
+                    .padding(.top, diPad)
+
+                // Home indicator
+                VStack {
+                    Spacer()
+                    Capsule()
+                        .fill(Color(white: 0.95).opacity(0.55))
+                        .frame(width: hiW, height: 3)
+                        .padding(.bottom, hiBot)
+                }
+            }
+        }
+        .frame(width: width, height: height)
+        .shadow(color: slide.accentColor.opacity(0.35), radius: 36, x: 0, y: 22)
+        .shadow(color: .black.opacity(0.55), radius: 18, x: 0, y: 10)
+    }
+
+    @ViewBuilder
+    private func screenshotImage() -> some View {
+        if let asset = slide.assetName {
+            Image(asset)
+                .resizable()
+                .scaledToFill()
+        } else {
+            Color(hex: 0xF5F3F0)
+        }
+    }
+
+    // Phone side buttons — purely decorative, fully proportional.
+    private func phoneButtons(width: CGFloat, height: CGFloat) -> some View {
+        let bw  = width * 0.020
+        let br  = width * 0.011
+        let frameColor = Color(white: 0.26)
+        return ZStack {
+            RoundedRectangle(cornerRadius: br)
+                .fill(frameColor)
+                .frame(width: bw, height: height * 0.040)
+                .position(x: 0, y: height * 0.20)
+            RoundedRectangle(cornerRadius: br)
+                .fill(frameColor)
+                .frame(width: bw, height: height * 0.062)
+                .position(x: 0, y: height * 0.33)
+            RoundedRectangle(cornerRadius: br)
+                .fill(frameColor)
+                .frame(width: bw, height: height * 0.062)
+                .position(x: 0, y: height * 0.44)
+            RoundedRectangle(cornerRadius: br)
+                .fill(frameColor)
+                .frame(width: bw, height: height * 0.076)
+                .position(x: width, y: height * 0.34)
         }
     }
 
@@ -140,306 +231,7 @@ struct OnboardingSlideCardView: View {
         .clipShape(Capsule())
     }
 
-    // MARK: - Result card (per-slide)
-
-    @ViewBuilder
-    private var resultCard: some View {
-        switch slide.id {
-        case 1: emailResultCard
-        case 2: aiChatResultCard
-        case 3: dashboardResultCard
-        case 4: insightsResultCard
-        case 5: reportsResultCard
-        case 6: cashFlowResultCard
-        case 7: invoiceResultCard
-        default: EmptyView()
-        }
-    }
-
-    // Reusable glassmorphism card wrapper
-    private func glassCard<Content: View>(
-        @ViewBuilder _ content: () -> Content
-    ) -> some View {
-        content()
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.white.opacity(0.07))
-            .background(.ultraThinMaterial.opacity(0.22))
-            .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(.white.opacity(0.15), lineWidth: 1)
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .shadow(color: .black.opacity(0.30), radius: 18, x: 0, y: 10)
-    }
-
-    // 1 — Email auto-tracking
-    private var emailResultCard: some View {
-        glassCard {
-            HStack(spacing: 12) {
-                resultIcon("fork.knife", color: .orange)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Swiggy")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(.white)
-                    HStack(spacing: 5) {
-                        Image(systemName: "checkmark.seal.fill")
-                            .font(.system(size: 10))
-                            .foregroundStyle(slide.accentColor)
-                        Text("Auto-tagged from email")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.white.opacity(0.65))
-                    }
-                }
-                Spacer(minLength: 6)
-                Text("−₹847")
-                    .font(.system(size: 16, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
-            }
-        }
-    }
-
-    // 2 — AI Finance Buddy
-    private var aiChatResultCard: some View {
-        glassCard {
-            VStack(alignment: .leading, spacing: 10) {
-                chatBubble(
-                    text: "Spent ₹500 on lunch",
-                    isUser: true
-                )
-                chatBubble(
-                    text: "✓ Logged ₹500 to Food, paid by HDFC",
-                    isUser: false
-                )
-            }
-        }
-    }
-
-    private func chatBubble(text: String, isUser: Bool) -> some View {
-        HStack {
-            if isUser { Spacer(minLength: 24) }
-            Text(text)
-                .font(.system(size: 12.5, weight: isUser ? .medium : .semibold))
-                .foregroundStyle(isUser ? .white : .white)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(
-                    isUser
-                        ? AnyShapeStyle(Color.white.opacity(0.16))
-                        : AnyShapeStyle(slide.accentColor.opacity(0.30))
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            if !isUser { Spacer(minLength: 24) }
-        }
-    }
-
-    // 3 — Dashboard / Money in one place
-    private var dashboardResultCard: some View {
-        glassCard {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Text("Total balance")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.65))
-                    Spacer()
-                    Text("Live")
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(slide.accentColor)
-                        .padding(.horizontal, 6).padding(.vertical, 2)
-                        .background(slide.accentColor.opacity(0.18))
-                        .clipShape(Capsule())
-                }
-                Text("₹1,84,520")
-                    .font(.system(size: 26, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
-                HStack(spacing: 6) {
-                    accountBadge("HDFC", "🏦")
-                    accountBadge("ICICI", "💳")
-                    accountBadge("Cash", "💵")
-                    Text("+1")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.55))
-                        .padding(.horizontal, 7).padding(.vertical, 4)
-                        .background(.white.opacity(0.10))
-                        .clipShape(Capsule())
-                }
-            }
-        }
-    }
-
-    private func accountBadge(_ name: String, _ glyph: String) -> some View {
-        HStack(spacing: 4) {
-            Text(glyph).font(.system(size: 11))
-            Text(name).font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.85))
-        }
-        .padding(.horizontal, 7).padding(.vertical, 4)
-        .background(.white.opacity(0.10))
-        .clipShape(Capsule())
-    }
-
-    // 4 — AI Insights
-    private var insightsResultCard: some View {
-        glassCard {
-            VStack(alignment: .leading, spacing: 10) {
-                chatBubble(
-                    text: "How much did I save this month?",
-                    isUser: true
-                )
-                HStack(alignment: .top, spacing: 8) {
-                    Image(systemName: "sparkles")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(slide.accentColor)
-                        .padding(.top, 2)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("₹12,400 saved")
-                            .font(.system(size: 14, weight: .bold))
-                            .foregroundStyle(.white)
-                        Text("23% more than last month")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.white.opacity(0.65))
-                    }
-                    Spacer(minLength: 0)
-                }
-            }
-        }
-    }
-
-    // 5 — Reports / Visual story
-    private var reportsResultCard: some View {
-        glassCard {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("This month's spend")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.65))
-                HStack(alignment: .bottom, spacing: 10) {
-                    reportBar("Food", height: 50, value: "₹8.2k")
-                    reportBar("Shop", height: 32, value: "₹5.1k")
-                    reportBar("Bills", height: 70, value: "₹11k")
-                    reportBar("Travel", height: 22, value: "₹3.4k")
-                    reportBar("Misc", height: 14, value: "₹2.1k")
-                }
-            }
-        }
-    }
-
-    private func reportBar(_ label: String, height: CGFloat, value: String) -> some View {
-        VStack(spacing: 4) {
-            Text(value)
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.85))
-            RoundedRectangle(cornerRadius: 4)
-                .fill(
-                    LinearGradient(
-                        colors: [slide.accentColor, slide.accentColor.opacity(0.55)],
-                        startPoint: .top, endPoint: .bottom
-                    )
-                )
-                .frame(height: height)
-            Text(label)
-                .font(.system(size: 9))
-                .foregroundStyle(.white.opacity(0.6))
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    // 6 — Cash flow / EMI radar
-    private var cashFlowResultCard: some View {
-        glassCard {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Text("Next month's outflow")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.65))
-                    Spacer()
-                    Text("Detected")
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(slide.accentColor)
-                        .padding(.horizontal, 6).padding(.vertical, 2)
-                        .background(slide.accentColor.opacity(0.18))
-                        .clipShape(Capsule())
-                }
-                Text("₹23,500")
-                    .font(.system(size: 22, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
-                VStack(spacing: 6) {
-                    cashFlowRow("HDFC Home Loan", "5 May", "₹14,200")
-                    cashFlowRow("ICICI SIP", "10 May", "₹5,000")
-                    cashFlowRow("Netflix", "12 May", "₹649")
-                }
-            }
-        }
-    }
-
-    private func cashFlowRow(_ name: String, _ date: String, _ amt: String) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: "calendar")
-                .font(.system(size: 10))
-                .foregroundStyle(slide.accentColor)
-            Text(name)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.white.opacity(0.85))
-            Spacer()
-            Text(date)
-                .font(.system(size: 10))
-                .foregroundStyle(.white.opacity(0.55))
-            Text(amt)
-                .font(.system(size: 11, weight: .semibold, design: .rounded))
-                .foregroundStyle(.white)
-        }
-    }
-
-    // 7 — Invoice
-    private var invoiceResultCard: some View {
-        glassCard {
-            HStack(alignment: .top, spacing: 12) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(slide.accentColor.opacity(0.20))
-                        .frame(width: 44, height: 56)
-                    Image(systemName: "doc.text.fill")
-                        .font(.system(size: 18))
-                        .foregroundStyle(slide.accentColor)
-                }
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 6) {
-                        Text("INV-0024")
-                            .font(.system(size: 13, weight: .bold))
-                            .foregroundStyle(.white)
-                        Text("· GST 18%")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.white.opacity(0.55))
-                    }
-                    Text("Polaris Ventures")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.7))
-                    HStack(spacing: 6) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 10))
-                            .foregroundStyle(slide.accentColor)
-                        Text("Sent · PDF ready")
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.85))
-                    }
-                }
-                Spacer(minLength: 6)
-                Text("₹1,77,000")
-                    .font(.system(size: 15, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
-            }
-        }
-    }
-
-    // MARK: - Helpers
-
-    private func resultIcon(_ symbol: String, color: Color) -> some View {
-        ZStack {
-            Circle().fill(color.opacity(0.20)).frame(width: 38, height: 38)
-            Image(systemName: symbol)
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(color)
-        }
-    }
+    // MARK: - Stat pill
 
     private func statPillView(_ text: String) -> some View {
         HStack(spacing: 5) {
@@ -471,25 +263,24 @@ struct OnboardingSlideCardView: View {
                 .ignoresSafeArea()
 
                 Ellipse()
-                    .fill(Color(hex: 0xD4AF37).opacity(0.30))
+                    .fill(Color(hex: 0xD4AF37).opacity(0.32))
                     .frame(width: geo.size.width * 1.1, height: geo.size.height * 0.55)
                     .blur(radius: 110)
-                    .offset(x: -geo.size.width * 0.10,
-                            y: -geo.size.height * 0.25)
+                    .offset(x: 0, y: -geo.size.height * 0.25)
 
                 VStack(spacing: 0) {
                     Spacer().frame(height: 92)
 
-                    // Crown badge — single layered orb (consistent with feature slides)
+                    // Crown badge — premium feel
                     ZStack {
                         Circle()
                             .fill(Color(hex: 0xD4AF37).opacity(0.22))
-                            .frame(width: 168, height: 168)
-                            .blur(radius: 30)
+                            .frame(width: 188, height: 188)
+                            .blur(radius: 32)
 
                         Circle()
                             .stroke(Color(hex: 0xD4AF37).opacity(0.45), lineWidth: 1)
-                            .frame(width: 132, height: 132)
+                            .frame(width: 148, height: 148)
 
                         Circle()
                             .fill(
@@ -499,16 +290,15 @@ struct OnboardingSlideCardView: View {
                                     endPoint: .bottomTrailing
                                 )
                             )
-                            .frame(width: 108, height: 108)
-                            .shadow(color: Color(hex: 0xD4AF37).opacity(0.55),
-                                    radius: 24, x: 0, y: 14)
+                            .frame(width: 122, height: 122)
+                            .shadow(color: Color(hex: 0xD4AF37).opacity(0.6),
+                                    radius: 28, x: 0, y: 16)
 
                         Image(systemName: "crown.fill")
-                            .font(.system(size: 44))
+                            .font(.system(size: 50))
                             .foregroundStyle(.white)
                     }
 
-                    // Premium trial badge
                     HStack(spacing: 6) {
                         Image(systemName: "sparkles")
                             .font(.system(size: 11, weight: .bold))
@@ -522,7 +312,7 @@ struct OnboardingSlideCardView: View {
                     .background(Color(hex: 0xD4AF37).opacity(0.16))
                     .overlay(Capsule().stroke(Color(hex: 0xD4AF37).opacity(0.45), lineWidth: 1))
                     .clipShape(Capsule())
-                    .padding(.top, 28)
+                    .padding(.top, 30)
 
                     Text(lang.s(slide.titleKey))
                         .font(.system(size: 32, weight: .bold, design: .rounded))
@@ -533,9 +323,9 @@ struct OnboardingSlideCardView: View {
 
                     Text(lang.s(slide.descriptionKey))
                         .font(.system(size: 14.5))
-                        .foregroundStyle(.white.opacity(0.72))
+                        .foregroundStyle(.white.opacity(0.74))
                         .multilineTextAlignment(.center)
-                        .padding(.horizontal, 28)
+                        .padding(.horizontal, 30)
                         .padding(.top, 10)
                         .lineSpacing(5)
 
