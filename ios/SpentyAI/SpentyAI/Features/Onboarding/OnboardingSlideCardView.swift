@@ -22,7 +22,14 @@ struct OnboardingSlideCardView: View {
     // MARK: - Regular Slide
 
     private func regularSlide(geo: GeometryProxy) -> some View {
-        ZStack {
+        // Maintain real iPhone aspect ratio (≈ 1 : 2.16).
+        // Height-constrained so the text block below still has room.
+        let phoneAspect: CGFloat = 2.16
+        let maxPhoneH   = geo.size.height * 0.52
+        let phoneW      = min(geo.size.width * 0.62, maxPhoneH / phoneAspect)
+        let phoneH      = phoneW * phoneAspect
+
+        return ZStack {
             // ── 1. Full-screen gradient ──────────────────────────────────
             LinearGradient(
                 colors: slide.gradientColors.isEmpty
@@ -78,10 +85,7 @@ struct OnboardingSlideCardView: View {
 
                 // ── Phone frame mockup ───────────────────────────────────
                 phoneFrame(geo: geo)
-                    .frame(
-                        width:  geo.size.width * 0.72,
-                        height: geo.size.height * 0.50
-                    )
+                    .frame(width: phoneW, height: phoneH)
 
                 // ── Text block ───────────────────────────────────────────
                 VStack(alignment: .leading, spacing: 11) {

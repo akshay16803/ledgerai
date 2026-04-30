@@ -104,11 +104,11 @@ struct SubscriptionPaywall: View {
     // MARK: - Hero
 
     private var heroSection: some View {
-        VStack(spacing: 16) {
-            Spacer().frame(height: 20)
+        VStack(spacing: 14) {
+            Spacer().frame(height: 12)
 
             Image(systemName: "crown.fill")
-                .font(.system(size: 48))
+                .font(.system(size: 44))
                 .foregroundStyle(
                     LinearGradient(
                         colors: [brandPrimary, brandPrimary.opacity(0.6)],
@@ -118,7 +118,7 @@ struct SubscriptionPaywall: View {
                 )
 
             Text(lang.s("unlock_premium"))
-                .font(.title.weight(.bold))
+                .font(.title2.weight(.bold))
                 .multilineTextAlignment(.center)
 
             Text(lang.s("premium_subtitle"))
@@ -127,8 +127,8 @@ struct SubscriptionPaywall: View {
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 12)
 
-            // Feature pills
-            VStack(alignment: .leading, spacing: 14) {
+            // Feature rows with green circle icons
+            VStack(spacing: 12) {
                 featureRow(icon: "brain.head.profile",
                            text: "AI-powered transaction insights")
                 featureRow(icon: "chart.line.uptrend.xyaxis",
@@ -139,20 +139,27 @@ struct SubscriptionPaywall: View {
                            text: "Unlimited invoices & reports")
             }
             .padding(.top, 4)
+            .padding(.horizontal, 4)
         }
     }
 
     private func featureRow(icon: String, text: String) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: icon)
-                .font(.system(size: 16))
-                .foregroundStyle(brandPrimary)
-                .frame(width: 24, height: 22)
+        HStack(alignment: .center, spacing: 14) {
+            ZStack {
+                Circle()
+                    .fill(brandPrimary)
+                    .frame(width: 36, height: 36)
+                Image(systemName: icon)
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(.white)
+            }
 
             Text(text)
-                .font(.system(size: 14.5))
+                .font(.system(size: 15, weight: .medium))
                 .foregroundStyle(Color.spentyTextPrimary)
                 .fixedSize(horizontal: false, vertical: true)
+
+            Spacer()
         }
     }
 
