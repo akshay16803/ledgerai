@@ -223,9 +223,31 @@ class BillingViewModel(
     private suspend fun handlePurchase(purchase: Purchase) {
         if (purchase.purchaseState == Purchase.PurchaseState.PURCHASED) {
             acknowledgePurchaseIfNeeded(purchase)
-            // Notify backend and refresh status
-            loadAll()
-            _uiState.update { it.copy(isPurchasing = false, purchasingProductId = null) }
+
+            // Notify backend so server has a record of the purchase. iOS calls
+            // /api/payments/apple/verify; Android equivalent is /api/subscription/verify.
+            // Failure here is shown as an error but we do NOT re-charge the user.
+            when (val verifyResult = repository.verifyPurchase(purchase)) {
+                is ApiResult.Success -> {
+                    // Server now knows about the purchase; refresh status.
+                    loadAll()
+                    _uiState.update { it.copy(isPurchasing = false, purchasingProductId = null) }
+                }
+                is ApiResult.Failure -> {
+                    // Local Play purchase succeeded but server verification failed.
+                    // Refresh status anyway in case server has independent record.
+                    loadAll()
+                    _uiState.update {
+                        it.copy(
+                            isPurchasing = false,
+                            purchasingProductId = null,
+                            showError = true,
+                            errorMessage = "Purchase succeeded but verification failed: " +
+                                "${verifyResult.error.message}. Please contact support if your subscription does not appear."
+                        )
+                    }
+                }
+            }
         } else if (purchase.purchaseState == Purchase.PurchaseState.PENDING) {
             _uiState.update {
                 it.copy(

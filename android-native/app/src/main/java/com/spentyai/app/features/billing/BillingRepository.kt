@@ -1,5 +1,6 @@
 package com.spentyai.app.features.billing
 
+import com.android.billingclient.api.Purchase
 import com.spentyai.app.core.network.ApiClient
 import com.spentyai.app.core.network.ApiResult
 import kotlinx.serialization.SerialName
@@ -108,6 +109,19 @@ class BillingRepository(private val apiClient: ApiClient) {
 
     suspend fun activatePromo(code: String): ApiResult<PromoResponse> {
         return ApiResult.Success(PromoResponse(valid = false, message = "Promo code activation not yet available on Android."))
+    }
+
+    suspend fun verifyPurchase(purchase: Purchase): ApiResult<Unit> {
+        val productId = purchase.products.firstOrNull() ?: ""
+        val body = buildJsonObject {
+            put("platform", "android")
+            put("package_name", purchase.packageName)
+            put("product_id", productId)
+            put("purchase_token", purchase.purchaseToken)
+            purchase.orderId?.let { put("order_id", it) }
+        }
+        return apiClient.safeApiCall { apiClient.endpoints.verifySubscription(body) }
+            .map { /* discard JSON body */ }
     }
 
     suspend fun cancelSubscription(): ApiResult<Unit> {
