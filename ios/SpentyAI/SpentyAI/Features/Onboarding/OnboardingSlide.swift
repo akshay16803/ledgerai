@@ -83,35 +83,9 @@ extension OnboardingSlide {
             assetName: "OnboardingShot3_Dashboard"
         ),
 
-        // 4 – AI Insights  →  Sunset Orange
+        // 4 – Cash Flow  →  Deep Indigo
         OnboardingSlide(
             id: 4,
-            symbolName: "bubble.left.and.bubble.right.fill",
-            accentColor: Color(hex: 0xFF9F0A),
-            titleKey: "onboarding_slide4_title",
-            descriptionKey: "onboarding_slide4_desc",
-            categoryLabel: "SMART INSIGHTS",
-            statPills: ["Ask anything", "Like a CA"],
-            gradientColors: [Color(hex: 0x200500), Color(hex: 0x6B1A00), Color(hex: 0xBF3200)],
-            assetName: "OnboardingShot4_AIInsights"
-        ),
-
-        // 5 – Reports  →  Emerald
-        OnboardingSlide(
-            id: 5,
-            symbolName: "chart.line.uptrend.xyaxis",
-            accentColor: Color(hex: 0x34D399),
-            titleKey: "onboarding_slide5_title",
-            descriptionKey: "onboarding_slide5_desc",
-            categoryLabel: "REPORTS",
-            statPills: ["Visual charts", "Any period"],
-            gradientColors: [Color(hex: 0x001E18), Color(hex: 0x004A38), Color(hex: 0x00785A)],
-            assetName: "OnboardingShot5_Reports"
-        ),
-
-        // 6 – Cash Flow  →  Deep Indigo
-        OnboardingSlide(
-            id: 6,
             symbolName: "arrow.triangle.2.circlepath",
             accentColor: Color(hex: 0x818CF8),
             titleKey: "onboarding_slide6_title",
@@ -122,9 +96,9 @@ extension OnboardingSlide {
             assetName: "OnboardingShot6_CashFlow"
         ),
 
-        // 7 – Invoices  →  Ocean Blue
+        // 5 – Invoices  →  Ocean Blue
         OnboardingSlide(
-            id: 7,
+            id: 5,
             symbolName: "doc.text.fill",
             accentColor: Color(hex: 0x38BDF8),
             titleKey: "onboarding_slide7_title",
@@ -135,9 +109,9 @@ extension OnboardingSlide {
             assetName: "OnboardingShot7_Invoices"
         ),
 
-        // 8 – CTA  →  Dark Gold
+        // 6 – CTA  →  Dark Gold
         OnboardingSlide(
-            id: 8,
+            id: 6,
             symbolName: "crown.fill",
             accentColor: Color(hex: 0xD4AF37),
             titleKey: "onboarding_slide8_title",

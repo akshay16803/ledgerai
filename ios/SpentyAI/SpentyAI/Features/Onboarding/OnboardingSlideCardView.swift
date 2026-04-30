@@ -27,7 +27,7 @@ struct OnboardingSlideCardView: View {
         // Limit phone height so title + description + bottom controls all fit
         // on 6.1" devices at the smallest supported safe-area.
         let phoneAspect: CGFloat = 2.04
-        let availH = geo.size.height * 0.46
+        let availH = geo.size.height * 0.42
         let phoneW = min(geo.size.width * 0.66, availH / phoneAspect)
         let phoneH = phoneW * phoneAspect
 
@@ -52,7 +52,7 @@ struct OnboardingSlideCardView: View {
 
             // 3. Centre content stack
             VStack(spacing: 0) {
-                Spacer().frame(height: 76) // breathe past skip + progress bar
+                Spacer().frame(height: 70) // breathe past skip + progress bar
 
                 phoneFrame(width: phoneW, height: phoneH)
 
@@ -62,9 +62,11 @@ struct OnboardingSlideCardView: View {
                     }
 
                     Text(lang.s(slide.titleKey))
-                        .font(.system(size: 28, weight: .bold, design: .rounded))
+                        .font(.system(size: 26, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
                         .lineSpacing(2)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.85)
                         .fixedSize(horizontal: false, vertical: true)
 
                     Text(lang.s(slide.descriptionKey))
@@ -86,7 +88,7 @@ struct OnboardingSlideCardView: View {
                 .padding(.horizontal, 28)
                 .padding(.top, 22)
 
-                Spacer(minLength: 150)
+                Spacer(minLength: 200)
             }
             .frame(maxWidth: .infinity)
         }
