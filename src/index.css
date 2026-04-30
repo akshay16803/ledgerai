@@ -139,3 +139,22 @@ a {
   .stat-grid { grid-template-columns: repeat(3, 1fr) !important; }
   .card-grid { grid-template-columns: 1fr 1fr !important; }
 }
+
+/* Feature carousel — hover affordance */
+[role="region"][aria-label="SpentyAI feature highlights"] button[aria-label^="Show"]:not([aria-current="true"]):hover {
+  background: var(--bg-tertiary) !important;
+  border-color: var(--border-strong) !important;
+  color: var(--text-primary) !important;
+}
+[role="region"][aria-label="SpentyAI feature highlights"] button[aria-label$="auto-advance"]:hover,
+[role="region"][aria-label="SpentyAI feature highlights"] button[aria-label="Previous feature"]:hover {
+  background: var(--bg-tertiary) !important;
+  border-color: var(--border-strong) !important;
+}
+[role="region"][aria-label="SpentyAI feature highlights"] button[aria-label="Next feature"]:hover {
+  filter: brightness(0.95);
+  transform: translateY(-1px);
+}
+[role="region"][aria-label="SpentyAI feature highlights"] button[aria-label^="Go to slide"]:hover {
+  background: rgba(26,54,45,0.32) !important;
+}
