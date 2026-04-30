@@ -332,7 +332,7 @@ struct OnboardingSlideCardView: View {
                         .lineSpacing(5)
 
                     VStack(spacing: 10) {
-                        ctaFeatureRow("All 7 features fully unlocked")
+                        ctaFeatureRow("Every feature fully unlocked")
                         ctaFeatureRow("Zero limits — every account & history")
                         ctaFeatureRow("Charged only after day 7 — cancel any time")
                     }

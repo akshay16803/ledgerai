@@ -532,7 +532,7 @@ enum AppStrings {
         "onboarding_next": ["en": "Next", "hi": "अगला"],
         "onboarding_get_started": ["en": "Get Started", "hi": "शुरू करें"],
         "onboarding_slide1_title": ["en": "Your Bills, Auto-Found", "hi": "आपके बिल, खुद ट्रैक होते हैं"],
-        "onboarding_slide1_desc": ["en": "SpentyAI reads your Gmail and SMS to detect payments, salary credits, and EMIs. You just review and categorise them — no manual entry, no typing.", "hi": "SpentyAI आपके Gmail और SMS से लेन-देन खोजता है। आप बस उन्हें समीक्षा करें और वर्गीकृत करें — कोई मैन्युअल एंट्री नहीं।"],
+        "onboarding_slide1_desc": ["en": "SpentyAI reads your Gmail, Outlook, and bank SMS to detect payments, salary credits, and EMIs. You just review and categorise them — no manual entry, no typing.", "hi": "SpentyAI आपके Gmail, Outlook और बैंक SMS से लेन-देन खोजता है। आप बस उन्हें समीक्षा करें और वर्गीकृत करें — कोई मैन्युअल एंट्री नहीं।"],
         "onboarding_slide2_title": ["en": "Your AI Finance Buddy", "hi": "आपका AI फाइनेंस दोस्त"],
         "onboarding_slide2_desc": ["en": "Tell the AI \"I spent ₹500 on lunch\" and it records the expense for you — asking for any details it needs. Or ask \"How much did I save this month?\" and get an instant answer.", "hi": "AI को बताएं \"मैंने ₹500 खाने पर खर्च किए\" और वो खुद दर्ज कर लेगा। \"इस महीने कितना बचा?\" पूछें और तुरंत जवाब पाएं।"],
         "onboarding_slide3_title": ["en": "Your Money, All in One", "hi": "सारा पैसा, एक जगह"],
