@@ -563,7 +563,7 @@ enum AppStrings {
         "apply_promo": ["en": "Apply", "hi": "लागू करें"],
         "activate_promo_btn": ["en": "Activate Promo", "hi": "प्रोमो लागू करें"],
         "auto_detect_sub": ["en": "Already have a subscription? It will be detected automatically.", "hi": "पहले से सदस्यता है? यह अपने आप पता चल जाएगी।"],
-        "recurring_billing": ["en": "Recurring billing. Cancel anytime in Settings.", "hi": "बार-बार बिलिंग। सेटिंग्स में कभी भी रद्द करें।"],
+        "recurring_billing": ["en": "Free for 7 days, then auto-renews at the selected plan price. Payment is charged to your Apple ID at confirmation of purchase. Subscription auto-renews unless cancelled at least 24 hours before the end of the current period. Manage or cancel anytime in iOS Settings → Apple ID → Subscriptions.", "hi": "7 दिन मुफ्त, फिर चयनित प्लान की दर पर अपने आप नवीनीकृत होगा। भुगतान खरीद की पुष्टि पर आपकी Apple ID से कटेगा। मौजूदा अवधि समाप्त होने से कम से कम 24 घंटे पहले रद्द न करने पर सब्सक्रिप्शन अपने आप नवीनीकृत होगा। iOS Settings → Apple ID → Subscriptions में कभी भी प्रबंधन या रद्द करें।"],
         "restore_purchases": ["en": "Restore Purchases", "hi": "खरीदारी बहाल करें"],
         "processing_paywall": ["en": "Processing...", "hi": "प्रोसेसिंग..."],
 
