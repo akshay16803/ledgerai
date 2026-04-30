@@ -24,12 +24,21 @@ android {
         buildConfigField("String", "API_BASE_URL", "\"https://api.spentyai.com\"")
     }
 
+    // Load keystore creds from android-native/secrets/keystore.properties (committed for internal builds);
+    // fall back to env vars for CI.
+    val keystoreProps = java.util.Properties().apply {
+        val f = rootProject.file("secrets/keystore.properties")
+        if (f.exists()) load(f.inputStream())
+    }
+    fun ksProp(key: String, env: String): String? =
+        keystoreProps.getProperty(key) ?: System.getenv(env)
+
     signingConfigs {
         create("release") {
-            storeFile = System.getenv("KEYSTORE_PATH")?.let { file(it) }
-            storePassword = System.getenv("KEYSTORE_PASSWORD") ?: ""
-            keyAlias = System.getenv("KEY_ALIAS") ?: "spentyai"
-            keyPassword = System.getenv("KEY_PASSWORD") ?: ""
+            ksProp("storeFile", "KEYSTORE_PATH")?.let { storeFile = rootProject.file(it) }
+            storePassword = ksProp("storePassword", "KEYSTORE_PASSWORD") ?: ""
+            keyAlias = ksProp("keyAlias", "KEY_ALIAS") ?: "spentyai-release-key"
+            keyPassword = ksProp("keyPassword", "KEY_PASSWORD") ?: ""
         }
     }
 
