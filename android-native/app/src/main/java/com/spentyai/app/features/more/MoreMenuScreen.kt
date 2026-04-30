@@ -46,7 +46,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.spentyai.app.R
 import com.spentyai.app.core.theme.SpentyAccent1
 import com.spentyai.app.core.theme.SpentyAccent3
 import com.spentyai.app.core.theme.SpentyInfo
@@ -56,7 +58,7 @@ import com.spentyai.app.core.theme.SpentyType
 import com.spentyai.app.core.theme.SpentyWarning
 
 data class MoreMenuItem(
-    val title: String,
+    val titleRes: Int,
     val icon: ImageVector,
     val color: Color,
     val route: String
@@ -68,34 +70,34 @@ fun MoreMenuScreen(
     modifier: Modifier = Modifier
 ) {
     val financeItems = listOf(
-        MoreMenuItem("Cash Flow", Icons.Default.TrendingUp, SpentyPrimary, "cash_flow"),
-        MoreMenuItem("Invoices", Icons.Default.Description, SpentyInfo, "invoices"),
-        MoreMenuItem("Purchases", Icons.Default.ShoppingCart, SpentyAccent1, "bills"),
-        MoreMenuItem("Categories", Icons.Default.Category, SpentyWarning, "categories")
+        MoreMenuItem(R.string.cash_flow, Icons.Default.TrendingUp, SpentyPrimary, "cash_flow"),
+        MoreMenuItem(R.string.invoices, Icons.Default.Description, SpentyInfo, "invoices"),
+        MoreMenuItem(R.string.purchases, Icons.Default.ShoppingCart, SpentyAccent1, "bills"),
+        MoreMenuItem(R.string.categories, Icons.Default.Category, SpentyWarning, "categories")
     )
 
     val peopleItems = listOf(
-        MoreMenuItem("Customers", Icons.Default.People, SpentyInfo, "customers"),
-        MoreMenuItem("Vendors", Icons.Default.LocalShipping, SpentyAccent1, "vendors")
+        MoreMenuItem(R.string.customers, Icons.Default.People, SpentyInfo, "customers"),
+        MoreMenuItem(R.string.vendors, Icons.Default.LocalShipping, SpentyAccent1, "vendors")
     )
 
     val dataItems = listOf(
-        MoreMenuItem("Reconciliation", Icons.Default.CheckCircle, SpentySuccess, "reconciliation"),
-        MoreMenuItem("Email Sync", Icons.Default.Email, SpentyInfo, "email_sync"),
-        MoreMenuItem("SMS Sync", Icons.Default.Sms, SpentyAccent3, "sms_sync"),
-        MoreMenuItem("Records", Icons.Default.Archive, MaterialTheme.colorScheme.onSurfaceVariant, "records"),
-        MoreMenuItem("Past Insights", Icons.Default.History, SpentyAccent3, "past_insights")
+        MoreMenuItem(R.string.reconciliation, Icons.Default.CheckCircle, SpentySuccess, "reconciliation"),
+        MoreMenuItem(R.string.email_sync, Icons.Default.Email, SpentyInfo, "email_sync"),
+        MoreMenuItem(R.string.sms_sync, Icons.Default.Sms, SpentyAccent3, "sms_sync"),
+        MoreMenuItem(R.string.records, Icons.Default.Archive, MaterialTheme.colorScheme.onSurfaceVariant, "records"),
+        MoreMenuItem(R.string.past_insights, Icons.Default.History, SpentyAccent3, "past_insights")
     )
 
     val toolsItems = listOf(
-        MoreMenuItem("AI Chat", Icons.AutoMirrored.Filled.Chat, SpentyPrimary, "ai_chat"),
-        MoreMenuItem("Feature Requests", Icons.Default.Lightbulb, SpentyWarning, "feature_requests"),
-        MoreMenuItem("Support", Icons.AutoMirrored.Filled.HelpCenter, SpentyInfo, "support")
+        MoreMenuItem(R.string.ai_chat, Icons.AutoMirrored.Filled.Chat, SpentyPrimary, "ai_chat"),
+        MoreMenuItem(R.string.feature_requests, Icons.Default.Lightbulb, SpentyWarning, "feature_requests"),
+        MoreMenuItem(R.string.support, Icons.AutoMirrored.Filled.HelpCenter, SpentyInfo, "support")
     )
 
     val accountItems = listOf(
-        MoreMenuItem("Settings", Icons.Default.Settings, MaterialTheme.colorScheme.onSurfaceVariant, "settings"),
-        MoreMenuItem("Billing", Icons.Default.CreditCard, SpentyPrimary, "billing")
+        MoreMenuItem(R.string.settings, Icons.Default.Settings, MaterialTheme.colorScheme.onSurfaceVariant, "settings"),
+        MoreMenuItem(R.string.billing, Icons.Default.CreditCard, SpentyPrimary, "billing")
     )
 
     Column(
@@ -106,11 +108,11 @@ fun MoreMenuScreen(
     ) {
         Spacer(modifier = Modifier.height(16.dp))
 
-        MoreMenuSection("Finance", financeItems, onNavigate)
-        MoreMenuSection("People", peopleItems, onNavigate)
-        MoreMenuSection("Data", dataItems, onNavigate)
-        MoreMenuSection("Tools", toolsItems, onNavigate)
-        MoreMenuSection("Account", accountItems, onNavigate)
+        MoreMenuSection(stringResource(R.string.section_finance), financeItems, onNavigate)
+        MoreMenuSection(stringResource(R.string.section_people), peopleItems, onNavigate)
+        MoreMenuSection(stringResource(R.string.section_data), dataItems, onNavigate)
+        MoreMenuSection(stringResource(R.string.section_tools), toolsItems, onNavigate)
+        MoreMenuSection(stringResource(R.string.section_account), accountItems, onNavigate)
 
         Spacer(modifier = Modifier.height(24.dp))
     }
@@ -138,7 +140,7 @@ private fun MoreMenuSection(
         ) {
             items.forEachIndexed { index, item ->
                 MoreMenuRow(
-                    title = item.title,
+                    title = stringResource(item.titleRes),
                     icon = item.icon,
                     iconColor = item.color,
                     onClick = { onNavigate(item.route) }

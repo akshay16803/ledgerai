@@ -73,6 +73,7 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.spentyai.app.core.components.ErrorBanner
@@ -80,6 +81,7 @@ import com.spentyai.app.core.components.LoadingView
 import com.spentyai.app.core.models.Account
 import com.spentyai.app.core.models.PendingTransaction
 import com.spentyai.app.core.models.Transaction
+import com.spentyai.app.R
 import com.spentyai.app.core.theme.SpentyAccent1
 import com.spentyai.app.core.theme.SpentyAccent3
 import com.spentyai.app.core.theme.SpentyError
@@ -403,7 +405,7 @@ private fun StatsGrid(
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             MiniStatCard(
-                label = "Net Worth",
+                label = stringResource(R.string.net_worth),
                 value = formatCurrency(viewModel.netWorth),
                 icon = Icons.Filled.Money,
                 iconColor = if (viewModel.netWorth >= 0) SpentySuccess else SpentyError,
@@ -411,7 +413,7 @@ private fun StatsGrid(
                 modifier = Modifier.weight(1f)
             )
             MiniStatCard(
-                label = "Income This Month",
+                label = stringResource(R.string.income_this_month),
                 value = formatCurrency(viewModel.incomeThisMonth),
                 icon = Icons.Filled.ArrowCircleDown,
                 iconColor = SpentySuccess,
@@ -423,7 +425,7 @@ private fun StatsGrid(
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             MiniStatCard(
-                label = "Expenses This Month",
+                label = stringResource(R.string.expenses_this_month),
                 value = formatCurrency(viewModel.expenseThisMonth),
                 icon = Icons.Filled.ArrowCircleUp,
                 iconColor = SpentyAccent1,
@@ -817,7 +819,7 @@ private fun RecentTransactionsSection(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         CollapsibleSectionHeader(
-            title = "Recent Transactions",
+            title = stringResource(R.string.recent_transactions),
             icon = Icons.Filled.History,
             count = transactions.size,
             isExpanded = isExpanded,
@@ -931,7 +933,7 @@ private fun PendingApprovalSection(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         CollapsibleSectionHeader(
-            title = "Pending Approval",
+            title = stringResource(R.string.pending_approval),
             icon = Icons.Filled.Email,
             count = pendingCount,
             isExpanded = isExpanded,

@@ -22,6 +22,8 @@ import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.android.gms.common.api.ApiException
 import com.spentyai.app.core.auth.AuthManager
 import com.spentyai.app.core.onboarding.OnboardingPrefs
+import android.content.Context
+import com.spentyai.app.core.i18n.LanguageManager
 import com.spentyai.app.core.theme.SpentyTheme
 import com.spentyai.app.features.onboarding.OnboardingScreen
 import com.spentyai.app.features.onboarding.OnboardingViewModel
@@ -59,6 +61,14 @@ class MainActivity : ComponentActivity() {
                 authManager.setSignInError(friendlyMessage)
             }
         }
+    }
+
+    override fun attachBaseContext(newBase: Context) {
+        // Wrap the base context with the user-selected locale BEFORE
+        // super.attachBaseContext is invoked - this is what makes
+        // stringResource(R.string.x) pull from values-hi/ when Hindi
+        // is active. See LanguageManager.wrap() for details.
+        super.attachBaseContext(LanguageManager.wrap(newBase))
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {

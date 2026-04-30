@@ -1,0 +1,149 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    SpentyAI Android - Hindi (hi) translations.
+
+    Ported verbatim from ios/SpentyAI/SpentyAI/Core/Localization/AppStrings.swift.
+    Keep keys identical to values/strings.xml or fall-back to English will fire.
+-->
+<resources>
+
+    <string name="app_name">SpentyAI</string>
+    <string name="spentyai">SpentyAI</string>
+    <string name="smart_spending">स्मार्ट खर्च यहाँ शुरू होता है</string>
+
+    <!-- Bottom-nav tabs -->
+    <string name="nav_dashboard">डैशबोर्ड</string>
+    <string name="nav_transactions">लेन-देन</string>
+    <string name="nav_accounts">खाते</string>
+    <string name="nav_reports">रिपोर्ट</string>
+    <string name="nav_more">और</string>
+
+    <!-- Auth / Login -->
+    <string name="sign_in">साइन इन</string>
+    <string name="sign_in_with_google">Google से साइन इन करें</string>
+    <string name="view_demo_account">डेमो खाता देखें</string>
+    <string name="dev_login_debug">डेव लॉगिन (केवल डीबग)</string>
+    <string name="sign_in_error">साइन इन त्रुटि</string>
+    <string name="by_continuing">जारी रखने पर आप सहमत हैं</string>
+    <string name="terms_of_service">सेवा की शर्तें</string>
+    <string name="privacy_policy">गोपनीयता नीति</string>
+    <string name="and_separator">और</string>
+    <string name="sign_out">साइन आउट</string>
+    <string name="delete_account">खाता हटाएँ</string>
+
+    <!-- Common buttons -->
+    <string name="ok">ठीक है</string>
+    <string name="cancel">रद्द करें</string>
+    <string name="confirm">पुष्टि करें</string>
+    <string name="save">सेव करें</string>
+    <string name="create">बनाएँ</string>
+    <string name="delete">हटाएँ</string>
+    <string name="edit">बदलें</string>
+    <string name="add">जोड़ें</string>
+    <string name="search">खोजें</string>
+    <string name="filter">फ़िल्टर</string>
+    <string name="all">सभी</string>
+    <string name="done">हो गया</string>
+    <string name="close">बंद करें</string>
+    <string name="apply">लागू करें</string>
+    <string name="submit">जमा करें</string>
+    <string name="approve">स्वीकार करें</string>
+    <string name="reject">अस्वीकार करें</string>
+    <string name="select">चुनें</string>
+    <string name="select_all">सभी चुनें</string>
+    <string name="retry">फिर कोशिश करें</string>
+    <string name="loading">लोड हो रहा है…</string>
+    <string name="error_generic">कुछ गलत हो गया। कृपया फिर कोशिश करें।</string>
+    <string name="error_network">इंटरनेट कनेक्शन नहीं है।</string>
+    <string name="error_unauthorized">कृपया फिर साइन इन करें।</string>
+
+    <!-- Dashboard -->
+    <string name="net_worth">कुल संपत्ति</string>
+    <string name="total_balance">कुल शेष</string>
+    <string name="income">आय</string>
+    <string name="expenses">खर्चे</string>
+    <string name="net_income">शुद्ध आय</string>
+    <string name="income_this_month">इस महीने की आय</string>
+    <string name="expenses_this_month">इस महीने का खर्च</string>
+    <string name="recent_transactions">हाल के लेन-देन</string>
+    <string name="pending_approval">स्वीकृति बाकी</string>
+    <string name="all_caught_up">सब अपडेट है</string>
+    <string name="no_pending">कोई लंबित लेन-देन नहीं</string>
+    <string name="syncing">सिंक हो रहा है…</string>
+    <string name="accounts_receivable">वसूली योग्य</string>
+    <string name="accounts_payable">देय राशि</string>
+    <string name="cash_flow">कैश फ्लो</string>
+
+    <!-- More menu -->
+    <string name="section_finance">वित्त</string>
+    <string name="section_people">लोग</string>
+    <string name="section_data">डेटा</string>
+    <string name="section_tools">टूल्स</string>
+    <string name="section_account">खाता</string>
+    <string name="invoices">इनवॉइस</string>
+    <string name="purchases">खरीदारी</string>
+    <string name="bills">बिल</string>
+    <string name="categories">श्रेणियाँ</string>
+    <string name="mandates">मैंडेट</string>
+    <string name="payment_plans">भुगतान योजना</string>
+    <string name="tax_summary">कर सारांश</string>
+    <string name="customers">ग्राहक</string>
+    <string name="vendors">विक्रेता</string>
+    <string name="reconciliation">मिलान</string>
+    <string name="records">रिकॉर्ड</string>
+    <string name="statements">स्टेटमेंट</string>
+    <string name="email_sync">ईमेल सिंक</string>
+    <string name="sms_sync">SMS सिंक</string>
+    <string name="past_insights">पिछली जानकारी</string>
+    <string name="ai_chat">AI चैट</string>
+    <string name="feature_requests">सुझाव</string>
+    <string name="support">सहायता</string>
+    <string name="help_center">सहायता केंद्र</string>
+    <string name="settings">सेटिंग्स</string>
+    <string name="profile">प्रोफ़ाइल</string>
+    <string name="subscription">सदस्यता</string>
+    <string name="billing">बिलिंग</string>
+
+    <!-- Settings -->
+    <string name="settings_section_business">बिज़नेस</string>
+    <string name="settings_section_regional">क्षेत्रीय</string>
+    <string name="settings_section_language">भाषा</string>
+    <string name="settings_section_legal_support">क़ानूनी और सहायता</string>
+    <string name="business_profile">बिज़नेस प्रोफ़ाइल</string>
+    <string name="currency_and_locale">मुद्रा और लोकेल</string>
+    <string name="invoice_customization">इनवॉइस कस्टमाइज़</string>
+    <string name="business_logo">बिज़नेस लोगो</string>
+    <string name="signature">हस्ताक्षर</string>
+    <string name="upload_logo">लोगो अपलोड करें</string>
+    <string name="upload_signature">हस्ताक्षर अपलोड करें</string>
+    <string name="reset_data">डेटा रीसेट करें</string>
+    <string name="about_spentyai">SpentyAI के बारे में</string>
+    <string name="contact_support">सहायता से संपर्क करें</string>
+    <string name="refund_policy">रिफ़ंड और रद्दीकरण</string>
+    <string name="app_version">संस्करण</string>
+
+    <!-- Language toggle -->
+    <string name="language">भाषा</string>
+    <string name="language_english">English</string>
+    <string name="language_hindi">हिन्दी</string>
+    <string name="language_change_info">ऐप को तुरंत English और हिन्दी के बीच बदलें।</string>
+
+    <!-- Empty states -->
+    <string name="no_transactions">कोई लेन-देन नहीं</string>
+    <string name="no_transactions_subtitle">शुरुआत के लिए पहला लेन-देन जोड़ें</string>
+    <string name="no_accounts">कोई खाता नहीं</string>
+    <string name="no_accounts_subtitle">ट्रैकिंग शुरू करने के लिए बैंक खाता या क्रेडिट कार्ड जोड़ें</string>
+    <string name="no_invoices">कोई इनवॉइस नहीं</string>
+    <string name="no_bills">कोई बिल नहीं</string>
+    <string name="no_customers">कोई ग्राहक नहीं</string>
+    <string name="no_vendors">कोई विक्रेता नहीं</string>
+
+    <!-- Help Center -->
+    <string name="help_title">सहायता केंद्र</string>
+    <string name="help_subtitle">जवाब पाएँ, FAQ देखें और हमारी सहायता टीम से संपर्क करें।</string>
+    <string name="help_open_full_help">पूरा सहायता केंद्र वेब पर खोलें</string>
+    <string name="help_contact_us">सहायता से संपर्क करें</string>
+    <string name="help_browse_articles">लेख देखें</string>
+    <string name="help_section_faq">अक्सर पूछे जाने वाले प्रश्न</string>
+
+</resources>

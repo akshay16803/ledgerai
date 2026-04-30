@@ -8,6 +8,7 @@ import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import androidx.navigation.compose.currentBackStackEntryAsState
@@ -25,6 +26,7 @@ fun BottomNavBar(navController: NavController) {
         tonalElevation = 0.dp
     ) {
         BottomNavTab.entries.forEach { tab ->
+            val tabLabel = stringResource(tab.labelRes)
             val selected = when (tab) {
                 BottomNavTab.DASHBOARD -> currentRoute == Screen.Dashboard.route
                 BottomNavTab.TRANSACTIONS -> currentRoute?.startsWith("transaction") == true
@@ -48,12 +50,12 @@ fun BottomNavBar(navController: NavController) {
                 icon = {
                     Icon(
                         imageVector = if (selected) tab.selectedIcon else tab.unselectedIcon,
-                        contentDescription = tab.label
+                        contentDescription = tabLabel
                     )
                 },
                 label = {
                     Text(
-                        text = tab.label,
+                        text = tabLabel,
                         style = SpentyType.Caption2
                     )
                 },

@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
@@ -23,9 +25,11 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.CurrencyExchange
 import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.PersonOff
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -40,6 +44,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -50,6 +55,8 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.spentyai.app.core.components.LoadingView
+import com.spentyai.app.R
+import com.spentyai.app.core.i18n.LanguageManager
 import com.spentyai.app.core.theme.SpentyError
 import com.spentyai.app.core.theme.SpentyPrimary
 import com.spentyai.app.core.theme.SpentyStyle
@@ -287,6 +294,12 @@ fun SettingsScreen(
                         subtitle = currencySubtitle,
                         onClick = onNavigateToCurrencySettings
                     )
+                }
+
+                // Language Section (Hindi/English toggle)
+                SectionHeader(title = "Language", icon = Icons.Default.Language)
+                SettingsCard {
+                    LanguageToggleSection()
                 }
 
                 // Invoice Customization Section
@@ -534,5 +547,69 @@ private fun UploadPlaceholder(label: String) {
         )
         Spacer(modifier = Modifier.width(10.dp))
         Text(text = label, style = SpentyType.Subheadline, color = SpentyPrimary)
+    }
+}
+
+@Composable
+private fun LanguageToggleSection() {
+    val context = LocalContext.current
+    val activity = context as? android.app.Activity
+
+    // currentLang is read once per composition; switching the language
+    // recreates the activity below, which forces a fresh composition with
+    // the new locale-wrapped Resources.
+    val currentLang = remember { LanguageManager.currentLanguage(context) }
+
+    Column(modifier = Modifier.padding(vertical = 4.dp)) {
+        LanguageRow(
+            label = stringResource(R.string.language_english),
+            selected = currentLang == LanguageManager.LANG_EN,
+            onClick = {
+                if (currentLang != LanguageManager.LANG_EN) {
+                    LanguageManager.setLanguage(context, LanguageManager.LANG_EN)
+                    activity?.recreate()
+                }
+            }
+        )
+        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+        LanguageRow(
+            label = stringResource(R.string.language_hindi),
+            selected = currentLang == LanguageManager.LANG_HI,
+            onClick = {
+                if (currentLang != LanguageManager.LANG_HI) {
+                    LanguageManager.setLanguage(context, LanguageManager.LANG_HI)
+                    activity?.recreate()
+                }
+            }
+        )
+        Text(
+            stringResource(R.string.language_change_info),
+            style = SpentyType.Caption1,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+        )
+    }
+}
+
+@Composable
+private fun LanguageRow(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+    ) {
+        Text(
+            text = label,
+            style = SpentyType.Body,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(1f)
+        )
+        RadioButton(selected = selected, onClick = onClick)
     }
 }

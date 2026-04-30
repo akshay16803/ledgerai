@@ -97,11 +97,11 @@ enum class BottomNavTab(
     val screen: Screen,
     val selectedIcon: ImageVector,
     val unselectedIcon: ImageVector,
-    val label: String
+    val labelRes: Int
 ) {
-    DASHBOARD(Screen.Dashboard, Icons.Filled.Dashboard, Icons.Outlined.Dashboard, "Dashboard"),
-    TRANSACTIONS(Screen.Transactions, Icons.Filled.Receipt, Icons.Outlined.Receipt, "Transactions"),
-    ACCOUNTS(Screen.Accounts, Icons.Filled.AccountBalance, Icons.Outlined.AccountBalance, "Accounts"),
-    REPORTS(Screen.Reports, Icons.Filled.Assessment, Icons.Outlined.Assessment, "Reports"),
-    MORE(Screen.More, Icons.Filled.MoreHoriz, Icons.Outlined.MoreHoriz, "More")
+    DASHBOARD(Screen.Dashboard, Icons.Filled.Dashboard, Icons.Outlined.Dashboard, com.spentyai.app.R.string.nav_dashboard),
+    TRANSACTIONS(Screen.Transactions, Icons.Filled.Receipt, Icons.Outlined.Receipt, com.spentyai.app.R.string.nav_transactions),
+    ACCOUNTS(Screen.Accounts, Icons.Filled.AccountBalance, Icons.Outlined.AccountBalance, com.spentyai.app.R.string.nav_accounts),
+    REPORTS(Screen.Reports, Icons.Filled.Assessment, Icons.Outlined.Assessment, com.spentyai.app.R.string.nav_reports),
+    MORE(Screen.More, Icons.Filled.MoreHoriz, Icons.Outlined.MoreHoriz, com.spentyai.app.R.string.nav_more)
 }

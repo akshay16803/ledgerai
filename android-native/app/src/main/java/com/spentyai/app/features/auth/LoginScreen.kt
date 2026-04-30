@@ -39,6 +39,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextAlign
@@ -47,6 +48,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.spentyai.app.BuildConfig
+import com.spentyai.app.R
 import com.spentyai.app.core.theme.SpentyPrimary
 import com.spentyai.app.core.theme.SpentyType
 import com.spentyai.app.core.theme.SpentyWarning
@@ -120,12 +122,12 @@ private fun BrandingSection() {
         }
 
         Text(
-            text = "SpentyAI",
+            text = stringResource(R.string.spentyai),
             style = SpentyType.LargeTitle.copy(color = SpentyPrimary)
         )
 
         Text(
-            text = "Smart spending starts here",
+            text = stringResource(R.string.smart_spending),
             style = SpentyType.Subheadline.copy(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -187,7 +189,7 @@ private fun SignInSection(
                     style = SpentyType.Title3.copy(color = Color.White)
                 )
                 Text(
-                    text = "Sign in with Google",
+                    text = stringResource(R.string.sign_in_with_google),
                     style = SpentyType.Body.copy(
                         fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
                         color = Color.White
@@ -214,7 +216,7 @@ private fun SignInSection(
             enabled = !isLoading
         ) {
             Text(
-                text = "View Demo Account",
+                text = stringResource(R.string.view_demo_account),
                 style = SpentyType.Caption1.copy(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textDecoration = TextDecoration.Underline
@@ -237,7 +239,7 @@ private fun SignInSection(
                 enabled = !isLoading
             ) {
                 Text(
-                    text = "🔧 Dev Login (Debug Only)",
+                    text = stringResource(R.string.dev_login_debug),
                     style = SpentyType.Caption1.copy(color = Color.White)
                 )
             }
@@ -263,7 +265,7 @@ private fun ErrorBanner(
     ) {
         Icon(
             imageVector = Icons.Filled.Warning,
-            contentDescription = "Error",
+            contentDescription = stringResource(R.string.sign_in_error),
             tint = SpentyWarning,
             modifier = Modifier.size(18.dp)
         )
@@ -281,7 +283,7 @@ private fun ErrorBanner(
         ) {
             Icon(
                 imageVector = Icons.Filled.Close,
-                contentDescription = "Dismiss",
+                contentDescription = stringResource(R.string.close),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(14.dp)
             )
@@ -292,6 +294,12 @@ private fun ErrorBanner(
 @Composable
 private fun TermsFooter() {
     val uriHandler = LocalUriHandler.current
+    // Hoist stringResource calls out of buildAnnotatedString so the
+    // compiler doesn't choke on @Composable inside the builder lambda.
+    val byContinuingText = stringResource(R.string.by_continuing)
+    val termsText = stringResource(R.string.terms_of_service)
+    val privacyText = stringResource(R.string.privacy_policy)
+    val andText = stringResource(R.string.and_separator)
     val annotatedString = buildAnnotatedString {
         withStyle(
             SpanStyle(
@@ -299,7 +307,7 @@ private fun TermsFooter() {
                 fontSize = 12.sp
             )
         ) {
-            append("By continuing you agree to our\n")
+            append(byContinuingText + "\n")
         }
         pushStringAnnotation(tag = "URL", annotation = "https://spentyai.com/terms")
         withStyle(
@@ -309,7 +317,7 @@ private fun TermsFooter() {
                 textDecoration = TextDecoration.Underline
             )
         ) {
-            append("Terms of Service")
+            append(termsText)
         }
         pop()
         withStyle(
@@ -318,7 +326,7 @@ private fun TermsFooter() {
                 fontSize = 12.sp
             )
         ) {
-            append(" & ")
+            append(" " + andText + " ")
         }
         pushStringAnnotation(tag = "URL", annotation = "https://spentyai.com/privacy")
         withStyle(
@@ -328,7 +336,7 @@ private fun TermsFooter() {
                 textDecoration = TextDecoration.Underline
             )
         ) {
-            append("Privacy Policy")
+            append(privacyText)
         }
         pop()
     }
