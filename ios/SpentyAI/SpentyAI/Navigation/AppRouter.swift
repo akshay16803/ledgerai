@@ -9,13 +9,15 @@ struct AppRouter: View {
         Group {
             if authManager.isLoading {
                 LoadingView(message: "Checking your session...")
-            } else if !authManager.isAuthenticated {
-                LoginView(authManager: authManager)
-            } else if authManager.isAuthenticated && !onboardingDone {
+            } else if !onboardingDone {
+                // Show feature slides BEFORE sign-in so new users understand
+                // what they're signing up for.
                 OnboardingSliderView(onComplete: {
                     OnboardingManager.shared.markSeen()
                     onboardingDone = true
                 })
+            } else if !authManager.isAuthenticated {
+                LoginView(authManager: authManager)
             } else if let user = authManager.user, !user.hasActiveSubscription {
                 SubscriptionPaywall(onSubscribed: {
                     Task { await authManager.checkSession() }
