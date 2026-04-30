@@ -381,13 +381,45 @@ class BillingViewModel(
         _uiState.update { it.copy(showCancelConfirmation = false) }
     }
 
-    fun cancelSubscription() {
-        viewModelScope.launch {
-            _uiState.update { it.copy(isCancelling = true, showCancelConfirmation = false) }
-            repository.cancelSubscription()
-            loadAll()
-            _uiState.update { it.copy(isCancelling = false) }
+    /**
+     * Returns the Play Store deep link the UI should open to manage / cancel
+     * the active subscription. Returns null if the current subscription is
+     * not a recurring SUBS purchase (e.g. lifetime in-app purchase).
+     *
+     * Android cannot programmatically cancel a Play subscription — the user
+     * must do it through the Play Store. This URL drops them on the right
+     * screen, pre-filtered to this app + this SKU.
+     */
+    fun getCancelSubscriptionUrl(): String {
+        val productId = _uiState.value.currentStatus?.productId
+        val packageName = getApplication<Application>().packageName
+        return if (!productId.isNullOrEmpty()) {
+            "https://play.google.com/store/account/subscriptions?sku=$productId&package=$packageName"
+        } else {
+            "https://play.google.com/store/account/subscriptions?package=$packageName"
         }
+    }
+
+    /**
+     * Refresh subscription status after returning from the Play Store cancel
+     * flow. Intended to be invoked from the UI's onResume after the cancel
+     * link has been opened.
+     */
+    fun refreshAfterCancelReturn() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(showCancelConfirmation = false, isCancelling = false) }
+            loadAll()
+        }
+    }
+
+    /**
+     * Legacy entry point. The Play Store cancel flow is launched from the UI
+     * layer (Intent.ACTION_VIEW with [getCancelSubscriptionUrl]) because the
+     * ViewModel cannot start activities. This method just dismisses the
+     * confirmation dialog so the UI can navigate.
+     */
+    fun cancelSubscription() {
+        _uiState.update { it.copy(showCancelConfirmation = false) }
     }
 
     fun dismissError() {

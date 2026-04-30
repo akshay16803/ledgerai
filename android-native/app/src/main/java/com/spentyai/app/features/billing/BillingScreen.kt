@@ -43,6 +43,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
@@ -64,6 +65,7 @@ fun BillingScreen(
     onNavigateToPaymentHistory: () -> Unit
 ) {
     val state by viewModel.uiState.collectAsState()
+    val uriHandler = LocalUriHandler.current
 
     LaunchedEffect(Unit) {
         viewModel.loadAll()
@@ -94,7 +96,16 @@ fun BillingScreen(
             },
             confirmButton = {
                 Button(
-                    onClick = { viewModel.cancelSubscription() },
+                    onClick = {
+                        val url = viewModel.getCancelSubscriptionUrl()
+                        viewModel.cancelSubscription() // dismisses dialog
+                        try {
+                            uriHandler.openUri(url)
+                        } catch (_: Throwable) {
+                            // openUri may throw if no activity can handle it; swallow.
+                        }
+                        viewModel.refreshAfterCancelReturn()
+                    },
                     colors = SpentyStyle.destructiveButtonColors()
                 ) {
                     Text("Cancel Plan")
