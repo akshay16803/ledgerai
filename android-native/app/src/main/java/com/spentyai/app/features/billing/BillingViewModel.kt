@@ -112,51 +112,89 @@ class BillingViewModel(
     }
 
     suspend fun queryProductDetails() {
-        val productList = listOf(
+        // Subscriptions: monthly, quarterly, yearly. Match iOS-style identifiers.
+        val subsList = listOf(
             QueryProductDetailsParams.Product.newBuilder()
-                .setProductId("spenty_monthly")
+                .setProductId("com.spentyai.monthly")
                 .setProductType(BillingClient.ProductType.SUBS)
                 .build(),
             QueryProductDetailsParams.Product.newBuilder()
-                .setProductId("spenty_yearly")
+                .setProductId("com.spentyai.quarterly")
+                .setProductType(BillingClient.ProductType.SUBS)
+                .build(),
+            QueryProductDetailsParams.Product.newBuilder()
+                .setProductId("com.spentyai.yearly")
                 .setProductType(BillingClient.ProductType.SUBS)
                 .build()
         )
 
-        val params = QueryProductDetailsParams.newBuilder()
-            .setProductList(productList)
-            .build()
+        // Lifetime is a non-renewable in-app purchase, must be queried separately.
+        val inAppList = listOf(
+            QueryProductDetailsParams.Product.newBuilder()
+                .setProductId("com.spentyai.lifetime")
+                .setProductType(BillingClient.ProductType.INAPP)
+                .build()
+        )
 
-        val result = billingClient.queryProductDetails(params)
-        if (result.billingResult.responseCode == BillingClient.BillingResponseCode.OK) {
-            val details = result.productDetailsList ?: emptyList()
-            _uiState.update { it.copy(productDetailsList = details) }
+        val combined = mutableListOf<ProductDetails>()
+
+        val subsParams = QueryProductDetailsParams.newBuilder()
+            .setProductList(subsList)
+            .build()
+        val subsResult = billingClient.queryProductDetails(subsParams)
+        if (subsResult.billingResult.responseCode == BillingClient.BillingResponseCode.OK) {
+            combined.addAll(subsResult.productDetailsList ?: emptyList())
         }
+
+        val inAppParams = QueryProductDetailsParams.newBuilder()
+            .setProductList(inAppList)
+            .build()
+        val inAppResult = billingClient.queryProductDetails(inAppParams)
+        if (inAppResult.billingResult.responseCode == BillingClient.BillingResponseCode.OK) {
+            combined.addAll(inAppResult.productDetailsList ?: emptyList())
+        }
+
+        _uiState.update { it.copy(productDetailsList = combined) }
     }
 
     private suspend fun restorePurchases() {
-        val params = QueryPurchasesParams.newBuilder()
-            .setProductType(BillingClient.ProductType.SUBS)
-            .build()
-        val result = billingClient.queryPurchasesAsync(params)
-        if (result.billingResult.responseCode == BillingClient.BillingResponseCode.OK) {
-            for (purchase in result.purchasesList) {
-                if (purchase.purchaseState == Purchase.PurchaseState.PURCHASED) {
-                    acknowledgePurchaseIfNeeded(purchase)
+        // Restore both SUBS (monthly/quarterly/yearly) and INAPP (lifetime) purchases.
+        for (productType in listOf(BillingClient.ProductType.SUBS, BillingClient.ProductType.INAPP)) {
+            val params = QueryPurchasesParams.newBuilder()
+                .setProductType(productType)
+                .build()
+            val result = billingClient.queryPurchasesAsync(params)
+            if (result.billingResult.responseCode == BillingClient.BillingResponseCode.OK) {
+                for (purchase in result.purchasesList) {
+                    if (purchase.purchaseState == Purchase.PurchaseState.PURCHASED) {
+                        acknowledgePurchaseIfNeeded(purchase)
+                    }
                 }
             }
         }
     }
 
     fun purchaseSubscription(productDetails: ProductDetails, activity: Activity) {
-        val offerToken = productDetails.subscriptionOfferDetails?.firstOrNull()?.offerToken ?: return
+        // SUBS products require an offer token; INAPP (lifetime) does not.
+        val isSubs = productDetails.productType == BillingClient.ProductType.SUBS
+        val productDetailsParamsBuilder = BillingFlowParams.ProductDetailsParams.newBuilder()
+            .setProductDetails(productDetails)
 
-        val productDetailsParamsList = listOf(
-            BillingFlowParams.ProductDetailsParams.newBuilder()
-                .setProductDetails(productDetails)
-                .setOfferToken(offerToken)
-                .build()
-        )
+        if (isSubs) {
+            val offerToken = productDetails.subscriptionOfferDetails?.firstOrNull()?.offerToken
+            if (offerToken == null) {
+                _uiState.update {
+                    it.copy(
+                        showError = true,
+                        errorMessage = "Subscription offer not available. Please try again."
+                    )
+                }
+                return
+            }
+            productDetailsParamsBuilder.setOfferToken(offerToken)
+        }
+
+        val productDetailsParamsList = listOf(productDetailsParamsBuilder.build())
 
         val billingFlowParams = BillingFlowParams.newBuilder()
             .setProductDetailsParamsList(productDetailsParamsList)
