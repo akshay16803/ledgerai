@@ -2761,6 +2761,141 @@ async def create_mandate(payload: dict = Body(...), user: dict = Depends(get_cur
     return doc
 
 
+@app.get("/api/mandates/upcoming")
+async def upcoming_mandates(
+    days: int = 30,
+    user: dict = Depends(get_current_user),
+):
+    """List mandates with upcoming charges in the next N days."""
+    user_id = user["user_id"]
+    mandates = await db.mandates.find(
+        {"user_id": user_id, "status": "active"}, {"_id": 0}
+    ).to_list(500)
+
+    now = datetime.now(timezone.utc)
+    today = now.day
+    upcoming = []
+
+    for m in mandates:
+        debit_day = m.get("debit_day")
+        if debit_day is None:
+            continue
+        try:
+            debit_day = int(debit_day)
+        except (ValueError, TypeError):
+            continue
+
+        # Calculate next debit date
+        year, month = now.year, now.month
+        if debit_day <= today:
+            # Already passed this month, next occurrence is next month
+            month += 1
+            if month > 12:
+                month = 1
+                year += 1
+
+        try:
+            next_date = date_cls(year, month, min(debit_day, 28))
+        except ValueError:
+            next_date = date_cls(year, month, 28)
+
+        days_until = (next_date - now.date()).days
+        if 0 <= days_until <= days:
+            upcoming.append({
+                **m,
+                "next_debit_date": next_date.isoformat(),
+                "days_until": days_until,
+            })
+
+    upcoming.sort(key=lambda x: x["days_until"])
+    return {"upcoming": upcoming, "total": len(upcoming)}
+
+
+async def _compute_od_monthly_interest(user_id: str, account: dict) -> tuple:
+    """
+    Compute the current month's daily interest for an OD account.
+    Uses the same timeline-replay logic as the OD interest endpoint.
+    Returns the total interest amount for the current month.
+    """
+    rate = account.get("loan_interest_rate")
+    if not rate or rate <= 0:
+        return 0.0, 0.0
+
+    now = datetime.now(timezone.utc)
+    year, mon = now.year, now.month
+    month_start = date_cls(year, mon, 1)
+    if mon == 12:
+        month_end = date_cls(year + 1, 1, 1)
+    else:
+        month_end = date_cls(year, mon + 1, 1)
+
+    num_days = (month_end - month_start).days
+    daily_rate = rate / 100.0 / 365.0
+
+    opening = account.get("opening_balance", 0)
+    as_of_date = account.get("balance_as_of_date") or month_start.isoformat()
+    as_of_str = as_of_date if isinstance(as_of_date, str) else as_of_date.isoformat()
+    month_end_str = month_end.isoformat()
+    account_id = account["account_id"]
+
+    txn_query = {
+        "user_id": user_id,
+        "status": "approved",
+        "transaction_type": "transfer",
+        "date": {"$gte": as_of_str, "$lt": month_end_str},
+        "source": {"$ne": "loan_emi"},
+    }
+
+    withdrawals = await db.transactions.find(
+        {**txn_query, "account_id": account_id},
+        {"_id": 0, "date": 1, "amount": 1}
+    ).sort("date", 1).to_list(10000)
+
+    repayments = await db.transactions.find(
+        {**txn_query, "to_account_id": account_id},
+        {"_id": 0, "date": 1, "amount": 1}
+    ).sort("date", 1).to_list(10000)
+
+    expense_query = {
+        "user_id": user_id,
+        "status": "approved",
+        "account_id": account_id,
+        "transaction_type": "expense",
+        "date": {"$gte": as_of_str, "$lt": month_end_str},
+        "source": {"$ne": "loan_emi"},
+    }
+    expenses = await db.transactions.find(
+        expense_query, {"_id": 0, "date": 1, "amount": 1}
+    ).sort("date", 1).to_list(10000)
+
+    events = []
+    for w in withdrawals:
+        events.append({"date": w["date"], "delta": w["amount"]})
+    for r in repayments:
+        events.append({"date": r["date"], "delta": -r["amount"]})
+    for e in expenses:
+        events.append({"date": e["date"], "delta": e["amount"]})
+    events.sort(key=lambda x: x["date"])
+
+    balance = opening
+    pre_month_events = [e for e in events if e["date"] < month_start.isoformat()]
+    for e in pre_month_events:
+        balance += e["delta"]
+
+    month_events = [e for e in events if month_start.isoformat() <= e["date"] < month_end_str]
+
+    total_interest = 0.0
+    event_idx = 0
+    for day_offset in range(num_days):
+        current_date = month_start + timedelta(days=day_offset)
+        current_str = current_date.isoformat()
+        while event_idx < len(month_events) and month_events[event_idx]["date"] <= current_str:
+            balance += month_events[event_idx]["delta"]
+            event_idx += 1
+        total_interest += max(0, balance) * daily_rate
+
+    return round(total_interest, 2), round(max(0, balance), 2)
+
 @app.get("/api/mandates/{mandate_id}")
 async def get_mandate(mandate_id: str, user: dict = Depends(get_current_user)):
     """Get a single mandate by ID."""
@@ -2913,142 +3048,6 @@ async def detect_mandates(user: dict = Depends(get_current_user)):
             })
 
     return {"detected": detected[:20], "total": len(detected)}
-
-
-@app.get("/api/mandates/upcoming")
-async def upcoming_mandates(
-    days: int = 30,
-    user: dict = Depends(get_current_user),
-):
-    """List mandates with upcoming charges in the next N days."""
-    user_id = user["user_id"]
-    mandates = await db.mandates.find(
-        {"user_id": user_id, "status": "active"}, {"_id": 0}
-    ).to_list(500)
-
-    now = datetime.now(timezone.utc)
-    today = now.day
-    upcoming = []
-
-    for m in mandates:
-        debit_day = m.get("debit_day")
-        if debit_day is None:
-            continue
-        try:
-            debit_day = int(debit_day)
-        except (ValueError, TypeError):
-            continue
-
-        # Calculate next debit date
-        year, month = now.year, now.month
-        if debit_day <= today:
-            # Already passed this month, next occurrence is next month
-            month += 1
-            if month > 12:
-                month = 1
-                year += 1
-
-        try:
-            next_date = date_cls(year, month, min(debit_day, 28))
-        except ValueError:
-            next_date = date_cls(year, month, 28)
-
-        days_until = (next_date - now.date()).days
-        if 0 <= days_until <= days:
-            upcoming.append({
-                **m,
-                "next_debit_date": next_date.isoformat(),
-                "days_until": days_until,
-            })
-
-    upcoming.sort(key=lambda x: x["days_until"])
-    return {"upcoming": upcoming, "total": len(upcoming)}
-
-
-async def _compute_od_monthly_interest(user_id: str, account: dict) -> tuple:
-    """
-    Compute the current month's daily interest for an OD account.
-    Uses the same timeline-replay logic as the OD interest endpoint.
-    Returns the total interest amount for the current month.
-    """
-    rate = account.get("loan_interest_rate")
-    if not rate or rate <= 0:
-        return 0.0, 0.0
-
-    now = datetime.now(timezone.utc)
-    year, mon = now.year, now.month
-    month_start = date_cls(year, mon, 1)
-    if mon == 12:
-        month_end = date_cls(year + 1, 1, 1)
-    else:
-        month_end = date_cls(year, mon + 1, 1)
-
-    num_days = (month_end - month_start).days
-    daily_rate = rate / 100.0 / 365.0
-
-    opening = account.get("opening_balance", 0)
-    as_of_date = account.get("balance_as_of_date") or month_start.isoformat()
-    as_of_str = as_of_date if isinstance(as_of_date, str) else as_of_date.isoformat()
-    month_end_str = month_end.isoformat()
-    account_id = account["account_id"]
-
-    txn_query = {
-        "user_id": user_id,
-        "status": "approved",
-        "transaction_type": "transfer",
-        "date": {"$gte": as_of_str, "$lt": month_end_str},
-        "source": {"$ne": "loan_emi"},
-    }
-
-    withdrawals = await db.transactions.find(
-        {**txn_query, "account_id": account_id},
-        {"_id": 0, "date": 1, "amount": 1}
-    ).sort("date", 1).to_list(10000)
-
-    repayments = await db.transactions.find(
-        {**txn_query, "to_account_id": account_id},
-        {"_id": 0, "date": 1, "amount": 1}
-    ).sort("date", 1).to_list(10000)
-
-    expense_query = {
-        "user_id": user_id,
-        "status": "approved",
-        "account_id": account_id,
-        "transaction_type": "expense",
-        "date": {"$gte": as_of_str, "$lt": month_end_str},
-        "source": {"$ne": "loan_emi"},
-    }
-    expenses = await db.transactions.find(
-        expense_query, {"_id": 0, "date": 1, "amount": 1}
-    ).sort("date", 1).to_list(10000)
-
-    events = []
-    for w in withdrawals:
-        events.append({"date": w["date"], "delta": w["amount"]})
-    for r in repayments:
-        events.append({"date": r["date"], "delta": -r["amount"]})
-    for e in expenses:
-        events.append({"date": e["date"], "delta": e["amount"]})
-    events.sort(key=lambda x: x["date"])
-
-    balance = opening
-    pre_month_events = [e for e in events if e["date"] < month_start.isoformat()]
-    for e in pre_month_events:
-        balance += e["delta"]
-
-    month_events = [e for e in events if month_start.isoformat() <= e["date"] < month_end_str]
-
-    total_interest = 0.0
-    event_idx = 0
-    for day_offset in range(num_days):
-        current_date = month_start + timedelta(days=day_offset)
-        current_str = current_date.isoformat()
-        while event_idx < len(month_events) and month_events[event_idx]["date"] <= current_str:
-            balance += month_events[event_idx]["delta"]
-            event_idx += 1
-        total_interest += max(0, balance) * daily_rate
-
-    return round(total_interest, 2), round(max(0, balance), 2)
 
 
 @app.get("/api/cashflow/projection")
