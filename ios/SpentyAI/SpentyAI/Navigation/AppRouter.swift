@@ -14,7 +14,10 @@ struct AppRouter: View {
                 // what they're signing up for.
                 OnboardingSliderView(onComplete: {
                     OnboardingManager.shared.markSeen()
-                    onboardingDone = true
+                    Task {
+                        await authManager.checkSession()
+                        onboardingDone = true
+                    }
                 })
             } else if !authManager.isAuthenticated {
                 LoginView(authManager: authManager)

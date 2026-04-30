@@ -26,7 +26,7 @@ struct OnboardingSlideCardView: View {
         // maxPhoneH capped at 0.48 × screen height so the text block + 140pt
         // bottom clearance (for dots + Next button overlay) always fits.
         let phoneAspect: CGFloat = 2.0
-        let maxPhoneH   = geo.size.height * 0.48
+        let maxPhoneH   = geo.size.height * 0.43
         let phoneW      = min(geo.size.width * 0.62, maxPhoneH / phoneAspect)
         let phoneH      = phoneW * phoneAspect
 
