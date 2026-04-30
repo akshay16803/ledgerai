@@ -22,10 +22,11 @@ struct OnboardingSlideCardView: View {
     // MARK: - Regular Slide
 
     private func regularSlide(geo: GeometryProxy) -> some View {
-        // Maintain real iPhone aspect ratio (≈ 1 : 2.16).
-        // Height-constrained so the text block below still has room.
-        let phoneAspect: CGFloat = 2.16
-        let maxPhoneH   = geo.size.height * 0.52
+        // Phone mockup dimensions — proportional to real iPhone body (≈ 1 : 2.0).
+        // maxPhoneH capped at 0.48 × screen height so the text block + 140pt
+        // bottom clearance (for dots + Next button overlay) always fits.
+        let phoneAspect: CGFloat = 2.0
+        let maxPhoneH   = geo.size.height * 0.48
         let phoneW      = min(geo.size.width * 0.62, maxPhoneH / phoneAspect)
         let phoneH      = phoneW * phoneAspect
 
@@ -130,7 +131,7 @@ struct OnboardingSlideCardView: View {
                 .padding(.horizontal, 26)
                 .padding(.top, 20)
 
-                Spacer(minLength: 80)
+                Spacer(minLength: 140)
             }
             .frame(maxWidth: .infinity)
         }
