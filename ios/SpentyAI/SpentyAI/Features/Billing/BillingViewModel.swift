@@ -335,4 +335,35 @@ final class BillingViewModel {
     func displayPrice(for productId: String) -> String? {
         storeProducts[productId]?.displayPrice
     }
+
+    /// Returns a customer-facing trial summary like "7 days free, then ₹1,499/year"
+    /// when the product has an introductory free-trial offer. Nil otherwise.
+    /// Required by Apple Guideline 3.1.2: trial price + post-trial price must
+    /// be clearly disclosed on the paywall.
+    func trialSummary(for productId: String) -> String? {
+        guard let product = storeProducts[productId],
+              let intro = product.subscription?.introductoryOffer,
+              intro.paymentMode == .freeTrial else { return nil }
+
+        let days = intro.period.value * periodDays(for: intro.period.unit)
+        let unit: String
+        switch product.subscription?.subscriptionPeriod.unit {
+        case .day:   unit = "day"
+        case .week:  unit = "week"
+        case .month: unit = "month"
+        case .year:  unit = "year"
+        default:     unit = "period"
+        }
+        return "\(days) days free, then \(product.displayPrice)/\(unit)"
+    }
+
+    private func periodDays(for unit: Product.SubscriptionPeriod.Unit) -> Int {
+        switch unit {
+        case .day:   return 1
+        case .week:  return 7
+        case .month: return 30
+        case .year:  return 365
+        @unknown default: return 0
+        }
+    }
 }

@@ -130,8 +130,8 @@
     "_applicationInternalID": "1234567890",
     "_developerTeamID": "857NZC8N95",
     "_failTransactionsEnabled": false,
-    "_locale": "en_US",
-    "_storefront": "USA",
+    "_locale": "en_IN",
+    "_storefront": "IND",
     "_storeKitErrors": []
   }
 }
