@@ -30,17 +30,15 @@
             </intent-filter>
         </activity>
 
-        <activity
-            android:name="net.openid.appauth.RedirectUriReceiverActivity"
-            android:exported="true"
-            tools:node="replace">
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="com.spentyai.app" android:host="oauth2redirect" />
-            </intent-filter>
-        </activity>
+        <!--
+            OAuth redirect URIs are NOT received by the mobile app — Gmail and
+            Outlook OAuth callbacks land on the backend
+            (https://api.spentyai.com/api/{gmail|outlook}/callback) which then
+            stores tokens server-side. The app launches the auth URL in a
+            Custom Tab / browser, the user signs in, and the backend handles
+            the callback. No RedirectUriReceiverActivity / appauth dependency
+            is needed.
+        -->
 
     </application>
 
