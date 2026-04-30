@@ -46,6 +46,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -86,9 +88,18 @@ fun SubscriptionPaywallScreen(
     onSubscribed: () -> Unit
 ) {
     val state by viewModel.uiState.collectAsState()
-    var selectedProductId by remember { mutableStateOf("spenty_yearly") }
+    var selectedProductId by remember { mutableStateOf("com.spentyai.yearly") }
     var showPromoSection by remember { mutableStateOf(false) }
     val context = LocalContext.current
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    // Surface restore-purchase result as a snackbar.
+    LaunchedEffect(state.restoreMessage) {
+        state.restoreMessage?.let { msg ->
+            snackbarHostState.showSnackbar(msg)
+            viewModel.dismissRestoreMessage()
+        }
+    }
 
     LaunchedEffect(Unit) {
         viewModel.loadAll()
@@ -126,7 +137,8 @@ fun SubscriptionPaywallScreen(
                     containerColor = MaterialTheme.colorScheme.background
                 )
             )
-        }
+        },
+        snackbarHost = { SnackbarHost(hostState = snackbarHostState) }
     ) { padding ->
         Box(modifier = Modifier.fillMaxSize().padding(padding)) {
             Column(
@@ -177,6 +189,30 @@ fun SubscriptionPaywallScreen(
                         "Continue",
                         style = SpentyType.Headline,
                         color = Color.White
+                    )
+                }
+
+                // Restore Purchases (user-initiated). Required for Play UX & support cases.
+                OutlinedButton(
+                    onClick = { viewModel.restorePurchasesAction() },
+                    enabled = !state.isRestoringPurchases && !state.isPurchasing,
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(44.dp)
+                ) {
+                    if (state.isRestoringPurchases) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            color = SpentyPrimary,
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                    }
+                    Text(
+                        "Restore Purchases",
+                        style = SpentyType.Subheadline,
+                        color = SpentyPrimary
                     )
                 }
 
@@ -716,17 +752,6 @@ private fun TermsSection() {
                 style = SpentyType.Caption2.copy(textDecoration = TextDecoration.Underline),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.clickable { uriHandler.openUri("https://spentyai.com/privacy") }
-            )
-            Text(
-                "·",
-                style = SpentyType.Caption2,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                "Restore Purchases",
-                style = SpentyType.Caption2.copy(textDecoration = TextDecoration.Underline),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.clickable { /* Google Play restore handled automatically */ }
             )
         }
     }

@@ -45,7 +45,10 @@ data class BillingUiState(
     val isCancelling: Boolean = false,
     // Play Billing
     val productDetailsList: List<ProductDetails> = emptyList(),
-    val isBillingReady: Boolean = false
+    val isBillingReady: Boolean = false,
+    // Restore Purchases (user-driven)
+    val isRestoringPurchases: Boolean = false,
+    val restoreMessage: String? = null
 ) {
     val isSubscribed: Boolean get() = currentStatus?.isActive == true
 }
@@ -172,6 +175,59 @@ class BillingViewModel(
                 }
             }
         }
+    }
+
+    /**
+     * User-initiated restore-purchases action. Re-queries Play for any owned
+     * subscriptions or lifetime purchases, acknowledges anything new, then
+     * refreshes status from the backend. Sets [BillingUiState.restoreMessage]
+     * for the UI to surface as a toast / snackbar.
+     */
+    fun restorePurchasesAction() {
+        if (_uiState.value.isRestoringPurchases) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(isRestoringPurchases = true, restoreMessage = null) }
+            var foundAny = false
+            try {
+                if (!billingClient.isReady) {
+                    connectToPlayStore()
+                }
+                for (productType in listOf(BillingClient.ProductType.SUBS, BillingClient.ProductType.INAPP)) {
+                    val params = QueryPurchasesParams.newBuilder()
+                        .setProductType(productType)
+                        .build()
+                    val result = billingClient.queryPurchasesAsync(params)
+                    if (result.billingResult.responseCode == BillingClient.BillingResponseCode.OK) {
+                        for (purchase in result.purchasesList) {
+                            if (purchase.purchaseState == Purchase.PurchaseState.PURCHASED) {
+                                foundAny = true
+                                acknowledgePurchaseIfNeeded(purchase)
+                                // Re-verify with backend so server picks up restored entitlement.
+                                repository.verifyPurchase(purchase)
+                            }
+                        }
+                    }
+                }
+                loadAll()
+                _uiState.update {
+                    it.copy(
+                        isRestoringPurchases = false,
+                        restoreMessage = if (foundAny) "Purchases restored." else "No previous purchases found."
+                    )
+                }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        isRestoringPurchases = false,
+                        restoreMessage = "Restore failed: ${e.message ?: "unknown error"}"
+                    )
+                }
+            }
+        }
+    }
+
+    fun dismissRestoreMessage() {
+        _uiState.update { it.copy(restoreMessage = null) }
     }
 
     fun purchaseSubscription(productDetails: ProductDetails, activity: Activity) {
