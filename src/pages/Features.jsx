@@ -1,5 +1,5 @@
 import { useNavigate, Link } from 'react-router-dom';
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import {
   EnvelopeSimple, ChartPie, Receipt, FileText, Users, Buildings,
@@ -7,7 +7,8 @@ import {
   TrendUp, Files, ArrowsLeftRight, Calendar, Camera, Repeat, Tag,
   CaretDown, CurrencyInr, Cpu, Bell, Wallet, CreditCard, Plugs,
   DeviceMobile, Desktop, GlobeHemisphereEast, Sparkle, ChartLine, Lock,
-  UploadSimple, Gavel, MagnifyingGlass, ChartBar, ArrowCircleUp
+  UploadSimple, Gavel, MagnifyingGlass, ChartBar, ArrowCircleUp,
+  CaretLeft, CaretRight, Pause, Play
 } from '@phosphor-icons/react';
 
 // ---- Hero narrative beats ---------------------------------------------------
@@ -582,6 +583,339 @@ function FeatureImage({ src, alt, aspect = '16 / 10' }) {
   );
 }
 
+// ---- Modern feature carousel ------------------------------------------------
+function FeatureCarousel({ slides }) {
+  const [active, setActive] = useState(0);
+  const [paused, setPaused] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [reduceMotion, setReduceMotion] = useState(false);
+  const touchRef = useRef({ x: 0, active: false });
+  const rootRef = useRef(null);
+
+  const total = slides.length;
+  const SLIDE_MS = 7000;
+
+  // Respect prefers-reduced-motion
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return;
+    const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+    setReduceMotion(mq.matches);
+    const handler = (e) => setReduceMotion(e.matches);
+    mq.addEventListener?.('change', handler);
+    return () => mq.removeEventListener?.('change', handler);
+  }, []);
+
+  // Auto-advance with progress bar
+  useEffect(() => {
+    if (paused || reduceMotion) return;
+    const tick = 50;
+    const step = (tick / SLIDE_MS) * 100;
+    let p = 0;
+    setProgress(0);
+    const id = setInterval(() => {
+      p += step;
+      if (p >= 100) {
+        p = 0;
+        setActive((a) => (a + 1) % total);
+      }
+      setProgress(p);
+    }, tick);
+    return () => clearInterval(id);
+  }, [active, paused, total, reduceMotion]);
+
+  // Keyboard navigation when section has focus
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el) return;
+    const onKey = (e) => {
+      if (e.key === 'ArrowRight') { e.preventDefault(); go(active + 1); }
+      else if (e.key === 'ArrowLeft') { e.preventDefault(); go(active - 1); }
+      else if (e.key === ' ') { e.preventDefault(); setPaused((p) => !p); }
+    };
+    el.addEventListener('keydown', onKey);
+    return () => el.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active]);
+
+  const go = (idx) => {
+    const next = ((idx % total) + total) % total;
+    setActive(next);
+    setProgress(0);
+  };
+
+  // Touch / swipe
+  const onTouchStart = (e) => {
+    touchRef.current = { x: e.touches[0].clientX, active: true };
+  };
+  const onTouchEnd = (e) => {
+    if (!touchRef.current.active) return;
+    const dx = e.changedTouches[0].clientX - touchRef.current.x;
+    touchRef.current.active = false;
+    if (Math.abs(dx) > 40) {
+      if (dx < 0) go(active + 1); else go(active - 1);
+    }
+  };
+
+  return (
+    <div
+      ref={rootRef}
+      tabIndex={0}
+      role="region"
+      aria-roledescription="carousel"
+      aria-label="SpentyAI feature highlights"
+      onMouseEnter={() => setPaused(true)}
+      onMouseLeave={() => setPaused(false)}
+      onFocus={() => setPaused(true)}
+      onBlur={() => setPaused(false)}
+      onTouchStart={onTouchStart}
+      onTouchEnd={onTouchEnd}
+      style={{ outline: 'none' }}
+    >
+      {/* Tab pills — feature names */}
+      <div style={{
+        display: 'flex',
+        flexWrap: 'wrap',
+        justifyContent: 'center',
+        gap: 8,
+        marginBottom: 28,
+      }}>
+        {slides.map((s, i) => {
+          const isActive = i === active;
+          const Icon = s.icon;
+          return (
+            <button
+              key={s.label}
+              onClick={() => go(i)}
+              aria-label={`Show ${s.eyebrow}`}
+              aria-current={isActive ? 'true' : 'false'}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 8,
+                padding: '8px 14px',
+                borderRadius: 999,
+                fontSize: 12,
+                fontWeight: 600,
+                letterSpacing: '0.04em',
+                cursor: 'pointer',
+                border: `1px solid ${isActive ? 'var(--brand-primary)' : 'var(--border-subtle)'}`,
+                background: isActive ? 'var(--brand-primary)' : 'var(--bg-primary)',
+                color: isActive ? '#fff' : 'var(--text-secondary)',
+                transition: 'all 0.2s ease',
+                fontFamily: 'var(--font-body)',
+              }}
+            >
+              <Icon size={14} weight={isActive ? 'fill' : 'duotone'} />
+              <span style={{ textTransform: 'uppercase', letterSpacing: '0.08em', fontSize: 11 }}>{s.eyebrow}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Slide stage */}
+      <div style={{
+        position: 'relative',
+        background: 'var(--bg-primary)',
+        border: '1px solid var(--border-subtle)',
+        borderRadius: 16,
+        boxShadow: '0 30px 80px rgba(26, 54, 45, 0.08), 0 6px 18px rgba(26, 54, 45, 0.04)',
+        overflow: 'hidden',
+      }}>
+        {/* Soft accent halo behind the active mockup */}
+        <div aria-hidden="true" style={{
+          position: 'absolute',
+          right: '-10%',
+          top: '-30%',
+          width: 480,
+          height: 480,
+          borderRadius: '50%',
+          background: 'radial-gradient(circle, rgba(52,199,89,0.18) 0%, rgba(52,199,89,0) 65%)',
+          pointerEvents: 'none',
+        }} />
+
+        {/* Top progress bar */}
+        <div style={{
+          position: 'absolute', top: 0, left: 0, right: 0,
+          height: 3, background: 'rgba(26,54,45,0.06)',
+        }}>
+          <div style={{
+            height: '100%',
+            width: `${progress}%`,
+            background: 'var(--brand-primary)',
+            transition: paused ? 'none' : 'width 50ms linear',
+          }} />
+        </div>
+
+        {/* Slides track */}
+        <div style={{ position: 'relative' }}>
+          {slides.map((slide, i) => {
+            const Icon = slide.icon;
+            const Mockup = slide.Mockup;
+            const isActive = i === active;
+            return (
+              <div
+                key={slide.label}
+                aria-hidden={!isActive}
+                style={{
+                  display: isActive ? 'block' : 'none',
+                  padding: 'clamp(28px, 4vw, 56px)',
+                  animation: isActive && !reduceMotion ? 'spentyFadeSlide 500ms ease both' : 'none',
+                }}
+              >
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
+                  gap: 'clamp(28px, 4vw, 56px)',
+                  alignItems: 'center',
+                }}>
+                  {/* Text column */}
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 18 }}>
+                      <div style={{
+                        width: 36, height: 36, borderRadius: 10,
+                        background: 'rgba(52,199,89,0.12)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        color: 'var(--brand-primary)',
+                      }}>
+                        <Icon size={20} weight="duotone" />
+                      </div>
+                      <span className="mono" style={{
+                        fontSize: 11, letterSpacing: '0.22em', textTransform: 'uppercase',
+                        color: 'var(--text-muted)', fontWeight: 600,
+                      }}>{slide.label} · {slide.eyebrow}</span>
+                    </div>
+                    <h3 style={{
+                      fontSize: 'clamp(1.6rem, 2.5vw, 2.4rem)', fontWeight: 500,
+                      lineHeight: 1.15, letterSpacing: '-0.02em', marginBottom: 16,
+                      color: 'var(--text-primary)',
+                      fontFamily: 'var(--font-heading)',
+                    }}>
+                      {slide.title}
+                    </h3>
+                    <p style={{
+                      fontSize: 16, color: 'var(--text-secondary)',
+                      lineHeight: 1.65, marginBottom: 22,
+                    }}>
+                      {slide.body}
+                    </p>
+                    <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: 4 }}>
+                      {slide.bullets.map((b, bi) => (
+                        <li key={bi} style={{
+                          display: 'flex', alignItems: 'flex-start', gap: 10,
+                          padding: '6px 0', fontSize: 14,
+                          color: 'var(--text-secondary)', lineHeight: 1.5,
+                        }}>
+                          <CheckCircle size={18} weight="fill" style={{ color: 'var(--success)', flexShrink: 0, marginTop: 1 }} />
+                          <span>{b}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                  {/* Mockup column */}
+                  <div style={{ position: 'relative' }}>
+                    <div style={{
+                      borderRadius: 12, overflow: 'hidden',
+                      transform: 'translateZ(0)',
+                    }}>
+                      <Mockup />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Footer controls */}
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          gap: 12, padding: '16px clamp(20px, 3vw, 36px)',
+          borderTop: '1px solid var(--border-subtle)',
+          background: 'var(--bg-primary)',
+        }}>
+          <span className="mono" style={{
+            fontSize: 12, letterSpacing: '0.18em', color: 'var(--text-muted)',
+            fontFamily: 'var(--font-mono)',
+          }}>
+            {String(active + 1).padStart(2, '0')} / {String(total).padStart(2, '0')}
+          </span>
+
+          {/* Dot indicators */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {slides.map((s, i) => (
+              <button
+                key={`dot-${s.label}`}
+                onClick={() => go(i)}
+                aria-label={`Go to slide ${i + 1}`}
+                style={{
+                  width: i === active ? 26 : 8, height: 8,
+                  borderRadius: 999,
+                  background: i === active ? 'var(--brand-primary)' : 'rgba(26,54,45,0.18)',
+                  border: 'none', padding: 0, cursor: 'pointer',
+                  transition: 'all 0.25s ease',
+                }}
+              />
+            ))}
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <button
+              type="button"
+              onClick={() => setPaused((p) => !p)}
+              aria-label={paused ? 'Play auto-advance' : 'Pause auto-advance'}
+              title={paused ? 'Play' : 'Pause'}
+              style={{
+                width: 36, height: 36, borderRadius: '50%',
+                border: '1px solid var(--border-subtle)',
+                background: 'var(--bg-primary)',
+                cursor: 'pointer',
+                color: 'var(--text-primary)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                transition: 'all 0.2s ease',
+              }}
+            >
+              {paused ? <Play size={14} weight="fill" /> : <Pause size={14} weight="fill" />}
+            </button>
+            <button
+              type="button"
+              onClick={() => go(active - 1)}
+              aria-label="Previous feature"
+              style={{
+                width: 36, height: 36, borderRadius: '50%',
+                border: '1px solid var(--border-subtle)',
+                background: 'var(--bg-primary)',
+                cursor: 'pointer',
+                color: 'var(--text-primary)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                transition: 'all 0.2s ease',
+              }}
+            >
+              <CaretLeft size={16} weight="bold" />
+            </button>
+            <button
+              type="button"
+              onClick={() => go(active + 1)}
+              aria-label="Next feature"
+              style={{
+                width: 36, height: 36, borderRadius: '50%',
+                border: 'none',
+                background: 'var(--brand-primary)',
+                cursor: 'pointer',
+                color: '#fff',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                transition: 'all 0.2s ease',
+                boxShadow: '0 6px 14px rgba(52, 199, 89, 0.28)',
+              }}
+            >
+              <CaretRight size={16} weight="bold" />
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ---- Page -------------------------------------------------------------------
 export default function Features() {
   const navigate = useNavigate();
@@ -733,65 +1067,19 @@ export default function Features() {
         </div>
       </section>
 
-      {/* Five hero features — alternating sides */}
-      <section style={{ padding: '100px 24px 80px' }}>
-        <div style={{ maxWidth: 1100, margin: '0 auto' }}>
-          <div style={{ textAlign: 'center', marginBottom: 72 }}>
-            <span className="mono" style={eyebrow}>Five reasons people pay</span>
+      {/* Six hero features — interactive carousel */}
+      <section style={{ padding: '100px 24px 80px', overflow: 'hidden' }}>
+        <div style={{ maxWidth: 1180, margin: '0 auto' }}>
+          <div style={{ textAlign: 'center', marginBottom: 56 }}>
+            <span className="mono" style={eyebrow}>Six reasons people pay</span>
             <h2 style={sectionH}>
               The features that <em style={{ color: 'var(--accent-1)', fontStyle: 'italic', fontFamily: 'var(--font-heading)' }}>earn</em> the subscription.
             </h2>
+            <p style={{ marginTop: 16, fontSize: 15, color: 'var(--text-muted)', maxWidth: 580, marginLeft: 'auto', marginRight: 'auto' }}>
+              Swipe through the six things SpentyAI actually does. Every claim here maps to a working part of the app.
+            </p>
           </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 96 }}>
-            {heroFeatures.map(({ label, eyebrow: ey, title, body, bullets, icon: Icon, Mockup, flip }, i) => (
-              <div key={label} style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
-                gap: 48,
-                alignItems: 'center',
-                direction: flip ? 'rtl' : 'ltr',
-              }}>
-                <div style={{ direction: 'ltr' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
-                    <Icon size={22} weight="duotone" style={{ color: 'var(--accent-1)' }} />
-                    <span className="mono" style={{
-                      fontSize: 11, letterSpacing: '0.2em', textTransform: 'uppercase',
-                      color: 'var(--text-muted)', fontWeight: 600,
-                    }}>{label} · {ey}</span>
-                  </div>
-                  <h3 style={{
-                    fontSize: 'clamp(1.6rem, 2.4vw, 2.2rem)', fontWeight: 500,
-                    lineHeight: 1.2, letterSpacing: '-0.02em', marginBottom: 16,
-                    color: 'var(--text-primary)',
-                  }}>
-                    {title}
-                  </h3>
-                  <p style={{
-                    fontSize: 16, color: 'var(--text-secondary)',
-                    lineHeight: 1.7, marginBottom: 20,
-                  }}>
-                    {body}
-                  </p>
-                  <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-                    {bullets.map((b, bi) => (
-                      <li key={bi} style={{
-                        display: 'flex', alignItems: 'flex-start', gap: 10,
-                        padding: '6px 0', fontSize: 14,
-                        color: 'var(--text-secondary)', lineHeight: 1.5,
-                      }}>
-                        <CheckCircle size={18} weight="fill" style={{ color: 'var(--success)', flexShrink: 0, marginTop: 1 }} />
-                        <span>{b}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-                <div style={{ direction: 'ltr' }}>
-                  <Mockup />
-                </div>
-              </div>
-            ))}
-          </div>
+          <FeatureCarousel slides={heroFeatures} />
         </div>
       </section>
 
