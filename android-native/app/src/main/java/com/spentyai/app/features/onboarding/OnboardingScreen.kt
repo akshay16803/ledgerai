@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+
 package com.spentyai.app.features.onboarding
 
 import androidx.compose.animation.core.animateFloatAsState
