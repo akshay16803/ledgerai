@@ -328,12 +328,20 @@ class BillingViewModel(
     fun loadAll() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, showError = false) }
-            // Load status
+            // Load status — if the API fails we still write a sentinel
+            // (isActive=false) so the app's subscription gate has a definitive
+            // answer and doesn't hang on a perpetual loading state.
             when (val statusResult = repository.getStatus()) {
                 is ApiResult.Success -> {
                     _uiState.update { it.copy(currentStatus = statusResult.data) }
                 }
-                is ApiResult.Failure -> { /* continue */ }
+                is ApiResult.Failure -> {
+                    if (_uiState.value.currentStatus == null) {
+                        _uiState.update {
+                            it.copy(currentStatus = SubscriptionStatus(isActive = false))
+                        }
+                    }
+                }
             }
             // Load history
             when (val historyResult = repository.getHistory()) {

@@ -141,6 +141,44 @@ fun AppNavigation(
     val billingRepository = remember { BillingRepository(apiClient) }
     val billingViewModel = remember { BillingViewModel(context.applicationContext as android.app.Application, billingRepository) }
 
+    // ── Subscription gate (P0 — must run before any Main destination) ──
+    // Mirrors iOS AppRouter: after sign-in we resolve subscription status from
+    // the backend and route unsubscribed users to SubscriptionPaywallScreen
+    // *with no back-stack entry to Main*. From the gate the user can only:
+    //   1. Subscribe → status flips active → fall through to MainTab
+    //   2. Restore Purchases → re-queries Play, may flip status active
+    //   3. Sign Out → returns to LoginScreen
+    // Re-fires when the user signs back in with a different account so the
+    // gate decision uses fresh status, not the previous user's cached value.
+    androidx.compose.runtime.LaunchedEffect(isAuthenticated) {
+        if (isAuthenticated) {
+            billingViewModel.loadAll()
+        }
+    }
+    val billingState by billingViewModel.uiState.collectAsState()
+    val statusResolved = billingState.currentStatus != null
+    val isSubscriptionActive = billingState.currentStatus?.isActive == true
+
+    // Show a loading state until we have a definitive status from the backend.
+    // (currentStatus is null until loadAll() completes — even before isLoading flips.)
+    if (!statusResolved) {
+        LoadingView()
+        return
+    }
+
+    if (statusResolved && !isSubscriptionActive) {
+        com.spentyai.app.features.onboarding.SubscriptionPaywallScreen(
+            viewModel = billingViewModel,
+            onDismiss = { /* gate cannot be dismissed without signing out */ },
+            onSubscribed = {
+                // Status flipped → re-query so the gate releases.
+                billingViewModel.loadAll()
+            },
+            onSignOut = { authManager.logout() },
+        )
+        return
+    }
+
     val pastInsightsRepository = remember { PastInsightsRepository(apiClient) }
     val pastInsightsViewModel = remember { PastInsightsViewModel(pastInsightsRepository) }
 

@@ -85,7 +85,8 @@ import com.spentyai.app.features.billing.FallbackPlan
 fun SubscriptionPaywallScreen(
     viewModel: BillingViewModel,
     onDismiss: () -> Unit,
-    onSubscribed: () -> Unit
+    onSubscribed: () -> Unit,
+    onSignOut: (() -> Unit)? = null,
 ) {
     val state by viewModel.uiState.collectAsState()
     var selectedProductId by remember { mutableStateOf("com.spentyai.yearly") }
@@ -129,8 +130,22 @@ fun SubscriptionPaywallScreen(
             TopAppBar(
                 title = {},
                 navigationIcon = {
-                    IconButton(onClick = onDismiss) {
-                        Icon(Icons.Default.Close, contentDescription = "Close")
+                    if (onSignOut == null) {
+                        IconButton(onClick = onDismiss) {
+                            Icon(Icons.Default.Close, contentDescription = "Close")
+                        }
+                    }
+                },
+                actions = {
+                    val signOutAction = onSignOut
+                    if (signOutAction != null) {
+                        TextButton(onClick = signOutAction) {
+                            Text(
+                                text = "Sign Out",
+                                color = SpentyPrimary,
+                                style = SpentyType.Subheadline
+                            )
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
