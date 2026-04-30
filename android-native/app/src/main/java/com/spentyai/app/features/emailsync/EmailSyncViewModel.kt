@@ -12,7 +12,7 @@ import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
 
-class EmailSyncViewModel(private val repository: EmailSyncRepository) : ViewModel() {
+class EmailSyncViewModel(internal val repository: EmailSyncRepository) : ViewModel() {
 
     // Data
     var gmailAccounts by mutableStateOf<List<EmailAccount>>(emptyList()); private set
@@ -408,6 +408,42 @@ class EmailSyncViewModel(private val repository: EmailSyncRepository) : ViewMode
         viewModelScope.launch {
             (repository.fetchAccounts() as? ApiResult.Success)?.let { accounts = it.data.accounts }
             (repository.fetchCategories() as? ApiResult.Success)?.let { categories = it.data }
+        }
+    }
+
+    // Inline-create helpers (P0 #15) — append-or-replace local lists so a
+    // freshly-created Account / Category / Subcategory is selectable in the
+    // EditTransactionSheet immediately, no full refetch.
+    fun upsertAccount(account: Account) {
+        val existing = accounts.indexOfFirst { it.id == account.id }
+        accounts = if (existing >= 0) {
+            accounts.toMutableList().also { it[existing] = account }
+        } else {
+            accounts + account
+        }
+    }
+
+    fun upsertCategory(category: Category) {
+        val existing = categories.indexOfFirst { it.id == category.id }
+        categories = if (existing >= 0) {
+            categories.toMutableList().also { it[existing] = category }
+        } else {
+            categories + category
+        }
+    }
+
+    fun upsertSubcategory(parentId: String, sub: Category) {
+        categories = categories.map { cat ->
+            if (cat.id != parentId) cat
+            else {
+                val existingChildren = cat.children ?: emptyList()
+                val newChildren = if (existingChildren.any { it.id == sub.id }) {
+                    existingChildren.map { if (it.id == sub.id) sub else it }
+                } else {
+                    existingChildren + sub
+                }
+                cat.copy(children = newChildren)
+            }
         }
     }
 

@@ -4,7 +4,7 @@ import com.spentyai.app.core.models.*
 import com.spentyai.app.core.network.ApiClient
 import com.spentyai.app.core.network.ApiResult
 
-class EmailSyncRepository(private val apiClient: ApiClient) {
+class EmailSyncRepository(internal val apiClient: ApiClient) {
 
     // Gmail
     suspend fun connectGmail(): ApiResult<OAuthConnectResponse> =

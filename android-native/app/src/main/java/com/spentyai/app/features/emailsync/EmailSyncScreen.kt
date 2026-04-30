@@ -1163,6 +1163,14 @@ private fun PendingTransactionRow(txn: PendingTransaction, viewModel: EmailSyncV
 private fun EditTransactionSheet(viewModel: EmailSyncViewModel) {
     LaunchedEffect(Unit) { viewModel.loadPickerData() }
 
+    // Inline-create dialog state (P0 #15) — same dialogs used by
+    // TransactionFormScreen so PendingReview no longer forces the user out
+    // of the screen when the AI suggests an unknown account / category /
+    // subcategory.
+    var showCreateAccount by remember { mutableStateOf(false) }
+    var showCreateCategory by remember { mutableStateOf(false) }
+    var showCreateSubcategory by remember { mutableStateOf(false) }
+
     ModalBottomSheet(
         onDismissRequest = { viewModel.showEditSheet = false },
         containerColor = MaterialTheme.colorScheme.background
@@ -1291,6 +1299,17 @@ private fun EditTransactionSheet(viewModel: EmailSyncViewModel) {
                         Text(selectedName, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Icon(Icons.Filled.ArrowDropDown, contentDescription = null)
                     }
+                    IconButton(
+                        onClick = { showCreateAccount = true },
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            Icons.Filled.AddCircle,
+                            contentDescription = "Add Account",
+                            tint = SpentyPrimary.copy(alpha = 0.7f),
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
                     DropdownMenu(
                         expanded = accountMenuExpanded,
                         onDismissRequest = { accountMenuExpanded = false }
@@ -1338,6 +1357,17 @@ private fun EditTransactionSheet(viewModel: EmailSyncViewModel) {
                             val selectedCat = viewModel.filteredCategories.firstOrNull { it.id == viewModel.editCategoryId }?.name ?: "Select"
                             Text(selectedCat, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Icon(Icons.Filled.ArrowDropDown, contentDescription = null)
+                        }
+                        IconButton(
+                            onClick = { showCreateCategory = true },
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(
+                                Icons.Filled.AddCircle,
+                                contentDescription = "Add Category",
+                                tint = SpentyPrimary.copy(alpha = 0.7f),
+                                modifier = Modifier.size(20.dp)
+                            )
                         }
                         DropdownMenu(
                             expanded = catMenuExpanded,
@@ -1387,6 +1417,19 @@ private fun EditTransactionSheet(viewModel: EmailSyncViewModel) {
                                 Text(selectedSub, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 Icon(Icons.Filled.ArrowDropDown, contentDescription = null)
                             }
+                            if (viewModel.editCategoryId.isNotEmpty()) {
+                                IconButton(
+                                    onClick = { showCreateSubcategory = true },
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Filled.AddCircle,
+                                        contentDescription = "Add Subcategory",
+                                        tint = SpentyPrimary.copy(alpha = 0.7f),
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
                             DropdownMenu(
                                 expanded = subMenuExpanded,
                                 onDismissRequest = { subMenuExpanded = false }
@@ -1415,6 +1458,52 @@ private fun EditTransactionSheet(viewModel: EmailSyncViewModel) {
 
             Spacer(modifier = Modifier.height(32.dp))
         }
+    }
+
+    // ============================================================
+    // Inline-create dialogs — P0 #15 (mirror TransactionFormScreen)
+    // ============================================================
+
+    if (showCreateAccount) {
+        CreateAccountDialog(
+            apiClient = viewModel.repository.apiClient,
+            onDismiss = { showCreateAccount = false },
+            onCreated = { newAccount ->
+                viewModel.upsertAccount(newAccount)
+                viewModel.editAccountId = newAccount.id
+                showCreateAccount = false
+            }
+        )
+    }
+
+    if (showCreateCategory) {
+        CreateCategoryDialog(
+            apiClient = viewModel.repository.apiClient,
+            transactionType = viewModel.editTransactionType,
+            onDismiss = { showCreateCategory = false },
+            onCreated = { newCat ->
+                viewModel.upsertCategory(newCat)
+                viewModel.editCategoryId = newCat.id
+                viewModel.editSubcategoryId = ""
+                showCreateCategory = false
+            }
+        )
+    }
+
+    if (showCreateSubcategory && viewModel.editCategoryId.isNotEmpty()) {
+        val parentName = viewModel.categories.firstOrNull { it.id == viewModel.editCategoryId }?.name ?: ""
+        CreateSubcategoryDialog(
+            apiClient = viewModel.repository.apiClient,
+            parentCategoryId = viewModel.editCategoryId,
+            parentCategoryName = parentName,
+            transactionType = viewModel.editTransactionType,
+            onDismiss = { showCreateSubcategory = false },
+            onCreated = { newSub ->
+                viewModel.upsertSubcategory(parentId = viewModel.editCategoryId, sub = newSub)
+                viewModel.editSubcategoryId = newSub.id
+                showCreateSubcategory = false
+            }
+        )
     }
 }
 
