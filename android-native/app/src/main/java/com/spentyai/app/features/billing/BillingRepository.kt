@@ -11,6 +11,7 @@ import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.doubleOrNull
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.put
 
 @Serializable
@@ -77,14 +78,21 @@ class BillingRepository(private val apiClient: ApiClient) {
     }
 
     suspend fun getPlans(): ApiResult<List<PlanDTO>> {
-        return apiClient.safeApiCall { apiClient.endpoints.getPaymentPlans() }
-            .map { plans ->
-                plans.map { p ->
+        // iOS-aligned: GET /api/payments/plans → { "plans": [PlanDTO, ...] }
+        return apiClient.safeApiCall { apiClient.endpoints.getSubscriptionPlans() }
+            .map { json ->
+                val arr = json["plans"] as? kotlinx.serialization.json.JsonArray
+                    ?: return@map emptyList<PlanDTO>()
+                arr.mapNotNull { el ->
+                    val obj = el as? JsonObject ?: return@mapNotNull null
                     PlanDTO(
-                        id = p.id,
-                        name = p.name,
-                        amount = p.totalAmount.toInt(),
-                        currency = p.currency
+                        id = (obj["plan_id"] as? JsonPrimitive)?.contentOrNull
+                            ?: (obj["id"] as? JsonPrimitive)?.contentOrNull ?: "",
+                        name = (obj["name"] as? JsonPrimitive)?.contentOrNull,
+                        amount = (obj["amount"] as? JsonPrimitive)?.intOrNull,
+                        amountDisplay = (obj["amount_display"] as? JsonPrimitive)?.contentOrNull,
+                        currency = (obj["currency"] as? JsonPrimitive)?.contentOrNull,
+                        durationDays = (obj["duration_days"] as? JsonPrimitive)?.intOrNull
                     )
                 }
             }

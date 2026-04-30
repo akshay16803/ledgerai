@@ -14,21 +14,20 @@ interface ApiEndpoints {
     @POST("api/auth/apple")
     suspend fun appleSignIn(@Body body: JsonObject): Response<JsonObject>
 
-    @GET("api/auth/session")
+    // Aligned with iOS: GET /api/auth/me (backend returns 404 on /api/auth/session)
+    @GET("api/auth/me")
     suspend fun checkSession(): Response<JsonObject>
 
     @POST("api/auth/logout")
     suspend fun logout(): Response<JsonObject>
 
-    @DELETE("api/auth/account")
+    // Aligned with iOS: DELETE /api/auth/delete-account (backend returns 404 on /api/auth/account)
+    @DELETE("api/auth/delete-account")
     suspend fun deleteAccount(): Response<JsonObject>
 
     // --- Auth (iOS-compatible) ---
     @POST("api/auth/google/mobile")
     suspend fun googleSignInMobile(@Body body: JsonObject): Response<JsonObject>
-
-    @GET("api/auth/me")
-    suspend fun authMe(): Response<JsonObject>
 
     // --- Dev bypass (debug builds only) ---
     @POST("api/auth/dev/simulator-login")
@@ -235,7 +234,8 @@ interface ApiEndpoints {
     @POST("api/invoices/{id}/send")
     suspend fun sendInvoice(@Path("id") id: String): Response<JsonObject>
 
-    @POST("api/invoices/{id}/mark-paid")
+    // Aligned with iOS: POST /api/invoices/{id}/record-payment (supports partial payments)
+    @POST("api/invoices/{id}/record-payment")
     suspend fun markInvoicePaid(
         @Path("id") id: String,
         @Body body: JsonObject
@@ -263,7 +263,8 @@ interface ApiEndpoints {
     @DELETE("api/bills/{id}")
     suspend fun deleteBill(@Path("id") id: String): Response<JsonObject>
 
-    @POST("api/bills/{id}/mark-paid")
+    // Aligned with iOS: POST /api/bills/{id}/record-payment (supports partial payments)
+    @POST("api/bills/{id}/record-payment")
     suspend fun markBillPaid(
         @Path("id") id: String,
         @Body body: JsonObject
@@ -442,22 +443,22 @@ interface ApiEndpoints {
     suspend fun getAccountSubTypesList(): Response<List<AccountSubType>>
 
     // --- Email Sync (full) ---
-    @GET("api/email/gmail/connect")
+    @GET("api/gmail/connect?platform=android")
     suspend fun connectGmail(): Response<OAuthConnectResponse>
 
-    @GET("api/email/gmail/status")
+    @GET("api/gmail/status")
     suspend fun getGmailStatus(): Response<EmailProviderStatus>
 
-    @POST("api/email/gmail/disconnect")
+    @POST("api/gmail/disconnect")
     suspend fun disconnectGmail(@Body body: DisconnectRequest): Response<GenericMessageResponse>
 
-    @GET("api/email/outlook/connect")
+    @GET("api/outlook/connect?platform=android")
     suspend fun connectOutlook(): Response<OAuthConnectResponse>
 
-    @GET("api/email/outlook/status")
+    @GET("api/outlook/status")
     suspend fun getOutlookStatus(): Response<EmailProviderStatus>
 
-    @POST("api/email/outlook/disconnect")
+    @POST("api/outlook/disconnect")
     suspend fun disconnectOutlook(@Body body: DisconnectRequest): Response<GenericMessageResponse>
 
     @POST("api/email/start-sync")
@@ -490,7 +491,7 @@ interface ApiEndpoints {
         @Body body: PendingTransactionUpdate
     ): Response<Transaction>
 
-    @GET("api/email/source/{id}")
+    @GET("api/source/{id}")
     suspend fun getSourceContent(@Path("id") id: String): Response<SourceContent>
 
     @GET("api/sms/stats")
@@ -585,7 +586,8 @@ interface ApiEndpoints {
     suspend fun updateUserProfile(@Body profile: JsonObject): Response<User>
 
     // --- Subscription ---
-    @GET("api/subscription/status")
+    // Aligned with iOS: GET /api/payments/status (backend returns 404 on /api/subscription/status)
+    @GET("api/payments/status")
     suspend fun getSubscriptionStatus(): Response<JsonObject>
 
     @POST("api/subscription/verify")
@@ -597,6 +599,10 @@ interface ApiEndpoints {
 
     @POST("api/promo/activate")
     suspend fun activatePromo(@Body body: JsonObject): Response<JsonObject>
+
+    // --- Subscription Plans (aligned with iOS: GET /api/payments/plans) ---
+    @GET("api/payments/plans")
+    suspend fun getSubscriptionPlans(): Response<JsonObject>
 
     // --- Payment History ---
     @GET("api/payments/history")
@@ -635,7 +641,7 @@ interface ApiEndpoints {
     @DELETE("api/mandates/{id}")
     suspend fun deleteMandate(@Path("id") id: String): Response<JsonObject>
 
-    // --- Payment Plans ---
+    // --- Payment Plans (installment plans for customer/vendor invoices — orphan route, not iOS subscription plans) ---
     @GET("api/payment-plans")
     suspend fun getPaymentPlans(): Response<List<PaymentPlan>>
 
