@@ -5,7 +5,12 @@ import com.spentyai.app.core.network.ApiClient
 import com.spentyai.app.core.network.ApiResult
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.put
 
 @Serializable
@@ -104,12 +109,29 @@ class BillingRepository(private val apiClient: ApiClient) {
     }
 
     suspend fun validatePromo(code: String): ApiResult<PromoResponse> {
-        return ApiResult.Success(PromoResponse(valid = false, message = "Promo code validation not yet available on Android."))
+        val body = buildJsonObject { put("code", code) }
+        return apiClient.safeApiCall { apiClient.endpoints.validatePromo(body) }
+            .map { jsonToPromoResponse(it) }
     }
 
     suspend fun activatePromo(code: String): ApiResult<PromoResponse> {
-        return ApiResult.Success(PromoResponse(valid = false, message = "Promo code activation not yet available on Android."))
+        val body = buildJsonObject { put("code", code) }
+        return apiClient.safeApiCall { apiClient.endpoints.activatePromo(body) }
+            .map { jsonToPromoResponse(it) }
     }
+
+    private fun jsonToPromoResponse(json: JsonObject): PromoResponse {
+        return PromoResponse(
+            valid = json["valid"]?.let { (it as? JsonPrimitive)?.booleanOrNull },
+            message = json["message"]?.let { (it as? JsonPrimitive)?.contentOrNull },
+            description = json["description"]?.let { (it as? JsonPrimitive)?.contentOrNull },
+            plan = json["plan"]?.let { (it as? JsonPrimitive)?.contentOrNull },
+            discount = json["discount"]?.let { (it as? JsonPrimitive)?.doubleOrNull },
+            subscriptionPlan = json["subscription_plan"]?.let { (it as? JsonPrimitive)?.contentOrNull },
+            subscriptionStatus = json["subscription_status"]?.let { (it as? JsonPrimitive)?.contentOrNull }
+        )
+    }
+
 
     suspend fun verifyPurchase(purchase: Purchase): ApiResult<Unit> {
         val productId = purchase.products.firstOrNull() ?: ""

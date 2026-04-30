@@ -584,6 +584,13 @@ interface ApiEndpoints {
     @POST("api/subscription/verify")
     suspend fun verifySubscription(@Body body: JsonObject): Response<JsonObject>
 
+    // --- Promo Codes ---
+    @POST("api/promo/validate")
+    suspend fun validatePromo(@Body body: JsonObject): Response<JsonObject>
+
+    @POST("api/promo/activate")
+    suspend fun activatePromo(@Body body: JsonObject): Response<JsonObject>
+
     // --- Feature Requests ---
     @GET("api/feature-requests")
     suspend fun getFeatureRequests(): Response<List<FeatureRequest>>
