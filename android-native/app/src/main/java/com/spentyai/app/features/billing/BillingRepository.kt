@@ -104,8 +104,8 @@ class BillingRepository(private val apiClient: ApiClient) {
     }
 
     suspend fun getHistory(): ApiResult<List<PaymentOrder>> {
-        // Use payment plans as proxy if no dedicated history endpoint
-        return ApiResult.Success(emptyList())
+        return apiClient.safeApiCall { apiClient.endpoints.getPaymentHistory() }
+            .map { items -> items.map { jsonToPaymentOrder(it) } }
     }
 
     suspend fun validatePromo(code: String): ApiResult<PromoResponse> {
@@ -132,6 +132,18 @@ class BillingRepository(private val apiClient: ApiClient) {
         )
     }
 
+
+    private fun jsonToPaymentOrder(json: JsonObject): PaymentOrder {
+        return PaymentOrder(
+            id = json["id"]?.let { (it as? JsonPrimitive)?.contentOrNull } ?: "",
+            plan = json["plan"]?.let { (it as? JsonPrimitive)?.contentOrNull },
+            amount = json["amount"]?.let { (it as? JsonPrimitive)?.doubleOrNull },
+            currency = json["currency"]?.let { (it as? JsonPrimitive)?.contentOrNull },
+            status = json["status"]?.let { (it as? JsonPrimitive)?.contentOrNull },
+            paymentProvider = json["payment_provider"]?.let { (it as? JsonPrimitive)?.contentOrNull },
+            createdAt = json["created_at"]?.let { (it as? JsonPrimitive)?.contentOrNull }
+        )
+    }
 
     suspend fun verifyPurchase(purchase: Purchase): ApiResult<Unit> {
         val productId = purchase.products.firstOrNull() ?: ""

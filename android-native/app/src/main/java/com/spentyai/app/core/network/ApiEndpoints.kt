@@ -591,6 +591,10 @@ interface ApiEndpoints {
     @POST("api/promo/activate")
     suspend fun activatePromo(@Body body: JsonObject): Response<JsonObject>
 
+    // --- Payment History ---
+    @GET("api/payments/history")
+    suspend fun getPaymentHistory(): Response<List<JsonObject>>
+
     // --- Feature Requests ---
     @GET("api/feature-requests")
     suspend fun getFeatureRequests(): Response<List<FeatureRequest>>
