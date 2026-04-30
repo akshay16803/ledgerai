@@ -1,117 +1,722 @@
 import SwiftUI
 
 // MARK: - Onboarding Slide Card View
-// Renders a single slide. Used inside ForEach in OnboardingSliderView.
-// Separate struct (not a private var) because it is reused in a ForEach.
+// Full-screen card: gradient top half with SwiftUI mock screen, white bottom half with text.
+// CTA slide (id 8) uses a fully dark premium layout.
 
 struct OnboardingSlideCardView: View {
-
-    // MARK: - Properties
-
     let slide: OnboardingSlide
     let lang: LocalizationManager
 
-    // MARK: - Body
-
     var body: some View {
         if slide.isCTASlide {
-            ctaSlideBody
+            ctaSlide
         } else {
-            standardSlideBody
+            GeometryReader { geo in
+                VStack(spacing: 0) {
+                    gradientSection(geo: geo)
+                    textSection
+                }
+            }
+            .background(Color.spentyBgPrimary)
         }
     }
 
-    // MARK: - Standard Slide (slides 1–7)
+    // MARK: - Gradient Top Section
 
-    private var standardSlideBody: some View {
-        VStack(spacing: 0) {
-            Spacer()
+    private func gradientSection(geo: GeometryProxy) -> some View {
+        let h = geo.size.height * 0.48
+        let mockW = geo.size.width * 0.70
+        let mockH = mockW * 1.6
 
-            VStack(spacing: 24) {
-                // Icon with tinted background
-                ZStack {
-                    RoundedRectangle(cornerRadius: 28, style: .continuous)
-                        .fill(slide.accentColor.opacity(0.12))
-                        .frame(width: 120, height: 120)
+        return ZStack {
+            // Gradient fill
+            LinearGradient(
+                colors: slide.gradientColors.isEmpty
+                    ? [Color.spentyPrimary, Color.spentyPrimary.opacity(0.5)]
+                    : slide.gradientColors,
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
 
-                    Image(systemName: slide.symbolName)
-                        .font(.system(size: 64))
-                        .foregroundStyle(slide.accentColor)
-                }
+            // Soft decorative circles
+            Circle()
+                .fill(.white.opacity(0.06))
+                .frame(width: 180, height: 180)
+                .offset(x: 90, y: -70)
+            Circle()
+                .fill(.white.opacity(0.04))
+                .frame(width: 240, height: 240)
+                .offset(x: -110, y: 60)
 
-                // Title
-                Text(lang.s(slide.titleKey))
-                    .font(SpentyFonts.title2)
-                    .foregroundStyle(Color.spentyTextPrimary)
-                    .multilineTextAlignment(.center)
+            // Mock app screen
+            mockScreen(for: slide.id)
+                .frame(width: mockW, height: mockH)
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .shadow(color: .black.opacity(0.28), radius: 22, x: 0, y: 12)
+                .offset(y: 12) // nudge down so it peeks into text section
+        }
+        .frame(height: h)
+        .clipped()
+    }
 
-                // Description
-                Text(lang.s(slide.descriptionKey))
-                    .font(SpentyFonts.body)
-                    .foregroundStyle(Color.spentyTextSecondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 32)
+    // MARK: - Text Bottom Section
+
+    private var textSection: some View {
+        VStack(alignment: .leading, spacing: 13) {
+            // Category badge
+            if !slide.categoryLabel.isEmpty {
+                Text(slide.categoryLabel)
+                    .font(.system(size: 10, weight: .bold))
+                    .tracking(1.4)
+                    .foregroundStyle(slide.accentColor)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(slide.accentColor.opacity(0.12))
+                    .clipShape(Capsule())
             }
 
-            Spacer()
-        }
-        .padding(.horizontal, 32)
-        .padding(.top, 60)
-    }
+            // Title
+            Text(lang.s(slide.titleKey))
+                .font(.system(size: 23, weight: .bold, design: .rounded))
+                .foregroundStyle(Color.spentyTextPrimary)
+                .lineSpacing(2)
+                .fixedSize(horizontal: false, vertical: true)
 
-    // MARK: - CTA Slide (slide 8)
+            // Description
+            Text(lang.s(slide.descriptionKey))
+                .font(.system(size: 14.5))
+                .foregroundStyle(Color.spentyTextSecondary)
+                .lineSpacing(5)
+                .fixedSize(horizontal: false, vertical: true)
 
-    private var ctaSlideBody: some View {
-        VStack(spacing: 0) {
-            Spacer()
-
-            VStack(spacing: 20) {
-                // Crown icon
-                Image(systemName: slide.symbolName)
-                    .font(.system(size: 64))
-                    .foregroundStyle(Color.spentyPrimary)
-
-                // Title
-                Text(lang.s(slide.titleKey))
-                    .font(.system(size: 28, weight: .bold, design: .rounded))
-                    .foregroundStyle(Color.spentyTextPrimary)
-                    .multilineTextAlignment(.center)
-
-                // Description
-                Text(lang.s(slide.descriptionKey))
-                    .font(SpentyFonts.body)
-                    .foregroundStyle(Color.spentyTextSecondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 16)
-
-                // Sparkle row
-                HStack(spacing: 12) {
-                    ForEach(0..<3, id: \.self) { _ in
-                        Image(systemName: "star.fill")
-                            .font(.system(size: 24))
-                            .foregroundStyle(Color.spentyPrimary)
+            // Stat pills
+            if !slide.statPills.isEmpty {
+                HStack(spacing: 8) {
+                    ForEach(slide.statPills, id: \.self) { pill in
+                        statPillView(pill)
                     }
                 }
-                .padding(.top, 4)
-
-                // Commitment card
-                HStack(spacing: 8) {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(Color.spentyPrimary)
-                    Text("7 days • No commitment • Cancel anytime")
-                        .font(SpentyFonts.caption1)
-                        .foregroundStyle(Color.spentyTextSecondary)
-                }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 14)
-                .background(
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .fill(Color.spentyPrimary.opacity(0.08))
-                )
+                .padding(.top, 2)
             }
-            .padding(.horizontal, 32)
-            .padding(.top, 60)
 
+            Spacer()
+        }
+        .padding(.horizontal, 26)
+        .padding(.top, 28)
+        .padding(.bottom, 108) // clearance for overlaid dots + button
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(Color.spentyBgPrimary)
+    }
+
+    private func statPillView(_ text: String) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: "checkmark")
+                .font(.system(size: 9, weight: .bold))
+            Text(text)
+                .font(.system(size: 12, weight: .medium))
+        }
+        .foregroundStyle(slide.accentColor)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(slide.accentColor.opacity(0.10))
+        .clipShape(Capsule())
+    }
+
+    // MARK: - Mock Screen Dispatcher
+
+    @ViewBuilder
+    private func mockScreen(for id: Int) -> some View {
+        ZStack(alignment: .top) {
+            Color(hex: 0xF5F3F0)
+            switch id {
+            case 1:  emailMock
+            case 2:  aiChatMock
+            case 3:  dashboardMock
+            case 4:  insightsMock
+            case 5:  reportsMock
+            case 6:  cashFlowMock
+            case 7:  invoiceMock
+            default: EmptyView()
+            }
+        }
+    }
+
+    // MARK: - Shared: Mini Status Bar
+
+    private var statusBar: some View {
+        HStack {
+            Text("9:41")
+                .font(.system(size: 8, weight: .semibold))
+                .padding(.leading, 12)
+            Spacer()
+            HStack(spacing: 3) {
+                Image(systemName: "wifi")
+                Image(systemName: "battery.75")
+            }
+            .font(.system(size: 8))
+            .padding(.trailing, 12)
+        }
+        .frame(height: 18)
+        .background(Color(hex: 0xF5F3F0))
+    }
+
+    // MARK: - Mock 1: Email Auto-Tracking
+
+    private var emailMock: some View {
+        VStack(spacing: 0) {
+            statusBar
+            // Screen title row
+            HStack {
+                Text("Transactions")
+                    .font(.system(size: 11, weight: .bold))
+                Spacer()
+                Image(systemName: "envelope.badge.fill")
+                    .foregroundStyle(Color(hex: 0x0A84FF))
+                    .font(.system(size: 10))
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            // Auto-sync banner
+            HStack(spacing: 5) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 9))
+                    .foregroundStyle(Color.spentyPrimary)
+                Text("3 transactions auto-detected from email")
+                    .font(.system(size: 8, weight: .medium))
+                    .foregroundStyle(Color.spentyPrimary)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 6)
+            .background(Color.spentyPrimary.opacity(0.09))
+            Divider()
+            VStack(spacing: 0) {
+                txnRow(icon: "🛵", name: "Zomato", cat: "Food & Dining", amt: "−₹847", pos: false)
+                Divider().padding(.leading, 40)
+                txnRow(icon: "📦", name: "Amazon Pay", cat: "Shopping", amt: "−₹2,199", pos: false)
+                Divider().padding(.leading, 40)
+                txnRow(icon: "🏦", name: "HDFC Salary", cat: "Income", amt: "+₹45,000", pos: true)
+                Divider().padding(.leading, 40)
+                txnRow(icon: "🎬", name: "Netflix", cat: "Entertainment", amt: "−₹649", pos: false)
+            }
+            Spacer()
+        }
+    }
+
+    private func txnRow(icon: String, name: String, cat: String, amt: String, pos: Bool) -> some View {
+        HStack(spacing: 8) {
+            Text(icon)
+                .font(.system(size: 15))
+                .frame(width: 28, height: 28)
+                .background(Color.gray.opacity(0.08))
+                .clipShape(Circle())
+            VStack(alignment: .leading, spacing: 1) {
+                Text(name).font(.system(size: 9, weight: .semibold))
+                Text(cat).font(.system(size: 7)).foregroundStyle(.secondary)
+            }
+            Spacer()
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(amt)
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(pos ? Color.spentyPrimary : Color.spentyError)
+                Text("📧")
+                    .font(.system(size: 8))
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+    }
+
+    // MARK: - Mock 2: AI Chat
+
+    private var aiChatMock: some View {
+        VStack(spacing: 0) {
+            statusBar
+            HStack {
+                Text("AI Buddy")
+                    .font(.system(size: 11, weight: .bold))
+                Spacer()
+                Image(systemName: "sparkles")
+                    .foregroundStyle(Color.spentyPrimary)
+                    .font(.system(size: 10))
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            Divider()
+            VStack(spacing: 10) {
+                // User bubble
+                HStack {
+                    Spacer()
+                    Text("How much did I spend on food this month?")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 7)
+                        .background(Color.spentyPrimary)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .frame(maxWidth: 130)
+                }
+                // AI bubble
+                HStack(alignment: .top, spacing: 6) {
+                    ZStack {
+                        Circle().fill(Color.spentyPrimary.opacity(0.15)).frame(width: 20, height: 20)
+                        Text("🤖").font(.system(size: 11))
+                    }
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("₹4,230 on food")
+                            .font(.system(size: 10, weight: .bold))
+                        Text("23 orders · avg ₹184")
+                            .font(.system(size: 8))
+                            .foregroundStyle(.secondary)
+                        HStack(spacing: 4) {
+                            Image(systemName: "flame.fill")
+                                .foregroundStyle(.orange)
+                            Text("Zomato is your top spend")
+                                .foregroundStyle(Color.spentyWarning)
+                        }
+                        .font(.system(size: 8))
+                    }
+                    .padding(9)
+                    .background(Color.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    Spacer()
+                }
+                // Second exchange
+                HStack {
+                    Spacer()
+                    Text("Am I saving enough?")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 7)
+                        .background(Color.spentyPrimary)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
+            }
+            .padding(10)
+            Spacer()
+            // Input bar
+            HStack {
+                Text("Ask anything...")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.tertiary)
+                    .padding(.leading, 8)
+                Spacer()
+                Image(systemName: "arrow.up.circle.fill")
+                    .font(.system(size: 16))
+                    .foregroundStyle(Color.spentyPrimary)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .background(Color.gray.opacity(0.1))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .padding(10)
+        }
+    }
+
+    // MARK: - Mock 3: Dashboard
+
+    private var dashboardMock: some View {
+        VStack(spacing: 0) {
+            statusBar
+            // Balance header
+            VStack(spacing: 3) {
+                Text("Total Balance")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.white.opacity(0.8))
+                Text("₹1,24,560")
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundStyle(.white)
+                HStack(spacing: 3) {
+                    Image(systemName: "arrow.up").font(.system(size: 7, weight: .bold))
+                    Text("+₹12,000 this month").font(.system(size: 8))
+                }
+                .foregroundStyle(.white.opacity(0.85))
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 14)
+            .background(
+                LinearGradient(colors: [Color(hex: 0x3634A3), Color(hex: 0x5E5CE6)],
+                               startPoint: .topLeading, endPoint: .bottomTrailing)
+            )
+            // Mini bar chart
+            VStack(spacing: 4) {
+                Text("Monthly Spend").font(.system(size: 8, weight: .medium)).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 12)
+                HStack(alignment: .bottom, spacing: 5) {
+                    ForEach([0.42, 0.56, 0.48, 0.70, 0.62, 0.88], id: \.self) { h in
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(h == 0.88
+                                  ? Color(hex: 0x5E5CE6)
+                                  : Color(hex: 0x5E5CE6).opacity(0.3))
+                            .frame(height: CGFloat(h) * 34)
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+                .frame(height: 34)
+                .padding(.horizontal, 12)
+            }
+            .padding(.top, 8)
+            Divider().padding(.horizontal, 12).padding(.top, 6)
+            // Accounts
+            VStack(spacing: 0) {
+                acctRow(emoji: "🏦", name: "HDFC Bank", balance: "₹82,400", frac: 0.66)
+                Divider().padding(.leading, 40)
+                acctRow(emoji: "💳", name: "Paytm Wallet", balance: "₹42,160", frac: 0.34)
+            }
+            .padding(.horizontal, 12).padding(.top, 4)
+            Spacer()
+        }
+    }
+
+    private func acctRow(emoji: String, name: String, balance: String, frac: CGFloat) -> some View {
+        HStack(spacing: 8) {
+            Text(emoji).font(.system(size: 15))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(name).font(.system(size: 8, weight: .semibold))
+                GeometryReader { g in
+                    ZStack(alignment: .leading) {
+                        RoundedRectangle(cornerRadius: 2).fill(Color.spentyBorder).frame(height: 3)
+                        RoundedRectangle(cornerRadius: 2).fill(Color(hex: 0x5E5CE6))
+                            .frame(width: g.size.width * frac, height: 3)
+                    }
+                }
+                .frame(height: 3).frame(maxWidth: 60)
+            }
+            Spacer()
+            Text(balance)
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(Color(hex: 0x5E5CE6))
+        }
+        .padding(.vertical, 8)
+    }
+
+    // MARK: - Mock 4: AI Insights / Spending Breakdown
+
+    private var insightsMock: some View {
+        VStack(spacing: 0) {
+            statusBar
+            HStack {
+                Text("Spending Breakdown")
+                    .font(.system(size: 10, weight: .bold))
+                Spacer()
+                Text("This Month").font(.system(size: 8)).foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 7)
+            Divider()
+            // Donut chart
+            ZStack {
+                Circle().trim(from: 0,    to: 0.38).stroke(Color.spentyPrimary,      lineWidth: 15).rotationEffect(.degrees(-90))
+                Circle().trim(from: 0.38, to: 0.62).stroke(Color(hex: 0x0A84FF),    lineWidth: 15).rotationEffect(.degrees(-90))
+                Circle().trim(from: 0.62, to: 0.80).stroke(Color.spentyWarning,     lineWidth: 15).rotationEffect(.degrees(-90))
+                Circle().trim(from: 0.80, to: 1.00).stroke(Color(hex: 0xFF6B35),    lineWidth: 15).rotationEffect(.degrees(-90))
+                VStack(spacing: 1) {
+                    Text("₹11,030").font(.system(size: 11, weight: .bold))
+                    Text("total spent").font(.system(size: 8)).foregroundStyle(.secondary)
+                }
+            }
+            .frame(width: 66, height: 66)
+            .padding(.vertical, 10)
+            // Legend
+            VStack(spacing: 5) {
+                legendRow(c: Color.spentyPrimary,   cat: "Food",     pct: "38%", amt: "₹4,190")
+                legendRow(c: Color(hex: 0x0A84FF),  cat: "Shopping", pct: "24%", amt: "₹2,647")
+                legendRow(c: Color.spentyWarning,   cat: "Bills",    pct: "18%", amt: "₹1,985")
+                legendRow(c: Color(hex: 0xFF6B35),  cat: "Other",    pct: "20%", amt: "₹2,208")
+            }
+            .padding(.horizontal, 12)
+            Spacer()
+        }
+    }
+
+    private func legendRow(c: Color, cat: String, pct: String, amt: String) -> some View {
+        HStack(spacing: 6) {
+            Circle().fill(c).frame(width: 7, height: 7)
+            Text(cat).font(.system(size: 9))
+            Spacer()
+            Text(pct).font(.system(size: 8)).foregroundStyle(.secondary)
+            Text(amt).font(.system(size: 9, weight: .semibold)).frame(width: 38, alignment: .trailing)
+        }
+    }
+
+    // MARK: - Mock 5: Reports
+
+    private var reportsMock: some View {
+        VStack(spacing: 0) {
+            statusBar
+            HStack {
+                Text("Monthly Report").font(.system(size: 10, weight: .bold))
+                Spacer()
+                Text("Apr 2025").font(.system(size: 8)).foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 7)
+            Divider()
+            // Summary row
+            HStack(spacing: 6) {
+                summaryCard(label: "Income",  val: "₹45k",  c: Color.spentyPrimary)
+                summaryCard(label: "Expense", val: "₹33k",  c: Color.spentyError)
+                summaryCard(label: "Saved",   val: "₹12k",  c: Color(hex: 0x0A84FF))
+            }
+            .padding(.horizontal, 12).padding(.top, 7)
+            // Line chart
+            VStack(spacing: 3) {
+                Text("Spending Trend")
+                    .font(.system(size: 8, weight: .medium)).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Canvas { ctx, size in
+                    let pts: [CGFloat] = [0.65, 0.50, 0.72, 0.42, 0.58, 0.33]
+                    let w = size.width / CGFloat(pts.count - 1)
+                    var p = Path()
+                    for (i, y) in pts.enumerated() {
+                        let pt = CGPoint(x: CGFloat(i) * w, y: size.height * y)
+                        if i == 0 { p.move(to: pt) } else { p.addLine(to: pt) }
+                    }
+                    ctx.stroke(p, with: .color(Color(hex: 0x1B5E20)), lineWidth: 1.8)
+                    var fill = p
+                    fill.addLine(to: CGPoint(x: size.width, y: size.height))
+                    fill.addLine(to: CGPoint(x: 0, y: size.height))
+                    fill.closeSubpath()
+                    ctx.fill(fill, with: .color(Color(hex: 0x1B5E20).opacity(0.12)))
+                }
+                .frame(height: 38)
+            }
+            .padding(.horizontal, 12).padding(.top, 8)
+            Divider().padding(.horizontal, 12).padding(.top, 5)
+            // Category bars
+            VStack(spacing: 4) {
+                Text("Top Categories")
+                    .font(.system(size: 8, weight: .medium)).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                catBar(name: "Food",     pct: 0.38, amt: "₹4,190", c: Color.spentyPrimary)
+                catBar(name: "Shopping", pct: 0.24, amt: "₹2,647", c: Color(hex: 0x0A84FF))
+                catBar(name: "Bills",    pct: 0.18, amt: "₹1,985", c: Color.spentyWarning)
+            }
+            .padding(.horizontal, 12).padding(.top, 5)
+            Spacer()
+        }
+    }
+
+    private func summaryCard(label: String, val: String, c: Color) -> some View {
+        VStack(spacing: 2) {
+            Text(val).font(.system(size: 10, weight: .bold)).foregroundStyle(c)
+            Text(label).font(.system(size: 7)).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity).padding(.vertical, 6)
+        .background(c.opacity(0.09))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+
+    private func catBar(name: String, pct: CGFloat, amt: String, c: Color) -> some View {
+        HStack(spacing: 6) {
+            Text(name).font(.system(size: 8)).frame(width: 40, alignment: .leading)
+            GeometryReader { g in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 2).fill(Color.spentyBorder).frame(height: 4)
+                    RoundedRectangle(cornerRadius: 2).fill(c)
+                        .frame(width: g.size.width * pct, height: 4)
+                }
+            }
+            .frame(height: 4)
+            Text(amt).font(.system(size: 8, weight: .medium)).frame(width: 34, alignment: .trailing)
+        }
+    }
+
+    // MARK: - Mock 6: Cash Flow / Upcoming Payments
+
+    private var cashFlowMock: some View {
+        VStack(spacing: 0) {
+            statusBar
+            HStack {
+                Text("Upcoming Payments").font(.system(size: 10, weight: .bold))
+                Spacer()
+                Text("May 2025").font(.system(size: 8)).foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 7)
+            // Outflow banner
+            HStack(spacing: 5) {
+                Image(systemName: "arrow.down.circle.fill").font(.system(size: 9)).foregroundStyle(Color.spentyError)
+                Text("₹28,149 going out this month").font(.system(size: 8, weight: .semibold)).foregroundStyle(Color.spentyError)
+            }
+            .frame(maxWidth: .infinity).padding(.vertical, 6).background(Color.spentyError.opacity(0.09))
+            Divider()
+            VStack(spacing: 0) {
+                upcomingRow(emoji: "🏠", name: "SBI Home EMI",   amt: "₹22,500", date: "5 May",  urgent: true)
+                Divider().padding(.leading, 40)
+                upcomingRow(emoji: "🎬", name: "Netflix",         amt: "₹649",   date: "8 May",  urgent: false)
+                Divider().padding(.leading, 40)
+                upcomingRow(emoji: "🛡️", name: "LIC Insurance",  amt: "₹3,200", date: "10 May", urgent: false)
+                Divider().padding(.leading, 40)
+                upcomingRow(emoji: "💪", name: "Cult.fit",        amt: "₹1,800", date: "15 May", urgent: false)
+            }
+            Spacer()
+        }
+    }
+
+    private func upcomingRow(emoji: String, name: String, amt: String, date: String, urgent: Bool) -> some View {
+        HStack(spacing: 8) {
+            Text(emoji).font(.system(size: 14)).frame(width: 26)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(name).font(.system(size: 9, weight: .semibold))
+                Text(date).font(.system(size: 7)).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Text(amt)
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(urgent ? Color.spentyError : Color.spentyTextPrimary)
+        }
+        .padding(.horizontal, 12).padding(.vertical, 8)
+    }
+
+    // MARK: - Mock 7: Invoice
+
+    private var invoiceMock: some View {
+        VStack(spacing: 0) {
+            statusBar
+            HStack {
+                Text("Invoices").font(.system(size: 10, weight: .bold))
+                Spacer()
+                Image(systemName: "plus.circle.fill").foregroundStyle(Color(hex: 0x0062CC)).font(.system(size: 13))
+            }
+            .padding(.horizontal, 12).padding(.vertical, 7)
+            Divider()
+            // Invoice card
+            VStack(spacing: 0) {
+                // Card header
+                HStack {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("INVOICE").font(.system(size: 8, weight: .bold)).foregroundStyle(Color(hex: 0x0062CC))
+                        Text("#INV-2025-024").font(.system(size: 7)).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Text("✓ Sent")
+                        .font(.system(size: 8, weight: .semibold)).foregroundStyle(.white)
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(Color.spentyPrimary)
+                        .clipShape(Capsule())
+                }
+                .padding(10).background(Color(hex: 0x0062CC).opacity(0.07))
+                Divider()
+                VStack(spacing: 5) {
+                    HStack {
+                        Text("Bill to:").font(.system(size: 7)).foregroundStyle(.secondary)
+                        Spacer()
+                        Text("Rohan Mehta").font(.system(size: 8, weight: .semibold))
+                    }
+                    Divider()
+                    HStack {
+                        Text("Design Services").font(.system(size: 8))
+                        Spacer()
+                        Text("₹15,000").font(.system(size: 8, weight: .semibold))
+                    }
+                    HStack {
+                        Text("GST (18%)").font(.system(size: 8)).foregroundStyle(.secondary)
+                        Spacer()
+                        Text("₹2,700").font(.system(size: 8)).foregroundStyle(.secondary)
+                    }
+                    Divider()
+                    HStack {
+                        Text("Total").font(.system(size: 9, weight: .bold))
+                        Spacer()
+                        Text("₹17,700").font(.system(size: 11, weight: .bold)).foregroundStyle(Color(hex: 0x0062CC))
+                    }
+                }
+                .padding(10)
+            }
+            .background(Color.white)
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .shadow(color: .black.opacity(0.07), radius: 5, x: 0, y: 2)
+            .padding(10)
+            Spacer()
+            // Action row
+            HStack(spacing: 8) {
+                Label("Share", systemImage: "square.and.arrow.up")
+                    .font(.system(size: 8, weight: .medium))
+                    .padding(.vertical, 5).frame(maxWidth: .infinity)
+                    .background(Color(hex: 0x0062CC).opacity(0.1))
+                    .foregroundStyle(Color(hex: 0x0062CC))
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                Label("PDF", systemImage: "doc.fill")
+                    .font(.system(size: 8, weight: .medium))
+                    .padding(.vertical, 5).frame(maxWidth: .infinity)
+                    .background(Color.gray.opacity(0.1))
+                    .foregroundStyle(Color.spentyTextPrimary)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
+            .padding(.horizontal, 10).padding(.bottom, 8)
+        }
+    }
+
+    // MARK: - CTA Slide (Slide 8)
+
+    private var ctaSlide: some View {
+        ZStack {
+            LinearGradient(
+                colors: [Color(hex: 0x111111), Color(hex: 0x1C1C1E)],
+                startPoint: .topLeading, endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
+            // Ambient glow circles
+            Circle().fill(Color(hex: 0xD4AF37).opacity(0.10))
+                .frame(width: 300, height: 300).offset(x: -80, y: -230)
+            Circle().fill(Color(hex: 0xD4AF37).opacity(0.06))
+                .frame(width: 220, height: 220).offset(x: 140, y: 160)
+
+            VStack(spacing: 26) {
+                Spacer()
+                // Crown badge
+                ZStack {
+                    Circle()
+                        .fill(LinearGradient(
+                            colors: [Color(hex: 0xD4AF37), Color(hex: 0xF5E27A)],
+                            startPoint: .topLeading, endPoint: .bottomTrailing))
+                        .frame(width: 90, height: 90)
+                    Image(systemName: "crown.fill")
+                        .font(.system(size: 42))
+                        .foregroundStyle(.white)
+                }
+                // Text
+                VStack(spacing: 10) {
+                    Text(lang.s(slide.titleKey))
+                        .font(.system(size: 28, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .multilineTextAlignment(.center)
+                    Text(lang.s(slide.descriptionKey))
+                        .font(.system(size: 15))
+                        .foregroundStyle(.white.opacity(0.68))
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 32)
+                        .lineSpacing(4)
+                }
+                // Feature checkmarks
+                VStack(spacing: 10) {
+                    ctaFeatureRow("All 7 features fully unlocked")
+                    ctaFeatureRow("Zero limits — all accounts & history")
+                    ctaFeatureRow("Free for 7 days · Cancel anytime")
+                }
+                .padding(.horizontal, 36)
+                // Pricing nudge
+                HStack(spacing: 7) {
+                    Image(systemName: "tag.fill").font(.system(size: 12)).foregroundStyle(Color(hex: 0xD4AF37))
+                    Text("Plans from just ₹99/month")
+                        .font(.system(size: 14, weight: .medium)).foregroundStyle(.white.opacity(0.8))
+                }
+                .padding(.horizontal, 22).padding(.vertical, 12)
+                .background(.white.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 22))
+                Spacer()
+                Spacer()
+            }
+        }
+    }
+
+    private func ctaFeatureRow(_ text: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundStyle(Color(hex: 0xD4AF37))
+                .font(.system(size: 15))
+            Text(text)
+                .font(.system(size: 14))
+                .foregroundStyle(.white.opacity(0.85))
             Spacer()
         }
     }
@@ -124,5 +729,4 @@ struct OnboardingSlideCardView: View {
         slide: OnboardingSlide.allSlides[0],
         lang: LocalizationManager.shared
     )
-    .environment(LocalizationManager.shared)
 }

@@ -11,93 +11,102 @@ struct OnboardingSliderView: View {
     // MARK: - Callbacks
     var onComplete: () -> Void
 
-    // MARK: - Brand Colors
-    private let brandPrimary = Color.spentyPrimary
-    private let brandBg = Color.spentyBgPrimary
-
     private let slides = OnboardingSlide.allSlides
+    private let brandPrimary = Color.spentyPrimary
 
     // MARK: - Body
     var body: some View {
         ZStack(alignment: .top) {
-            brandBg.ignoresSafeArea()
 
-            VStack(spacing: 0) {
-                // Skip button row
+            // ── Full-screen paged slides ──────────────────────────────
+            TabView(selection: $currentSlide) {
+                ForEach(slides.indices, id: \.self) { index in
+                    OnboardingSlideCardView(slide: slides[index], lang: lang)
+                        .tag(index)
+                }
+            }
+            .tabViewStyle(.page(indexDisplayMode: .never))
+            .ignoresSafeArea()
+
+            // ── Skip button (top-right, over gradient) ───────────────
+            if currentSlide < slides.count - 1 {
                 HStack {
                     Spacer()
-                    if currentSlide < slides.count - 1 {
-                        Button(lang.s("onboarding_skip")) {
-                            onComplete()
-                        }
-                        .font(.subheadline)
-                        .foregroundStyle(Color.spentyTextSecondary)
-                        .padding(.trailing, 20)
-                        .padding(.top, 16)
+                    Button(lang.s("onboarding_skip")) {
+                        withAnimation(.easeInOut(duration: 0.3)) { onComplete() }
                     }
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(.black.opacity(0.18), in: Capsule())
                 }
-                .frame(height: 52)
+                .padding(.horizontal, 20)
+                .padding(.top, 56)
+                .transition(.opacity)
+                .animation(.easeInOut(duration: 0.2), value: currentSlide)
+            }
 
-                // Slide content
-                TabView(selection: $currentSlide) {
-                    ForEach(slides.indices, id: \.self) { index in
-                        OnboardingSlideCardView(slide: slides[index], lang: lang)
-                            .tag(index)
-                    }
+            // ── Bottom controls (dots + button) ──────────────────────
+            VStack {
+                Spacer()
+                VStack(spacing: 18) {
+                    dotIndicators
+                    bottomButton
+                        .padding(.horizontal, 24)
                 }
-                .tabViewStyle(.page(indexDisplayMode: .never))
-                .animation(.easeInOut(duration: 0.3), value: currentSlide)
-
-                // Dot indicators
-                dotIndicators
-                    .padding(.top, 16)
-
-                // Bottom buttons
-                bottomButtons
-                    .padding(.horizontal, 24)
-                    .padding(.top, 24)
-                    .padding(.bottom, 48)
+                .padding(.bottom, 44)
             }
         }
     }
 
-    // MARK: - Sub-views
-
+    // MARK: - Dot Indicators (active = wide capsule)
     private var dotIndicators: some View {
         HStack(spacing: 6) {
             ForEach(slides.indices, id: \.self) { index in
-                Circle()
-                    .fill(index == currentSlide ? brandPrimary : Color.spentyBorder)
-                    .frame(width: 8, height: 8)
-                    .animation(.easeInOut(duration: 0.2), value: currentSlide)
+                if index == currentSlide {
+                    Capsule()
+                        .fill(brandPrimary)
+                        .frame(width: 22, height: 7)
+                } else {
+                    Circle()
+                        .fill(Color.primary.opacity(0.18))
+                        .frame(width: 7, height: 7)
+                }
             }
         }
+        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: currentSlide)
     }
 
-    private var bottomButtons: some View {
+    // MARK: - Bottom Button
+    private var bottomButton: some View {
         Group {
             if currentSlide == slides.count - 1 {
-                // Get Started (CTA slide)
-                Button(lang.s("onboarding_get_started")) {
-                    onComplete()
-                }
-                .font(.headline)
-                .foregroundStyle(.white)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 16)
-                .background(brandPrimary, in: RoundedRectangle(cornerRadius: 14))
+                Button(lang.s("onboarding_get_started")) { onComplete() }
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 17)
+                    .background(
+                        LinearGradient(
+                            colors: [Color(hex: 0xD4AF37), Color(hex: 0xB8860B)],
+                            startPoint: .leading, endPoint: .trailing
+                        ),
+                        in: RoundedRectangle(cornerRadius: 16)
+                    )
+                    .shadow(color: Color(hex: 0xD4AF37).opacity(0.4), radius: 12, x: 0, y: 6)
             } else {
-                // Next
                 Button(lang.s("onboarding_next")) {
-                    withAnimation(.easeInOut(duration: 0.3)) {
+                    withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
                         currentSlide += 1
                     }
                 }
-                .font(.headline)
+                .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(.white)
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 16)
-                .background(brandPrimary, in: RoundedRectangle(cornerRadius: 14))
+                .padding(.vertical, 17)
+                .background(brandPrimary, in: RoundedRectangle(cornerRadius: 16))
+                .shadow(color: brandPrimary.opacity(0.35), radius: 10, x: 0, y: 5)
             }
         }
     }

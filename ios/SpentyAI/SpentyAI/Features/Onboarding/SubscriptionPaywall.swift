@@ -128,25 +128,35 @@ struct SubscriptionPaywall: View {
                 .padding(.horizontal, 12)
 
             // Feature pills
-            VStack(alignment: .leading, spacing: 10) {
-                featureRow(icon: "brain.head.profile", text: "AI-powered transaction insights")
-                featureRow(icon: "chart.line.uptrend.xyaxis", text: "Advanced cash flow analytics")
-                featureRow(icon: "envelope.badge", text: "Automatic email & SMS sync")
-                featureRow(icon: "doc.text.fill", text: "Unlimited invoices & reports")
+            VStack(alignment: .leading, spacing: 12) {
+                featureRow(icon: "envelope.badge.fill",
+                           text: "Bills auto-detected from Gmail & SMS — zero typing")
+                featureRow(icon: "brain.head.profile",
+                           text: "Ask your AI anything about your money — instant answers")
+                featureRow(icon: "chart.bar.fill",
+                           text: "All bank accounts & wallets in one clear dashboard")
+                featureRow(icon: "arrow.triangle.2.circlepath",
+                           text: "Never miss an EMI — upcoming payments tracked for you")
+                featureRow(icon: "chart.line.uptrend.xyaxis",
+                           text: "Beautiful reports showing exactly where your money goes")
+                featureRow(icon: "doc.text.fill",
+                           text: "Create GST invoices & manage your business spending")
             }
             .padding(.top, 4)
         }
     }
 
     private func featureRow(icon: String, text: String) -> some View {
-        HStack(spacing: 12) {
+        HStack(alignment: .top, spacing: 12) {
             Image(systemName: icon)
-                .font(.body)
+                .font(.system(size: 16))
                 .foregroundStyle(brandPrimary)
-                .frame(width: 24)
+                .frame(width: 24, height: 22)
 
             Text(text)
-                .font(.subheadline)
+                .font(.system(size: 14.5))
+                .foregroundStyle(Color.spentyTextPrimary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
