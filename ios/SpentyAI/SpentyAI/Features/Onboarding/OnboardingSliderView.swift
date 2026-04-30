@@ -1,5 +1,11 @@
 import SwiftUI
 
+// MARK: - Onboarding Slider View
+// Hosts the 8 paged slides plus the chrome around them: a Stories-style
+// segmented progress bar at the top, the Skip button, dot indicators, and
+// the bottom Next / Get Started CTA. Layout sits inside the safe area so
+// nothing collides with the Dynamic Island.
+
 struct OnboardingSliderView: View {
 
     @Environment(LocalizationManager.self) var lang
@@ -9,18 +15,9 @@ struct OnboardingSliderView: View {
     private let slides = OnboardingSlide.allSlides
 
     var body: some View {
-        // ─────────────────────────────────────────────────────────────────
-        // NOTE: The outer ZStack intentionally has NO .ignoresSafeArea().
-        // Only the TabView inside ignores the safe area so it can paint
-        // the gradient under the Dynamic Island. The control overlays
-        // (skip button, bottom controls) are in a plain VStack that
-        // naturally sits within the safe-area layout guide, so the skip
-        // button always appears just below the Dynamic Island / status bar
-        // and never overlaps it.
-        // ─────────────────────────────────────────────────────────────────
         ZStack(alignment: .top) {
 
-            // ── Full-screen paged slides ──────────────────────────────
+            // ── Full-screen paged slides (gradient renders under Dynamic Island) ──
             TabView(selection: $currentSlide) {
                 ForEach(slides.indices, id: \.self) { index in
                     OnboardingSlideCardView(slide: slides[index], lang: lang)
@@ -29,31 +26,32 @@ struct OnboardingSliderView: View {
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
             .ignoresSafeArea()
+            .animation(.spring(response: 0.45, dampingFraction: 0.85), value: currentSlide)
 
-            // ── Skip button — respects safe area naturally ────────────
-            // padding(.top, 12) is relative to the bottom of the safe
-            // area inset, so this is always comfortably below the clock
-            // and battery icons on every iPhone model.
-            if currentSlide < slides.count - 1 {
-                HStack {
-                    Spacer()
-                    Button(lang.s("onboarding_skip")) {
-                        withAnimation(.easeInOut(duration: 0.3)) { onComplete() }
+            // ── Top: segmented progress + skip ─────────────────────────────
+            VStack(spacing: 12) {
+                segmentedProgress
+                    .padding(.horizontal, 18)
+                    .padding(.top, 4)
+
+                if currentSlide < slides.count - 1 {
+                    HStack {
+                        Spacer()
+                        Button(lang.s("onboarding_skip")) {
+                            withAnimation(.easeInOut(duration: 0.3)) { onComplete() }
+                        }
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.88))
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 7)
+                        .background(.white.opacity(0.14), in: Capsule())
+                        .overlay(Capsule().stroke(.white.opacity(0.22), lineWidth: 1))
                     }
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.85))
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .background(.white.opacity(0.14), in: Capsule())
-                    .overlay(Capsule().stroke(.white.opacity(0.22), lineWidth: 1))
+                    .padding(.horizontal, 20)
                 }
-                .padding(.horizontal, 20)
-                .padding(.top, 12)
-                .transition(.opacity)
-                .animation(.easeInOut(duration: 0.2), value: currentSlide)
             }
 
-            // ── Bottom controls ───────────────────────────────────────
+            // ── Bottom controls ────────────────────────────────────────────
             VStack {
                 Spacer()
                 VStack(spacing: 18) {
@@ -61,12 +59,29 @@ struct OnboardingSliderView: View {
                     bottomButton
                         .padding(.horizontal, 24)
                 }
-                .padding(.bottom, 40)
+                .padding(.bottom, 36)
             }
         }
     }
 
-    // MARK: - Dot Indicators
+    // MARK: - Segmented progress (Stories-style)
+
+    private var segmentedProgress: some View {
+        HStack(spacing: 5) {
+            ForEach(slides.indices, id: \.self) { i in
+                Capsule()
+                    .fill(.white.opacity(i <= currentSlide ? 0.92 : 0.20))
+                    .frame(height: 3)
+                    .animation(
+                        .spring(response: 0.5, dampingFraction: 0.85),
+                        value: currentSlide
+                    )
+            }
+        }
+    }
+
+    // MARK: - Dot indicators
+
     private var dotIndicators: some View {
         HStack(spacing: 6) {
             ForEach(slides.indices, id: \.self) { i in
@@ -85,6 +100,7 @@ struct OnboardingSliderView: View {
     }
 
     // MARK: - Bottom Button
+
     private var bottomButton: some View {
         let isCTA = currentSlide == slides.count - 1
 
