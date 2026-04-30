@@ -21,7 +21,10 @@ import com.google.android.gms.auth.api.signin.GoogleSignInClient
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.android.gms.common.api.ApiException
 import com.spentyai.app.core.auth.AuthManager
+import com.spentyai.app.core.onboarding.OnboardingPrefs
 import com.spentyai.app.core.theme.SpentyTheme
+import com.spentyai.app.features.onboarding.OnboardingScreen
+import com.spentyai.app.features.onboarding.OnboardingViewModel
 import com.spentyai.app.navigation.AppNavigation
 
 class MainActivity : ComponentActivity() {
@@ -95,12 +98,24 @@ fun SpentyAppContent(
     authManager: AuthManager,
     onGoogleSignInRequest: () -> Unit
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val onboardingViewModel = remember {
+        OnboardingViewModel(OnboardingPrefs(context.applicationContext))
+    }
+    val hasSeenOnboarding by onboardingViewModel.hasSeenOnboarding.collectAsState()
     val isAuthenticated by authManager.isAuthenticated.collectAsState()
     var hasCheckedSession by remember { mutableStateOf(false) }
 
     if (!hasCheckedSession) {
         authManager.checkSession()
         hasCheckedSession = true
+    }
+
+    // Gate 1: Onboarding — show the 6-slide carousel before Login on first launch.
+    // Mirrors iOS AppRouter: loading → onboarding → login → paywall → main.
+    if (!hasSeenOnboarding) {
+        OnboardingScreen(onComplete = { onboardingViewModel.markSeen() })
+        return
     }
 
     AppNavigation(
