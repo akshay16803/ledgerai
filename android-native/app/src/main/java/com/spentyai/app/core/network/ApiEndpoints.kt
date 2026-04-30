@@ -34,6 +34,13 @@ interface ApiEndpoints {
     @POST("api/auth/dev/simulator-login")
     suspend fun devSimulatorLogin(@Body body: JsonObject): Response<JsonObject>
 
+    // --- Demo Login (App Review / Play Reviewer flow) ---
+    // Public endpoint that returns a session for the pre-seeded demo account
+    // (spentyai6@gmail.com). Used by Google Play / App Store reviewers and
+    // exposed via the "View Demo Account" link on the Login screen.
+    @POST("api/auth/demo-login")
+    suspend fun demoLogin(@Body body: JsonObject): Response<JsonObject>
+
     // --- Dashboard ---
     @GET("api/dashboard/summary")
     suspend fun getDashboardSummary(): Response<DashboardSummary>

@@ -50,6 +50,17 @@ class AuthViewModel(
         authManager.clearError()
     }
 
+    /**
+     * Demo Account login — required for Google Play store reviewer flow.
+     * Calls POST /api/auth/demo-login under the hood; signs the user in as
+     * spentyai6@gmail.com with full subscription access.
+     */
+    fun signInWithDemo() {
+        _showError.value = false
+        _errorMessage.value = ""
+        authManager.signInWithDemo()
+    }
+
     /** Debug bypass — only call from debug builds. */
     fun devSignIn() {
         _showError.value = false

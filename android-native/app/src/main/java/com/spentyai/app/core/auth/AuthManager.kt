@@ -123,6 +123,66 @@ class AuthManager(
     }
 
     /**
+     * Demo Login — calls POST /api/auth/demo-login to sign in as the pre-seeded
+     * demo account (spentyai6@gmail.com). Required for the Google Play store
+     * reviewer flow so reviewers can access the full app without a real Google
+     * account. The demo account always has subscription_status = "active".
+     *
+     * Backend response shape:
+     *   {
+     *     "session_token": "...",
+     *     "user": {
+     *       "user_id": "...",
+     *       "email": "...",
+     *       "subscription_status": "active",
+     *       ...
+     *     }
+     *   }
+     */
+    fun signInWithDemo() {
+        scope.launch {
+            _isLoading.value = true
+            _error.value = null
+
+            val body = JsonObject(
+                mapOf(
+                    "platform" to JsonPrimitive("android")
+                )
+            )
+
+            val result = apiClient.safeApiCall { apiClient.endpoints.demoLogin(body) }
+            when (result) {
+                is ApiResult.Success -> {
+                    val data = result.data
+                    val token = data["session_token"]?.jsonPrimitive?.content
+                    val userObj = data["user"] as? JsonObject
+                    val userId = userObj?.get("user_id")?.jsonPrimitive?.content
+                    val email = userObj?.get("email")?.jsonPrimitive?.content
+                    val subscription = userObj?.get("subscription_status")?.jsonPrimitive?.content
+
+                    if (token != null) {
+                        tokenStore.saveToken(token)
+                        userId?.let { tokenStore.saveUserId(it) }
+                        email?.let { tokenStore.saveUserEmail(it) }
+                        // Demo account always has active subscription on backend.
+                        tokenStore.saveSubscriptionStatus(subscription ?: "active")
+                        _isAuthenticated.value = true
+                        _isSubscribed.value = tokenStore.isSubscribed()
+                        android.util.Log.d("AuthManager", "[DemoLogin] success — userId=$userId email=$email")
+                    } else {
+                        _error.value = "Demo login unavailable. Please use Google sign-in."
+                    }
+                }
+                is ApiResult.Failure -> {
+                    android.util.Log.w("AuthManager", "[DemoLogin] failed: ${result.error.message}")
+                    _error.value = "Demo login unavailable. Please use Google sign-in."
+                }
+            }
+            _isLoading.value = false
+        }
+    }
+
+    /**
      * DEBUG ONLY — bypass Google Sign-In using the dev simulator login endpoint.
      * Mirrors the iOS simulatorAutoLogin() flow exactly.
      * Falls back to an offline token if the backend returns 503/404.

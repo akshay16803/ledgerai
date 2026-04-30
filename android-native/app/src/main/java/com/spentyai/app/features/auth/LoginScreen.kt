@@ -60,6 +60,7 @@ fun LoginScreen(
     val showError by viewModel.showError.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
     val onDevSignIn: (() -> Unit)? = if (BuildConfig.DEBUG) ({ viewModel.devSignIn() }) else null
+    val onDemoSignIn: () -> Unit = { viewModel.signInWithDemo() }
 
     Box(
         modifier = Modifier
@@ -85,6 +86,7 @@ fun LoginScreen(
                 showError = showError,
                 errorMessage = errorMessage,
                 onGoogleSignIn = onGoogleSignInRequest,
+                onDemoSignIn = onDemoSignIn,
                 onDismissError = { viewModel.dismissError() },
                 onDevSignIn = onDevSignIn
             )
@@ -137,6 +139,7 @@ private fun SignInSection(
     showError: Boolean,
     errorMessage: String,
     onGoogleSignIn: () -> Unit,
+    onDemoSignIn: () -> Unit,
     onDismissError: () -> Unit,
     onDevSignIn: (() -> Unit)? = null
 ) {
@@ -199,6 +202,23 @@ private fun SignInSection(
                 modifier = Modifier.size(24.dp),
                 color = SpentyPrimary,
                 strokeWidth = 2.dp
+            )
+        }
+
+        // ── Demo Account ─────────────────────────────────────
+        // Required for Google Play store reviewer flow. A small, low-profile
+        // underlined link below the Google button. Mirrors iOS LoginView's
+        // "View Demo Account" affordance.
+        androidx.compose.material3.TextButton(
+            onClick = onDemoSignIn,
+            enabled = !isLoading
+        ) {
+            Text(
+                text = "View Demo Account",
+                style = SpentyType.Caption1.copy(
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textDecoration = TextDecoration.Underline
+                )
             )
         }
 
