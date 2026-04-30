@@ -133,7 +133,7 @@ extension OnboardingSlide {
             titleKey: "onboarding_slide8_title",
             descriptionKey: "onboarding_slide8_desc",
             categoryLabel: "GO PREMIUM",
-            statPills: ["7 days free", "Cancel anytime"],
+            statPills: ["7-day trial", "Cancel anytime"],
             gradientColors: [Color(hex: 0x0A0800), Color(hex: 0x1C1500), Color(hex: 0x2E2200)],
             isCTASlide: true
         ),

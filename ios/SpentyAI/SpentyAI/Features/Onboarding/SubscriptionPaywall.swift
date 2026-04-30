@@ -130,9 +130,9 @@ struct SubscriptionPaywall: View {
             // Feature pills
             VStack(alignment: .leading, spacing: 12) {
                 featureRow(icon: "envelope.badge.fill",
-                           text: "Bills auto-detected from Gmail & SMS — zero typing")
+                           text: "SpentyAI reads Gmail & SMS to detect transactions — just review and categorise")
                 featureRow(icon: "brain.head.profile",
-                           text: "Ask your AI anything about your money — instant answers")
+                           text: "Tell the AI about any expense or income — it records it and asks for any missing details")
                 featureRow(icon: "chart.bar.fill",
                            text: "All bank accounts & wallets in one clear dashboard")
                 featureRow(icon: "arrow.triangle.2.circlepath",

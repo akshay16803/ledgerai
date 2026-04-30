@@ -730,15 +730,15 @@ struct OnboardingSlideCardView: View {
                 VStack(spacing: 10) {
                     ctaFeatureRow("All 7 features fully unlocked")
                     ctaFeatureRow("Zero limits — all accounts & history")
-                    ctaFeatureRow("Free for 7 days · Cancel anytime")
+                    ctaFeatureRow("7-day trial — charged only after day 7")
                 }
                 .padding(.horizontal, 36)
-                // Pricing nudge
+                // Trial note
                 HStack(spacing: 7) {
-                    Image(systemName: "tag.fill")
+                    Image(systemName: "calendar.badge.checkmark")
                         .font(.system(size: 12))
                         .foregroundStyle(Color(hex: 0xD4AF37))
-                    Text("Plans from just ₹99/month")
+                    Text("Monthly, yearly & lifetime plans available")
                         .font(.system(size: 14, weight: .medium))
                         .foregroundStyle(.white.opacity(0.8))
                 }
