@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Auto Backup rules for Android <= 11.
+
+    We DO NOT want to back up:
+      - Auth tokens (EncryptedSharedPreferences in `secure_prefs`)
+      - Cached API responses / OkHttp cache
+      - The crash-restart sentinel
+    Backing up the auth DB would let a fresh install on a new device
+    silently log the new user in as the old user.
+-->
+<full-backup-content>
+    <exclude domain="sharedpref" path="secure_prefs.xml" />
+    <exclude domain="sharedpref" path="secure_prefs" />
+    <exclude domain="sharedpref" path="auth_prefs.xml" />
+    <exclude domain="file" path="okhttp_cache/" />
+    <exclude domain="database" path="spentyai.db" />
+</full-backup-content>

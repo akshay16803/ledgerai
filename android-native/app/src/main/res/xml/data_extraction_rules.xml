@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Android 12+ data-extraction rules (Auto Backup AND Device-to-Device Migration).
+    Required by Play Console / Android 12 target SDK behavior.
+    Same exclusions as backup_rules.xml — never include auth tokens or cache.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="secure_prefs.xml" />
+        <exclude domain="sharedpref" path="secure_prefs" />
+        <exclude domain="sharedpref" path="auth_prefs.xml" />
+        <exclude domain="file" path="okhttp_cache/" />
+        <exclude domain="database" path="spentyai.db" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="secure_prefs.xml" />
+        <exclude domain="sharedpref" path="secure_prefs" />
+        <exclude domain="sharedpref" path="auth_prefs.xml" />
+        <exclude domain="file" path="okhttp_cache/" />
+        <exclude domain="database" path="spentyai.db" />
+    </device-transfer>
+</data-extraction-rules>

@@ -2,19 +2,37 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!--
+        Permission audit (2026-05-01, production-readiness pass):
+          INTERNET                  - Retrofit / OkHttp                                  USED
+          ACCESS_NETWORK_STATE      - connectivity check before retries                  USED
+          RECORD_AUDIO              - AI Chat voice input (AndroidSpeechManager.kt)      USED
+          CAMERA                    - Bill upload + transaction receipt camera capture   USED
+
+        Removed (unused) - was triggering Play Console "permissions you don't use" warnings:
+          READ_MEDIA_IMAGES         - PickVisualMedia is a system picker, no perm needed
+          READ_EXTERNAL_STORAGE     - superseded by PhotoPicker; never requested
+          WRITE_EXTERNAL_STORAGE    - never written from app; superseded by scoped storage
+          READ_SMS                  - never declared; SMS Sync uploads files, not reads SMS
+    -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.CAMERA" />
-    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
-    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
+
+    <!-- Camera + microphone hardware features are optional - emulators or
+         tablets without these should still be able to install. -->
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
 
     <application
         android:name=".SpentyApp"
         android:allowBackup="true"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
+        android:networkSecurityConfig="@xml/network_security_config"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.SpentyAI"
@@ -31,7 +49,7 @@
         </activity>
 
         <!--
-            OAuth redirect URIs are NOT received by the mobile app — Gmail and
+            OAuth redirect URIs are NOT received by the mobile app - Gmail and
             Outlook OAuth callbacks land on the backend
             (https://api.spentyai.com/api/{gmail|outlook}/callback) which then
             stores tokens server-side. The app launches the auth URL in a

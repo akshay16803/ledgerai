@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Production network security policy.
+
+    Cleartext is forbidden for every domain (`cleartextTrafficPermitted="false"`).
+    The only domain we explicitly trust is `api.spentyai.com` (system CAs only).
+    Debug builds get a separate `<debug-overrides>` so a developer can attach
+    a local proxy / mitmproxy / staging cert without touching the prod policy.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">api.spentyai.com</domain>
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </domain-config>
+
+    <debug-overrides>
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+        </trust-anchors>
+    </debug-overrides>
+</network-security-config>
