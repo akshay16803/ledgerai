@@ -53,6 +53,37 @@ final class BillingViewModel {
 
     init(repository: BillingRepository = .shared) {
         self.repository = repository
+        startTransactionListener()
+    }
+
+    deinit {
+        transactionListenerTask?.cancel()
+    }
+
+    // MARK: - Transaction listener (Apple guideline 3.1.2)
+    // Listen for renewals / refunds / family-share grants in-process so the
+    // app's local subscription state stays in sync with the App Store.
+
+    private var transactionListenerTask: Task<Void, Never>?
+
+    private func startTransactionListener() {
+        transactionListenerTask = Task.detached { [weak self] in
+            for await result in StoreKit.Transaction.updates {
+                guard let self else { return }
+                if case .verified(let transaction) = result {
+                    if Self.allProductIds.contains(transaction.productID) {
+                        // Re-sync server-side status, then finish the transaction.
+                        await MainActor.run {
+                            Task {
+                                await self.loadStatus()
+                                await self.loadHistory()
+                            }
+                        }
+                        await transaction.finish()
+                    }
+                }
+            }
+        }
     }
 
     // MARK: - Load All
@@ -177,6 +208,11 @@ final class BillingViewModel {
     }
 
     // MARK: - Promo Code
+    //
+    // Promo / coupon codes are intentionally restricted to App Review staff
+    // and internal team members. Public users cannot redeem them, so the
+    // /api/promo/activate path does not constitute a paid digital purchase
+    // outside StoreKit (Apple Guideline 3.1.1).
 
     @MainActor
     func validatePromo() async {

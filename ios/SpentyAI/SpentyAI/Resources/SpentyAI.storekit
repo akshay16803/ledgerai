@@ -1,122 +1,137 @@
 {
-  "identifier" : "E1A1F8B7-3C5D-4A2E-B8F1-9D2E3F4A5B6C",
-  "type" : "Configuration",
-  "version" : 3,
-  "subscriptionGroups" : [
+  "identifier": "E1A1F8B7-3C5D-4A2E-B8F1-9D2E3F4A5B6C",
+  "type": "Configuration",
+  "version": 3,
+  "subscriptionGroups": [
     {
-      "id" : "com.spentyai.premium",
-      "localizations" : [
+      "id": "com.spentyai.premium",
+      "localizations": [
         {
-          "description" : "Access all SpentyAI features",
-          "displayName" : "SpentyAI Premium",
-          "locale" : "en_US"
+          "description": "Access all SpentyAI features",
+          "displayName": "SpentyAI Premium",
+          "locale": "en_US"
         }
       ],
-      "subscriptions" : [
+      "subscriptions": [
         {
-          "adHocOffers" : [],
-          "codeOffers" : [],
-          "displayPrice" : "199",
-          "familyShareable" : false,
-          "groupNumber" : 1,
-          "internalID" : "A1B2C3D4",
-          "introductoryOffer" : null,
-          "localizations" : [
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "199",
+          "familyShareable": false,
+          "groupNumber": 1,
+          "internalID": "A1B2C3D4",
+          "introductoryOffer": {
+            "internalID": "TRIAL_MONTHLY",
+            "numberOfPeriods": 1,
+            "paymentMode": "free",
+            "subscriptionPeriod": "P1W"
+          },
+          "localizations": [
             {
-              "description" : "Monthly access to SpentyAI",
-              "displayName" : "Monthly Plan",
-              "locale" : "en_US"
+              "description": "Monthly access to SpentyAI",
+              "displayName": "Monthly Plan",
+              "locale": "en_US"
             }
           ],
-          "productID" : "com.spentyai.monthly",
-          "recurringSubscriptionPeriod" : "P1M",
-          "referenceName" : "Monthly",
-          "subscriptionGroupID" : "com.spentyai.premium",
-          "type" : "RecurringSubscription"
+          "productID": "com.spentyai.monthly",
+          "recurringSubscriptionPeriod": "P1M",
+          "referenceName": "Monthly",
+          "subscriptionGroupID": "com.spentyai.premium",
+          "type": "RecurringSubscription"
         },
         {
-          "adHocOffers" : [],
-          "codeOffers" : [],
-          "displayPrice" : "449",
-          "familyShareable" : false,
-          "groupNumber" : 2,
-          "internalID" : "E5F6G7H8",
-          "introductoryOffer" : null,
-          "localizations" : [
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "449",
+          "familyShareable": false,
+          "groupNumber": 2,
+          "internalID": "E5F6G7H8",
+          "introductoryOffer": {
+            "internalID": "TRIAL_QUARTERLY",
+            "numberOfPeriods": 1,
+            "paymentMode": "free",
+            "subscriptionPeriod": "P1W"
+          },
+          "localizations": [
             {
-              "description" : "Quarterly access to SpentyAI",
-              "displayName" : "Quarterly Plan",
-              "locale" : "en_US"
+              "description": "Quarterly access to SpentyAI",
+              "displayName": "Quarterly Plan",
+              "locale": "en_US"
             }
           ],
-          "productID" : "com.spentyai.quarterly",
-          "recurringSubscriptionPeriod" : "P3M",
-          "referenceName" : "Quarterly",
-          "subscriptionGroupID" : "com.spentyai.premium",
-          "type" : "RecurringSubscription"
+          "productID": "com.spentyai.quarterly",
+          "recurringSubscriptionPeriod": "P3M",
+          "referenceName": "Quarterly",
+          "subscriptionGroupID": "com.spentyai.premium",
+          "type": "RecurringSubscription"
         },
         {
-          "adHocOffers" : [],
-          "codeOffers" : [],
-          "displayPrice" : "1499",
-          "familyShareable" : false,
-          "groupNumber" : 3,
-          "internalID" : "I9J0K1L2",
-          "introductoryOffer" : null,
-          "localizations" : [
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "1499",
+          "familyShareable": false,
+          "groupNumber": 3,
+          "internalID": "I9J0K1L2",
+          "introductoryOffer": {
+            "internalID": "TRIAL_YEARLY",
+            "numberOfPeriods": 1,
+            "paymentMode": "free",
+            "subscriptionPeriod": "P1W"
+          },
+          "localizations": [
             {
-              "description" : "Yearly access to SpentyAI",
-              "displayName" : "Yearly Plan",
-              "locale" : "en_US"
+              "description": "Yearly access to SpentyAI",
+              "displayName": "Yearly Plan",
+              "locale": "en_US"
             }
           ],
-          "productID" : "com.spentyai.yearly",
-          "recurringSubscriptionPeriod" : "P1Y",
-          "referenceName" : "Yearly",
-          "subscriptionGroupID" : "com.spentyai.premium",
-          "type" : "RecurringSubscription"
+          "productID": "com.spentyai.yearly",
+          "recurringSubscriptionPeriod": "P1Y",
+          "referenceName": "Yearly",
+          "subscriptionGroupID": "com.spentyai.premium",
+          "type": "RecurringSubscription"
         }
       ]
     }
   ],
-  "products" : [
+  "products": [
     {
-      "displayPrice" : "9999",
-      "familyShareable" : false,
-      "internalID" : "M3N4O5P6",
-      "localizations" : [
+      "displayPrice": "9999",
+      "familyShareable": false,
+      "internalID": "M3N4O5P6",
+      "localizations": [
         {
-          "description" : "Lifetime access to SpentyAI",
-          "displayName" : "Lifetime Plan",
-          "locale" : "en_US"
+          "description": "Lifetime access to SpentyAI",
+          "displayName": "Lifetime Plan",
+          "locale": "en_US"
         }
       ],
-      "productID" : "com.spentyai.lifetime",
-      "referenceName" : "Lifetime",
-      "type" : "NonConsumable"
+      "productID": "com.spentyai.lifetime",
+      "referenceName": "Lifetime",
+      "type": "NonConsumable"
     },
     {
-      "displayPrice" : "4999",
-      "familyShareable" : false,
-      "internalID" : "Q7R8S9T0",
-      "localizations" : [
+      "displayPrice": "4999",
+      "familyShareable": false,
+      "internalID": "Q7R8S9T0",
+      "localizations": [
         {
-          "description" : "Special one-time offer: Lifetime access to SpentyAI",
-          "displayName" : "Lifetime Plan — Special Offer",
-          "locale" : "en_US"
+          "description": "Special one-time offer: Lifetime access to SpentyAI",
+          "displayName": "Lifetime Plan \u2014 Special Offer",
+          "locale": "en_US"
         }
       ],
-      "productID" : "com.spentyai.lifetime_offer",
-      "referenceName" : "Lifetime Offer",
-      "type" : "NonConsumable"
+      "productID": "com.spentyai.lifetime_offer",
+      "referenceName": "Lifetime Offer",
+      "type": "NonConsumable"
     }
   ],
-  "settings" : {
-    "_applicationInternalID" : "1234567890",
-    "_developerTeamID" : "857NZC8N95",
-    "_failTransactionsEnabled" : false,
-    "_locale" : "en_US",
-    "_storefront" : "USA",
-    "_storeKitErrors" : []
+  "settings": {
+    "_applicationInternalID": "1234567890",
+    "_developerTeamID": "857NZC8N95",
+    "_failTransactionsEnabled": false,
+    "_locale": "en_US",
+    "_storefront": "USA",
+    "_storeKitErrors": []
   }
 }
