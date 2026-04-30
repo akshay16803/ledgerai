@@ -9531,14 +9531,43 @@ async def process_tax_summary(user_id: str, summary_id: str, email_address: str,
 
 # ─── User Settings ───────────────────────────────────────────────────
 
+def _sanitize_settings(doc: dict) -> dict:
+    """Convert any non-JSON-serializable MongoDB types (ObjectId, Int64,
+    datetime, bytes) in a settings document to plain Python types so that
+    FastAPI can serialize them without raising a 500."""
+    if not doc:
+        return {}
+    result = {}
+    for k, v in doc.items():
+        type_name = type(v).__name__
+        if type_name in ("ObjectId",):
+            result[k] = str(v)
+        elif type_name in ("Int64", "Int32", "Decimal128"):
+            result[k] = int(v)
+        elif isinstance(v, datetime):
+            result[k] = v.isoformat()
+        elif isinstance(v, bytes):
+            result[k] = base64.b64encode(v).decode()
+        elif isinstance(v, dict):
+            result[k] = _sanitize_settings(v)
+        elif isinstance(v, list):
+            result[k] = [
+                _sanitize_settings(i) if isinstance(i, dict) else i
+                for i in v
+            ]
+        else:
+            result[k] = v
+    return result
+
+
 @app.get("/api/settings")
 async def get_settings(user: dict = Depends(get_current_user)):
     settings = await db.user_settings.find_one({"user_id": user["user_id"]}, {"_id": 0})
     if not settings:
         settings = {"user_id": user["user_id"], "base_currency": "INR", "date_format": "DD/MM/YYYY"}
         await db.user_settings.insert_one(settings)
-        del settings["_id"]
-    return settings
+        settings.pop("_id", None)
+    return _sanitize_settings(settings)
 
 
 @app.put("/api/settings")
@@ -9575,7 +9604,7 @@ async def update_settings(request: Request, user: dict = Depends(get_current_use
         upsert=True,
     )
     settings = await db.user_settings.find_one({"user_id": user["user_id"]}, {"_id": 0})
-    return settings
+    return _sanitize_settings(settings or {})
 
 
 
