@@ -1,5 +1,10 @@
 package com.spentyai.app.features.transactions
 
+import android.graphics.Bitmap
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -21,6 +26,9 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.spentyai.app.core.components.CreateAccountDialog
+import com.spentyai.app.core.components.CreateCategoryDialog
+import com.spentyai.app.core.components.CreateSubcategoryDialog
 import com.spentyai.app.core.models.Account
 import com.spentyai.app.core.models.Category
 import com.spentyai.app.core.models.Transaction
@@ -28,18 +36,52 @@ import com.spentyai.app.core.theme.*
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
+/**
+ * Mode for [TransactionFormScreen]. Mirrors iOS UnifiedTransactionForm modes:
+ * - CREATE: new transaction
+ * - EDIT:   edit existing approved transaction
+ * - APPROVE: edit then approve a pending (AI-detected) transaction. Same form
+ *   as EDIT, but the primary button reads "Approve" and on save also calls
+ *   POST /api/transactions/{id}/approve.
+ */
+enum class TransactionFormMode { CREATE, EDIT, APPROVE }
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TransactionFormScreen(
     viewModel: TransactionsViewModel,
     transaction: Transaction?,
     onDismiss: () -> Unit,
-    onSaved: () -> Unit
+    onSaved: () -> Unit,
+    mode: TransactionFormMode = if (transaction != null) TransactionFormMode.EDIT else TransactionFormMode.CREATE
 ) {
     val state by viewModel.uiState.collectAsState()
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
-    val isEditing = transaction != null
+    val isEditing = mode == TransactionFormMode.EDIT || mode == TransactionFormMode.APPROVE
+    val isApproving = mode == TransactionFormMode.APPROVE
+
+    // Inline-create dialog state (matches iOS UnifiedTransactionForm new-account /
+    // new-category / new-subcategory alerts). Reuses CreateAccountDialog /
+    // CreateCategoryDialog / CreateSubcategoryDialog from core/components.
+    var showCreateAccount by remember { mutableStateOf(false) }
+    var showCreateCategory by remember { mutableStateOf(false) }
+    var showCreateSubcategory by remember { mutableStateOf(false) }
+
+    // Photo / camera attachment state — mirrors iOS PhotosPicker + camera capture.
+    // Backend doesn't yet accept attachments on POST /api/transactions, so we
+    // hold them locally and surface them as a chip; once the backend
+    // /attach endpoint lands, the URI/bitmap can be uploaded here.
+    var attachmentUri by remember { mutableStateOf<Uri?>(null) }
+    var cameraBitmap by remember { mutableStateOf<Bitmap?>(null) }
+
+    val photoLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickVisualMedia()
+    ) { uri: Uri? -> if (uri != null) { attachmentUri = uri; cameraBitmap = null } }
+
+    val cameraLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.TakePicturePreview()
+    ) { bmp: Bitmap? -> if (bmp != null) { cameraBitmap = bmp; attachmentUri = null } }
 
     // Form state
     var transactionType by remember { mutableStateOf(transaction?.transactionType ?: "expense") }
@@ -146,8 +188,23 @@ fun TransactionFormScreen(
             payload = payload,
             editId = transaction?.id,
             onSuccess = {
-                isSaving = false
-                onSaved()
+                if (isApproving && transaction != null) {
+                    // Approve-mode: same form-save then auto-approve the pending txn.
+                    viewModel.approveTransaction(
+                        id = transaction.id,
+                        onSuccess = {
+                            isSaving = false
+                            onSaved()
+                        },
+                        onError = { msg ->
+                            isSaving = false
+                            errorMessage = msg
+                        }
+                    )
+                } else {
+                    isSaving = false
+                    onSaved()
+                }
             },
             onError = { msg ->
                 isSaving = false
@@ -179,12 +236,20 @@ fun TransactionFormScreen(
                     Text("Cancel", style = SpentyType.Body, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 Text(
-                    text = if (isEditing) "Edit Transaction" else "New Transaction",
+                    text = when (mode) {
+                        TransactionFormMode.APPROVE -> "Approve Transaction"
+                        TransactionFormMode.EDIT -> "Edit Transaction"
+                        TransactionFormMode.CREATE -> "New Transaction"
+                    },
                     style = SpentyType.Headline
                 )
                 TextButton(onClick = { doSave() }, enabled = !isSaving) {
                     Text(
-                        text = if (isEditing) "Save" else "Create",
+                        text = when (mode) {
+                            TransactionFormMode.APPROVE -> "Approve"
+                            TransactionFormMode.EDIT -> "Save"
+                            TransactionFormMode.CREATE -> "Create"
+                        },
                         style = SpentyType.Headline,
                         fontWeight = FontWeight.SemiBold,
                         color = SpentyPrimary
@@ -326,7 +391,7 @@ fun TransactionFormScreen(
                             onSelect = { accountId = it }
                         )
                         IconButton(
-                            onClick = { /* Inline account creation -- refresh after */ },
+                            onClick = { showCreateAccount = true },
                             modifier = Modifier.size(32.dp)
                         ) {
                             Icon(Icons.Filled.AddCircle, contentDescription = "Add Account", tint = SpentyPrimary.copy(alpha = 0.7f))
@@ -385,7 +450,7 @@ fun TransactionFormScreen(
                             }
                         )
                         IconButton(
-                            onClick = { /* Inline category creation -- refresh after */ },
+                            onClick = { showCreateCategory = true },
                             modifier = Modifier.size(32.dp)
                         ) {
                             Icon(Icons.Filled.AddCircle, contentDescription = "Add Category", tint = SpentyPrimary.copy(alpha = 0.7f))
@@ -403,7 +468,7 @@ fun TransactionFormScreen(
                             )
                             if (categoryId.isNotEmpty()) {
                                 IconButton(
-                                    onClick = { /* Inline subcategory creation -- refresh after */ },
+                                    onClick = { showCreateSubcategory = true },
                                     modifier = Modifier.size(32.dp)
                                 ) {
                                     Icon(Icons.Filled.AddCircle, contentDescription = "Add Subcategory", tint = SpentyPrimary.copy(alpha = 0.7f))
@@ -432,6 +497,75 @@ fun TransactionFormScreen(
                 shape = SpentyStyle.inputShape,
                 colors = SpentyStyle.inputColors()
             )
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            // Attachment section -- mirrors iOS PhotosPicker + camera capture.
+            FormSectionLabel("ATTACHMENT")
+            Spacer(modifier = Modifier.height(8.dp))
+
+            ElevatedCard(
+                colors = SpentyStyle.cardColors(),
+                elevation = SpentyStyle.cardElevation(),
+                shape = SpentyStyle.cardShape
+            ) {
+                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                photoLauncher.launch(
+                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                )
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Outlined.Image, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Photo", style = SpentyType.Subheadline)
+                        }
+                        OutlinedButton(
+                            onClick = { cameraLauncher.launch(null) },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Outlined.PhotoCamera, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Camera", style = SpentyType.Subheadline)
+                        }
+                    }
+
+                    if (attachmentUri != null || cameraBitmap != null) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Outlined.AttachFile,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                                tint = SpentyPrimary
+                            )
+                            Text(
+                                if (attachmentUri != null) "Photo attached" else "Camera capture attached",
+                                style = SpentyType.Caption1,
+                                color = SpentyPrimary,
+                                modifier = Modifier.weight(1f)
+                            )
+                            TextButton(onClick = {
+                                attachmentUri = null
+                                cameraBitmap = null
+                            }) {
+                                Text("Remove", style = SpentyType.Caption1, color = SpentyError)
+                            }
+                        }
+                    }
+                }
+            }
 
             Spacer(modifier = Modifier.height(20.dp))
 
@@ -574,12 +708,62 @@ fun TransactionFormScreen(
                     )
                 } else {
                     Text(
-                        text = if (isEditing) "Save Changes" else "Create Transaction",
+                        text = when (mode) {
+                            TransactionFormMode.APPROVE -> "Approve Transaction"
+                            TransactionFormMode.EDIT -> "Save Changes"
+                            TransactionFormMode.CREATE -> "Create Transaction"
+                        },
                         style = SpentyType.Headline
                     )
                 }
             }
         }
+    }
+
+    // ============================================================
+    // Inline-create dialogs (mirror iOS UnifiedTransactionForm)
+    // ============================================================
+
+    if (showCreateAccount) {
+        CreateAccountDialog(
+            apiClient = viewModel.apiClient,
+            onDismiss = { showCreateAccount = false },
+            onCreated = { newAccount ->
+                viewModel.upsertAccount(newAccount)
+                accountId = newAccount.id
+                showCreateAccount = false
+            }
+        )
+    }
+
+    if (showCreateCategory) {
+        CreateCategoryDialog(
+            apiClient = viewModel.apiClient,
+            transactionType = transactionType,
+            onDismiss = { showCreateCategory = false },
+            onCreated = { newCat ->
+                viewModel.upsertCategory(newCat)
+                categoryId = newCat.id
+                subcategoryId = ""
+                showCreateCategory = false
+            }
+        )
+    }
+
+    if (showCreateSubcategory && categoryId.isNotEmpty()) {
+        val parentName = state.categories.firstOrNull { it.id == categoryId }?.name ?: ""
+        CreateSubcategoryDialog(
+            apiClient = viewModel.apiClient,
+            parentCategoryId = categoryId,
+            parentCategoryName = parentName,
+            transactionType = transactionType,
+            onDismiss = { showCreateSubcategory = false },
+            onCreated = { newSub ->
+                viewModel.upsertSubcategory(parentId = categoryId, sub = newSub)
+                subcategoryId = newSub.id
+                showCreateSubcategory = false
+            }
+        )
     }
 }
 

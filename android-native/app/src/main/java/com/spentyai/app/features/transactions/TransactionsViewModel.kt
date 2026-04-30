@@ -50,7 +50,7 @@ data class TransactionsUiState(
     val selectedIds: Set<String> = emptySet()
 )
 
-class TransactionsViewModel(private val apiClient: ApiClient) : ViewModel() {
+class TransactionsViewModel(internal val apiClient: ApiClient) : ViewModel() {
 
     private val repository = TransactionRepository(apiClient)
     private val pageSize = 30
@@ -397,6 +397,77 @@ class TransactionsViewModel(private val apiClient: ApiClient) : ViewModel() {
     fun subcategories(categoryId: String?): List<Category> {
         if (categoryId.isNullOrEmpty()) return emptyList()
         return _uiState.value.categories.firstOrNull { it.id == categoryId }?.children ?: emptyList()
+    }
+
+    // MARK: - Approve (used by TransactionFormScreen approve mode, P0 #12)
+
+    fun approveTransaction(
+        id: String,
+        onSuccess: () -> Unit = {},
+        onError: (String) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            when (val result = repository.approveTransaction(id)) {
+                is ApiResult.Success -> {
+                    // Surface the now-approved transaction in the local list.
+                    _uiState.update { state ->
+                        val exists = state.transactions.any { it.id == id }
+                        val merged = if (exists) {
+                            state.transactions.map { if (it.id == id) result.data else it }
+                        } else {
+                            listOf(result.data) + state.transactions
+                        }
+                        state.copy(transactions = merged)
+                    }
+                    onSuccess()
+                }
+                is ApiResult.Failure -> onError(result.error.message ?: "Failed to approve transaction")
+            }
+        }
+    }
+
+    // MARK: - Inline-create helpers (used by TransactionFormScreen + PendingReviewScreen, P0 #12, #15)
+
+    fun upsertAccount(account: Account) {
+        _uiState.update { state ->
+            val existing = state.accounts.indexOfFirst { it.id == account.id }
+            val accounts = if (existing >= 0) {
+                state.accounts.toMutableList().also { it[existing] = account }
+            } else {
+                state.accounts + account
+            }
+            state.copy(accounts = accounts)
+        }
+    }
+
+    fun upsertCategory(category: Category) {
+        _uiState.update { state ->
+            val existing = state.categories.indexOfFirst { it.id == category.id }
+            val categories = if (existing >= 0) {
+                state.categories.toMutableList().also { it[existing] = category }
+            } else {
+                state.categories + category
+            }
+            state.copy(categories = categories)
+        }
+    }
+
+    fun upsertSubcategory(parentId: String, sub: Category) {
+        _uiState.update { state ->
+            val categories = state.categories.map { cat ->
+                if (cat.id != parentId) cat
+                else {
+                    val existingChildren = cat.children ?: emptyList()
+                    val newChildren = if (existingChildren.any { it.id == sub.id }) {
+                        existingChildren.map { if (it.id == sub.id) sub else it }
+                    } else {
+                        existingChildren + sub
+                    }
+                    cat.copy(children = newChildren)
+                }
+            }
+            state.copy(categories = categories)
+        }
     }
 
     // MARK: - Private
