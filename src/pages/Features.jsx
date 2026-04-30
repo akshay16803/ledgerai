@@ -584,6 +584,82 @@ function FeatureImage({ src, alt, aspect = '16 / 10' }) {
 }
 
 // ---- Modern feature carousel ------------------------------------------------
+function SlideStage({ slide, activeKey, reduceMotion }) {
+  const Icon = slide.icon;
+  const Mockup = slide.Mockup;
+  return (
+    <div style={{ position: 'relative' }}>
+      <div
+        key={activeKey}
+        style={{
+          padding: 'clamp(28px, 4vw, 56px)',
+          animation: reduceMotion ? 'none' : 'spentyFadeSlide 500ms ease both',
+        }}
+      >
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
+          gap: 'clamp(28px, 4vw, 56px)',
+          alignItems: 'center',
+        }}>
+          {/* Text column */}
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 18 }}>
+              <div style={{
+                width: 36, height: 36, borderRadius: 10,
+                background: 'rgba(52,199,89,0.12)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                color: 'var(--brand-primary)',
+              }}>
+                <Icon size={20} weight="duotone" />
+              </div>
+              <span className="mono" style={{
+                fontSize: 11, letterSpacing: '0.22em', textTransform: 'uppercase',
+                color: 'var(--text-muted)', fontWeight: 600,
+              }}>{slide.label} · {slide.eyebrow}</span>
+            </div>
+            <h3 style={{
+              fontSize: 'clamp(1.6rem, 2.5vw, 2.4rem)', fontWeight: 500,
+              lineHeight: 1.15, letterSpacing: '-0.02em', marginBottom: 16,
+              color: 'var(--text-primary)',
+              fontFamily: 'var(--font-heading)',
+            }}>
+              {slide.title}
+            </h3>
+            <p style={{
+              fontSize: 16, color: 'var(--text-secondary)',
+              lineHeight: 1.65, marginBottom: 22,
+            }}>
+              {slide.body}
+            </p>
+            <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: 4 }}>
+              {slide.bullets.map((b, bi) => (
+                <li key={bi} style={{
+                  display: 'flex', alignItems: 'flex-start', gap: 10,
+                  padding: '6px 0', fontSize: 14,
+                  color: 'var(--text-secondary)', lineHeight: 1.5,
+                }}>
+                  <CheckCircle size={18} weight="fill" style={{ color: 'var(--success)', flexShrink: 0, marginTop: 1 }} />
+                  <span>{b}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+          {/* Mockup column */}
+          <div style={{ position: 'relative' }}>
+            <div style={{
+              borderRadius: 12, overflow: 'hidden',
+              transform: 'translateZ(0)',
+            }}>
+              <Mockup />
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function FeatureCarousel({ slides }) {
   const [active, setActive] = useState(0);
   const [paused, setPaused] = useState(false);
@@ -746,85 +822,8 @@ function FeatureCarousel({ slides }) {
           }} />
         </div>
 
-        {/* Slides track */}
-        <div style={{ position: 'relative' }}>
-          {slides.map((slide, i) => {
-            const Icon = slide.icon;
-            const Mockup = slide.Mockup;
-            const isActive = i === active;
-            return (
-              <div
-                key={slide.label}
-                aria-hidden={!isActive}
-                style={{
-                  display: isActive ? 'block' : 'none',
-                  padding: 'clamp(28px, 4vw, 56px)',
-                  animation: isActive && !reduceMotion ? 'spentyFadeSlide 500ms ease both' : 'none',
-                }}
-              >
-                <div style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
-                  gap: 'clamp(28px, 4vw, 56px)',
-                  alignItems: 'center',
-                }}>
-                  {/* Text column */}
-                  <div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 18 }}>
-                      <div style={{
-                        width: 36, height: 36, borderRadius: 10,
-                        background: 'rgba(52,199,89,0.12)',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        color: 'var(--brand-primary)',
-                      }}>
-                        <Icon size={20} weight="duotone" />
-                      </div>
-                      <span className="mono" style={{
-                        fontSize: 11, letterSpacing: '0.22em', textTransform: 'uppercase',
-                        color: 'var(--text-muted)', fontWeight: 600,
-                      }}>{slide.label} · {slide.eyebrow}</span>
-                    </div>
-                    <h3 style={{
-                      fontSize: 'clamp(1.6rem, 2.5vw, 2.4rem)', fontWeight: 500,
-                      lineHeight: 1.15, letterSpacing: '-0.02em', marginBottom: 16,
-                      color: 'var(--text-primary)',
-                      fontFamily: 'var(--font-heading)',
-                    }}>
-                      {slide.title}
-                    </h3>
-                    <p style={{
-                      fontSize: 16, color: 'var(--text-secondary)',
-                      lineHeight: 1.65, marginBottom: 22,
-                    }}>
-                      {slide.body}
-                    </p>
-                    <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: 4 }}>
-                      {slide.bullets.map((b, bi) => (
-                        <li key={bi} style={{
-                          display: 'flex', alignItems: 'flex-start', gap: 10,
-                          padding: '6px 0', fontSize: 14,
-                          color: 'var(--text-secondary)', lineHeight: 1.5,
-                        }}>
-                          <CheckCircle size={18} weight="fill" style={{ color: 'var(--success)', flexShrink: 0, marginTop: 1 }} />
-                          <span>{b}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                  {/* Mockup column */}
-                  <div style={{ position: 'relative' }}>
-                    <div style={{
-                      borderRadius: 12, overflow: 'hidden',
-                      transform: 'translateZ(0)',
-                    }}>
-                      <Mockup />
-                    </div>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
+        {/* Slide stage — render only the active slide so key={active} drives a clean fade per change */}
+        <SlideStage slide={slides[active]} activeKey={active} reduceMotion={reduceMotion} />
 
         {/* Footer controls */}
         <div style={{
