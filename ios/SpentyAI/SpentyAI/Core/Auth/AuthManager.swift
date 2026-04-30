@@ -81,9 +81,13 @@ final class AuthManager {
 
     func checkSession() async {
         #if targetEnvironment(simulator)
+        // Simulator auto-login is OPT-IN. Default behaviour matches a real
+        // device (new install = no token = LoginView). Devs who still want
+        // the auto-login convenience can pass SIMULATOR_AUTOLOGIN=true via
+        // Xcode scheme env vars.
+        let simAutoLoginOn = ProcessInfo.processInfo.environment["SIMULATOR_AUTOLOGIN"] == "true"
         let existingToken = KeychainHelper.read(key: KeychainHelper.sessionTokenKey)
-        // If no valid token exists, or we have an offline fallback token, auto-login via dev endpoint
-        if existingToken == nil || existingToken?.hasPrefix("sim-offline-token-") == true {
+        if simAutoLoginOn && (existingToken == nil || existingToken?.hasPrefix("sim-offline-token-") == true) {
             isLoading = true
             defer { isLoading = false }
             do {
@@ -92,6 +96,13 @@ final class AuthManager {
                 print("[SimulatorBypass] Auto-login failed: \(error)")
                 isAuthenticated = false
             }
+            return
+        }
+        // Always clean up any leftover offline-fallback tokens so they do not
+        // resurrect across launches when SIMULATOR_AUTOLOGIN is off.
+        if !simAutoLoginOn, let token = existingToken, token.hasPrefix("sim-offline-token-") {
+            KeychainHelper.delete(key: KeychainHelper.sessionTokenKey)
+            isAuthenticated = false
             return
         }
         #endif
@@ -124,11 +135,13 @@ final class AuthManager {
             KeychainHelper.delete(key: KeychainHelper.sessionTokenKey)
 
             #if targetEnvironment(simulator)
-            // Token was stale — try auto-login again
-            do {
-                try await simulatorAutoLogin()
-            } catch {
-                print("[SimulatorBypass] Re-login failed: \(error)")
+            // Token was stale — try auto-login again ONLY if dev opted in.
+            if ProcessInfo.processInfo.environment["SIMULATOR_AUTOLOGIN"] == "true" {
+                do {
+                    try await simulatorAutoLogin()
+                } catch {
+                    print("[SimulatorBypass] Re-login failed: \(error)")
+                }
             }
             #endif
         }
