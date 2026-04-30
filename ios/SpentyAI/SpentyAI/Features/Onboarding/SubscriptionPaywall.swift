@@ -128,19 +128,15 @@ struct SubscriptionPaywall: View {
                 .padding(.horizontal, 12)
 
             // Feature pills
-            VStack(alignment: .leading, spacing: 12) {
-                featureRow(icon: "envelope.badge.fill",
-                           text: "SpentyAI reads Gmail & SMS to detect transactions — just review and categorise")
+            VStack(alignment: .leading, spacing: 14) {
                 featureRow(icon: "brain.head.profile",
-                           text: "Tell the AI about any expense or income — it records it and asks for any missing details")
-                featureRow(icon: "chart.bar.fill",
-                           text: "All bank accounts & wallets in one clear dashboard")
-                featureRow(icon: "arrow.triangle.2.circlepath",
-                           text: "Never miss an EMI — upcoming payments tracked for you")
+                           text: "AI-powered transaction insights")
                 featureRow(icon: "chart.line.uptrend.xyaxis",
-                           text: "Beautiful reports showing exactly where your money goes")
+                           text: "Advanced cash flow analytics")
+                featureRow(icon: "envelope.badge.fill",
+                           text: "Automatic email & SMS sync")
                 featureRow(icon: "doc.text.fill",
-                           text: "Create GST invoices & manage your business spending")
+                           text: "Unlimited invoices & reports")
             }
             .padding(.top, 4)
         }
