@@ -1,8 +1,8 @@
 import SwiftUI
 
 // MARK: - Onboarding Slide Card View
-// Full-screen card: gradient top half with SwiftUI mock screen, white bottom half with text.
-// CTA slide (id 8) uses a fully dark premium layout.
+// Full-screen dark gradient + ambient glow + floating glass card with mock screen.
+// White text on dark. SF Symbols only (no emoji — renders as "?" in simulator).
 
 struct OnboardingSlideCardView: View {
     let slide: OnboardingSlide
@@ -13,101 +13,105 @@ struct OnboardingSlideCardView: View {
             ctaSlide
         } else {
             GeometryReader { geo in
-                VStack(spacing: 0) {
-                    gradientSection(geo: geo)
-                    textSection
-                }
+                regularSlide(geo: geo)
             }
-            .background(Color.spentyBgPrimary)
         }
     }
 
-    // MARK: - Gradient Top Section
+    // MARK: - Regular Slide
 
-    private func gradientSection(geo: GeometryProxy) -> some View {
-        let h = geo.size.height * 0.48
-        let mockW = geo.size.width * 0.70
-        let mockH = mockW * 1.6
-
-        return ZStack {
-            // Gradient fill
+    private func regularSlide(geo: GeometryProxy) -> some View {
+        ZStack {
+            // ── 1. Full-screen gradient ──────────────────────────────────
             LinearGradient(
                 colors: slide.gradientColors.isEmpty
-                    ? [Color.spentyPrimary, Color.spentyPrimary.opacity(0.5)]
+                    ? [Color.black, Color(hex: 0x1C1C1E)]
                     : slide.gradientColors,
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
 
-            // Soft decorative circles
+            // ── 2. Ambient glow orbs ─────────────────────────────────────
             Circle()
-                .fill(.white.opacity(0.06))
-                .frame(width: 180, height: 180)
-                .offset(x: 90, y: -70)
-            Circle()
-                .fill(.white.opacity(0.04))
+                .fill(slide.accentColor.opacity(0.42))
                 .frame(width: 240, height: 240)
-                .offset(x: -110, y: 60)
+                .blur(radius: 72)
+                .offset(x: -70, y: -(geo.size.height * 0.20))
 
-            // Mock app screen
-            mockScreen(for: slide.id)
-                .frame(width: mockW, height: mockH)
-                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                .shadow(color: .black.opacity(0.28), radius: 22, x: 0, y: 12)
-                .offset(y: 12) // nudge down so it peeks into text section
-        }
-        .frame(height: h)
-        .clipped()
-    }
+            Circle()
+                .fill(slide.accentColor.opacity(0.22))
+                .frame(width: 170, height: 170)
+                .blur(radius: 52)
+                .offset(x: 110, y: geo.size.height * 0.06)
 
-    // MARK: - Text Bottom Section
+            // ── 3. Content column ────────────────────────────────────────
+            VStack(spacing: 0) {
+                Spacer().frame(height: 60)
 
-    private var textSection: some View {
-        VStack(alignment: .leading, spacing: 13) {
-            // Category badge
-            if !slide.categoryLabel.isEmpty {
-                Text(slide.categoryLabel)
-                    .font(.system(size: 10, weight: .bold))
-                    .tracking(1.4)
-                    .foregroundStyle(slide.accentColor)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(slide.accentColor.opacity(0.12))
-                    .clipShape(Capsule())
-            }
+                // Glass card containing mock screen
+                glassCard(geo: geo)
+                    .frame(height: geo.size.height * 0.40)
+                    .padding(.horizontal, 22)
 
-            // Title
-            Text(lang.s(slide.titleKey))
-                .font(.system(size: 23, weight: .bold, design: .rounded))
-                .foregroundStyle(Color.spentyTextPrimary)
-                .lineSpacing(2)
-                .fixedSize(horizontal: false, vertical: true)
+                // Text block
+                VStack(alignment: .leading, spacing: 10) {
+                    if !slide.categoryLabel.isEmpty {
+                        Text(slide.categoryLabel)
+                            .font(.system(size: 10, weight: .bold))
+                            .tracking(1.5)
+                            .foregroundStyle(slide.accentColor)
+                            .padding(.horizontal, 11)
+                            .padding(.vertical, 5)
+                            .background(slide.accentColor.opacity(0.18))
+                            .clipShape(Capsule())
+                    }
 
-            // Description
-            Text(lang.s(slide.descriptionKey))
-                .font(.system(size: 14.5))
-                .foregroundStyle(Color.spentyTextSecondary)
-                .lineSpacing(5)
-                .fixedSize(horizontal: false, vertical: true)
+                    Text(lang.s(slide.titleKey))
+                        .font(.system(size: 24, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .lineSpacing(2)
+                        .fixedSize(horizontal: false, vertical: true)
 
-            // Stat pills
-            if !slide.statPills.isEmpty {
-                HStack(spacing: 8) {
-                    ForEach(slide.statPills, id: \.self) { pill in
-                        statPillView(pill)
+                    Text(lang.s(slide.descriptionKey))
+                        .font(.system(size: 14))
+                        .foregroundStyle(.white.opacity(0.70))
+                        .lineSpacing(4)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    if !slide.statPills.isEmpty {
+                        HStack(spacing: 8) {
+                            ForEach(slide.statPills, id: \.self) { pill in
+                                statPillView(pill)
+                            }
+                        }
+                        .padding(.top, 2)
                     }
                 }
-                .padding(.top, 2)
-            }
+                .padding(.horizontal, 28)
+                .padding(.top, 22)
 
-            Spacer()
+                Spacer(minLength: 110)
+            }
         }
-        .padding(.horizontal, 26)
-        .padding(.top, 28)
-        .padding(.bottom, 108) // clearance for overlaid dots + button
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Color.spentyBgPrimary)
     }
+
+    // MARK: - Glass Card
+
+    private func glassCard(geo: GeometryProxy) -> some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .fill(.white.opacity(0.07))
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(.white.opacity(0.16), lineWidth: 1)
+
+            mockScreen(for: slide.id)
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .padding(10)
+        }
+        .shadow(color: .black.opacity(0.38), radius: 26, x: 0, y: 14)
+    }
+
+    // MARK: - Stat Pill
 
     private func statPillView(_ text: String) -> some View {
         HStack(spacing: 5) {
@@ -116,10 +120,11 @@ struct OnboardingSlideCardView: View {
             Text(text)
                 .font(.system(size: 12, weight: .medium))
         }
-        .foregroundStyle(slide.accentColor)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(slide.accentColor.opacity(0.10))
+        .foregroundStyle(.white.opacity(0.92))
+        .padding(.horizontal, 11)
+        .padding(.vertical, 7)
+        .background(.white.opacity(0.11))
+        .overlay(Capsule().stroke(.white.opacity(0.22), lineWidth: 1))
         .clipShape(Capsule())
     }
 
@@ -166,7 +171,6 @@ struct OnboardingSlideCardView: View {
     private var emailMock: some View {
         VStack(spacing: 0) {
             statusBar
-            // Screen title row
             HStack {
                 Text("Transactions")
                     .font(.system(size: 11, weight: .bold))
@@ -177,7 +181,6 @@ struct OnboardingSlideCardView: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 7)
-            // Auto-sync banner
             HStack(spacing: 5) {
                 Image(systemName: "checkmark.circle.fill")
                     .font(.system(size: 9))
@@ -191,25 +194,31 @@ struct OnboardingSlideCardView: View {
             .background(Color.spentyPrimary.opacity(0.09))
             Divider()
             VStack(spacing: 0) {
-                txnRow(icon: "🛵", name: "Zomato", cat: "Food & Dining", amt: "−₹847", pos: false)
+                txnRow(sfSymbol: "fork.knife", iconColor: .orange,
+                       name: "Zomato", cat: "Food & Dining", amt: "−₹847", pos: false)
                 Divider().padding(.leading, 40)
-                txnRow(icon: "📦", name: "Amazon Pay", cat: "Shopping", amt: "−₹2,199", pos: false)
+                txnRow(sfSymbol: "bag.fill", iconColor: Color(hex: 0x0A84FF),
+                       name: "Amazon Pay", cat: "Shopping", amt: "−₹2,199", pos: false)
                 Divider().padding(.leading, 40)
-                txnRow(icon: "🏦", name: "HDFC Salary", cat: "Income", amt: "+₹45,000", pos: true)
+                txnRow(sfSymbol: "indianrupeesign.circle.fill", iconColor: Color.spentyPrimary,
+                       name: "HDFC Salary", cat: "Income", amt: "+₹45,000", pos: true)
                 Divider().padding(.leading, 40)
-                txnRow(icon: "🎬", name: "Netflix", cat: "Entertainment", amt: "−₹649", pos: false)
+                txnRow(sfSymbol: "play.rectangle.fill", iconColor: Color(hex: 0xE50914),
+                       name: "Netflix", cat: "Entertainment", amt: "−₹649", pos: false)
             }
             Spacer()
         }
     }
 
-    private func txnRow(icon: String, name: String, cat: String, amt: String, pos: Bool) -> some View {
+    private func txnRow(sfSymbol: String, iconColor: Color, name: String,
+                        cat: String, amt: String, pos: Bool) -> some View {
         HStack(spacing: 8) {
-            Text(icon)
-                .font(.system(size: 15))
-                .frame(width: 28, height: 28)
-                .background(Color.gray.opacity(0.08))
-                .clipShape(Circle())
+            ZStack {
+                Circle().fill(iconColor.opacity(0.15)).frame(width: 28, height: 28)
+                Image(systemName: sfSymbol)
+                    .font(.system(size: 11))
+                    .foregroundStyle(iconColor)
+            }
             VStack(alignment: .leading, spacing: 1) {
                 Text(name).font(.system(size: 9, weight: .semibold))
                 Text(cat).font(.system(size: 7)).foregroundStyle(.secondary)
@@ -219,8 +228,9 @@ struct OnboardingSlideCardView: View {
                 Text(amt)
                     .font(.system(size: 9, weight: .bold))
                     .foregroundStyle(pos ? Color.spentyPrimary : Color.spentyError)
-                Text("📧")
-                    .font(.system(size: 8))
+                Image(systemName: "envelope.fill")
+                    .font(.system(size: 7))
+                    .foregroundStyle(Color(hex: 0x0A84FF).opacity(0.55))
             }
         }
         .padding(.horizontal, 12)
@@ -244,7 +254,6 @@ struct OnboardingSlideCardView: View {
             .padding(.vertical, 7)
             Divider()
             VStack(spacing: 10) {
-                // User bubble
                 HStack {
                     Spacer()
                     Text("How much did I spend on food this month?")
@@ -256,11 +265,12 @@ struct OnboardingSlideCardView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 12))
                         .frame(maxWidth: 130)
                 }
-                // AI bubble
                 HStack(alignment: .top, spacing: 6) {
                     ZStack {
                         Circle().fill(Color.spentyPrimary.opacity(0.15)).frame(width: 20, height: 20)
-                        Text("🤖").font(.system(size: 11))
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 9))
+                            .foregroundStyle(Color.spentyPrimary)
                     }
                     VStack(alignment: .leading, spacing: 3) {
                         Text("₹4,230 on food")
@@ -269,8 +279,7 @@ struct OnboardingSlideCardView: View {
                             .font(.system(size: 8))
                             .foregroundStyle(.secondary)
                         HStack(spacing: 4) {
-                            Image(systemName: "flame.fill")
-                                .foregroundStyle(.orange)
+                            Image(systemName: "flame.fill").foregroundStyle(.orange)
                             Text("Zomato is your top spend")
                                 .foregroundStyle(Color.spentyWarning)
                         }
@@ -281,7 +290,6 @@ struct OnboardingSlideCardView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 12))
                     Spacer()
                 }
-                // Second exchange
                 HStack {
                     Spacer()
                     Text("Am I saving enough?")
@@ -295,7 +303,6 @@ struct OnboardingSlideCardView: View {
             }
             .padding(10)
             Spacer()
-            // Input bar
             HStack {
                 Text("Ask anything...")
                     .font(.system(size: 9))
@@ -319,7 +326,6 @@ struct OnboardingSlideCardView: View {
     private var dashboardMock: some View {
         VStack(spacing: 0) {
             statusBar
-            // Balance header
             VStack(spacing: 3) {
                 Text("Total Balance")
                     .font(.system(size: 9))
@@ -339,16 +345,18 @@ struct OnboardingSlideCardView: View {
                 LinearGradient(colors: [Color(hex: 0x3634A3), Color(hex: 0x5E5CE6)],
                                startPoint: .topLeading, endPoint: .bottomTrailing)
             )
-            // Mini bar chart
             VStack(spacing: 4) {
-                Text("Monthly Spend").font(.system(size: 8, weight: .medium)).foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 12)
+                Text("Monthly Spend")
+                    .font(.system(size: 8, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12)
                 HStack(alignment: .bottom, spacing: 5) {
                     ForEach([0.42, 0.56, 0.48, 0.70, 0.62, 0.88], id: \.self) { h in
                         RoundedRectangle(cornerRadius: 3)
                             .fill(h == 0.88
                                   ? Color(hex: 0x5E5CE6)
-                                  : Color(hex: 0x5E5CE6).opacity(0.3))
+                                  : Color(hex: 0x5E5CE6).opacity(0.30))
                             .frame(height: CGFloat(h) * 34)
                             .frame(maxWidth: .infinity)
                     }
@@ -358,35 +366,43 @@ struct OnboardingSlideCardView: View {
             }
             .padding(.top, 8)
             Divider().padding(.horizontal, 12).padding(.top, 6)
-            // Accounts
             VStack(spacing: 0) {
-                acctRow(emoji: "🏦", name: "HDFC Bank", balance: "₹82,400", frac: 0.66)
+                acctRow(sfSymbol: "building.columns.fill", iconColor: Color(hex: 0x5E5CE6),
+                        name: "HDFC Bank", balance: "₹82,400", frac: 0.66)
                 Divider().padding(.leading, 40)
-                acctRow(emoji: "💳", name: "Paytm Wallet", balance: "₹42,160", frac: 0.34)
+                acctRow(sfSymbol: "creditcard.fill", iconColor: Color(hex: 0x0A84FF),
+                        name: "Paytm Wallet", balance: "₹42,160", frac: 0.34)
             }
-            .padding(.horizontal, 12).padding(.top, 4)
+            .padding(.horizontal, 12)
+            .padding(.top, 4)
             Spacer()
         }
     }
 
-    private func acctRow(emoji: String, name: String, balance: String, frac: CGFloat) -> some View {
+    private func acctRow(sfSymbol: String, iconColor: Color, name: String,
+                         balance: String, frac: CGFloat) -> some View {
         HStack(spacing: 8) {
-            Text(emoji).font(.system(size: 15))
-            VStack(alignment: .leading, spacing: 2) {
+            ZStack {
+                Circle().fill(iconColor.opacity(0.15)).frame(width: 26, height: 26)
+                Image(systemName: sfSymbol)
+                    .font(.system(size: 10))
+                    .foregroundStyle(iconColor)
+            }
+            VStack(alignment: .leading, spacing: 3) {
                 Text(name).font(.system(size: 8, weight: .semibold))
-                GeometryReader { g in
-                    ZStack(alignment: .leading) {
-                        RoundedRectangle(cornerRadius: 2).fill(Color.spentyBorder).frame(height: 3)
-                        RoundedRectangle(cornerRadius: 2).fill(Color(hex: 0x5E5CE6))
-                            .frame(width: g.size.width * frac, height: 3)
-                    }
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(Color.spentyBorder)
+                        .frame(width: 60, height: 3)
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(iconColor)
+                        .frame(width: 60 * frac, height: 3)
                 }
-                .frame(height: 3).frame(maxWidth: 60)
             }
             Spacer()
             Text(balance)
                 .font(.system(size: 9, weight: .bold))
-                .foregroundStyle(Color(hex: 0x5E5CE6))
+                .foregroundStyle(iconColor)
         }
         .padding(.vertical, 8)
     }
@@ -404,12 +420,11 @@ struct OnboardingSlideCardView: View {
             }
             .padding(.horizontal, 12).padding(.vertical, 7)
             Divider()
-            // Donut chart
             ZStack {
-                Circle().trim(from: 0,    to: 0.38).stroke(Color.spentyPrimary,      lineWidth: 15).rotationEffect(.degrees(-90))
-                Circle().trim(from: 0.38, to: 0.62).stroke(Color(hex: 0x0A84FF),    lineWidth: 15).rotationEffect(.degrees(-90))
-                Circle().trim(from: 0.62, to: 0.80).stroke(Color.spentyWarning,     lineWidth: 15).rotationEffect(.degrees(-90))
-                Circle().trim(from: 0.80, to: 1.00).stroke(Color(hex: 0xFF6B35),    lineWidth: 15).rotationEffect(.degrees(-90))
+                Circle().trim(from: 0,    to: 0.38).stroke(Color.spentyPrimary,   lineWidth: 15).rotationEffect(.degrees(-90))
+                Circle().trim(from: 0.38, to: 0.62).stroke(Color(hex: 0x0A84FF), lineWidth: 15).rotationEffect(.degrees(-90))
+                Circle().trim(from: 0.62, to: 0.80).stroke(Color.spentyWarning,  lineWidth: 15).rotationEffect(.degrees(-90))
+                Circle().trim(from: 0.80, to: 1.00).stroke(Color(hex: 0xFF6B35), lineWidth: 15).rotationEffect(.degrees(-90))
                 VStack(spacing: 1) {
                     Text("₹11,030").font(.system(size: 11, weight: .bold))
                     Text("total spent").font(.system(size: 8)).foregroundStyle(.secondary)
@@ -417,12 +432,11 @@ struct OnboardingSlideCardView: View {
             }
             .frame(width: 66, height: 66)
             .padding(.vertical, 10)
-            // Legend
             VStack(spacing: 5) {
-                legendRow(c: Color.spentyPrimary,   cat: "Food",     pct: "38%", amt: "₹4,190")
-                legendRow(c: Color(hex: 0x0A84FF),  cat: "Shopping", pct: "24%", amt: "₹2,647")
-                legendRow(c: Color.spentyWarning,   cat: "Bills",    pct: "18%", amt: "₹1,985")
-                legendRow(c: Color(hex: 0xFF6B35),  cat: "Other",    pct: "20%", amt: "₹2,208")
+                legendRow(c: Color.spentyPrimary,  cat: "Food",     pct: "38%", amt: "₹4,190")
+                legendRow(c: Color(hex: 0x0A84FF), cat: "Shopping", pct: "24%", amt: "₹2,647")
+                legendRow(c: Color.spentyWarning,  cat: "Bills",    pct: "18%", amt: "₹1,985")
+                legendRow(c: Color(hex: 0xFF6B35), cat: "Other",    pct: "20%", amt: "₹2,208")
             }
             .padding(.horizontal, 12)
             Spacer()
@@ -451,14 +465,12 @@ struct OnboardingSlideCardView: View {
             }
             .padding(.horizontal, 12).padding(.vertical, 7)
             Divider()
-            // Summary row
             HStack(spacing: 6) {
-                summaryCard(label: "Income",  val: "₹45k",  c: Color.spentyPrimary)
-                summaryCard(label: "Expense", val: "₹33k",  c: Color.spentyError)
-                summaryCard(label: "Saved",   val: "₹12k",  c: Color(hex: 0x0A84FF))
+                summaryCard(label: "Income",  val: "₹45k", c: Color.spentyPrimary)
+                summaryCard(label: "Expense", val: "₹33k", c: Color.spentyError)
+                summaryCard(label: "Saved",   val: "₹12k", c: Color(hex: 0x0A84FF))
             }
             .padding(.horizontal, 12).padding(.top, 7)
-            // Line chart
             VStack(spacing: 3) {
                 Text("Spending Trend")
                     .font(.system(size: 8, weight: .medium)).foregroundStyle(.secondary)
@@ -482,7 +494,6 @@ struct OnboardingSlideCardView: View {
             }
             .padding(.horizontal, 12).padding(.top, 8)
             Divider().padding(.horizontal, 12).padding(.top, 5)
-            // Category bars
             VStack(spacing: 4) {
                 Text("Top Categories")
                     .font(.system(size: 8, weight: .medium)).foregroundStyle(.secondary)
@@ -532,29 +543,43 @@ struct OnboardingSlideCardView: View {
                 Text("May 2025").font(.system(size: 8)).foregroundStyle(.secondary)
             }
             .padding(.horizontal, 12).padding(.vertical, 7)
-            // Outflow banner
             HStack(spacing: 5) {
-                Image(systemName: "arrow.down.circle.fill").font(.system(size: 9)).foregroundStyle(Color.spentyError)
-                Text("₹28,149 going out this month").font(.system(size: 8, weight: .semibold)).foregroundStyle(Color.spentyError)
+                Image(systemName: "arrow.down.circle.fill")
+                    .font(.system(size: 9)).foregroundStyle(Color.spentyError)
+                Text("₹28,149 going out this month")
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundStyle(Color.spentyError)
             }
-            .frame(maxWidth: .infinity).padding(.vertical, 6).background(Color.spentyError.opacity(0.09))
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 6)
+            .background(Color.spentyError.opacity(0.09))
             Divider()
             VStack(spacing: 0) {
-                upcomingRow(emoji: "🏠", name: "SBI Home EMI",   amt: "₹22,500", date: "5 May",  urgent: true)
+                upcomingRow(sfSymbol: "house.fill", iconColor: Color.spentyError,
+                            name: "SBI Home EMI", amt: "₹22,500", date: "5 May", urgent: true)
                 Divider().padding(.leading, 40)
-                upcomingRow(emoji: "🎬", name: "Netflix",         amt: "₹649",   date: "8 May",  urgent: false)
+                upcomingRow(sfSymbol: "play.rectangle.fill", iconColor: Color(hex: 0xE50914),
+                            name: "Netflix", amt: "₹649", date: "8 May", urgent: false)
                 Divider().padding(.leading, 40)
-                upcomingRow(emoji: "🛡️", name: "LIC Insurance",  amt: "₹3,200", date: "10 May", urgent: false)
+                upcomingRow(sfSymbol: "shield.fill", iconColor: Color(hex: 0x0A84FF),
+                            name: "LIC Insurance", amt: "₹3,200", date: "10 May", urgent: false)
                 Divider().padding(.leading, 40)
-                upcomingRow(emoji: "💪", name: "Cult.fit",        amt: "₹1,800", date: "15 May", urgent: false)
+                upcomingRow(sfSymbol: "figure.run", iconColor: Color.spentyPrimary,
+                            name: "Cult.fit", amt: "₹1,800", date: "15 May", urgent: false)
             }
             Spacer()
         }
     }
 
-    private func upcomingRow(emoji: String, name: String, amt: String, date: String, urgent: Bool) -> some View {
+    private func upcomingRow(sfSymbol: String, iconColor: Color, name: String,
+                             amt: String, date: String, urgent: Bool) -> some View {
         HStack(spacing: 8) {
-            Text(emoji).font(.system(size: 14)).frame(width: 26)
+            ZStack {
+                Circle().fill(iconColor.opacity(0.15)).frame(width: 26, height: 26)
+                Image(systemName: sfSymbol)
+                    .font(.system(size: 10))
+                    .foregroundStyle(iconColor)
+            }
             VStack(alignment: .leading, spacing: 1) {
                 Text(name).font(.system(size: 9, weight: .semibold))
                 Text(date).font(.system(size: 7)).foregroundStyle(.secondary)
@@ -575,26 +600,30 @@ struct OnboardingSlideCardView: View {
             HStack {
                 Text("Invoices").font(.system(size: 10, weight: .bold))
                 Spacer()
-                Image(systemName: "plus.circle.fill").foregroundStyle(Color(hex: 0x0062CC)).font(.system(size: 13))
+                Image(systemName: "plus.circle.fill")
+                    .foregroundStyle(Color(hex: 0x0062CC))
+                    .font(.system(size: 13))
             }
             .padding(.horizontal, 12).padding(.vertical, 7)
             Divider()
-            // Invoice card
             VStack(spacing: 0) {
-                // Card header
                 HStack {
                     VStack(alignment: .leading, spacing: 1) {
-                        Text("INVOICE").font(.system(size: 8, weight: .bold)).foregroundStyle(Color(hex: 0x0062CC))
-                        Text("#INV-2025-024").font(.system(size: 7)).foregroundStyle(.secondary)
+                        Text("INVOICE")
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundStyle(Color(hex: 0x0062CC))
+                        Text("#INV-2025-024")
+                            .font(.system(size: 7)).foregroundStyle(.secondary)
                     }
                     Spacer()
-                    Text("✓ Sent")
+                    Text("Sent")
                         .font(.system(size: 8, weight: .semibold)).foregroundStyle(.white)
                         .padding(.horizontal, 8).padding(.vertical, 3)
                         .background(Color.spentyPrimary)
                         .clipShape(Capsule())
                 }
-                .padding(10).background(Color(hex: 0x0062CC).opacity(0.07))
+                .padding(10)
+                .background(Color(hex: 0x0062CC).opacity(0.07))
                 Divider()
                 VStack(spacing: 5) {
                     HStack {
@@ -617,7 +646,9 @@ struct OnboardingSlideCardView: View {
                     HStack {
                         Text("Total").font(.system(size: 9, weight: .bold))
                         Spacer()
-                        Text("₹17,700").font(.system(size: 11, weight: .bold)).foregroundStyle(Color(hex: 0x0062CC))
+                        Text("₹17,700")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(Color(hex: 0x0062CC))
                     }
                 }
                 .padding(10)
@@ -627,7 +658,6 @@ struct OnboardingSlideCardView: View {
             .shadow(color: .black.opacity(0.07), radius: 5, x: 0, y: 2)
             .padding(10)
             Spacer()
-            // Action row
             HStack(spacing: 8) {
                 Label("Share", systemImage: "square.and.arrow.up")
                     .font(.system(size: 8, weight: .medium))
@@ -651,15 +681,24 @@ struct OnboardingSlideCardView: View {
     private var ctaSlide: some View {
         ZStack {
             LinearGradient(
-                colors: [Color(hex: 0x111111), Color(hex: 0x1C1C1E)],
-                startPoint: .topLeading, endPoint: .bottomTrailing
+                colors: slide.gradientColors.isEmpty
+                    ? [Color(hex: 0x111111), Color(hex: 0x1C1C1E)]
+                    : slide.gradientColors,
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
             )
-            .ignoresSafeArea()
-            // Ambient glow circles
-            Circle().fill(Color(hex: 0xD4AF37).opacity(0.10))
-                .frame(width: 300, height: 300).offset(x: -80, y: -230)
-            Circle().fill(Color(hex: 0xD4AF37).opacity(0.06))
-                .frame(width: 220, height: 220).offset(x: 140, y: 160)
+
+            // Ambient gold glows
+            Circle()
+                .fill(Color(hex: 0xD4AF37).opacity(0.20))
+                .frame(width: 300, height: 300)
+                .blur(radius: 80)
+                .offset(x: -80, y: -220)
+            Circle()
+                .fill(Color(hex: 0xD4AF37).opacity(0.12))
+                .frame(width: 220, height: 220)
+                .blur(radius: 60)
+                .offset(x: 140, y: 160)
 
             VStack(spacing: 26) {
                 Spacer()
@@ -696,9 +735,12 @@ struct OnboardingSlideCardView: View {
                 .padding(.horizontal, 36)
                 // Pricing nudge
                 HStack(spacing: 7) {
-                    Image(systemName: "tag.fill").font(.system(size: 12)).foregroundStyle(Color(hex: 0xD4AF37))
+                    Image(systemName: "tag.fill")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Color(hex: 0xD4AF37))
                     Text("Plans from just ₹99/month")
-                        .font(.system(size: 14, weight: .medium)).foregroundStyle(.white.opacity(0.8))
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.8))
                 }
                 .padding(.horizontal, 22).padding(.vertical, 12)
                 .background(.white.opacity(0.08))

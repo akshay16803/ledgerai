@@ -5,12 +5,12 @@ import SwiftUI
 struct OnboardingSlide: Identifiable {
     let id: Int
     let symbolName: String
-    let accentColor: Color
+    let accentColor: Color       // Bright glow / pill colour
     let titleKey: String
     let descriptionKey: String
-    let categoryLabel: String   // Short badge label (e.g. "AUTO TRACKING")
-    let statPills: [String]     // 2 short benefit bullets
-    let gradientColors: [Color] // Top-section gradient
+    let categoryLabel: String
+    let statPills: [String]
+    let gradientColors: [Color]  // Deep dark full-screen gradient
     let isCTASlide: Bool
 
     init(
@@ -24,15 +24,15 @@ struct OnboardingSlide: Identifiable {
         gradientColors: [Color] = [],
         isCTASlide: Bool = false
     ) {
-        self.id = id
-        self.symbolName = symbolName
-        self.accentColor = accentColor
-        self.titleKey = titleKey
+        self.id            = id
+        self.symbolName    = symbolName
+        self.accentColor   = accentColor
+        self.titleKey      = titleKey
         self.descriptionKey = descriptionKey
         self.categoryLabel = categoryLabel
-        self.statPills = statPills
+        self.statPills     = statPills
         self.gradientColors = gradientColors
-        self.isCTASlide = isCTASlide
+        self.isCTASlide    = isCTASlide
     }
 }
 
@@ -41,43 +41,43 @@ struct OnboardingSlide: Identifiable {
 extension OnboardingSlide {
     static let allSlides: [OnboardingSlide] = [
 
-        // 1 – Email Auto-Tracking
+        // 1 – Email Auto-Tracking  →  Royal Blue
         OnboardingSlide(
             id: 1,
             symbolName: "envelope.badge.fill",
-            accentColor: Color(hex: 0x0A84FF),
+            accentColor: Color(hex: 0x4A8EFF),
             titleKey: "onboarding_slide1_title",
             descriptionKey: "onboarding_slide1_desc",
             categoryLabel: "AUTO TRACKING",
             statPills: ["Zero typing", "Auto-detected"],
-            gradientColors: [Color(hex: 0x0A84FF), Color(hex: 0x00C7BE)]
+            gradientColors: [Color(hex: 0x060E2E), Color(hex: 0x0D2B6B), Color(hex: 0x1565C0)]
         ),
 
-        // 2 – AI Accounting
+        // 2 – AI Finance Buddy  →  Forest Green
         OnboardingSlide(
             id: 2,
             symbolName: "brain.head.profile",
-            accentColor: Color.spentyPrimary,
+            accentColor: Color(hex: 0x30D158),
             titleKey: "onboarding_slide2_title",
             descriptionKey: "onboarding_slide2_desc",
             categoryLabel: "AI ASSISTANT",
             statPills: ["Instant answers", "No jargon"],
-            gradientColors: [Color(hex: 0x248A3D), Color(hex: 0x34C759)]
+            gradientColors: [Color(hex: 0x041A0C), Color(hex: 0x0A3D1E), Color(hex: 0x1B6B38)]
         ),
 
-        // 3 – Dashboard
+        // 3 – Dashboard  →  Deep Violet
         OnboardingSlide(
             id: 3,
             symbolName: "chart.bar.fill",
-            accentColor: Color(hex: 0x5E5CE6),
+            accentColor: Color(hex: 0xBF5AF2),
             titleKey: "onboarding_slide3_title",
             descriptionKey: "onboarding_slide3_desc",
             categoryLabel: "DASHBOARD",
             statPills: ["All accounts", "Real-time"],
-            gradientColors: [Color(hex: 0x3634A3), Color(hex: 0x5E5CE6)]
+            gradientColors: [Color(hex: 0x0D0026), Color(hex: 0x2A0A5E), Color(hex: 0x4527A0)]
         ),
 
-        // 4 – AI Insights
+        // 4 – AI Insights  →  Sunset Orange
         OnboardingSlide(
             id: 4,
             symbolName: "bubble.left.and.bubble.right.fill",
@@ -86,46 +86,46 @@ extension OnboardingSlide {
             descriptionKey: "onboarding_slide4_desc",
             categoryLabel: "SMART INSIGHTS",
             statPills: ["Ask anything", "Like a CA"],
-            gradientColors: [Color(hex: 0xFF6B35), Color(hex: 0xFF9F0A)]
+            gradientColors: [Color(hex: 0x200500), Color(hex: 0x6B1A00), Color(hex: 0xBF3200)]
         ),
 
-        // 5 – Reports
+        // 5 – Reports  →  Emerald
         OnboardingSlide(
             id: 5,
             symbolName: "chart.line.uptrend.xyaxis",
-            accentColor: Color(hex: 0x34C759),
+            accentColor: Color(hex: 0x34D399),
             titleKey: "onboarding_slide5_title",
             descriptionKey: "onboarding_slide5_desc",
             categoryLabel: "REPORTS",
             statPills: ["Visual charts", "Any period"],
-            gradientColors: [Color(hex: 0x1B5E20), Color(hex: 0x2E7D32)]
+            gradientColors: [Color(hex: 0x001E18), Color(hex: 0x004A38), Color(hex: 0x00785A)]
         ),
 
-        // 6 – Mandate & Cash Flow
+        // 6 – Cash Flow  →  Deep Indigo
         OnboardingSlide(
             id: 6,
             symbolName: "arrow.triangle.2.circlepath",
-            accentColor: Color(hex: 0x0062CC),
+            accentColor: Color(hex: 0x818CF8),
             titleKey: "onboarding_slide6_title",
             descriptionKey: "onboarding_slide6_desc",
             categoryLabel: "CASH FLOW",
             statPills: ["Never miss EMI", "Plan ahead"],
-            gradientColors: [Color(hex: 0x0040DD), Color(hex: 0x32ADE6)]
+            gradientColors: [Color(hex: 0x06082E), Color(hex: 0x111566), Color(hex: 0x1E2BA0)]
         ),
 
-        // 7 – Invoices & Vendors
+        // 7 – Invoices  →  Ocean Blue
         OnboardingSlide(
             id: 7,
             symbolName: "doc.text.fill",
-            accentColor: Color(hex: 0x0062CC),
+            accentColor: Color(hex: 0x38BDF8),
             titleKey: "onboarding_slide7_title",
             descriptionKey: "onboarding_slide7_desc",
             categoryLabel: "INVOICING",
             statPills: ["GST ready", "Professional"],
-            gradientColors: [Color(hex: 0x004E92), Color(hex: 0x000428)]
+            gradientColors: [Color(hex: 0x001929), Color(hex: 0x003456), Color(hex: 0x015A8C)]
         ),
 
-        // 8 – CTA
+        // 8 – CTA  →  Dark Gold
         OnboardingSlide(
             id: 8,
             symbolName: "crown.fill",
@@ -134,7 +134,7 @@ extension OnboardingSlide {
             descriptionKey: "onboarding_slide8_desc",
             categoryLabel: "GO PREMIUM",
             statPills: ["7 days free", "Cancel anytime"],
-            gradientColors: [Color(hex: 0x1C1C1E), Color(hex: 0x2C2C2E)],
+            gradientColors: [Color(hex: 0x0A0800), Color(hex: 0x1C1500), Color(hex: 0x2E2200)],
             isCTASlide: true
         ),
     ]

@@ -2,19 +2,12 @@ import SwiftUI
 
 struct OnboardingSliderView: View {
 
-    // MARK: - Environment
     @Environment(LocalizationManager.self) var lang
-
-    // MARK: - State
     @State private var currentSlide = 0
-
-    // MARK: - Callbacks
     var onComplete: () -> Void
 
     private let slides = OnboardingSlide.allSlides
-    private let brandPrimary = Color.spentyPrimary
 
-    // MARK: - Body
     var body: some View {
         ZStack(alignment: .top) {
 
@@ -28,7 +21,7 @@ struct OnboardingSliderView: View {
             .tabViewStyle(.page(indexDisplayMode: .never))
             .ignoresSafeArea()
 
-            // ── Skip button (top-right, over gradient) ───────────────
+            // ── Skip button ───────────────────────────────────────────
             if currentSlide < slides.count - 1 {
                 HStack {
                     Spacer()
@@ -36,10 +29,10 @@ struct OnboardingSliderView: View {
                         withAnimation(.easeInOut(duration: 0.3)) { onComplete() }
                     }
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.white.opacity(0.85))
                     .padding(.horizontal, 16)
                     .padding(.vertical, 8)
-                    .background(.black.opacity(0.18), in: Capsule())
+                    .background(.white.opacity(0.12), in: Capsule())
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 56)
@@ -47,10 +40,10 @@ struct OnboardingSliderView: View {
                 .animation(.easeInOut(duration: 0.2), value: currentSlide)
             }
 
-            // ── Bottom controls (dots + button) ──────────────────────
+            // ── Bottom controls ───────────────────────────────────────
             VStack {
                 Spacer()
-                VStack(spacing: 18) {
+                VStack(spacing: 20) {
                     dotIndicators
                     bottomButton
                         .padding(.horizontal, 24)
@@ -60,17 +53,17 @@ struct OnboardingSliderView: View {
         }
     }
 
-    // MARK: - Dot Indicators (active = wide capsule)
+    // MARK: - Dot Indicators
     private var dotIndicators: some View {
         HStack(spacing: 6) {
-            ForEach(slides.indices, id: \.self) { index in
-                if index == currentSlide {
+            ForEach(slides.indices, id: \.self) { i in
+                if i == currentSlide {
                     Capsule()
-                        .fill(brandPrimary)
+                        .fill(.white)
                         .frame(width: 22, height: 7)
                 } else {
                     Circle()
-                        .fill(Color.primary.opacity(0.18))
+                        .fill(.white.opacity(0.28))
                         .frame(width: 7, height: 7)
                 }
             }
@@ -80,35 +73,34 @@ struct OnboardingSliderView: View {
 
     // MARK: - Bottom Button
     private var bottomButton: some View {
-        Group {
-            if currentSlide == slides.count - 1 {
-                Button(lang.s("onboarding_get_started")) { onComplete() }
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 17)
-                    .background(
-                        LinearGradient(
-                            colors: [Color(hex: 0xD4AF37), Color(hex: 0xB8860B)],
-                            startPoint: .leading, endPoint: .trailing
-                        ),
-                        in: RoundedRectangle(cornerRadius: 16)
-                    )
-                    .shadow(color: Color(hex: 0xD4AF37).opacity(0.4), radius: 12, x: 0, y: 6)
+        let isCTA = currentSlide == slides.count - 1
+
+        return Button(isCTA ? lang.s("onboarding_get_started") : lang.s("onboarding_next")) {
+            if isCTA {
+                onComplete()
             } else {
-                Button(lang.s("onboarding_next")) {
-                    withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
-                        currentSlide += 1
-                    }
+                withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                    currentSlide += 1
                 }
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 17)
-                .background(brandPrimary, in: RoundedRectangle(cornerRadius: 16))
-                .shadow(color: brandPrimary.opacity(0.35), radius: 10, x: 0, y: 5)
             }
         }
+        .font(.system(size: 17, weight: .semibold))
+        .foregroundStyle(isCTA ? Color(hex: 0x1A1400) : .white)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 17)
+        .background(
+            isCTA
+            ? AnyShapeStyle(LinearGradient(
+                colors: [Color(hex: 0xF5D020), Color(hex: 0xD4AF37)],
+                startPoint: .leading, endPoint: .trailing))
+            : AnyShapeStyle(Color.white.opacity(0.18)),
+            in: RoundedRectangle(cornerRadius: 16)
+        )
+        .overlay(
+            isCTA ? nil :
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(.white.opacity(0.3), lineWidth: 1)
+        )
     }
 }
 
