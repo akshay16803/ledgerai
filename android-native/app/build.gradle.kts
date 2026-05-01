@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -24,21 +26,17 @@ android {
         buildConfigField("String", "API_BASE_URL", "\"https://api.spentyai.com\"")
     }
 
-    // Load keystore creds from android-native/secrets/keystore.properties (committed for internal builds);
-    // fall back to env vars for CI.
-    val keystoreProps = java.util.Properties().apply {
-        val f = rootProject.file("secrets/keystore.properties")
-        if (f.exists()) load(f.inputStream())
-    }
-    fun ksProp(key: String, env: String): String? =
-        keystoreProps.getProperty(key) ?: System.getenv(env)
-
     signingConfigs {
         create("release") {
-            ksProp("storeFile", "KEYSTORE_PATH")?.let { storeFile = rootProject.file(it) }
-            storePassword = ksProp("storePassword", "KEYSTORE_PASSWORD") ?: ""
-            keyAlias = ksProp("keyAlias", "KEY_ALIAS") ?: "spentyai-release-key"
-            keyPassword = ksProp("keyPassword", "KEY_PASSWORD") ?: ""
+            val keystoreProps = Properties()
+            val f = rootProject.file("secrets/keystore.properties")
+            if (f.exists()) f.inputStream().use { keystoreProps.load(it) }
+            fun pick(k: String, env: String): String? =
+                keystoreProps.getProperty(k) ?: System.getenv(env)
+            pick("storeFile", "KEYSTORE_PATH")?.let { storeFile = rootProject.file(it) }
+            storePassword = pick("storePassword", "KEYSTORE_PASSWORD") ?: ""
+            keyAlias = pick("keyAlias", "KEY_ALIAS") ?: "spentyai-release-key"
+            keyPassword = pick("keyPassword", "KEY_PASSWORD") ?: ""
         }
     }
 
