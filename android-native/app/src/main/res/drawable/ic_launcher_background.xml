@@ -4,7 +4,8 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
+    <!-- iOS app icon background color, sampled from appicon.png corners. -->
     <path
-        android:fillColor="#FF34C759"
+        android:fillColor="#FF436955"
         android:pathData="M0,0h108v108H0z" />
 </vector>
