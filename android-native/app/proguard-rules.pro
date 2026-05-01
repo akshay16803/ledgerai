@@ -28,7 +28,11 @@
 }
 
 # Retrofit's Kotlin support reads continuations via reflection.
--keepclassmembers,allowshrinking,allowobfuscation class kotlin.coroutines.Continuation
+# Under R8 full mode (AGP 8.x default) the *class* itself must be kept —
+# otherwise its generic signature is stripped and Retrofit can't introspect
+# `Continuation<Response<T>>`, which manifests as
+# `java.lang.Class cannot be cast to java.lang.reflect.ParameterizedType`.
+-keep,allowobfuscation,allowshrinking class kotlin.coroutines.Continuation
 -if interface * { @retrofit2.http.* <methods>; }
 -keep,allowobfuscation interface <1>
 
