@@ -8,13 +8,16 @@ plugins {
 
 android {
     namespace = "com.spentyai.app"
-    compileSdk = 34
+    // Play Console now requires apps target API level 35+ (Android 15) for new
+    // releases. Bump compileSdk + targetSdk together so we get the matching
+    // platform headers + behavior changes.
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "com.spentyai.app"
         minSdk = 24
-        targetSdk = 34
-        versionCode = 1
+        targetSdk = 35
+        versionCode = 2
         versionName = "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
