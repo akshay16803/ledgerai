@@ -79,6 +79,8 @@ import com.spentyai.app.core.theme.SpentyType
 import com.spentyai.app.features.billing.BillingRepository
 import com.spentyai.app.features.billing.BillingViewModel
 import com.spentyai.app.features.billing.FallbackPlan
+import com.spentyai.app.features.billing.LifetimeOfferManager
+import com.spentyai.app.features.billing.LifetimeOfferSheet
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -93,6 +95,36 @@ fun SubscriptionPaywallScreen(
     var showPromoSection by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
+
+    // Lifetime offer intercept — onboarding parity with iOS BillingView. New
+    // users select Monthly and tap Continue → if the 1-hour offer window is
+    // still open, show the offer sheet (with countdown) before charging.
+    var showLifetimeOffer by remember { mutableStateOf(false) }
+    if (showLifetimeOffer) {
+        LifetimeOfferSheet(
+            showTimer = true,
+            offerPrice = viewModel.displayPrice(BillingRepository.PRODUCT_LIFETIME_OFFER)
+                ?: BillingRepository.lifetimeOfferPlan.displayPrice,
+            isPurchasing = state.purchasingProductId == BillingRepository.PRODUCT_LIFETIME_OFFER,
+            onAccept = {
+                val activity = context as? android.app.Activity
+                if (activity != null) viewModel.purchaseLifetimeOffer(activity)
+            },
+            onDecline = {
+                // Apple guideline 3.1.1 / Play UX parity: declining the offer
+                // closes the sheet without auto-charging the Monthly plan the
+                // user originally selected. They can tap Continue again.
+                showLifetimeOffer = false
+            }
+        )
+    }
+
+    // Auto-close the sheet on successful Lifetime purchase.
+    LaunchedEffect(state.isLifetime) {
+        if (state.isLifetime && showLifetimeOffer) {
+            showLifetimeOffer = false
+        }
+    }
 
     // Surface restore-purchase result as a snackbar.
     LaunchedEffect(state.restoreMessage) {
@@ -185,12 +217,18 @@ fun SubscriptionPaywallScreen(
                 // Subscribe button
                 Button(
                     onClick = {
-                        val activity = context as? android.app.Activity
-                        val productDetails = state.productDetailsList.find { it.productId == selectedProductId }
-                        if (activity != null && productDetails != null) {
-                            viewModel.purchaseSubscription(productDetails, activity)
+                        val isMonthly = selectedProductId == BillingRepository.PRODUCT_MONTHLY
+                        val offerOpen = LifetimeOfferManager.shared(context).isOfferActive
+                        if (isMonthly && offerOpen && !state.isLifetime) {
+                            showLifetimeOffer = true
                         } else {
-                            viewModel.purchasePlan(selectedProductId)
+                            val activity = context as? android.app.Activity
+                            val productDetails = state.productDetailsList.find { it.productId == selectedProductId }
+                            if (activity != null && productDetails != null) {
+                                viewModel.purchaseSubscription(productDetails, activity)
+                            } else {
+                                viewModel.purchasePlan(selectedProductId)
+                            }
                         }
                     },
                     enabled = !state.isPurchasing,

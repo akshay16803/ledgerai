@@ -51,6 +51,19 @@ data class BillingUiState(
     val restoreMessage: String? = null
 ) {
     val isSubscribed: Boolean get() = currentStatus?.isActive == true
+
+    /**
+     * True if the user already owns Lifetime (either the regular or the
+     * discounted offer SKU). Mirrors iOS BillingViewModel.isLifetime —
+     * suppresses the upgrade banner and the Monthly intercept once the user
+     * has bought the one-time product.
+     */
+    val isLifetime: Boolean
+        get() {
+            val pid = currentStatus?.productId ?: return false
+            return pid == BillingRepository.PRODUCT_LIFETIME ||
+                    pid == BillingRepository.PRODUCT_LIFETIME_OFFER
+        }
 }
 
 class BillingViewModel(
@@ -131,10 +144,18 @@ class BillingViewModel(
                 .build()
         )
 
-        // Lifetime is a non-renewable in-app purchase, must be queried separately.
+        // Lifetime products are non-renewable in-app purchases and must be queried
+        // as INAPP. iOS exposes two lifetime SKUs: the regular full-price product
+        // (used for the strikethrough on the subscriber-upgrade banner) and the
+        // 50%-off offer (the actual SKU we charge when the user accepts the
+        // intercept sheet or the upgrade banner).
         val inAppList = listOf(
             QueryProductDetailsParams.Product.newBuilder()
-                .setProductId("com.spentyai.lifetime")
+                .setProductId(BillingRepository.PRODUCT_LIFETIME)
+                .setProductType(BillingClient.ProductType.INAPP)
+                .build(),
+            QueryProductDetailsParams.Product.newBuilder()
+                .setProductId(BillingRepository.PRODUCT_LIFETIME_OFFER)
                 .setProductType(BillingClient.ProductType.INAPP)
                 .build()
         )
@@ -357,6 +378,49 @@ class BillingViewModel(
     fun isCurrentPlan(productId: String): Boolean {
         val status = _uiState.value.currentStatus
         return status?.isActive == true && status.productId == productId
+    }
+
+    /**
+     * Returns the localized Play-Store-formatted price for the given product
+     * id, or null if Play Billing hasn't loaded the product yet. Mirrors iOS
+     * BillingViewModel.displayPrice(for:) — used by the upgrade banner and the
+     * lifetime offer sheet so users see the exact charge before confirming.
+     */
+    fun displayPrice(productId: String): String? {
+        val details = _uiState.value.productDetailsList.firstOrNull { it.productId == productId }
+            ?: return null
+        // SUBS products carry pricing inside subscriptionOfferDetails; INAPP
+        // products (lifetime, lifetime_offer) carry it on oneTimePurchaseOfferDetails.
+        val oneTime = details.oneTimePurchaseOfferDetails?.formattedPrice
+        if (oneTime != null) return oneTime
+        return details.subscriptionOfferDetails
+            ?.firstOrNull()
+            ?.pricingPhases
+            ?.pricingPhaseList
+            ?.lastOrNull()
+            ?.formattedPrice
+    }
+
+    /**
+     * Purchase the discounted lifetime offer SKU. Used by both the
+     * non-subscriber Monthly intercept sheet (showTimer=true) and the
+     * existing-subscriber upgrade banner (showTimer=false). If Play hasn't
+     * loaded the product yet we surface an error rather than silently
+     * charging the wrong SKU.
+     */
+    fun purchaseLifetimeOffer(activity: Activity) {
+        val details = _uiState.value.productDetailsList
+            .firstOrNull { it.productId == BillingRepository.PRODUCT_LIFETIME_OFFER }
+        if (details == null) {
+            _uiState.update {
+                it.copy(
+                    showError = true,
+                    errorMessage = "Lifetime offer is loading. Please try again in a moment."
+                )
+            }
+            return
+        }
+        purchaseSubscription(details, activity)
     }
 
     /** Legacy shim — used by paywall before Play details are loaded. */

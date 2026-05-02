@@ -69,11 +69,34 @@ data class FallbackPlan(
 class BillingRepository(private val apiClient: ApiClient) {
 
     companion object {
+        // iOS-aligned SKU identifiers. Lifetime is the regular full-price product;
+        // lifetime_offer is the discounted \u20B94,999 SKU shown via the upgrade banner
+        // and the timed offer sheet (matches BillingViewModel.swift line 48-49).
+        const val PRODUCT_MONTHLY        = "com.spentyai.monthly"
+        const val PRODUCT_QUARTERLY      = "com.spentyai.quarterly"
+        const val PRODUCT_YEARLY         = "com.spentyai.yearly"
+        const val PRODUCT_LIFETIME       = "com.spentyai.lifetime"
+        const val PRODUCT_LIFETIME_OFFER = "com.spentyai.lifetime_offer"
+
         val fallbackPlans = listOf(
-            FallbackPlan("Monthly", "com.spentyai.monthly", "\u20B9199", "/month", "Flexible, cancel anytime", null),
-            FallbackPlan("Quarterly", "com.spentyai.quarterly", "\u20B9449", "/3 months", "Save 25% vs monthly", null),
-            FallbackPlan("Yearly", "com.spentyai.yearly", "\u20B91,499", "/year", "Save 37% -- most popular", "Popular"),
-            FallbackPlan("Lifetime", "com.spentyai.lifetime", "\u20B94,999", "one-time", "Pay once, use forever", "Best Value")
+            // Regular Lifetime price reflects the full-price SKU on iOS (\u20B99,999).
+            // The \u20B94,999 lifetime_offer is shown separately via the upgrade banner /
+            // intercept sheet and is not iterated as its own card.
+            FallbackPlan("Monthly", PRODUCT_MONTHLY, "\u20B9199", "/month", "Flexible, cancel anytime", null),
+            FallbackPlan("Quarterly", PRODUCT_QUARTERLY, "\u20B9449", "/3 months", "Save 25% vs monthly", null),
+            FallbackPlan("Yearly", PRODUCT_YEARLY, "\u20B91,499", "/year", "Save 37% -- most popular", "Popular"),
+            FallbackPlan("Lifetime", PRODUCT_LIFETIME, "\u20B99,999", "one-time", "Pay once, use forever", "Best Value")
+        )
+
+        /** The 50%-off lifetime SKU. Surfaced via the upgrade banner and the
+         *  Monthly-intercept timed offer sheet \u2014 never as its own plan card. */
+        val lifetimeOfferPlan = FallbackPlan(
+            name = "Lifetime",
+            productId = PRODUCT_LIFETIME_OFFER,
+            displayPrice = "\u20B94,999",
+            perUnit = "one-time",
+            subtitle = "Pay once, use forever",
+            badge = "50% OFF"
         )
     }
 

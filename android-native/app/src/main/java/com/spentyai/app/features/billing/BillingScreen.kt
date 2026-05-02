@@ -2,6 +2,7 @@ package com.spentyai.app.features.billing
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -41,6 +42,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
@@ -50,6 +56,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.spentyai.app.core.theme.SpentyError
 import com.spentyai.app.core.theme.SpentyPrimary
 import com.spentyai.app.core.theme.SpentyStyle
@@ -66,6 +73,50 @@ fun BillingScreen(
 ) {
     val state by viewModel.uiState.collectAsState()
     val uriHandler = LocalUriHandler.current
+    val context = LocalContext.current
+
+    // Lifetime-offer modal state. Two modes:
+    //  - Upgrade mode (existing subscriber tapped the gold banner) → no timer
+    //  - Intercept mode (non-subscriber tapped Subscribe on Monthly while the
+    //    1-hour offer window is still open) → countdown
+    var showLifetimeOffer by remember { mutableStateOf(false) }
+    var isUpgradeMode by remember { mutableStateOf(false) }
+
+    if (showLifetimeOffer) {
+        LifetimeOfferSheet(
+            showTimer = !isUpgradeMode,
+            offerPrice = viewModel.displayPrice(BillingRepository.PRODUCT_LIFETIME_OFFER)
+                ?: BillingRepository.lifetimeOfferPlan.displayPrice,
+            // Drive isPurchasing from VM state so the spinner clears when Play
+            // returns USER_CANCELED and the user can retry from the same sheet.
+            isPurchasing = state.purchasingProductId == BillingRepository.PRODUCT_LIFETIME_OFFER,
+            onAccept = {
+                val activity = context as? android.app.Activity
+                if (activity != null) viewModel.purchaseLifetimeOffer(activity)
+                // Sheet stays open while Play dialog is up; once the purchase
+                // resolves (success or cancel), the listener flips
+                // purchasingProductId and the sheet either closes (success
+                // routes through isLifetime change) or shows the CTA again.
+            },
+            onDecline = {
+                // Mirror iOS guideline 3.1.1 behavior: declining the offer just
+                // closes the sheet — we do NOT auto-charge the Monthly plan the
+                // user originally tapped. They can tap Subscribe again if they
+                // want to commit to Monthly.
+                showLifetimeOffer = false
+                isUpgradeMode = false
+            }
+        )
+    }
+
+    // When the lifetime purchase succeeds, the VM's currentStatus updates and
+    // isLifetime becomes true — close the sheet automatically.
+    LaunchedEffect(state.isLifetime) {
+        if (state.isLifetime && showLifetimeOffer) {
+            showLifetimeOffer = false
+            isUpgradeMode = false
+        }
+    }
 
     LaunchedEffect(Unit) {
         viewModel.loadAll()
@@ -169,6 +220,21 @@ fun BillingScreen(
                     }
                 }
 
+                // Subscriber upgrade banner — only when user has an active SUBS
+                // (Monthly/Quarterly/Yearly) and has not bought Lifetime yet.
+                // Mirrors iOS BillingView.subscriberUpgradeBanner.
+                if (state.isSubscribed && !state.isLifetime) {
+                    SubscriberUpgradeBanner(
+                        regularPrice = viewModel.displayPrice(BillingRepository.PRODUCT_LIFETIME),
+                        offerPrice = viewModel.displayPrice(BillingRepository.PRODUCT_LIFETIME_OFFER)
+                            ?: BillingRepository.lifetimeOfferPlan.displayPrice,
+                        onUpgrade = {
+                            isUpgradeMode = true
+                            showLifetimeOffer = true
+                        }
+                    )
+                }
+
                 // Plan cards
                 Column {
                     Text("Choose a Plan", style = SpentyType.Title3)
@@ -178,7 +244,27 @@ fun BillingScreen(
                             plan = plan,
                             isCurrent = viewModel.isCurrentPlan(plan.productId),
                             isPurchasing = state.purchasingProductId == plan.productId,
-                            onSubscribe = { viewModel.purchasePlan(plan.productId) },
+                            onSubscribe = {
+                                // iOS-parity intercept: a non-lifetime user tapping
+                                // Subscribe on Monthly while the 1-hour offer window
+                                // is still open sees the lifetime offer first. All
+                                // other taps go straight to Play Billing.
+                                val isMonthly = plan.productId == BillingRepository.PRODUCT_MONTHLY
+                                val offerOpen = LifetimeOfferManager.shared(context).isOfferActive
+                                if (isMonthly && offerOpen && !state.isLifetime) {
+                                    isUpgradeMode = false
+                                    showLifetimeOffer = true
+                                } else {
+                                    val activity = context as? android.app.Activity
+                                    val productDetails = state.productDetailsList
+                                        .firstOrNull { it.productId == plan.productId }
+                                    if (activity != null && productDetails != null) {
+                                        viewModel.purchaseSubscription(productDetails, activity)
+                                    } else {
+                                        viewModel.purchasePlan(plan.productId)
+                                    }
+                                }
+                            },
                             isAnyPurchasing = state.isPurchasing
                         )
                         Spacer(modifier = Modifier.height(12.dp))
@@ -427,6 +513,121 @@ private fun formatPaymentAmount(amount: Double?, currency: String?): String {
         String.format("\u20B9%.0f", rupees)
     } else {
         String.format("\u20B9%.2f", rupees)
+    }
+}
+
+/**
+ * Gold-bordered upgrade-to-Lifetime banner shown to users who already have an
+ * active subscription (Monthly / Quarterly / Yearly). Tapping the CTA opens
+ * the LifetimeOfferSheet in upgrade mode (no timer). Mirrors iOS
+ * BillingView.subscriberUpgradeBanner exactly — same gold accent (#D4AF37),
+ * same strikethrough regular price + bold offer price + 50% OFF pill.
+ */
+@Composable
+private fun SubscriberUpgradeBanner(
+    regularPrice: String?,
+    offerPrice: String,
+    onUpgrade: () -> Unit
+) {
+    val gold = Color(0xFFD4AF37)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .shadow(2.dp, RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(16.dp))
+            .background(MaterialTheme.colorScheme.surface)
+            .border(1.5.dp, gold.copy(alpha = 0.3f), RoundedCornerShape(16.dp))
+            .padding(18.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        // SUBSCRIBER EXCLUSIVE pill
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            modifier = Modifier
+                .clip(RoundedCornerShape(50))
+                .background(gold.copy(alpha = 0.12f))
+                .padding(horizontal = 10.dp, vertical = 5.dp)
+        ) {
+            Icon(
+                Icons.Default.Verified,
+                contentDescription = null,
+                tint = gold,
+                modifier = Modifier.size(10.dp)
+            )
+            Text(
+                "SUBSCRIBER EXCLUSIVE",
+                style = SpentyType.Caption2.copy(
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.8.sp
+                ),
+                color = gold
+            )
+        }
+
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
+                "Upgrade to Lifetime Access",
+                style = SpentyType.Title3.copy(fontWeight = FontWeight.Bold)
+            )
+            Text(
+                "Pay once and never subscribe again.",
+                style = SpentyType.Subheadline,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+
+        Row(
+            verticalAlignment = Alignment.Bottom,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            // Strikethrough regular price (only if Play has loaded it)
+            regularPrice?.let {
+                Text(
+                    it,
+                    style = SpentyType.Subheadline.copy(textDecoration = TextDecoration.LineThrough),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            // Bold offer price
+            Text(
+                offerPrice,
+                style = SpentyType.Title2.copy(fontWeight = FontWeight.Bold),
+                color = SpentyPrimary
+            )
+            Text(
+                "50% OFF",
+                style = SpentyType.Caption1.copy(fontWeight = FontWeight.Bold),
+                color = Color.White,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(50))
+                    .background(Color(0xFFFF9500))
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+            )
+        }
+
+        // Primary CTA — full width, primary green, price right-aligned
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(SpentyPrimary)
+                .clickable(onClick = onUpgrade)
+                .padding(horizontal = 20.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                "Upgrade Now",
+                style = SpentyType.Headline,
+                color = Color.White,
+                modifier = Modifier.weight(1f)
+            )
+            Text(
+                offerPrice,
+                style = SpentyType.Headline,
+                color = Color.White
+            )
+        }
     }
 }
 
