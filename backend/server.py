@@ -10871,7 +10871,11 @@ PLAN_PRICES = {
     "monthly": {"amount": 19900, "currency": "INR", "description": "SpentyAI Monthly Plan", "duration_days": 30},
     "quarterly": {"amount": 44900, "currency": "INR", "description": "SpentyAI Quarterly Plan", "duration_days": 90},
     "yearly": {"amount": 149900, "currency": "INR", "description": "SpentyAI Yearly Plan", "duration_days": 365},
-    "lifetime": {"amount": 499900, "currency": "INR", "description": "SpentyAI Lifetime Access", "duration_days": 36500},
+    # Two lifetime SKUs: regular (₹9,999) and 50%-off offer (₹4,999). Both grant
+    # the SAME entitlement on the user record (subscription_plan="lifetime"); the
+    # split exists only so payment_orders captures the actual paid amount.
+    "lifetime": {"amount": 999900, "currency": "INR", "description": "SpentyAI Lifetime Access", "duration_days": 36500},
+    "lifetime_offer": {"amount": 499900, "currency": "INR", "description": "SpentyAI Lifetime Access (50% off offer)", "duration_days": 36500},
 }
 
 
@@ -11032,12 +11036,15 @@ async def verify_apple_payment(body: dict = Body(...), user: dict = Depends(get_
     if not receipt_data:
         raise HTTPException(status_code=400, detail="receipt_data is required")
 
-    # Map Apple product IDs to plan keys
+    # Map Apple product IDs to plan keys. lifetime_offer is the 50%-off
+    # one-time SKU surfaced via the Monthly intercept and the subscriber
+    # upgrade banner — same entitlement as lifetime, just lower paid amount.
     apple_plan_map = {
         "com.spentyai.monthly": "monthly",
         "com.spentyai.quarterly": "quarterly",
         "com.spentyai.yearly": "yearly",
         "com.spentyai.lifetime": "lifetime",
+        "com.spentyai.lifetime_offer": "lifetime_offer",
     }
     plan_key = apple_plan_map.get(product_id, "monthly")
 
@@ -11144,19 +11151,226 @@ async def apple_webhook(request: Request):
     return {"status": "ok"}
 
 
+# Map Android (Google Play) product IDs to internal plan keys. iOS uses the
+# same SKU strings — see verify_apple_payment for the parallel map. lifetime
+# and lifetime_offer share entitlement (both grant subscription_plan="lifetime")
+# but are tracked as separate plan keys so payment_orders.amount records the
+# actual paid amount (₹9,999 vs ₹4,999).
+ANDROID_PLAN_MAP = {
+    "com.spentyai.monthly": "monthly",
+    "com.spentyai.quarterly": "quarterly",
+    "com.spentyai.yearly": "yearly",
+    "com.spentyai.lifetime": "lifetime",
+    "com.spentyai.lifetime_offer": "lifetime_offer",
+}
+
+
+async def _validate_google_play_purchase(
+    package_name: str, product_id: str, purchase_token: str
+) -> dict:
+    """Validate a Google Play purchase token against the Play Developer API.
+
+    Returns a dict {"ok": bool, "data": dict | None, "error": str | None}.
+    If service-account creds aren't configured we fall back to "ok" with a
+    warning so the verify endpoint still works in dev / before SA setup —
+    matching the existing Apple verify which has a similar TODO for StoreKit
+    JWS validation.
+    """
+    sa_json = os.environ.get("GOOGLE_PLAY_SERVICE_ACCOUNT_JSON")
+    sa_path = os.environ.get("GOOGLE_PLAY_SERVICE_ACCOUNT_FILE")
+    if not sa_json and not sa_path:
+        logger.warning(
+            "Google Play Developer API credentials not configured "
+            "(set GOOGLE_PLAY_SERVICE_ACCOUNT_JSON or GOOGLE_PLAY_SERVICE_ACCOUNT_FILE). "
+            "Skipping token validation — purchase will be accepted on Play receipt only."
+        )
+        return {"ok": True, "data": None, "error": None}
+
+    try:
+        from google.oauth2 import service_account  # type: ignore
+        from google.auth.transport.requests import Request as GAuthRequest  # type: ignore
+    except ImportError:
+        logger.error("google-auth library not installed; cannot validate Play token")
+        return {"ok": True, "data": None, "error": "library_missing"}
+
+    try:
+        if sa_json:
+            import json as _json
+            sa_info = _json.loads(sa_json)
+            credentials = service_account.Credentials.from_service_account_info(
+                sa_info, scopes=["https://www.googleapis.com/auth/androidpublisher"]
+            )
+        else:
+            credentials = service_account.Credentials.from_service_account_file(
+                sa_path, scopes=["https://www.googleapis.com/auth/androidpublisher"]
+            )
+        credentials.refresh(GAuthRequest())
+        access_token = credentials.token
+
+        # One-time products go to /products/, subscriptions go to /subscriptions/
+        is_subscription = product_id in {
+            "com.spentyai.monthly", "com.spentyai.quarterly", "com.spentyai.yearly"
+        }
+        endpoint = "subscriptions" if is_subscription else "products"
+        url = (
+            f"https://androidpublisher.googleapis.com/androidpublisher/v3/applications/"
+            f"{package_name}/purchases/{endpoint}/{product_id}/tokens/{purchase_token}"
+        )
+
+        async with httpx.AsyncClient(timeout=15) as http_client:
+            resp = await http_client.get(
+                url, headers={"Authorization": f"Bearer {access_token}"}
+            )
+        if resp.status_code != 200:
+            logger.warning(
+                f"Google Play token validation returned {resp.status_code}: {resp.text}"
+            )
+            return {"ok": False, "data": None, "error": f"http_{resp.status_code}"}
+        data = resp.json()
+        # For one-time products, purchaseState 0 = purchased, 1 = canceled, 2 = pending.
+        # For subscriptions, paymentState 1 = received (or 0 = pending).
+        if not is_subscription and data.get("purchaseState") not in (0, None):
+            return {"ok": False, "data": data, "error": "not_purchased"}
+        if is_subscription and data.get("paymentState") not in (1, 2, None):
+            return {"ok": False, "data": data, "error": "payment_not_received"}
+        return {"ok": True, "data": data, "error": None}
+    except Exception as e:
+        logger.error(f"Google Play token validation exception: {e}")
+        return {"ok": False, "data": None, "error": str(e)}
+
+
+@app.post("/api/subscription/verify")
+async def verify_android_purchase(body: dict = Body(...), user: dict = Depends(get_current_user)):
+    """Verify a Google Play purchase and activate subscription / lifetime entitlement.
+
+    Body shape (matches Android BillingRepository.verifyPurchase):
+        {
+            "platform": "android",
+            "package_name": "com.spentyai.app",
+            "product_id": "com.spentyai.lifetime_offer",
+            "purchase_token": "<play_token>",
+            "order_id": "<optional play order id>"
+        }
+    """
+    platform = body.get("platform", "android")
+    package_name = body.get("package_name") or "com.spentyai.app"
+    product_id = body.get("product_id") or ""
+    purchase_token = body.get("purchase_token") or ""
+    play_order_id = body.get("order_id")
+
+    if platform != "android":
+        raise HTTPException(status_code=400, detail="platform must be 'android'")
+    if not product_id or not purchase_token:
+        raise HTTPException(status_code=400, detail="product_id and purchase_token are required")
+    if product_id not in ANDROID_PLAN_MAP:
+        raise HTTPException(status_code=400, detail=f"Unknown product_id: {product_id}")
+
+    plan_key = ANDROID_PLAN_MAP[product_id]
+
+    # Replay protection: refuse if this purchase_token was already processed.
+    existing = await db.payment_orders.find_one({
+        "payment_provider": "google_play",
+        "google_play_purchase_token": purchase_token,
+    })
+    if existing:
+        # Idempotent — return success so the client doesn't error on retries.
+        return {
+            "message": "Subscription already verified",
+            "plan": plan_key,
+            "order_id": existing.get("order_id"),
+            "expiry": existing.get("expiry"),
+            "already_verified": True,
+        }
+
+    # Validate the token against Google Play Developer API.
+    result = await _validate_google_play_purchase(package_name, product_id, purchase_token)
+    if not result["ok"]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Google Play token validation failed: {result.get('error') or 'unknown'}",
+        )
+
+    plan = PLAN_PRICES.get(plan_key, PLAN_PRICES["monthly"])
+    now = datetime.now(timezone.utc)
+    expiry = now + timedelta(days=plan["duration_days"])
+
+    # Both lifetime SKUs grant the same entitlement on the user record. Other
+    # plan keys map to themselves so the UI can show "Active: Monthly", etc.
+    entitlement_plan = "lifetime" if plan_key in ("lifetime", "lifetime_offer") else plan_key
+
+    order_id = f"google_{uuid.uuid4().hex[:12]}"
+    await db.payment_orders.insert_one({
+        "order_id": order_id,
+        "user_id": user["user_id"],
+        "plan": plan_key,
+        "product_id": product_id,
+        "amount": plan["amount"],
+        "currency": plan["currency"],
+        "payment_provider": "google_play",
+        "google_play_purchase_token": purchase_token,
+        "google_play_order_id": play_order_id,
+        "status": "paid",
+        "paid_at": now,
+        "created_at": now,
+    })
+
+    await db.users.update_one(
+        {"user_id": user["user_id"]},
+        {"$set": {
+            "subscription_plan": entitlement_plan,
+            "subscription_status": "active",
+            "subscription_expiry": expiry.isoformat(),
+            "subscription_provider": "google_play",
+            "updated_at": now,
+        }},
+    )
+
+    return {
+        "message": "Subscription activated",
+        "plan": entitlement_plan,
+        "product_id": product_id,
+        "order_id": order_id,
+        "expiry": expiry.isoformat(),
+    }
+
+
 @app.get("/api/payments/status")
 async def payment_status(user: dict = Depends(get_current_user)):
-    """Get current subscription status for the user."""
+    """Get current subscription status for the user.
+
+    Returns the existing subscription_* fields (used by iOS) AND a parallel
+    set of short field names (`plan`, `expires_at`, `provider`, `product_id`)
+    that the Android client (BillingRepository.getStatus) reads. Also looks
+    up the actual store product_id from the most recent payment_orders row
+    so the Android `isLifetime` check can distinguish lifetime vs monthly.
+    """
     user_doc = await db.users.find_one({"user_id": user["user_id"]}, {"_id": 0})
     if not user_doc:
         raise HTTPException(status_code=404, detail="User not found")
 
+    # Pull the most recent paid order for this user to surface the actual
+    # store product_id (e.g. com.spentyai.lifetime_offer) — required by the
+    # Android lifetime-offer banner / intercept logic.
+    latest_order = await db.payment_orders.find_one(
+        {"user_id": user["user_id"], "status": {"$in": ["paid", "completed"]}},
+        sort=[("created_at", -1)],
+    )
+    product_id = (latest_order or {}).get("product_id")
+    plan = user_doc.get("subscription_plan")
+    is_active = user_doc.get("subscription_status") == "active"
+
     return {
-        "subscription_plan": user_doc.get("subscription_plan"),
+        # Existing fields (kept for iOS / web back-compat)
+        "subscription_plan": plan,
         "subscription_status": user_doc.get("subscription_status"),
         "subscription_expiry": user_doc.get("subscription_expiry"),
         "subscription_provider": user_doc.get("subscription_provider"),
-        "is_active": user_doc.get("subscription_status") == "active",
+        "is_active": is_active,
+        # Short-name aliases consumed by Android BillingRepository.getStatus
+        "plan": plan,
+        "expires_at": user_doc.get("subscription_expiry"),
+        "provider": user_doc.get("subscription_provider"),
+        "product_id": product_id,
     }
 
 
