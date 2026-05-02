@@ -5,35 +5,36 @@ import kotlinx.serialization.Serializable
 
 @Serializable
 data class Statement(
+    // Backend statements endpoint returns camelCase JSON keys.
     @SerialName("statementId") val id: String = "",
-    val filename: String? = null,
-    val accountId: String? = null,
-    val accountName: String? = null,
-    val statementType: String? = null,
-    val status: String? = null,
-    val entryCount: Int? = null,
-    val periodFrom: String? = null,
-    val periodTo: String? = null,
-    val uploadedAt: String? = null,
-    val parsedEntries: List<ParsedEntry>? = null,
-    val reconciliation: ReconciliationResult? = null,
-    val auditStatus: String? = null,
-    val processingProgress: Double? = null,
-    val processingStageLabel: String? = null
+    @SerialName("filename") val filename: String? = null,
+    @SerialName("accountId") val accountId: String? = null,
+    @SerialName("accountName") val accountName: String? = null,
+    @SerialName("statementType") val statementType: String? = null,
+    @SerialName("status") val status: String? = null,
+    @SerialName("entryCount") val entryCount: Int? = null,
+    @SerialName("periodFrom") val periodFrom: String? = null,
+    @SerialName("periodTo") val periodTo: String? = null,
+    @SerialName("uploadedAt") val uploadedAt: String? = null,
+    @SerialName("parsedEntries") val parsedEntries: List<ParsedEntry>? = null,
+    @SerialName("reconciliation") val reconciliation: ReconciliationResult? = null,
+    @SerialName("auditStatus") val auditStatus: String? = null,
+    @SerialName("processingProgress") val processingProgress: Double? = null,
+    @SerialName("processingStageLabel") val processingStageLabel: String? = null
 )
 
 @Serializable
 data class ParsedEntry(
-    val date: String? = null,
-    val description: String? = null,
-    val amount: Double? = null,
-    val type: String? = null,
-    val transactionType: String? = null,
-    val balance: Double? = null,
-    val categoryId: String? = null,
-    val categoryName: String? = null,
-    val matched: Boolean? = null,
-    val matchedTransactionId: String? = null
+    @SerialName("date") val date: String? = null,
+    @SerialName("description") val description: String? = null,
+    @SerialName("amount") val amount: Double? = null,
+    @SerialName("type") val type: String? = null,
+    @SerialName("transactionType") val transactionType: String? = null,
+    @SerialName("balance") val balance: Double? = null,
+    @SerialName("categoryId") val categoryId: String? = null,
+    @SerialName("categoryName") val categoryName: String? = null,
+    @SerialName("matched") val matched: Boolean? = null,
+    @SerialName("matchedTransactionId") val matchedTransactionId: String? = null
 ) {
     val id: String
         get() = if (!matchedTransactionId.isNullOrEmpty()) matchedTransactionId

@@ -6,6 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -78,14 +79,32 @@ fun ReconciliationScreen(
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(vertical = 8.dp)
                     ) {
-                        items(viewModel.statements, key = { it.id }) { statement ->
+                        // Defensive key: fall back to a per-row composite if statement.id
+                        // is empty (e.g., due to a deserialization mismatch). Without this,
+                        // duplicate empty keys crash the LazyColumn:
+                        //   "Key '' was already used. LazyColumn please provide unique keys."
+                        itemsIndexed(
+                            items = viewModel.statements,
+                            key = { idx, s ->
+                                s.id.ifEmpty { "stmt-row-$idx-${s.filename ?: ""}-${s.uploadedAt ?: ""}" }
+                            }
+                        ) { _, statement ->
                             StatementRow(
                                 statement = statement,
                                 viewModel = viewModel,
-                                onClick = { onStatementClick(statement.id) },
+                                onClick = {
+                                    // Guard against empty id — navigation route requires a
+                                    // non-empty path segment, otherwise crashes with:
+                                    //   "Navigation destination 'statement_detail/' cannot be found"
+                                    if (statement.id.isNotEmpty()) {
+                                        onStatementClick(statement.id)
+                                    }
+                                },
                                 onDelete = {
-                                    deleteTargetId = statement.id
-                                    showDeleteConfirm = true
+                                    if (statement.id.isNotEmpty()) {
+                                        deleteTargetId = statement.id
+                                        showDeleteConfirm = true
+                                    }
                                 }
                             )
                         }
