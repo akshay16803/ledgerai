@@ -778,7 +778,14 @@ async def demo_login(request: Request):
     The account is created with sample data on first call.
     No credentials required — this is intentionally open so Apple reviewers
     can access the full app without a real Google/Apple account.
+
+    Optional `?fresh=true` query param skips the subscription override so
+    QA can exercise the non-subscribed paywall / Monthly-intercept flows
+    against the demo account. Used by the lifetime-offer test pass.
+    Reviewers (default path, no flag) still always land in an active state.
     """
+    fresh_mode = request.query_params.get("fresh", "").lower() in {"1", "true", "yes"}
+
     DEMO_EMAIL = "spentyai6@gmail.com"
     DEMO_NAME  = "Demo User"
 
@@ -805,16 +812,31 @@ async def demo_login(request: Request):
         await seed_default_data(user_id)
         logger.info(f"[DemoLogin] Created demo account: user_id={user_id}")
 
-    # Ensure demo user always has an active subscription so the paywall is skipped
-    await db.users.update_one(
-        {"user_id": user_id},
-        {"$set": {
-            "subscription_plan": "yearly",
-            "subscription_status": "active",
-            "subscription_provider": "promo",
-            "subscription_expiry": (datetime.now(timezone.utc) + timedelta(days=365)).isoformat(),
-        }}
-    )
+    if fresh_mode:
+        # QA path — drop the demo into a clean non-subscribed state and clear
+        # any stale payment_orders so /api/payments/status returns null
+        # product_id and the Android lifetime-offer intercept fires.
+        await db.users.update_one(
+            {"user_id": user_id},
+            {"$set": {
+                "subscription_plan": None,
+                "subscription_status": None,
+                "subscription_provider": None,
+                "subscription_expiry": None,
+            }}
+        )
+        await db.payment_orders.delete_many({"user_id": user_id})
+    else:
+        # Ensure demo user always has an active subscription so the paywall is skipped
+        await db.users.update_one(
+            {"user_id": user_id},
+            {"$set": {
+                "subscription_plan": "yearly",
+                "subscription_status": "active",
+                "subscription_provider": "promo",
+                "subscription_expiry": (datetime.now(timezone.utc) + timedelta(days=365)).isoformat(),
+            }}
+        )
 
     # Mint a short-lived session (7 days) for demo accounts
     session_token = secrets.token_urlsafe(48)
