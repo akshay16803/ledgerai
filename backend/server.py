@@ -11274,11 +11274,21 @@ async def verify_android_purchase(body: dict = Body(...), user: dict = Depends(g
     })
     if existing:
         # Idempotent — return success so the client doesn't error on retries.
+        # Surface the entitlement_plan (lifetime, never lifetime_offer) and the
+        # actual stored expiry so the response shape matches the fresh-purchase
+        # path one-for-one.
+        replay_entitlement = (
+            "lifetime" if plan_key in ("lifetime", "lifetime_offer") else plan_key
+        )
+        # Look up the existing user's subscription expiry so the replay
+        # response is fully populated (the order row doesn't store expiry).
+        user_now = await db.users.find_one({"user_id": user["user_id"]}, {"_id": 0})
         return {
             "message": "Subscription already verified",
-            "plan": plan_key,
+            "plan": replay_entitlement,
+            "product_id": existing.get("product_id"),
             "order_id": existing.get("order_id"),
-            "expiry": existing.get("expiry"),
+            "expiry": (user_now or {}).get("subscription_expiry"),
             "already_verified": True,
         }
 
