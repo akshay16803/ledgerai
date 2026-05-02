@@ -2,7 +2,7 @@ import SwiftUI
 
 // MARK: - Lifetime Offer Sheet
 // Two modes:
-//   showTimer = true  → non-subscriber monthly intercept; 1-hour countdown displayed
+//   showTimer = true  → non-subscriber monthly intercept; 30-minute countdown displayed
 //   showTimer = false → existing subscriber upgrade; no timer, always available
 
 struct LifetimeOfferSheet: View {
@@ -223,7 +223,7 @@ struct LifetimeOfferSheet: View {
                         .foregroundStyle(.orange)
                 }
                 Spacer()
-                Text("1 hour only")
+                Text("30 min only")
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(.orange)
                     .padding(.horizontal, 8)

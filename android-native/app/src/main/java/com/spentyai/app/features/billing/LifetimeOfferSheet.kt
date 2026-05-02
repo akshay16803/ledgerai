@@ -61,7 +61,7 @@ import kotlinx.coroutines.launch
  * Lifetime Offer Sheet — Android port of iOS LifetimeOfferSheet.swift.
  *
  * Two modes:
- *   showTimer = true  → non-subscriber Monthly intercept; 1-hour countdown.
+ *   showTimer = true  → non-subscriber Monthly intercept; 30-minute countdown.
  *   showTimer = false → existing subscriber upgrade; no timer, always available.
  *
  * UI is matched visually to iOS: dark forest-green header with gold accent,
@@ -433,7 +433,7 @@ private fun UrgencyNote(showTimer: Boolean, displayTime: String) {
                 )
             }
             Text(
-                text = "1 hour only",
+                text = "30 min only",
                 style = SpentyType.Caption2.copy(fontSize = 10.sp, fontWeight = FontWeight.SemiBold),
                 color = OrangeWarning,
                 modifier = Modifier

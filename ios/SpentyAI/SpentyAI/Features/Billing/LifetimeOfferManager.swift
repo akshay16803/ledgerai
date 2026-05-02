@@ -1,7 +1,7 @@
 import Foundation
 
 // MARK: - Lifetime Offer Manager
-// Tracks whether the 1-hour timed offer window is still active.
+// Tracks whether the 30-minute timed offer window is still active.
 // The clock starts the first time the offer sheet is shown to a non-subscriber.
 // Existing subscribers bypass this and always see the offer via the upgrade banner.
 
@@ -10,9 +10,9 @@ final class LifetimeOfferManager {
     private init() {}
 
     private let firstSeenKey   = "spenty_lifetime_offer_first_seen_v1"
-    private let offerDuration: TimeInterval = 3600  // 1 hour
+    private let offerDuration: TimeInterval = 1800  // 30 minutes
 
-    /// True if the timed offer window is still open (never started or within 1 hour).
+    /// True if the timed offer window is still open (never started or within 30 min).
     var isOfferActive: Bool {
         guard let firstSeen = UserDefaults.standard.object(forKey: firstSeenKey) as? Date else {
             return true  // Never shown yet — offer is open
@@ -21,6 +21,8 @@ final class LifetimeOfferManager {
     }
 
     /// Remaining seconds in the offer window (0 if expired or never started).
+    // Reset to 30 min on offer-window length change so retroactive change doesn't
+    // leave existing users with a longer effective window than expected.
     var timeRemaining: TimeInterval {
         guard let firstSeen = UserDefaults.standard.object(forKey: firstSeenKey) as? Date else {
             return offerDuration
@@ -28,7 +30,7 @@ final class LifetimeOfferManager {
         return max(0, offerDuration - Date().timeIntervalSince(firstSeen))
     }
 
-    /// Call once when the offer sheet is first shown to start the 1-hour clock.
+    /// Call once when the offer sheet is first shown to start the 30-min clock.
     func recordFirstShown() {
         guard UserDefaults.standard.object(forKey: firstSeenKey) == nil else { return }
         UserDefaults.standard.set(Date(), forKey: firstSeenKey)
