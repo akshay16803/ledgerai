@@ -11358,16 +11358,50 @@ async def payment_status(user: dict = Depends(get_current_user)):
     if not user_doc:
         raise HTTPException(status_code=404, detail="User not found")
 
-    # Pull the most recent paid order for this user to surface the actual
-    # store product_id (e.g. com.spentyai.lifetime_offer) — required by the
-    # Android lifetime-offer banner / intercept logic.
-    latest_order = await db.payment_orders.find_one(
-        {"user_id": user["user_id"], "status": {"$in": ["paid", "completed"]}},
-        sort=[("created_at", -1)],
-    )
-    product_id = (latest_order or {}).get("product_id")
     plan = user_doc.get("subscription_plan")
     is_active = user_doc.get("subscription_status") == "active"
+
+    # Resolve product_id consistently with the user's CURRENT subscription_plan.
+    # If we just look at "most recent paid order" naively, a stale order from a
+    # previous plan can leak through — e.g. demo accounts whose plan is force-
+    # set to "yearly" on every login but who still have an old lifetime_offer
+    # order in the table. That mismatch breaks the Android lifetime-offer
+    # banner (state.isLifetime would return true even though the user is on
+    # the yearly tier).
+    #
+    # Strategy: scope the order lookup to plan keys that map to the current
+    # subscription_plan. Both "lifetime" and "lifetime_offer" plan keys are
+    # accepted when subscription_plan == "lifetime" (since both grant the
+    # same entitlement).
+    plan_keys_for_lookup: list[str]
+    if plan == "lifetime":
+        plan_keys_for_lookup = ["lifetime", "lifetime_offer"]
+    elif plan in {"monthly", "quarterly", "yearly"}:
+        plan_keys_for_lookup = [plan]
+    else:
+        plan_keys_for_lookup = []
+
+    latest_order = None
+    if plan_keys_for_lookup:
+        latest_order = await db.payment_orders.find_one(
+            {
+                "user_id": user["user_id"],
+                "status": {"$in": ["paid", "completed"]},
+                "plan": {"$in": plan_keys_for_lookup},
+            },
+            sort=[("created_at", -1)],
+        )
+
+    # Fallback: synthesise a canonical product_id from the plan key when
+    # there's no matching order (e.g. promo / demo / web-activated accounts
+    # never had a Play / App Store order recorded).
+    plan_to_default_sku = {
+        "monthly": "com.spentyai.monthly",
+        "quarterly": "com.spentyai.quarterly",
+        "yearly": "com.spentyai.yearly",
+        "lifetime": "com.spentyai.lifetime",
+    }
+    product_id = (latest_order or {}).get("product_id") or plan_to_default_sku.get(plan)
 
     return {
         # Existing fields (kept for iOS / web back-compat)
