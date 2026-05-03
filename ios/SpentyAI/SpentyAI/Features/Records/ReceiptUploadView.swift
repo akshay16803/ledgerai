@@ -22,6 +22,12 @@ struct ReceiptUploadView: View {
     @State private var showTransactionPicker = false
     @State private var linkedTransactionId: String = ""
 
+    // AI Processing Consent — required by Apple guideline 5.1.1(i)/5.1.2(i) before
+    // user data (receipt image) may be sent to OpenAI for OCR + transaction parsing.
+    // The pending action is invoked once consent is granted.
+    @State private var showConsentSheet = false
+    @State private var pendingAIAction: (() -> Void)?
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -58,6 +64,27 @@ struct ReceiptUploadView: View {
             .onChange(of: selectedPhotoItem) { _, newItem in
                 Task { await loadPhoto(from: newItem) }
             }
+            .sheet(isPresented: $showConsentSheet) {
+                AIConsentSheet {
+                    // User granted consent — run the action that triggered the sheet.
+                    pendingAIAction?()
+                    pendingAIAction = nil
+                }
+            }
+        }
+    }
+
+    // MARK: - AI Consent Gate
+
+    /// Run `action` immediately if the user has already consented to AI processing,
+    /// otherwise stash it in `pendingAIAction` and present `AIConsentSheet`. The action
+    /// will fire after the user taps "Allow AI features".
+    private func gateAI(_ action: @escaping () -> Void) {
+        if AIConsentManager.hasConsented {
+            action()
+        } else {
+            pendingAIAction = action
+            showConsentSheet = true
         }
     }
 
@@ -246,7 +273,7 @@ struct ReceiptUploadView: View {
         VStack(spacing: 12) {
             if selectedImage != nil && uploadedReceiptId == nil {
                 Button {
-                    Task { await uploadAndParse() }
+                    gateAI { Task { await uploadAndParse() } }
                 } label: {
                     HStack(spacing: 8) {
                         if isUploading || isParsing {

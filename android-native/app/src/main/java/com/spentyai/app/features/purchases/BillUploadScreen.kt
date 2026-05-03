@@ -42,6 +42,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -50,6 +51,8 @@ import com.spentyai.app.core.theme.SpentyPrimary
 import com.spentyai.app.core.theme.SpentyStyle
 import com.spentyai.app.core.theme.SpentySuccess
 import com.spentyai.app.core.theme.SpentyType
+import com.spentyai.app.features.aiconsent.AIConsentDialog
+import com.spentyai.app.features.aiconsent.AIConsentManager
 import com.spentyai.app.features.invoices.SectionCard
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -61,6 +64,37 @@ fun BillUploadScreen(
     var isUploading by remember { mutableStateOf(false) }
     var uploadedFileName by remember { mutableStateOf<String?>(null) }
     var parseError by remember { mutableStateOf<String?>(null) }
+
+    // ── AI consent gate ──────────────────────────────────────────────────────
+    // Required by Apple guideline 5.1.1(i) / 5.1.2(i) and Google Play's User
+    // Data policy: before any data is sent to OpenAI we must show the user
+    // exactly what is sent and get an explicit opt-in. Mirrors AIChatScreen.
+    val context = LocalContext.current
+    var showConsentSheet by remember { mutableStateOf(false) }
+    var pendingAIAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+
+    /** Run [action] now if consent is granted, otherwise stash and prompt. */
+    val gateAI: ((() -> Unit) -> Unit) = { action ->
+        if (AIConsentManager.hasConsented(context)) {
+            action()
+        } else {
+            pendingAIAction = action
+            showConsentSheet = true
+        }
+    }
+
+    if (showConsentSheet) {
+        AIConsentDialog(
+            onDismiss = {
+                showConsentSheet = false
+                pendingAIAction = null
+            },
+            onGrant = {
+                pendingAIAction?.invoke()
+                pendingAIAction = null
+            }
+        )
+    }
 
     // For now, this is a placeholder UI matching the iOS design.
     // Actual upload/parse integration requires multipart upload support.
@@ -196,7 +230,7 @@ fun BillUploadScreen(
                         Spacer(modifier = Modifier.height(8.dp))
 
                         Button(
-                            onClick = { filePickerLauncher.launch("image/*") },
+                            onClick = { gateAI { filePickerLauncher.launch("image/*") } },
                             modifier = Modifier.fillMaxWidth(),
                             colors = SpentyStyle.primaryButtonColors(),
                             shape = SpentyStyle.primaryButtonShape
@@ -207,7 +241,7 @@ fun BillUploadScreen(
                         }
 
                         OutlinedButton(
-                            onClick = { filePickerLauncher.launch("application/pdf") },
+                            onClick = { gateAI { filePickerLauncher.launch("application/pdf") } },
                             modifier = Modifier.fillMaxWidth(),
                             shape = SpentyStyle.secondaryButtonShape,
                             border = SpentyStyle.secondaryButtonBorder()

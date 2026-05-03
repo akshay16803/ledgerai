@@ -4,6 +4,12 @@ struct SMSSyncView: View {
 
     @State private var viewModel = SMSSyncViewModel()
 
+    // AI Processing Consent — required by Apple guideline 5.1.1(i)/5.1.2(i) before
+    // user data (SMS body text) may be sent to OpenAI for transaction parsing.
+    // The pending action is invoked once consent is granted.
+    @State private var showConsentSheet = false
+    @State private var pendingAIAction: (() -> Void)?
+
     var body: some View {
         ScrollView {
             VStack(spacing: 20) {
@@ -21,6 +27,27 @@ struct SMSSyncView: View {
         .navigationBarTitleDisplayMode(.large)
         .task {
             await viewModel.loadStats()
+        }
+        .sheet(isPresented: $showConsentSheet) {
+            AIConsentSheet {
+                // User granted consent — run the action that triggered the sheet.
+                pendingAIAction?()
+                pendingAIAction = nil
+            }
+        }
+    }
+
+    // MARK: - AI Consent Gate
+
+    /// Run `action` immediately if the user has already consented to AI processing,
+    /// otherwise stash it in `pendingAIAction` and present `AIConsentSheet`. The action
+    /// will fire after the user taps "Allow AI features".
+    private func gateAI(_ action: @escaping () -> Void) {
+        if AIConsentManager.hasConsented {
+            action()
+        } else {
+            pendingAIAction = action
+            showConsentSheet = true
         }
     }
 
@@ -104,7 +131,7 @@ struct SMSSyncView: View {
                 }
 
             Button {
-                Task { await viewModel.uploadAndParse() }
+                gateAI { Task { await viewModel.uploadAndParse() } }
             } label: {
                 HStack(spacing: 8) {
                     if viewModel.isProcessing {
@@ -243,7 +270,7 @@ struct SMSSyncView: View {
             VStack(spacing: 12) {
                 if let stats = viewModel.syncStats, (stats.pendingReview ?? 0) > 0 || (stats.aiFailed ?? 0) > 0 {
                     Button {
-                        Task { await viewModel.retryPending() }
+                        gateAI { Task { await viewModel.retryPending() } }
                     } label: {
                         HStack(spacing: 8) {
                             if viewModel.isRetrying {
@@ -273,7 +300,7 @@ struct SMSSyncView: View {
                 }
 
                 Button {
-                    Task { await viewModel.detectMandates() }
+                    gateAI { Task { await viewModel.detectMandates() } }
                 } label: {
                     HStack(spacing: 8) {
                         if viewModel.isDetectingMandates {

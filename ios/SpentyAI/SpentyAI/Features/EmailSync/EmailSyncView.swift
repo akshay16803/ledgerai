@@ -6,6 +6,12 @@ struct EmailSyncView: View {
     @Environment(LocalizationManager.self) var lang
     @State private var viewModel = EmailSyncViewModel()
 
+    // AI Processing Consent — required by Apple guideline 5.1.1(i)/5.1.2(i) before
+    // user data (email body text) may be sent to OpenAI for transaction parsing.
+    // The pending action is invoked once consent is granted.
+    @State private var showConsentSheet = false
+    @State private var pendingAIAction: (() -> Void)?
+
     var body: some View {
         ScrollView {
             VStack(spacing: 20) {
@@ -50,6 +56,27 @@ struct EmailSyncView: View {
         }
         .onDisappear {
             viewModel.stopPolling()
+        }
+        .sheet(isPresented: $showConsentSheet) {
+            AIConsentSheet {
+                // User granted consent — run the action that triggered the sheet.
+                pendingAIAction?()
+                pendingAIAction = nil
+            }
+        }
+    }
+
+    // MARK: - AI Consent Gate
+
+    /// Run `action` immediately if the user has already consented to AI processing,
+    /// otherwise stash it in `pendingAIAction` and present `AIConsentSheet`. The action
+    /// will fire after the user taps "Allow AI features".
+    private func gateAI(_ action: @escaping () -> Void) {
+        if AIConsentManager.hasConsented {
+            action()
+        } else {
+            pendingAIAction = action
+            showConsentSheet = true
         }
     }
 
@@ -354,7 +381,7 @@ struct EmailSyncView: View {
             }
 
             Button {
-                Task { await viewModel.connectGmail() }
+                gateAI { Task { await viewModel.connectGmail() } }
             } label: {
                 HStack(spacing: 8) {
                     if viewModel.isConnecting {
@@ -408,7 +435,7 @@ struct EmailSyncView: View {
                 }
 
                 Button {
-                    Task { await viewModel.connectOutlook() }
+                    gateAI { Task { await viewModel.connectOutlook() } }
                 } label: {
                     HStack(spacing: 8) {
                         if viewModel.isConnecting {
@@ -429,7 +456,7 @@ struct EmailSyncView: View {
         } else {
             // Compact "Add Outlook" row when no accounts
             Button {
-                Task { await viewModel.connectOutlook() }
+                gateAI { Task { await viewModel.connectOutlook() } }
             } label: {
                 HStack(spacing: 12) {
                     Image(systemName: "envelope.fill")
@@ -533,11 +560,13 @@ struct EmailSyncView: View {
             HStack(spacing: 10) {
                 if account.needsReconnect == true {
                     Button {
-                        Task {
-                            if provider == "gmail" {
-                                await viewModel.connectGmail()
-                            } else {
-                                await viewModel.connectOutlook()
+                        gateAI {
+                            Task {
+                                if provider == "gmail" {
+                                    await viewModel.connectGmail()
+                                } else {
+                                    await viewModel.connectOutlook()
+                                }
                             }
                         }
                     } label: {
@@ -556,7 +585,7 @@ struct EmailSyncView: View {
                 }
 
                 Button {
-                    Task { await viewModel.startSync(forAccount: account) }
+                    gateAI { Task { await viewModel.startSync(forAccount: account) } }
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: "arrow.clockwise")
@@ -719,7 +748,7 @@ struct EmailSyncView: View {
            (stats.aiFailed ?? 0) > 0 || (stats.aiPending ?? 0) > 0 {
             VStack(spacing: 12) {
                 Button {
-                    Task { await viewModel.retryPending() }
+                    gateAI { Task { await viewModel.retryPending() } }
                 } label: {
                     HStack(spacing: 8) {
                         if viewModel.isRetrying {

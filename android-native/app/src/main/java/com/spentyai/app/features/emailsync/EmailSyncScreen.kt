@@ -21,6 +21,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -28,6 +29,8 @@ import androidx.compose.ui.unit.sp
 import com.spentyai.app.core.components.*
 import com.spentyai.app.core.models.*
 import com.spentyai.app.core.theme.*
+import com.spentyai.app.features.aiconsent.AIConsentDialog
+import com.spentyai.app.features.aiconsent.AIConsentManager
 import java.text.NumberFormat
 import java.util.*
 
@@ -43,6 +46,37 @@ fun EmailSyncScreen(
     onBack: () -> Unit
 ) {
     LaunchedEffect(Unit) { viewModel.loadAll() }
+
+    // ── AI consent gate ──────────────────────────────────────────────────────
+    // Required by Apple guideline 5.1.1(i) / 5.1.2(i) and Google Play's User
+    // Data policy: before any data is sent to OpenAI we must show the user
+    // exactly what is sent and get an explicit opt-in. Mirrors AIChatScreen.
+    val context = LocalContext.current
+    var showConsentSheet by remember { mutableStateOf(false) }
+    var pendingAIAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+
+    /** Run [action] now if consent is granted, otherwise stash and prompt. */
+    val gateAI: ((() -> Unit) -> Unit) = { action ->
+        if (AIConsentManager.hasConsented(context)) {
+            action()
+        } else {
+            pendingAIAction = action
+            showConsentSheet = true
+        }
+    }
+
+    if (showConsentSheet) {
+        AIConsentDialog(
+            onDismiss = {
+                showConsentSheet = false
+                pendingAIAction = null
+            },
+            onGrant = {
+                pendingAIAction?.invoke()
+                pendingAIAction = null
+            }
+        )
+    }
 
     Scaffold(
         topBar = {
@@ -90,13 +124,13 @@ fun EmailSyncScreen(
                     OverviewStatsSection(viewModel)
 
                     // Gmail Section
-                    GmailSection(viewModel)
+                    GmailSection(viewModel, gateAI)
 
                     // Outlook Section
-                    OutlookSection(viewModel)
+                    OutlookSection(viewModel, gateAI)
 
                     // Sync Actions
-                    SyncActionsSection(viewModel)
+                    SyncActionsSection(viewModel, gateAI)
 
                     // Pending Review Card
                     PendingReviewCard(viewModel, onNavigateToPendingReview)
@@ -222,7 +256,7 @@ private fun MiniStatCard(label: String, value: String, color: Color, modifier: M
 // ================================
 
 @Composable
-private fun GmailSection(viewModel: EmailSyncViewModel) {
+private fun GmailSection(viewModel: EmailSyncViewModel, gateAI: (() -> Unit) -> Unit) {
     ElevatedCard(
         shape = SpentyStyle.cardShape,
         colors = SpentyStyle.cardColors(),
@@ -262,7 +296,7 @@ private fun GmailSection(viewModel: EmailSyncViewModel) {
                 )
             } else {
                 viewModel.gmailAccounts.forEach { account ->
-                    AccountRow(account, "gmail", viewModel)
+                    AccountRow(account, "gmail", viewModel, gateAI)
                 }
             }
 
@@ -295,7 +329,7 @@ private fun GmailSection(viewModel: EmailSyncViewModel) {
 // ================================
 
 @Composable
-private fun OutlookSection(viewModel: EmailSyncViewModel) {
+private fun OutlookSection(viewModel: EmailSyncViewModel, gateAI: (() -> Unit) -> Unit) {
     ElevatedCard(
         shape = SpentyStyle.cardShape,
         colors = SpentyStyle.cardColors(),
@@ -335,7 +369,7 @@ private fun OutlookSection(viewModel: EmailSyncViewModel) {
                 )
             } else {
                 viewModel.outlookAccounts.forEach { account ->
-                    AccountRow(account, "outlook", viewModel)
+                    AccountRow(account, "outlook", viewModel, gateAI)
                 }
             }
 
@@ -368,7 +402,12 @@ private fun OutlookSection(viewModel: EmailSyncViewModel) {
 // ================================
 
 @Composable
-private fun AccountRow(account: EmailAccount, provider: String, viewModel: EmailSyncViewModel) {
+private fun AccountRow(
+    account: EmailAccount,
+    provider: String,
+    viewModel: EmailSyncViewModel,
+    gateAI: (() -> Unit) -> Unit
+) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         // Header
         Row(
@@ -466,7 +505,7 @@ private fun AccountRow(account: EmailAccount, provider: String, viewModel: Email
                 label = "Sync",
                 icon = Icons.Filled.Refresh,
                 color = SpentyPrimary,
-                onClick = { viewModel.startSync(account) },
+                onClick = { gateAI { viewModel.startSync(account) } },
                 enabled = account.syncing != true && !viewModel.isSyncing
             )
 
@@ -581,7 +620,7 @@ private fun ActionChip(
 // ================================
 
 @Composable
-private fun SyncActionsSection(viewModel: EmailSyncViewModel) {
+private fun SyncActionsSection(viewModel: EmailSyncViewModel, gateAI: (() -> Unit) -> Unit) {
     if (!viewModel.hasAnyAccount) return
 
     ElevatedCard(
@@ -594,7 +633,7 @@ private fun SyncActionsSection(viewModel: EmailSyncViewModel) {
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Button(
-                onClick = { viewModel.startSync() },
+                onClick = { gateAI { viewModel.startSync() } },
                 modifier = SpentyStyle.primaryButtonModifier,
                 shape = SpentyStyle.primaryButtonShape,
                 colors = SpentyStyle.primaryButtonColors(),
@@ -618,7 +657,7 @@ private fun SyncActionsSection(viewModel: EmailSyncViewModel) {
             val stats = viewModel.syncStatsResponse
             if (stats != null && ((stats.aiFailed ?: 0) > 0 || (stats.aiPending ?: 0) > 0)) {
                 Button(
-                    onClick = { viewModel.retryPending() },
+                    onClick = { gateAI { viewModel.retryPending() } },
                     modifier = SpentyStyle.primaryButtonModifier,
                     shape = SpentyStyle.primaryButtonShape,
                     colors = SpentyStyle.primaryButtonColors(),
