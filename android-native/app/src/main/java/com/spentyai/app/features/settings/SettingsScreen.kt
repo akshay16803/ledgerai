@@ -20,6 +20,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Business
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.CurrencyExchange
@@ -28,8 +29,11 @@ import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.PersonOff
 import androidx.compose.material.icons.filled.RestartAlt
+import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -44,9 +48,11 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -62,6 +68,8 @@ import com.spentyai.app.core.theme.SpentyPrimary
 import com.spentyai.app.core.theme.SpentyStyle
 import com.spentyai.app.core.theme.SpentyType
 import com.spentyai.app.core.theme.SpentyWarning
+import com.spentyai.app.features.aiconsent.AIConsentDialog
+import com.spentyai.app.features.aiconsent.AIConsentManager
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -344,6 +352,15 @@ fun SettingsScreen(
                     }
                 }
 
+                // Privacy Section — lets the user revoke / re-grant AI processing
+                // consent (mirrors iOS SettingsView.privacySection). Required by
+                // Apple guideline 5.1.1(i) and Google Play User Data policy:
+                // users must be able to withdraw consent at any time.
+                SectionHeader(title = "Privacy", icon = Icons.Default.Shield)
+                SettingsCard {
+                    AIConsentRow()
+                }
+
                 // Account Section
                 SectionHeader(title = "Account", icon = Icons.AutoMirrored.Filled.ExitToApp)
                 SettingsCard {
@@ -587,6 +604,94 @@ private fun LanguageToggleSection() {
             style = SpentyType.Caption1,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+        )
+    }
+}
+
+/**
+ * Settings row that displays the user's current AI processing consent state
+ * and lets them toggle it. Flipping the switch off calls
+ * [AIConsentManager.revoke] immediately. Flipping it on opens
+ * [AIConsentDialog] so the user reviews exactly what data is sent before
+ * agreeing — the dialog itself records consent on "Allow AI features".
+ *
+ * Mirrors the iOS Settings → Privacy → AI processing consent toggle.
+ */
+@Composable
+private fun AIConsentRow() {
+    val context = LocalContext.current
+    var enabled by remember { mutableStateOf(AIConsentManager.hasConsented(context)) }
+    var showConsentDialog by remember { mutableStateOf(false) }
+
+    if (showConsentDialog) {
+        AIConsentDialog(
+            onDismiss = {
+                showConsentDialog = false
+                // Re-sync the local state from the source of truth so the
+                // switch snaps back if the user dismissed without granting.
+                enabled = AIConsentManager.hasConsented(context)
+            },
+            onGrant = {
+                // AIConsentDialog already called grant(); reflect that here.
+                enabled = true
+            }
+        )
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(32.dp)
+                .clip(RoundedCornerShape(7.dp))
+                .background(SpentyPrimary),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Default.AutoAwesome,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+                tint = Color.White
+            )
+        }
+        Spacer(modifier = Modifier.width(14.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = "AI processing consent",
+                style = SpentyType.Body,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                text = if (enabled) {
+                    "Allowed — AI features can send your data to OpenAI."
+                } else {
+                    "Off — AI features will prompt you again before sending data."
+                },
+                style = SpentyType.Caption2,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Switch(
+            checked = enabled,
+            onCheckedChange = { wantOn ->
+                if (wantOn) {
+                    // Always show the disclosure dialog before recording a
+                    // grant — required so the user sees what they're agreeing
+                    // to (matches iOS behaviour).
+                    showConsentDialog = true
+                } else {
+                    AIConsentManager.revoke(context)
+                    enabled = false
+                }
+            },
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = Color.White,
+                checkedTrackColor = SpentyPrimary
+            )
         )
     }
 }

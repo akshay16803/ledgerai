@@ -371,6 +371,11 @@ fun BillingScreen(
                     }
                 }
 
+                // Terms of Service + Privacy Policy footer.
+                // Required by Apple guideline 3.1.2 / Play UX parity, and mirrors
+                // SubscriptionPaywallScreen.TermsSection.
+                BillingTermsSection(uriHandler = uriHandler)
+
                 Spacer(modifier = Modifier.height(16.dp))
             }
 
@@ -626,6 +631,44 @@ private fun SubscriberUpgradeBanner(
                 offerPrice,
                 style = SpentyType.Headline,
                 color = Color.White
+            )
+        }
+    }
+}
+
+/**
+ * Terms of Service + Privacy Policy footer for the in-app subscription
+ * management screen. Mirrors SubscriptionPaywallScreen.TermsSection so already-
+ * subscribed users still have a one-tap path to the legal docs from inside the
+ * app — required for Apple guideline 3.1.2 parity and Play UX best practice.
+ */
+@Composable
+private fun BillingTermsSection(uriHandler: androidx.compose.ui.platform.UriHandler) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                "Terms of Service",
+                style = SpentyType.Caption2.copy(textDecoration = TextDecoration.Underline),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.clickable { uriHandler.openUri("https://spentyai.com/terms") }
+            )
+            Text(
+                "·",
+                style = SpentyType.Caption2,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                "Privacy Policy",
+                style = SpentyType.Caption2.copy(textDecoration = TextDecoration.Underline),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.clickable { uriHandler.openUri("https://spentyai.com/privacy") }
             )
         }
     }

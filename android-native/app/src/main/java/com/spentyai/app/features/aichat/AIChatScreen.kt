@@ -85,6 +85,8 @@ import com.spentyai.app.core.theme.SpentyError
 import com.spentyai.app.core.theme.SpentyPrimary
 import com.spentyai.app.core.theme.SpentyStyle
 import com.spentyai.app.core.theme.SpentyType
+import com.spentyai.app.features.aiconsent.AIConsentDialog
+import com.spentyai.app.features.aiconsent.AIConsentManager
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -99,6 +101,38 @@ fun AIChatScreen(
 
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+
+    // ── AI consent gate ──────────────────────────────────────────────────────
+    // Required by Apple guideline 5.1.1(i) / 5.1.2(i) and Google Play's User
+    // Data policy: before any data is sent to OpenAI we must show the user
+    // exactly what is sent and get an explicit opt-in. Mirrors iOS
+    // AIChatView.gateAI.
+    var showConsentSheet by remember { mutableStateOf(false) }
+    var pendingAIAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+
+    /** Run [action] now if consent is granted, otherwise stash and prompt. */
+    val gateAI: ((() -> Unit) -> Unit) = { action ->
+        if (AIConsentManager.hasConsented(context)) {
+            action()
+        } else {
+            pendingAIAction = action
+            showConsentSheet = true
+        }
+    }
+
+    if (showConsentSheet) {
+        AIConsentDialog(
+            onDismiss = {
+                showConsentSheet = false
+                pendingAIAction = null
+            },
+            onGrant = {
+                // Fire the action that triggered the prompt, then clear.
+                pendingAIAction?.invoke()
+                pendingAIAction = null
+            }
+        )
+    }
 
     // Voice state
     val isVoiceModeActive by viewModel.isVoiceModeActive.collectAsState()
@@ -253,8 +287,20 @@ fun AIChatScreen(
                 isSending = state.isSending,
                 transcribedText = transcribedText,
                 lastAiMessage = state.messages.lastOrNull { it.role.name == "ASSISTANT" }?.content,
-                onSend = { scope.launch { viewModel.sendVoiceInput(context) } },
-                onToggleMic = { scope.launch { viewModel.toggleMicrophone(context) } },
+                onSend = { gateAI { scope.launch { viewModel.sendVoiceInput(context) } } },
+                onToggleMic = {
+                    // toggleMicrophone auto-sends when stopping with non-empty
+                    // transcript — gate the stop path so consent is captured
+                    // before the request goes out. Starting the mic is fine
+                    // without a gate (no data is sent yet).
+                    if (viewModel.speechManager.isListening.value) {
+                        gateAI {
+                            scope.launch { viewModel.toggleMicrophone(context) }
+                        }
+                    } else {
+                        scope.launch { viewModel.toggleMicrophone(context) }
+                    }
+                },
                 onExit = { viewModel.exitVoiceMode() }
             )
             return@Scaffold
@@ -276,11 +322,19 @@ fun AIChatScreen(
                 contentPadding = PaddingValues(vertical = 8.dp)
             ) {
                 if (state.messages.isEmpty() && !state.isSending) {
-                    item { WelcomeSection(state.suggestions, viewModel::sendSuggestion) }
+                    item {
+                        WelcomeSection(state.suggestions) { suggestion ->
+                            gateAI { viewModel.sendSuggestion(suggestion) }
+                        }
+                    }
                 }
 
                 if (state.messages.isNotEmpty()) {
-                    item { SuggestionStrip(state.suggestions, viewModel::sendSuggestion) }
+                    item {
+                        SuggestionStrip(state.suggestions) { suggestion ->
+                            gateAI { viewModel.sendSuggestion(suggestion) }
+                        }
+                    }
                 }
 
                 items(state.messages, key = { it.id }) { message ->
@@ -308,13 +362,21 @@ fun AIChatScreen(
             InputBar(
                 input = state.input,
                 onInputChange = viewModel::onInputChange,
-                onSend = { viewModel.sendMessage(context) },
+                onSend = { gateAI { viewModel.sendMessage(context) } },
                 canSend = state.input.isNotBlank() && !state.isSending,
                 isListening = isListening,
                 onToggleMic = {
                     scope.launch {
                         if (hasMicPermission) {
-                            viewModel.toggleMicrophone(context)
+                            // toggleMicrophone may auto-send transcribed text;
+                            // gate it so the consent sheet appears first.
+                            if (viewModel.speechManager.isListening.value) {
+                                gateAI {
+                                    scope.launch { viewModel.toggleMicrophone(context) }
+                                }
+                            } else {
+                                viewModel.toggleMicrophone(context)
+                            }
                         } else {
                             permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                         }

@@ -11,6 +11,11 @@ struct AIChatView: View {
     @FocusState private var isInputFocused: Bool
     @Environment(\.dismiss) private var dismiss
 
+    // AI Processing Consent — required by Apple guideline 5.1.1(i)/5.1.2(i) before
+    // user data may be sent to OpenAI. The pending action is invoked once consent is granted.
+    @State private var showConsentSheet = false
+    @State private var pendingAIAction: (() -> Void)?
+
     // MARK: - Body
 
     var body: some View {
@@ -39,7 +44,14 @@ struct AIChatView: View {
                     HStack(spacing: 12) {
                         // Voice mode button
                         Button {
-                            Task { await viewModel.toggleVoiceMode() }
+                            // Voice mode streams transcribed audio to the AI on each utterance,
+                            // so consent is required before entering it. Exiting voice mode
+                            // sends nothing — bypass the gate when already active.
+                            if viewModel.isVoiceModeActive {
+                                Task { await viewModel.toggleVoiceMode() }
+                            } else {
+                                gateAI { Task { await viewModel.toggleVoiceMode() } }
+                            }
                         } label: {
                             Image(systemName: viewModel.isVoiceModeActive ? "waveform.circle.fill" : "waveform.circle")
                                 .font(.system(size: 20))
@@ -92,6 +104,27 @@ struct AIChatView: View {
                 await viewModel.loadSuggestions()
                 await viewModel.loadHistory()
             }
+            .sheet(isPresented: $showConsentSheet) {
+                AIConsentSheet {
+                    // User granted consent — run the action that triggered the sheet.
+                    pendingAIAction?()
+                    pendingAIAction = nil
+                }
+            }
+        }
+    }
+
+    // MARK: - AI Consent Gate
+
+    /// Run `action` immediately if the user has already consented to AI processing,
+    /// otherwise stash it in `pendingAIAction` and present `AIConsentSheet`. The action
+    /// will fire after the user taps "Allow AI features".
+    private func gateAI(_ action: @escaping () -> Void) {
+        if AIConsentManager.hasConsented {
+            action()
+        } else {
+            pendingAIAction = action
+            showConsentSheet = true
         }
     }
 
@@ -197,7 +230,7 @@ struct AIChatView: View {
             HStack(spacing: 40) {
                 // Send button (stop listening and send)
                 Button {
-                    Task { await viewModel.sendVoiceInput() }
+                    gateAI { Task { await viewModel.sendVoiceInput() } }
                 } label: {
                     VStack(spacing: 6) {
                         ZStack {
@@ -356,7 +389,7 @@ struct AIChatView: View {
             VStack(spacing: 10) {
                 ForEach(viewModel.suggestions, id: \.self) { suggestion in
                     Button {
-                        Task { await viewModel.sendSuggestion(suggestion) }
+                        gateAI { Task { await viewModel.sendSuggestion(suggestion) } }
                     } label: {
                         HStack(spacing: 8) {
                             Image(systemName: iconForSuggestion(suggestion))
@@ -397,7 +430,7 @@ struct AIChatView: View {
             HStack(spacing: 8) {
                 ForEach(viewModel.suggestions, id: \.self) { suggestion in
                     Button {
-                        Task { await viewModel.sendSuggestion(suggestion) }
+                        gateAI { Task { await viewModel.sendSuggestion(suggestion) } }
                     } label: {
                         Text(suggestion)
                             .font(SpentyFonts.caption1.weight(.medium))
@@ -442,7 +475,10 @@ struct AIChatView: View {
             HStack(alignment: .bottom, spacing: 10) {
                 // Microphone button
                 Button {
-                    Task { await viewModel.toggleMicrophone() }
+                    // Tapping the mic to STOP can trigger an immediate send-to-AI;
+                    // tapping to START is on-device speech recognition only. Gate both
+                    // for simplicity — consent is a one-time prompt.
+                    gateAI { Task { await viewModel.toggleMicrophone() } }
                 } label: {
                     ZStack {
                         Circle()
@@ -478,12 +514,12 @@ struct AIChatView: View {
                     .focused($isInputFocused)
                     .onSubmit {
                         if viewModel.canSend {
-                            Task { await viewModel.sendMessage() }
+                            gateAI { Task { await viewModel.sendMessage() } }
                         }
                     }
 
                 Button {
-                    Task { await viewModel.sendMessage() }
+                    gateAI { Task { await viewModel.sendMessage() } }
                 } label: {
                     ZStack {
                         Circle()

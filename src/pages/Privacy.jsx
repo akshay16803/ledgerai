@@ -2,7 +2,7 @@ import { useNavigate } from 'react-router-dom';
 
 export default function Privacy() {
   const navigate = useNavigate();
-  const lastUpdated = 'April 27, 2026';
+  const lastUpdated = 'May 3, 2026';
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg-primary)', padding: '48px 24px' }}>
@@ -122,23 +122,77 @@ export default function Privacy() {
             </p>
           </Section>
 
-          <Section title="5. Third-Party Services">
+          <Section title="5. AI Processing & Third-Party AI Services">
+            <p>
+              SpentyAI uses <strong>OpenAI</strong> (operated by OpenAI, L.L.C., based in the United States)
+              as the only third-party AI provider.
+            </p>
+
+            <SubSection title="5.1 What data is sent to OpenAI">
+              <ul style={{ paddingLeft: 20, margin: '8px 0' }}>
+                <li><strong>AI Chat:</strong> your typed question plus a structured summary of your accounts,
+                  recent transactions, categories, customers, vendors, invoices, and bills.</li>
+                <li><strong>Email parsing:</strong> the body text of transaction-related emails from any inbox
+                  you have explicitly connected (Gmail or Outlook).</li>
+                <li><strong>SMS parsing:</strong> the body text of bank/payment SMS messages you have uploaded
+                  from your phone.</li>
+                <li><strong>Receipt scanning:</strong> the photo of a receipt you have uploaded.</li>
+                <li><strong>Bank statement parsing:</strong> the contents of any bank statement (PDF, CSV, or
+                  Excel) you have uploaded.</li>
+              </ul>
+            </SubSection>
+
+            <SubSection title="5.2 What is never sent">
+              <ul style={{ paddingLeft: 20, margin: '8px 0' }}>
+                <li>Account passwords, OAuth refresh tokens, full bank account or card numbers, Aadhaar / PAN,
+                  or any government-issued ID number.</li>
+                <li>Anything from emails or SMS that we have not classified as transaction-related.</li>
+              </ul>
+            </SubSection>
+
+            <SubSection title="5.3 How the data travels and how long it is kept">
+              <ul style={{ paddingLeft: 20, margin: '8px 0' }}>
+                <li>All data is sent over TLS to api.openai.com.</li>
+                <li>Per OpenAI's API terms (effective since March 2023), API request data is not retained beyond
+                  30 days for abuse monitoring and is not used to train OpenAI's models.</li>
+                <li>For full details, see OpenAI's privacy and data-usage policy at{' '}
+                  <a href="https://openai.com/policies/" target="_blank" rel="noopener noreferrer"
+                     style={{ color: 'var(--brand-primary)', textDecoration: 'underline' }}>
+                    https://openai.com/policies/
+                  </a>.
+                </li>
+              </ul>
+            </SubSection>
+
+            <SubSection title="5.4 Your control">
+              <ul style={{ paddingLeft: 20, margin: '8px 0' }}>
+                <li>AI features are opt-in. Before any data is sent to OpenAI for the first time, the app asks
+                  for your explicit consent.</li>
+                <li>You can revoke that consent at any time from <strong>Settings &rarr; Privacy</strong> on the
+                  iOS app, the Android app, or the web app. Revoking consent disables all AI features for that
+                  account.</li>
+              </ul>
+            </SubSection>
+          </Section>
+
+          <Section title="6. Other Third-Party Services">
             <p>We use the following third-party services to operate SpentyAI:</p>
             <ul style={{ paddingLeft: 20, margin: '8px 0' }}>
               <li><strong>Google OAuth</strong> &mdash; for sign-in authentication and Gmail access.</li>
               <li><strong>Microsoft Graph API</strong> &mdash; for Outlook email access.</li>
-              <li><strong>OpenAI</strong> &mdash; to analyze email and SMS content and extract transaction data.
-                Email/SMS content is sent to OpenAI's API for processing. OpenAI's data usage policy applies.</li>
               <li><strong>PhonePe / Razorpay</strong> &mdash; to process subscription payments. Payment data is
                 governed by their respective privacy policies and PCI-DSS standards.</li>
               <li><strong>Resend</strong> &mdash; to deliver verification and welcome emails to your address.</li>
               <li><strong>MongoDB Atlas</strong> &mdash; to securely store your account and financial data.</li>
               <li><strong>Railway</strong> &mdash; to host our application infrastructure.</li>
             </ul>
-            <p>We do not sell, rent, or share your personal or financial data with advertisers or data brokers.</p>
+            <p>
+              For our AI provider (OpenAI), see Section 5 above. We do not sell, rent, or share your personal
+              or financial data with advertisers or data brokers.
+            </p>
           </Section>
 
-          <Section title="6. Data Retention">
+          <Section title="7. Data Retention">
             <p>
               Your data is retained as long as your account is active. If you wish to delete your account and
               all associated data, contact us at the email below. We will permanently remove your records
@@ -146,7 +200,7 @@ export default function Privacy() {
             </p>
           </Section>
 
-          <Section title="7. Data Security">
+          <Section title="8. Data Security">
             <p>
               All data is transmitted over HTTPS with TLS encryption. Session cookies are httpOnly and secure.
               Database access is restricted and authenticated. Email OAuth tokens are stored securely and can
@@ -154,7 +208,7 @@ export default function Privacy() {
             </p>
           </Section>
 
-          <Section title="8. Your Rights">
+          <Section title="9. Your Rights">
             <p>You have the right to:</p>
             <ul style={{ paddingLeft: 20, margin: '8px 0' }}>
               <li><strong>Access</strong> your data through the app's dashboard, transactions, and reports pages.</li>
@@ -165,21 +219,21 @@ export default function Privacy() {
             </ul>
           </Section>
 
-          <Section title="9. Children's Privacy">
+          <Section title="10. Children's Privacy">
             <p>
               SpentyAI is not intended for use by anyone under the age of 18. We do not knowingly collect
               data from minors.
             </p>
           </Section>
 
-          <Section title="10. Changes to This Policy">
+          <Section title="11. Changes to This Policy">
             <p>
               We may update this policy from time to time. Changes will be posted on this page with an
               updated date. Continued use of SpentyAI after changes constitutes acceptance of the revised policy.
             </p>
           </Section>
 
-          <Section title="11. Grievance Officer">
+          <Section title="12. Grievance Officer">
             <p>
               In accordance with the Information Technology Act, 2000 and the Information Technology
               (Intermediary Guidelines and Digital Media Ethics Code) Rules, 2021, if you have any grievance
@@ -195,7 +249,7 @@ export default function Privacy() {
             </p>
           </Section>
 
-          <Section title="12. Contact Us">
+          <Section title="13. Contact Us">
             <p>
               If you have questions about this Privacy Policy or want to request data deletion, contact us at:
             </p>

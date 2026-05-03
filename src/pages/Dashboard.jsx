@@ -11,6 +11,8 @@ import { EditTransactionModal } from '../components/EditTransactionModal';
 import { SalesInvoiceModal } from '../components/SalesInvoiceModal';
 import { PurchaseBillModal } from '../components/PurchaseBillModal';
 import { InternationalInvoiceModal } from '../components/InternationalInvoiceModal';
+import AIConsentModal from '../components/AIConsentModal';
+import * as aiConsent from '../lib/aiConsent';
 import { usesExistingForms } from '../lib/countryConfig';
 import { s, toggleLanguage, getCurrentLanguage } from '../lib/localization';
 
@@ -184,6 +186,9 @@ function AIChatPanel() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
+  const [showConsentModal, setShowConsentModal] = useState(false);
+  // Buffered prompt awaiting consent — when set, granting consent triggers send.
+  const [pendingPrompt, setPendingPrompt] = useState(null);
   const messagesEndRef = useRef(null);
 
   const quickPrompts = [
@@ -199,17 +204,17 @@ function AIChatPanel() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  const sendMessage = async (text) => {
-    const inputText = text || input;
-    if (sending || !inputText.trim()) return;
-
-    const userMessage = { role: 'user', content: inputText.trim() };
+  // Performs the actual send (used by both the consent-cleared path and the
+  // post-grant continuation). Pulled out so the consent gate can call it
+  // without re-running the gate.
+  const performSend = async (inputText) => {
+    const userMessage = { role: 'user', content: inputText };
     setMessages(prev => [...prev, userMessage]);
     setInput('');
     setSending(true);
 
     try {
-      const res = await api.post('/api/ai/chat', { message: inputText.trim(), conversation: [...messages, userMessage] });
+      const res = await api.post('/api/ai/chat', { message: inputText, conversation: [...messages, userMessage] });
       const assistantMessage = { role: 'assistant', content: res.reply || res.message || res.content || '' };
       if (res.transaction_posted && res.transaction) {
         assistantMessage.transaction = res.transaction;
@@ -227,6 +232,36 @@ function AIChatPanel() {
 
     setSending(false);
     setTimeout(scrollToBottom, 100);
+  };
+
+  // Public entry point — gates AI calls behind the one-time consent prompt.
+  // If consent is missing, buffers the prompt and opens the consent modal;
+  // the modal's onGrant callback will resume the send.
+  const sendMessage = (text) => {
+    const inputText = (text || input).trim();
+    if (sending || !inputText) return;
+
+    if (!aiConsent.hasConsented()) {
+      setPendingPrompt(inputText);
+      setShowConsentModal(true);
+      return;
+    }
+
+    performSend(inputText);
+  };
+
+  const handleConsentGranted = () => {
+    if (pendingPrompt) {
+      const buffered = pendingPrompt;
+      setPendingPrompt(null);
+      // Fire after the modal dismisses so state updates settle.
+      setTimeout(() => performSend(buffered), 0);
+    }
+  };
+
+  const handleConsentClosed = () => {
+    setShowConsentModal(false);
+    setPendingPrompt(null);
   };
 
   const handleSubmit = (e) => {
@@ -405,6 +440,12 @@ function AIChatPanel() {
           </form>
         </div>
       )}
+
+      <AIConsentModal
+        isOpen={showConsentModal}
+        onClose={handleConsentClosed}
+        onGrant={handleConsentGranted}
+      />
     </>
   );
 }

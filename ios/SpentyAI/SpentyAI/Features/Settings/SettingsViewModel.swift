@@ -27,6 +27,10 @@ final class SettingsViewModel {
     var isDeletingLogo = false
     var isDeletingSignature = false
 
+    // AI Processing Consent — mirrors `AIConsentManager.hasConsented` so the SwiftUI
+    // Toggle in `SettingsView` can observe changes via @Observable.
+    var aiConsentEnabled: Bool = AIConsentManager.hasConsented
+
     // MARK: - Dependencies
 
     private let repository: SettingsRepository

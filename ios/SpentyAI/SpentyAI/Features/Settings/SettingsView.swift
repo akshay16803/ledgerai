@@ -96,10 +96,63 @@ struct SettingsView: View {
             businessProfileSection
             currencyLocaleSection
             invoiceCustomizationSection
+            privacySection
             legalSupportSection
             accountSection
         }
         .scrollContentBackground(.hidden)
+    }
+
+    // MARK: - Privacy Section
+
+    /// Lets the user revoke the AI processing consent recorded by `AIConsentManager`.
+    /// Required by Apple guideline 5.1.1(i): users must be able to withdraw consent
+    /// to AI data processing at any time.
+    private var privacySection: some View {
+        Section {
+            HStack(spacing: 14) {
+                sectionIcon("sparkles", color: .spentyPrimary)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("AI processing consent")
+                        .font(SpentyFonts.body)
+                        .foregroundColor(.spentyTextPrimary)
+                    Text(viewModel.aiConsentEnabled
+                         ? "AI features may send your data to OpenAI."
+                         : "AI features will not send any data until re-enabled.")
+                        .font(SpentyFonts.caption1)
+                        .foregroundColor(.spentyTextSecondary)
+                        .lineLimit(2)
+                }
+
+                Spacer()
+
+                Toggle("", isOn: Binding(
+                    get: { viewModel.aiConsentEnabled },
+                    set: { newValue in
+                        if newValue {
+                            AIConsentManager.grant()
+                        } else {
+                            AIConsentManager.revoke()
+                        }
+                        viewModel.aiConsentEnabled = newValue
+                    }
+                ))
+                .labelsHidden()
+                .tint(.spentyPrimary)
+            }
+            .padding(.vertical, 4)
+        } header: {
+            Label("Privacy", systemImage: "lock.shield.fill")
+                .font(SpentyFonts.caption1)
+                .fontWeight(.semibold)
+                .foregroundColor(.spentyPrimary)
+                .textCase(nil)
+        } footer: {
+            Text("Turn this off to stop sending your data to our AI provider (OpenAI). You can turn it back on any time.")
+                .font(SpentyFonts.caption2)
+                .foregroundColor(.spentyTextSecondary)
+        }
     }
 
     // MARK: - Business Profile Section

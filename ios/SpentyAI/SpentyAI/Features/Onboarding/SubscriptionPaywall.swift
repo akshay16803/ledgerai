@@ -7,7 +7,6 @@ struct SubscriptionPaywall: View {
     @Environment(LocalizationManager.self) var lang
     @State private var viewModel = BillingViewModel()
     @State private var selectedProductId: String = "com.spentyai.yearly"
-    @State private var showPromoSection = false
     @State private var showLifetimeOffer = false
     @State private var isRestoring = false
     @State private var restoreResultMessage: String? = nil
@@ -32,9 +31,6 @@ struct SubscriptionPaywall: View {
 
                 // Subscribe Button
                 subscribeButton
-
-                // Promo
-                promoSection
 
                 // Detection Note
                 detectionNote
@@ -291,82 +287,6 @@ struct SubscriptionPaywall: View {
         .disabled(viewModel.isPurchasing)
     }
 
-    // MARK: - Promo Section
-
-    private var promoSection: some View {
-        VStack(spacing: 10) {
-            Button {
-                withAnimation { showPromoSection.toggle() }
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "ticket")
-                    Text(lang.s("have_promo"))
-                        .font(.subheadline)
-                    Spacer()
-                    Image(systemName: showPromoSection ? "chevron.up" : "chevron.down")
-                        .font(.caption)
-                }
-                .foregroundStyle(brandPrimary)
-            }
-
-            if showPromoSection {
-                VStack(spacing: 10) {
-                    HStack(spacing: 8) {
-                        TextField(lang.s("enter_code"), text: $viewModel.promoCode)
-                            .textFieldStyle(.roundedBorder)
-                            .textInputAutocapitalization(.characters)
-                            .autocorrectionDisabled()
-
-                        Button {
-                            Task { await viewModel.validatePromo() }
-                        } label: {
-                            if viewModel.isValidatingPromo {
-                                ProgressView()
-                            } else {
-                                Text(lang.s("apply_promo"))
-                            }
-                        }
-                        .buttonStyle(.bordered)
-                        .tint(brandPrimary)
-                        .disabled(viewModel.promoCode.trimmingCharacters(in: .whitespaces).isEmpty || viewModel.isValidatingPromo)
-                    }
-
-                    if !viewModel.promoMessage.isEmpty {
-                        HStack(spacing: 6) {
-                            Image(systemName: viewModel.promoValid == true ? "checkmark.circle.fill" : "xmark.circle.fill")
-                            Text(viewModel.promoMessage)
-                                .font(.caption)
-                        }
-                        .foregroundStyle(viewModel.promoValid == true ? brandPrimary : brandError)
-                    }
-
-                    if viewModel.promoValid == true {
-                        Button {
-                            Task {
-                                await viewModel.activatePromo()
-                                if viewModel.isSubscribed {
-                                    onSubscribed?()
-                                }
-                            }
-                        } label: {
-                            Text(lang.s("activate_promo_btn"))
-                                .font(.subheadline.weight(.semibold))
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 10)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .tint(brandPrimary)
-                        .disabled(viewModel.isActivatingPromo)
-                    }
-                }
-                .transition(.opacity.combined(with: .move(edge: .top)))
-            }
-        }
-        .padding()
-        .background(Color.spentyCardBg)
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-    }
-
     // MARK: - Detection Note
 
     private var detectionNote: some View {
@@ -388,47 +308,52 @@ struct SubscriptionPaywall: View {
     // MARK: - Terms
 
     private var termsSection: some View {
-        VStack(spacing: 4) {
+        VStack(spacing: 8) {
             Text(lang.s("recurring_billing"))
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
 
-            HStack(spacing: 4) {
+            // Apple guideline 3.1.2: Terms of Service and Privacy Policy must be
+            // visible at the moment of purchase. Render full-width, tappable, body-sized.
+            HStack(spacing: 12) {
                 Link("Terms of Service", destination: URL(string: "https://spentyai.com/terms")!)
-                Text("·")
+                    .frame(maxWidth: .infinity)
                 Link("Privacy Policy", destination: URL(string: "https://spentyai.com/privacy")!)
-                Text("·")
-                Button("Restore Purchases") {
-                    Task {
-                        isRestoring = true
-                        do {
-                            try await AppStore.sync()
-                            // Re-check entitlements after sync
-                            await viewModel.checkEntitlements()
-                            if viewModel.isSubscribed {
-                                onSubscribed?()
-                            } else {
-                                restoreResultMessage = "No active subscription found for this Apple ID."
-                                showRestoreResult = true
-                            }
-                        } catch {
-                            restoreResultMessage = "Restore failed. Please try again or contact us at customersupport@spentyai.com."
+                    .frame(maxWidth: .infinity)
+            }
+            .font(.body)
+            .foregroundStyle(brandPrimary)
+
+            Button("Restore Purchases") {
+                Task {
+                    isRestoring = true
+                    do {
+                        try await AppStore.sync()
+                        // Re-check entitlements after sync
+                        await viewModel.checkEntitlements()
+                        if viewModel.isSubscribed {
+                            onSubscribed?()
+                        } else {
+                            restoreResultMessage = "No active subscription found for this Apple ID."
                             showRestoreResult = true
                         }
-                        isRestoring = false
+                    } catch {
+                        restoreResultMessage = "Restore failed. Please try again or contact us at customersupport@spentyai.com."
+                        showRestoreResult = true
                     }
-                }
-                .disabled(isRestoring)
-                .overlay {
-                    if isRestoring {
-                        ProgressView()
-                            .scaleEffect(0.7)
-                            .offset(x: 48)
-                    }
+                    isRestoring = false
                 }
             }
-            .font(.caption2)
-            .foregroundStyle(.tertiary)
+            .font(.body)
+            .foregroundStyle(brandPrimary)
+            .disabled(isRestoring)
+            .overlay {
+                if isRestoring {
+                    ProgressView()
+                        .scaleEffect(0.7)
+                        .offset(x: 80)
+                }
+            }
         }
         .multilineTextAlignment(.center)
     }

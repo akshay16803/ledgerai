@@ -306,6 +306,26 @@ export default function Pricing() {
           ))}
         </div>
 
+        {/* Terms + Privacy + auto-renew disclosure (Apple Issue #2) */}
+        <p style={{
+          textAlign: 'center',
+          fontSize: 13,
+          color: 'var(--text-secondary)',
+          maxWidth: 560,
+          margin: '-32px auto 56px',
+          lineHeight: 1.6,
+        }}>
+          By subscribing, you agree to our{' '}
+          <Link to="/terms" style={{ color: 'var(--brand-primary)', textDecoration: 'underline', fontWeight: 500 }}>
+            Terms of Service
+          </Link>{' '}
+          and{' '}
+          <Link to="/privacy" style={{ color: 'var(--brand-primary)', textDecoration: 'underline', fontWeight: 500 }}>
+            Privacy Policy
+          </Link>
+          . Subscriptions auto-renew until cancelled. Cancel any time.
+        </p>
+
         {/* Everything included */}
         <div style={{
           background: '#fff',

@@ -38,7 +38,10 @@ interface ApiEndpoints {
     // (spentyai6@gmail.com). Used by Google Play / App Store reviewers and
     // exposed via the "View Demo Account" link on the Login screen.
     @POST("api/auth/demo-login")
-    suspend fun demoLogin(@Body body: JsonObject): Response<JsonObject>
+    suspend fun demoLogin(
+        @Body body: JsonObject,
+        @retrofit2.http.Query("fresh") fresh: Boolean? = null
+    ): Response<JsonObject>
 
     // --- Dashboard ---
     @GET("api/dashboard/summary")

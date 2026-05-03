@@ -150,7 +150,11 @@ class AuthManager(
                 )
             )
 
-            val result = apiClient.safeApiCall { apiClient.endpoints.demoLogin(body) }
+            // Debug builds opt into the fresh / non-subscribed demo state so QA
+            // can exercise the Monthly-intercept and onboarding-paywall flows.
+            // Release builds always get the active-subscription demo path.
+            val freshMode: Boolean? = if (com.spentyai.app.BuildConfig.DEBUG) true else null
+            val result = apiClient.safeApiCall { apiClient.endpoints.demoLogin(body, freshMode) }
             when (result) {
                 is ApiResult.Success -> {
                     val data = result.data

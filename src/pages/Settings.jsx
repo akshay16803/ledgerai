@@ -3,10 +3,12 @@ import { useState, useEffect, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
-import { Check, Globe, CalendarBlank, Buildings, Bank, Warning, ArrowLeft, ArrowRight, Receipt, MapPin, ArrowCounterClockwise, Trash, UploadSimple, Image, X } from '@phosphor-icons/react';
+import { Check, Globe, CalendarBlank, Buildings, Bank, Warning, ArrowLeft, ArrowRight, Receipt, MapPin, ArrowCounterClockwise, Trash, UploadSimple, Image, X, ShieldCheck, Robot } from '@phosphor-icons/react';
 
 const API = import.meta.env.REACT_APP_BACKEND_URL || '';
 import { COUNTRIES } from '../lib/countryConfig';
+import * as aiConsent from '../lib/aiConsent';
+import AIConsentModal from '../components/AIConsentModal';
 
 const INDIAN_STATES = [
   'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chhattisgarh', 'Goa', 'Gujarat',
@@ -130,6 +132,10 @@ export default function Settings() {
   const [signatureUrl, setSignatureUrl] = useState('');
   const [logoUploading, setLogoUploading] = useState(false);
   const [signatureUploading, setSignatureUploading] = useState(false);
+
+  // AI consent state — mirrors localStorage; updated by toggle / consent modal
+  const [aiConsentGranted, setAiConsentGranted] = useState(() => aiConsent.hasConsented());
+  const [showAiConsentModal, setShowAiConsentModal] = useState(false);
 
   useEffect(() => {
     api.get('/api/settings').then(s => {
@@ -270,6 +276,21 @@ export default function Settings() {
       setSignatureUrl(data.url || data.signature_url || '');
     } catch { alert('Signature upload failed. Please try again.'); }
     finally { setSignatureUploading(false); }
+  };
+
+  // AI consent toggle: turning OFF revokes immediately; turning ON opens the
+  // consent modal so the user sees what they're agreeing to.
+  const handleAiConsentToggle = () => {
+    if (aiConsentGranted) {
+      aiConsent.revoke();
+      setAiConsentGranted(false);
+    } else {
+      setShowAiConsentModal(true);
+    }
+  };
+
+  const handleAiConsentGranted = () => {
+    setAiConsentGranted(true);
   };
 
   const selectedCurrency = CURRENCIES.find(c => c.code === baseCurrency);
@@ -720,6 +741,74 @@ export default function Settings() {
           </span>
         )}
       </div>
+
+      {/* Privacy — AI processing consent (parity with iOS / Android) */}
+      {!setupMode && (
+        <div data-testid="privacy-section" style={{
+          background: '#fff', border: '1px solid var(--border-subtle)', borderRadius: 2,
+          padding: 28, marginTop: 32,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+            <ShieldCheck size={18} weight="duotone" style={{ color: 'var(--info)' }} />
+            <h2 style={{ fontSize: 16, fontWeight: 600 }}>Privacy</h2>
+          </div>
+          <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 16 }}>
+            Manage how SpentyAI uses third-party services to process your data.
+          </p>
+
+          <div
+            style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16,
+              padding: '16px 20px', border: '1px solid var(--border-subtle)', borderRadius: 4,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, flex: 1 }}>
+              <Robot size={20} weight="duotone" style={{ color: 'var(--brand-primary)', flexShrink: 0, marginTop: 2 }} />
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4 }}>
+                  AI processing consent
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', maxWidth: 480, lineHeight: 1.5 }}>
+                  When enabled, SpentyAI may send data to OpenAI for AI Chat, email parsing, SMS parsing,
+                  receipts, and bank statements. Turning this off disables all AI features for this account.
+                  See our <a href="/privacy" style={{ color: 'var(--brand-primary)', textDecoration: 'underline' }}>Privacy Policy</a> for details.
+                </div>
+              </div>
+            </div>
+            {/* Toggle */}
+            <button
+              data-testid="ai-consent-toggle"
+              role="switch"
+              aria-checked={aiConsentGranted}
+              onClick={handleAiConsentToggle}
+              style={{
+                position: 'relative',
+                width: 44, height: 26, borderRadius: 13,
+                border: 'none', padding: 0,
+                background: aiConsentGranted ? 'var(--brand-primary)' : 'var(--border-strong)',
+                cursor: 'pointer',
+                transition: 'background 0.15s ease',
+                flexShrink: 0,
+              }}
+            >
+              <span style={{
+                position: 'absolute', top: 3, left: aiConsentGranted ? 21 : 3,
+                width: 20, height: 20, borderRadius: '50%',
+                background: '#fff',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.25)',
+                transition: 'left 0.15s ease',
+              }} />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* AI consent modal — opened when user toggles ON */}
+      <AIConsentModal
+        isOpen={showAiConsentModal}
+        onClose={() => setShowAiConsentModal(false)}
+        onGrant={handleAiConsentGranted}
+      />
 
       {/* Help & Support */}
       {!setupMode && (
