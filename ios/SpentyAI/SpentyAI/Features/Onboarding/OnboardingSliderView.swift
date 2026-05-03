@@ -14,6 +14,12 @@ struct OnboardingSliderView: View {
 
     private let slides = OnboardingSlide.allSlides
 
+    /// Apple App Review (May 2026) flagged iPhone-stretched iPad UI; cap the
+    /// onboarding bottom CTA's width on iPad and centre it.
+    private var isPad: Bool {
+        UIDevice.current.userInterfaceIdiom == .pad
+    }
+
     var body: some View {
         ZStack(alignment: .top) {
 
@@ -58,6 +64,7 @@ struct OnboardingSliderView: View {
                     dotIndicators
                     bottomButton
                         .padding(.horizontal, 24)
+                        .frame(maxWidth: isPad ? 460 : .infinity)
                 }
                 .padding(.bottom, 36)
             }

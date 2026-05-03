@@ -24,6 +24,13 @@ struct LoginView: View {
 
     // MARK: - Body
 
+    /// On iPad the login chrome should sit in a centered card rather than
+    /// stretch the full screen width. iPhone keeps the original full-width
+    /// layout. Apple App Review (May 2026) flagged iPhone-stretched iPad UI.
+    private var isPad: Bool {
+        UIDevice.current.userInterfaceIdiom == .pad
+    }
+
     var body: some View {
         ZStack {
             Color.spentyBgPrimary
@@ -42,6 +49,8 @@ struct LoginView: View {
                     .padding(.bottom, 48)
             }
             .padding(.horizontal, 32)
+            .frame(maxWidth: isPad ? 460 : .infinity)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .alert(lang.s("sign_in_error"), isPresented: $viewModel.showError) {
             Button(lang.s("ok")) { viewModel.dismissError() }

@@ -1,9 +1,18 @@
 import SwiftUI
+import UIKit
 
 struct AppRouter: View {
     var authManager: AuthManager
 
     @State private var onboardingDone = OnboardingManager.shared.hasSeenOnboarding
+
+    /// Apple App Review (May 2026) flagged the iPad as showing iPhone-stretched
+    /// UI with poor typography. We already have a `SidebarView` built around
+    /// `NavigationSplitView` — this just routes iPad users to it instead of the
+    /// iPhone tab bar. iPhone keeps the existing `MainTabView`.
+    private var isPad: Bool {
+        UIDevice.current.userInterfaceIdiom == .pad
+    }
 
     var body: some View {
         Group {
@@ -25,6 +34,8 @@ struct AppRouter: View {
                 SubscriptionPaywall(onSubscribed: {
                     Task { await authManager.checkSession() }
                 })
+            } else if isPad {
+                SidebarView()
             } else {
                 MainTabView()
             }

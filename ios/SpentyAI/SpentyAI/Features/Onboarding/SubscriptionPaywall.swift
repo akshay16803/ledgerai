@@ -20,6 +20,12 @@ struct SubscriptionPaywall: View {
     private let brandBg      = Color.spentyBgPrimary
     private let brandError   = Color.spentyError
 
+    /// Apple App Review (May 2026) flagged iPhone-stretched iPad UI; cap
+    /// paywall content width on iPad and centre it.
+    private var isPad: Bool {
+        UIDevice.current.userInterfaceIdiom == .pad
+    }
+
     var body: some View {
         ScrollView {
             VStack(spacing: 28) {
@@ -40,6 +46,8 @@ struct SubscriptionPaywall: View {
             }
             .padding(.horizontal, 20)
             .padding(.bottom, 40)
+            .frame(maxWidth: isPad ? 640 : .infinity)
+            .frame(maxWidth: .infinity)
         }
         .background(brandBg.ignoresSafeArea())
         .task {
