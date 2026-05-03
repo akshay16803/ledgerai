@@ -850,6 +850,11 @@ async def demo_login(request: Request):
 
     user_doc = await db.users.find_one({"user_id": user_id}, {"_id": 0})
     logger.info(f"[DemoLogin] Session minted for demo user {user_id}")
+    # Reflect ACTUAL DB state in the response — previously hardcoded
+    # "yearly/active" which broke ?fresh=true (DB updated correctly but the
+    # response lied, so the client thought the demo user was still
+    # subscribed). Reviewer default path (no flag) still returns yearly/active
+    # because user_doc is set to that just above.
     return {
         "session_token": session_token,
         "user": {
@@ -857,8 +862,8 @@ async def demo_login(request: Request):
             "email": DEMO_EMAIL,
             "name": DEMO_NAME,
             "picture": None,
-            "subscription_plan": "yearly",
-            "subscription_status": "active",
+            "subscription_plan": user_doc.get("subscription_plan") if user_doc else None,
+            "subscription_status": user_doc.get("subscription_status") if user_doc else None,
         },
     }
 
