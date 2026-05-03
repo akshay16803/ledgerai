@@ -220,6 +220,25 @@ struct SubscriptionPaywall: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
+
+                    // Trial summary pill — stacked under subtitle, NOT overlaid.
+                    // Previously this was an `.overlay(alignment: .bottomLeading)`
+                    // which printed on top of the subtitle text, producing the
+                    // double-text artefact Apple App Review noticed (May 2026).
+                    if let trial = viewModel.trialSummary(for: plan.productId) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "sparkles")
+                                .font(.system(size: 9, weight: .bold))
+                            Text(trial)
+                                .font(.system(size: 10, weight: .semibold))
+                        }
+                        .foregroundStyle(brandPrimary)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .background(brandPrimary.opacity(0.10))
+                        .clipShape(Capsule())
+                        .padding(.top, 4)
+                    }
                 }
 
                 Spacer()
@@ -240,23 +259,6 @@ struct SubscriptionPaywall: View {
                             .font(.caption2)
                             .foregroundStyle(.tertiary)
                     }
-                }
-            }
-            .overlay(alignment: .bottomLeading) {
-                if let trial = viewModel.trialSummary(for: plan.productId) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "sparkles")
-                            .font(.system(size: 9, weight: .bold))
-                        Text(trial)
-                            .font(.system(size: 10, weight: .semibold))
-                    }
-                    .foregroundStyle(brandPrimary)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(brandPrimary.opacity(0.10))
-                    .clipShape(Capsule())
-                    .padding(.leading, 36)
-                    .padding(.bottom, -6)
                 }
             }
             .padding(14)
