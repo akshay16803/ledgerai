@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api.js';
-import { useAuth } from '../lib/auth.jsx';
+import { useAuth } from '../contexts/AuthContext.jsx';
 
 // Landed here from PayU after a successful payment.
 // PayU's callback handler on the backend has already verified the response
