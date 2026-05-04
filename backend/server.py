@@ -8755,21 +8755,39 @@ async def _sweep_expired_subscriptions_once() -> int:
     """Find users whose subscription_expiry is in the past and mark them
     expired. Skips lifetime users (their expiry is set ~100 years out but
     we exclude by plan key for safety). Returns the number flipped."""
-    now_iso = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(timezone.utc)
+    now_iso = now.isoformat()
+    # Status-specific grace windows. "active" rows flip immediately on expiry —
+    # they mean the gateway has confirmed nothing's coming. "trialing" rows
+    # get +24h because PayU/Apple/Google often charge the first cycle hours
+    # after the nominal trial-end timestamp. "in_grace_period" rows get +30
+    # days because gateways themselves are still retrying the auto-charge —
+    # immediate expiry would defeat the purpose of grace.
+    trial_cutoff_iso = (now - timedelta(hours=24)).isoformat()
+    grace_cutoff_iso = (now - timedelta(days=30)).isoformat()
     try:
-        # Also catches "trialing" + "in_grace_period" rows whose expiry has
-        # passed — those are equivalent to active access for gating purposes,
-        # so they need the same sweep.
         result = await db.users.update_many(
             {
-                "subscription_status": {"$in": list(ACTIVE_SUBSCRIPTION_STATUSES)},
                 "subscription_plan": {"$nin": list(LIFETIME_PLAN_KEYS)},
-                "subscription_expiry": {"$lt": now_iso},
+                "$or": [
+                    {
+                        "subscription_status": "active",
+                        "subscription_expiry": {"$lt": now_iso},
+                    },
+                    {
+                        "subscription_status": "trialing",
+                        "subscription_expiry": {"$lt": trial_cutoff_iso},
+                    },
+                    {
+                        "subscription_status": "in_grace_period",
+                        "subscription_expiry": {"$lt": grace_cutoff_iso},
+                    },
+                ],
             },
             {
                 "$set": {
                     "subscription_status": "expired",
-                    "subscription_expired_at": datetime.now(timezone.utc),
+                    "subscription_expired_at": now,
                 }
             },
         )
@@ -11200,6 +11218,14 @@ async def payu_callback(request: Request):
     udf5        = payload.get("udf5", "")
     received_hash = payload.get("hash", "")
     payu_payment_id = payload.get("mihpayid", "") or payload.get("payuMoneyId", "")
+    # PayU returns mandate_id (recurring) sometimes as `mandate_id`, sometimes
+    # as `subscription_id`. Capture both so the recurring webhook handler
+    # below can use mandate_id to identify the user across renewals.
+    payu_mandate_id = (
+        payload.get("mandate_id", "")
+        or payload.get("subscription_id", "")
+        or ""
+    )
     additional_charges = payload.get("additionalCharges", "")
 
     web_base = os.environ.get("WEB_BASE_URL", "https://www.spentyai.com").rstrip("/")
@@ -11267,11 +11293,16 @@ async def payu_callback(request: Request):
         {"$set": {
             "status": "paid",
             "payu_payment_id": payu_payment_id,
+            "payu_mandate_id": payu_mandate_id,
             "payu_status_raw": status,
             "paid_at": now,
             "callback_at": now,
         }},
     )
+    # subscription_payment_id stores the long-lived identifier we'll use to
+    # look the user up on renewal webhooks. Prefer mandate_id (stable across
+    # cycles); fall back to one-shot payment_id for non-recurring orders.
+    long_lived_id = payu_mandate_id or payu_payment_id
     await db.users.update_one(
         {"user_id": user_id},
         {"$set": {
@@ -11279,11 +11310,11 @@ async def payu_callback(request: Request):
             "subscription_status": sub_status,
             "subscription_provider": "payu",
             "subscription_expiry": expiry.isoformat(),
-            "subscription_payment_id": payu_payment_id,
+            "subscription_payment_id": long_lived_id,
             "subscription_updated_at": now,
         }},
     )
-    logger.info(f"[PayU] Activated {plan_key} ({sub_status}) for user_id={user_id} via txnid={txnid}")
+    logger.info(f"[PayU] Activated {plan_key} ({sub_status}) for user_id={user_id} via txnid={txnid} mandate_id={payu_mandate_id}")
     return RedirectResponse(url=success_url, status_code=303)
 
 
@@ -11754,6 +11785,22 @@ async def google_rtdn(request: Request):
 PAYU_SUB_KEY  = os.environ.get("PAYU_SUB_KEY")  or PAYU_KEY
 PAYU_SUB_SALT = os.environ.get("PAYU_SUB_SALT") or PAYU_SALT
 
+# Master switch. PayU support has to enable Subscriptions / eMandate on the
+# merchant ID (13642426) before /payu/subscription/create can succeed at PayU's
+# end. Until they confirm enabled, set PAYU_SUBS_ENABLED=0 in env to fall the
+# /subscription/create endpoint back to one-time `/payments/create-order` with
+# a message — users get charged the FULL plan amount today (no auto-renew yet)
+# instead of seeing a confusing PayU error mid-checkout.
+PAYU_SUBS_ENABLED = (os.environ.get("PAYU_SUBS_ENABLED", "0").lower() in {"1", "true", "yes"})
+
+# Some PayU subscription configurations require the recurring fields
+# (si, billing_amount, billing_cycle, billing_interval, payment_start_date)
+# to be included in the request hash. Default OFF (matches the "standard 12
+# fields" hash in PayU's general docs); set PAYU_SUBS_HASH_RECURRING_FIELDS=1
+# if PayU support tells us their subscription hash spec includes the recurring
+# fields for our MID.
+PAYU_SUBS_HASH_RECURRING_FIELDS = (os.environ.get("PAYU_SUBS_HASH_RECURRING_FIELDS", "0").lower() in {"1", "true", "yes"})
+
 PAYU_BILLING_CYCLE = {
     # plan_key -> (billing_amount in rupees, billing_cycle, billing_interval)
     "monthly":   ("monthly",   1),
@@ -11780,6 +11827,17 @@ async def payu_create_subscription(body: dict = Body(...), user: dict = Depends(
         raise HTTPException(status_code=400, detail=f"Plan not supported for recurring: {plan_key}")
     if not (PAYU_SUB_KEY and PAYU_SUB_SALT):
         raise HTTPException(status_code=503, detail="PayU recurring not configured. Contact support.")
+
+    # PayU support has not enabled Subscriptions on this merchant ID yet —
+    # fall back to one-time /create-order so users aren't dropped onto a
+    # PayU error page. The user gets charged the full plan amount today
+    # (no auto-renew) and gets the standard duration of access; auto-renew
+    # is set up automatically once PAYU_SUBS_ENABLED is flipped on.
+    if not PAYU_SUBS_ENABLED:
+        # Defer to the existing one-time order creator. Forwarding via internal
+        # call keeps the endpoint compatible with the same frontend code path.
+        logger.info(f"[payu] Subscriptions disabled — falling back to one-time order for plan={plan_key}")
+        return await create_payment_order(body=body, user=user)
 
     plan = PLAN_PRICES[plan_key]
     cycle, interval = PAYU_BILLING_CYCLE[plan_key]
@@ -11816,11 +11874,19 @@ async def payu_create_subscription(body: dict = Body(...), user: dict = Depends(
     udf2 = user["user_id"]
     udf3 = "recurring"
 
-    request_hash = _payu_request_hash(
-        key=PAYU_SUB_KEY, txnid=txnid, amount=amount, productinfo=productinfo,
-        firstname=firstname, email=email,
-        udf1=udf1, udf2=udf2, udf3=udf3, salt=PAYU_SUB_SALT,
-    )
+    if PAYU_SUBS_HASH_RECURRING_FIELDS:
+        # Some PayU subscription configurations include the recurring fields
+        # in the hash. Format (per PayU support's recurring spec):
+        #   sha512(key|txnid|amount|productinfo|firstname|email|udf1..udf5||||||SALT|si|billing_amount|billing_cycle|billing_interval|payment_start_date|free_trial)
+        base = f"{PAYU_SUB_KEY}|{txnid}|{amount}|{productinfo}|{firstname}|{email}|{udf1}|{udf2}|{udf3}|||||||{PAYU_SUB_SALT}"
+        recurring = f"|1|{full_amount}|{cycle}|{interval}|{payment_start}|{free_trial_flag}"
+        request_hash = hashlib.sha512((base + recurring).encode("utf-8")).hexdigest().lower()
+    else:
+        request_hash = _payu_request_hash(
+            key=PAYU_SUB_KEY, txnid=txnid, amount=amount, productinfo=productinfo,
+            firstname=firstname, email=email,
+            udf1=udf1, udf2=udf2, udf3=udf3, salt=PAYU_SUB_SALT,
+        )
 
     await db.payment_orders.insert_one({
         "order_id": txnid,
@@ -11896,17 +11962,52 @@ async def payu_webhook(request: Request):
 
     event = (payload.get("event") or payload.get("status") or "").upper()
     txnid = payload.get("txnid") or payload.get("subscription_id") or ""
-    mandate_id = payload.get("mandate_id") or payload.get("subscription_id") or ""
+    # PayU's recurring webhooks reliably echo mandate_id / subscription_id /
+    # mihpayid. udf fields are NOT echoed on most renewal events. Resolve the
+    # user with a chain: udf2 (set on the FIRST charge) → mandate_id stored on
+    # the user record (set during the first /payu/callback) → mandate_id on
+    # any payment_orders row → txnid lookup. Last fallback prevents silent
+    # data loss on subscription renewals.
+    mandate_id = (
+        payload.get("mandate_id")
+        or payload.get("subscription_id")
+        or payload.get("mihpayid")
+        or ""
+    )
 
-    user_id = None
-    plan_key = payload.get("udf1")
-    if not plan_key:
-        order = await db.payment_orders.find_one({"order_id": txnid})
+    user_id = payload.get("udf2") or None
+    plan_key = payload.get("udf1") or None
+
+    # Mandate-id lookup on user record (preferred for renewals)
+    if not user_id and mandate_id:
+        user = await db.users.find_one(
+            {"subscription_payment_id": mandate_id},
+            {"user_id": 1, "subscription_plan": 1},
+        )
+        if user:
+            user_id = user.get("user_id")
+            plan_key = plan_key or user.get("subscription_plan")
+
+    # Mandate-id lookup on payment_orders (preferred when first charge had its
+    # mandate_id captured but the user record was not yet updated)
+    if not user_id and mandate_id:
+        order = await db.payment_orders.find_one(
+            {"$or": [
+                {"payu_mandate_id": mandate_id},
+                {"payu_payment_id": mandate_id},
+            ]},
+            {"user_id": 1, "plan": 1},
+        )
         if order:
             user_id = order.get("user_id")
-            plan_key = order.get("plan")
-    else:
-        user_id = payload.get("udf2")
+            plan_key = plan_key or order.get("plan")
+
+    # Final fallback: txnid lookup
+    if not user_id and txnid:
+        order = await db.payment_orders.find_one({"order_id": txnid}, {"user_id": 1, "plan": 1})
+        if order:
+            user_id = order.get("user_id")
+            plan_key = plan_key or order.get("plan")
 
     logger.info(f"[payu-webhook] event={event} txnid={txnid} mandate_id={mandate_id} user_id={user_id}")
 

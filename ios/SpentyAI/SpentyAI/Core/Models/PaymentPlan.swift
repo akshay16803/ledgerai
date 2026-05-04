@@ -45,8 +45,12 @@ struct SubscriptionStatus: Codable {
     let plan: String?
     let productId: String?
     let expiresAt: String?
-    let provider: String?          // "apple", "web", "promo"
+    let provider: String?          // "apple", "google", "payu", "promo"
     let autoRenew: Bool?
+    /// Raw backend status — "active" / "trialing" / "in_grace_period" /
+    /// "expired" / "cancelled". Used to render the "Trial · ends [date]"
+    /// badge in BillingView when status == "trialing".
+    let status: String?
 
     enum CodingKeys: String, CodingKey {
         case plan = "subscriptionPlan"
@@ -55,5 +59,6 @@ struct SubscriptionStatus: Codable {
         case productId
         case expiresAt = "subscriptionExpiry"
         case autoRenew
+        case status
     }
 }

@@ -193,26 +193,86 @@ fun BillingScreen(
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(24.dp)
             ) {
-                // Current plan header
+                // Cross-platform double-billing block: if the user is already
+                // active via PayU (web) or Apple (iOS), opening Settings →
+                // Subscription on this device should NOT let them start a Play
+                // Billing flow that would charge them again. Mirror of the
+                // launch-time SubscriptionPaywallScreen logic — same banner,
+                // same disable on Subscribe buttons below.
+                val xpProvider = state.currentStatus?.provider?.lowercase()
+                val xpActive = state.currentStatus?.isActive == true
+                val xpBlock = xpActive && (xpProvider == "payu" || xpProvider == "apple")
+                val xpMessage = when {
+                    xpActive && xpProvider == "payu" ->
+                        "You're subscribed via the SpentyAI website (PayU). Manage at www.spentyai.com — subscribing here would double-charge you."
+                    xpActive && xpProvider == "apple" ->
+                        "You're subscribed via iPhone (App Store). Manage in the App Store on your phone — subscribing here would double-charge you."
+                    else -> ""
+                }
+                if (xpBlock) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(SpentyError.copy(alpha = 0.08f))
+                            .padding(14.dp),
+                        verticalAlignment = Alignment.Top,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .width(4.dp)
+                                .height(28.dp)
+                                .clip(RoundedCornerShape(2.dp))
+                                .background(SpentyError)
+                        )
+                        Text(
+                            text = xpMessage,
+                            style = SpentyType.Subheadline,
+                            color = MaterialTheme.colorScheme.onBackground
+                        )
+                    }
+                }
+
+                // Current plan header — different copy for trialing /
+                // in_grace_period vs steady-state active so users always know
+                // what's about to happen to their billing.
                 state.currentStatus?.takeIf { it.isActive }?.let { status ->
+                    val rawStatus = status.status?.lowercase()
+                    val isTrial = rawStatus == "trialing"
+                    val isGrace = rawStatus == "in_grace_period"
+                    val accent = if (isGrace) SpentyError else SpentyPrimary
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(16.dp))
-                            .background(SpentyPrimary.copy(alpha = 0.08f))
+                            .background(accent.copy(alpha = 0.08f))
                             .padding(16.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Verified, contentDescription = null, tint = SpentyPrimary)
+                            Icon(Icons.Default.Verified, contentDescription = null, tint = accent)
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("Active Subscription", style = SpentyType.Headline, color = SpentyPrimary)
+                            Text(
+                                when {
+                                    isTrial -> "Free Trial Active"
+                                    isGrace -> "Payment Retrying"
+                                    else -> "Active Subscription"
+                                },
+                                style = SpentyType.Headline,
+                                color = accent
+                            )
                         }
                         status.plan?.let { plan ->
                             Text(plan, style = SpentyType.Title3)
                         }
                         status.expiresAt?.let { expires ->
-                            Text("Renews $expires", style = SpentyType.Caption1, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            val line = when {
+                                isTrial -> "First charge on $expires"
+                                isGrace -> "Auto-charge retrying — access continues until $expires"
+                                else -> "Renews $expires"
+                            }
+                            Text(line, style = SpentyType.Caption1, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         status.provider?.let { provider ->
                             Text("via ${provider.replaceFirstChar { it.uppercase() }}", style = SpentyType.Caption2, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -245,6 +305,7 @@ fun BillingScreen(
                             isCurrent = viewModel.isCurrentPlan(plan.productId),
                             isPurchasing = state.purchasingProductId == plan.productId,
                             onSubscribe = {
+                                if (xpBlock) return@PlanCard  // double-billing guard
                                 // iOS-parity intercept: a non-lifetime user tapping
                                 // Subscribe on Monthly while the 1-hour offer window
                                 // is still open sees the lifetime offer first. All
@@ -265,7 +326,7 @@ fun BillingScreen(
                                     }
                                 }
                             },
-                            isAnyPurchasing = state.isPurchasing
+                            isAnyPurchasing = state.isPurchasing || xpBlock
                         )
                         Spacer(modifier = Modifier.height(12.dp))
                     }

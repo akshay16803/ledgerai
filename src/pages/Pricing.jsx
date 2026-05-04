@@ -226,7 +226,7 @@ export default function Pricing() {
             fontSize: 11, fontWeight: 600, letterSpacing: '0.15em', textTransform: 'uppercase'
           }}>
             <Sparkle size={12} weight="fill" />
-            7-day free trial · ₹1 mandate verification
+            7-day free trial · ₹1 today (deducted from first cycle)
           </div>
         </div>
 
@@ -405,7 +405,7 @@ export default function Pricing() {
           marginRight: 'auto',
           lineHeight: 1.6,
         }}>
-          Prices in INR. GST extra where applicable. Cancel anytime during trial — no charge.
+          Prices in INR. GST extra where applicable. To start a trial we collect a ₹1 mandate-verification charge today through PayU's eMandate; this ₹1 is deducted from your first cycle's payment. Cancel any time during the 7-day trial from Settings → Billing and your first cycle is never charged.
           Lifetime offer available for a limited time only.
           AI email &amp; SMS processing is included under fair use. Pricing may be adjusted with 30 days' advance notice if AI infrastructure costs change significantly.{' '}
           <a href="/terms" style={{ color: 'inherit', textDecoration: 'underline', opacity: 0.8 }}>Terms apply.</a>

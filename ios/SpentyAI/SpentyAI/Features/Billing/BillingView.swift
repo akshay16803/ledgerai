@@ -15,9 +15,43 @@ struct BillingView: View {
     private let brandBg      = Color.spentyBgPrimary
     private let brandError   = Color.spentyError
 
+    /// True when the user already has an active subscription via a non-Apple
+    /// gateway (web PayU / Android Google Play). Tapping Subscribe in this
+    /// state would charge them via Apple too, leaving them double-billed.
+    /// The block also covers the in-app management screen (this view), not
+    /// just the launch-time paywall — a Settings → Subscription tap should
+    /// not become a billing trap.
+    private var crossPlatformBlock: (active: Bool, message: String) {
+        let provider = (viewModel.currentStatus?.provider ?? "").lowercased()
+        let active = viewModel.currentStatus?.isActive == true
+        if active && provider == "payu" {
+            return (true, "You're subscribed via the SpentyAI website (PayU). Manage at www.spentyai.com — subscribing here would double-charge you.")
+        }
+        if active && provider == "google" {
+            return (true, "You're subscribed via Google Play (Android). Manage in the Play Store on your phone — subscribing here would double-charge you.")
+        }
+        return (false, "")
+    }
+
     var body: some View {
         ScrollView {
             VStack(spacing: 24) {
+                if crossPlatformBlock.active {
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 16))
+                            .foregroundStyle(brandError)
+                            .padding(.top, 1)
+                        Text(crossPlatformBlock.message)
+                            .font(.subheadline)
+                            .foregroundStyle(Color.spentyTextPrimary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(14)
+                    .background(brandError.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                }
+
                 currentPlanHeader
 
                 subscriberUpgradeBanner
@@ -94,15 +128,20 @@ struct BillingView: View {
     @ViewBuilder
     private var currentPlanHeader: some View {
         if let status = viewModel.currentStatus, status.isActive {
+            let rawStatus = (status.status ?? "").lowercased()
+            let isTrial = rawStatus == "trialing"
+            let isGrace = rawStatus == "in_grace_period"
             VStack(spacing: 8) {
                 HStack {
-                    Image(systemName: "checkmark.seal.fill")
+                    Image(systemName: isTrial ? "hourglass" : (isGrace ? "exclamationmark.triangle.fill" : "checkmark.seal.fill"))
                         .font(.title2)
-                        .foregroundStyle(brandPrimary)
+                        .foregroundStyle(isGrace ? brandError : brandPrimary)
 
-                    Text(lang.s("active_subscription"))
+                    Text(isTrial ? "Free Trial Active"
+                         : isGrace ? "Payment Retrying"
+                         : lang.s("active_subscription"))
                         .font(.headline)
-                        .foregroundStyle(brandPrimary)
+                        .foregroundStyle(isGrace ? brandError : brandPrimary)
                 }
 
                 if let plan = status.plan {
@@ -111,9 +150,22 @@ struct BillingView: View {
                 }
 
                 if let expires = status.expiresAt {
-                    Text("Renews \(Self.formatPaymentDate(expires))")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    if isTrial {
+                        // Tell the user EXACTLY when the first real charge lands +
+                        // the recurring amount, so the trial isn't a black box.
+                        Text("First charge on \(Self.formatPaymentDate(expires))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else if isGrace {
+                        Text("Auto-charge retrying — access continues until \(Self.formatPaymentDate(expires))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                    } else {
+                        Text("Renews \(Self.formatPaymentDate(expires))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 if let provider = status.provider {
@@ -124,7 +176,7 @@ struct BillingView: View {
             }
             .frame(maxWidth: .infinity)
             .padding()
-            .background(brandPrimary.opacity(0.08))
+            .background((isGrace ? brandError : brandPrimary).opacity(0.08))
             .clipShape(RoundedRectangle(cornerRadius: 16))
         }
     }
@@ -203,6 +255,7 @@ struct BillingView: View {
                 let priceLoaded = viewModel.displayPrice(for: plan.productId) != nil
 
                 Button {
+                    if crossPlatformBlock.active { return }
                     if plan.productId == "com.spentyai.monthly" && LifetimeOfferManager.shared.isOfferActive {
                         isUpgradeMode = false
                         showLifetimeOffer = true
@@ -214,12 +267,15 @@ struct BillingView: View {
                         if isPurchasingThis {
                             ProgressView()
                                 .tint(.white)
-                        } else if !priceLoaded {
+                        } else if !priceLoaded && !crossPlatformBlock.active {
                             HStack(spacing: 6) {
                                 ProgressView().tint(.white).scaleEffect(0.8)
                                 Text("Loading…")
                                     .font(.subheadline.weight(.semibold))
                             }
+                        } else if crossPlatformBlock.active {
+                            Text("Manage on your other device")
+                                .font(.subheadline.weight(.semibold))
                         } else {
                             Text(lang.s("subscribe"))
                                 .font(.subheadline.weight(.semibold))
@@ -230,7 +286,7 @@ struct BillingView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(brandPrimary)
-                .disabled(viewModel.isPurchasing || !priceLoaded)
+                .disabled(viewModel.isPurchasing || !priceLoaded || crossPlatformBlock.active)
             }
         }
         .padding()
