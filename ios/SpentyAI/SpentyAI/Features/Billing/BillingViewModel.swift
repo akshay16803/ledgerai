@@ -138,17 +138,41 @@ final class BillingViewModel {
 
     // MARK: - StoreKit Products
 
+    /// Indicates whether the StoreKit product catalog is fully populated.
+    /// UI should disable purchase CTAs until this returns true so a user
+    /// cannot tap a price that hasn't loaded yet (Apple App Review 2.1(b),
+    /// May 2026 — reviewers tapped Continue before prices arrived and saw
+    /// our "Product not available" error).
+    var areProductsLoaded: Bool {
+        storeProducts.count >= Self.allProductIds.count
+    }
+
     @MainActor
     func loadStoreProducts() async {
-        do {
-            let products = try await Product.products(for: Self.allProductIds)
-            for product in products {
-                storeProducts[product.id] = product
+        // Retry up to 3 times with linear backoff. StoreKit fetches can fail
+        // transiently in slow / sandbox network conditions (Apple's review
+        // lab on iPad). Returning early on partial success would silently
+        // leave the catalog incomplete, so we keep going until we have all
+        // expected IDs or we've exhausted retries.
+        for attempt in 0..<3 {
+            do {
+                let products = try await Product.products(for: Self.allProductIds)
+                for product in products {
+                    storeProducts[product.id] = product
+                }
+                if areProductsLoaded { return }
+                #if DEBUG
+                print("[Billing] loadStoreProducts attempt \(attempt + 1): partial — got \(storeProducts.count)/\(Self.allProductIds.count)")
+                #endif
+            } catch {
+                #if DEBUG
+                print("[Billing] loadStoreProducts attempt \(attempt + 1) failed: \(error)")
+                #endif
             }
-        } catch {
-            #if DEBUG
-            print("[Billing] Failed to load StoreKit products: \(error)")
-            #endif
+            // Backoff: 500ms, 1000ms, then exit
+            if attempt < 2 {
+                try? await Task.sleep(nanoseconds: UInt64(500_000_000 * (attempt + 1)))
+            }
         }
     }
 
@@ -157,8 +181,16 @@ final class BillingViewModel {
     @MainActor
     func purchasePlan(_ productId: String) async {
         guard !isPurchasing else { return }
+
+        // Defensive: if the product isn't in our cache, try one more reload
+        // before giving up. Covers the race where a reviewer (or fast user)
+        // taps Continue while the initial StoreKit fetch is still in flight.
+        if storeProducts[productId] == nil {
+            await loadStoreProducts()
+        }
+
         guard let product = storeProducts[productId] else {
-            errorMessage = "Product not available. Please try again later."
+            errorMessage = "Unable to connect to the App Store. Please check your internet connection and try again."
             showError = true
             return
         }

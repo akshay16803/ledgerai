@@ -197,6 +197,11 @@ struct BillingView: View {
             }
 
             if !isCurrent && !viewModel.isLifetime {
+                // Apple App Review 2.1(b): keep Subscribe disabled until the
+                // StoreKit price for this specific plan has loaded so reviewer
+                // never taps a button that triggers an unfulfillable purchase.
+                let priceLoaded = viewModel.displayPrice(for: plan.productId) != nil
+
                 Button {
                     if plan.productId == "com.spentyai.monthly" && LifetimeOfferManager.shared.isOfferActive {
                         isUpgradeMode = false
@@ -209,6 +214,12 @@ struct BillingView: View {
                         if isPurchasingThis {
                             ProgressView()
                                 .tint(.white)
+                        } else if !priceLoaded {
+                            HStack(spacing: 6) {
+                                ProgressView().tint(.white).scaleEffect(0.8)
+                                Text("Loading…")
+                                    .font(.subheadline.weight(.semibold))
+                            }
                         } else {
                             Text(lang.s("subscribe"))
                                 .font(.subheadline.weight(.semibold))
@@ -219,7 +230,7 @@ struct BillingView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(brandPrimary)
-                .disabled(viewModel.isPurchasing)
+                .disabled(viewModel.isPurchasing || !priceLoaded)
             }
         }
         .padding()

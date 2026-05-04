@@ -143,6 +143,9 @@ struct LifetimeOfferSheet: View {
 
             // Buttons
             VStack(spacing: 14) {
+                // Apple App Review 2.1(b): disable CTA until the lifetime_offer
+                // price has loaded from StoreKit. Reviewer must not be able to
+                // tap a button that triggers an unfulfillable purchase.
                 Button {
                     Task {
                         isPurchasing = true
@@ -159,11 +162,15 @@ struct LifetimeOfferSheet: View {
                         } else {
                             HStack(spacing: 0) {
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(showTimer ? "Get Lifetime Access" : "Upgrade to Lifetime")
+                                    Text(offerPrice == nil
+                                         ? "Connecting to App Store…"
+                                         : (showTimer ? "Get Lifetime Access" : "Upgrade to Lifetime"))
                                         .font(.headline)
-                                    Text("One-time · no subscriptions")
-                                        .font(.caption)
-                                        .opacity(0.8)
+                                    if offerPrice != nil {
+                                        Text("One-time · no subscriptions")
+                                            .font(.caption)
+                                            .opacity(0.8)
+                                    }
                                 }
                                 Spacer()
                                 // Show actual price in button (guideline 3.1.1)
@@ -182,9 +189,10 @@ struct LifetimeOfferSheet: View {
                     }
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
-                    .background(Color.spentyPrimary, in: RoundedRectangle(cornerRadius: 14))
+                    .background(Color.spentyPrimary.opacity(offerPrice == nil ? 0.6 : 1.0),
+                                in: RoundedRectangle(cornerRadius: 14))
                 }
-                .disabled(isPurchasing)
+                .disabled(isPurchasing || offerPrice == nil)
 
                 Button {
                     onDecline()

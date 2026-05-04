@@ -275,7 +275,13 @@ struct SubscriptionPaywall: View {
     // MARK: - Subscribe Button
 
     private var subscribeButton: some View {
-        Button {
+        // Apple App Review (May 2026, 2.1(b)) failed because reviewers tapped
+        // Continue before StoreKit prices loaded and got "Product not available".
+        // Keep the CTA disabled with a "Connecting…" hint until the price for
+        // the selected plan is in our local cache.
+        let priceLoaded = viewModel.displayPrice(for: selectedProductId) != nil
+
+        return Button {
             if selectedProductId == "com.spentyai.monthly" && LifetimeOfferManager.shared.isOfferActive {
                 showLifetimeOffer = true
             } else {
@@ -287,14 +293,21 @@ struct SubscriptionPaywall: View {
                 }
             }
         } label: {
-            Text(lang.s("continue_btn"))
-                .font(.headline)
-                .foregroundStyle(.white)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 16)
-                .background(brandPrimary, in: RoundedRectangle(cornerRadius: 14))
+            HStack(spacing: 10) {
+                if !priceLoaded {
+                    ProgressView()
+                        .tint(.white)
+                }
+                Text(priceLoaded ? lang.s("continue_btn") : "Connecting to App Store…")
+                    .font(.headline)
+                    .foregroundStyle(.white)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 16)
+            .background(brandPrimary.opacity(priceLoaded ? 1.0 : 0.6),
+                        in: RoundedRectangle(cornerRadius: 14))
         }
-        .disabled(viewModel.isPurchasing)
+        .disabled(viewModel.isPurchasing || !priceLoaded)
     }
 
     // MARK: - Detection Note
