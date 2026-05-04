@@ -23,6 +23,8 @@ import Terms from './pages/Terms.jsx';
 import DeleteAccount from './pages/DeleteAccount.jsx';
 import RefundPolicy from './pages/RefundPolicy.jsx';
 import ShippingPolicy from './pages/ShippingPolicy.jsx';
+import PaymentSuccess from './pages/PaymentSuccess.jsx';
+import PaymentFailure from './pages/PaymentFailure.jsx';
 import ContactUs from './pages/ContactUs.jsx';
 import AboutUs from './pages/AboutUs.jsx';
 import Records from './pages/Records.jsx';
@@ -97,6 +99,8 @@ export default function App() {
       <Route path="/refund-policy" element={<RefundPolicy />} />
       <Route path="/shipping-policy" element={<ShippingPolicy />} />
       <Route path="/shipping" element={<ShippingPolicy />} />
+      <Route path="/payment-success" element={<PaymentSuccess />} />
+      <Route path="/payment-failure" element={<PaymentFailure />} />
       <Route path="/contact" element={<ContactUs />} />
       <Route path="/about" element={<AboutUs />} />
       <Route path="/dashboard" element={<ProtectedRoute><AppLayout><PageBoundary><Dashboard /></PageBoundary></AppLayout></ProtectedRoute>} />

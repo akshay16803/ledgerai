@@ -134,7 +134,7 @@ export default function Terms() {
               <li><strong>Lifetime:</strong> ₹9,999 one-time payment</li>
             </ul>
             <p>
-              Payments are processed by authorised third-party payment gateways including PhonePe, Razorpay,
+              Payments are processed by authorised third-party payment gateways including PayU
               and UPI payment networks. SpentyAI does <strong>not</strong> store your card number, UPI PIN, or
               net-banking credentials. All payment data is handled exclusively by the payment gateway and is
               subject to PCI-DSS compliant processing. By completing a payment, you agree to the payment

@@ -31,7 +31,7 @@ from google.auth.transport.requests import Request as GoogleRequest
 from googleapiclient.discovery import build
 from openai import OpenAI, AsyncOpenAI
 import resend
-import razorpay
+import hashlib
 import hmac
 
 load_dotenv()
@@ -79,9 +79,19 @@ openai_client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 # is not blocked while we wait on OpenAI (a long statement can take minutes).
 async_openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 
-RAZORPAY_KEY_ID = os.environ.get("RAZORPAY_KEY_ID", "")
-RAZORPAY_KEY_SECRET = os.environ.get("RAZORPAY_KEY_SECRET", "")
-razorpay_client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
+# PayU is the sole web payment gateway (replaced Razorpay 2026-05-04).
+# All values are server-side secrets — the SALT must NEVER be sent to the
+# client and must NEVER be committed to git. Set these in Railway env vars.
+PAYU_KEY            = os.environ.get("PAYU_KEY", "")
+PAYU_SALT           = os.environ.get("PAYU_SALT", "")
+PAYU_MID            = os.environ.get("PAYU_MID", "")
+PAYU_MERCHANT_EMAIL = os.environ.get("PAYU_MERCHANT_EMAIL", "")
+# "production" -> https://secure.payu.in/_payment ; "test" -> https://test.payu.in/_payment
+PAYU_ENV            = os.environ.get("PAYU_ENV", "production").lower()
+PAYU_PAYMENT_URL    = (
+    "https://test.payu.in/_payment" if PAYU_ENV == "test"
+    else "https://secure.payu.in/_payment"
+)
 
 # CORS origins from environment variable, defaults to allow all for flexibility
 CORS_ORIGINS = os.environ.get("CORS_ORIGINS", "*")
@@ -10892,134 +10902,222 @@ async def get_chat_suggestions(user: dict = Depends(get_current_user)):
 # =====================================================================
 
 
-# ─── Razorpay Payments ───────────────────────────────────────────────
+# ─── PayU Payments ───────────────────────────────────────────────────
+# Web payment gateway. Replaced Razorpay 2026-05-04. iOS uses StoreKit and
+# Android uses Google Play Billing — those flows are unaffected.
 
 PLAN_PRICES = {
-    "monthly": {"amount": 19900, "currency": "INR", "description": "SpentyAI Monthly Plan", "duration_days": 30},
-    "quarterly": {"amount": 44900, "currency": "INR", "description": "SpentyAI Quarterly Plan", "duration_days": 90},
-    "yearly": {"amount": 149900, "currency": "INR", "description": "SpentyAI Yearly Plan", "duration_days": 365},
+    "monthly":        {"amount": 19900,  "currency": "INR", "description": "SpentyAI Monthly Plan",                   "duration_days": 30},
+    "quarterly":      {"amount": 44900,  "currency": "INR", "description": "SpentyAI Quarterly Plan",                 "duration_days": 90},
+    "yearly":         {"amount": 149900, "currency": "INR", "description": "SpentyAI Yearly Plan",                    "duration_days": 365},
     # Two lifetime SKUs: regular (₹9,999) and 50%-off offer (₹4,999). Both grant
     # the SAME entitlement on the user record (subscription_plan="lifetime"); the
     # split exists only so payment_orders captures the actual paid amount.
-    "lifetime": {"amount": 999900, "currency": "INR", "description": "SpentyAI Lifetime Access", "duration_days": 36500},
+    "lifetime":       {"amount": 999900, "currency": "INR", "description": "SpentyAI Lifetime Access",                "duration_days": 36500},
     "lifetime_offer": {"amount": 499900, "currency": "INR", "description": "SpentyAI Lifetime Access (50% off offer)", "duration_days": 36500},
 }
 
 
+def _payu_request_hash(*, key: str, txnid: str, amount: str, productinfo: str,
+                       firstname: str, email: str,
+                       udf1: str = "", udf2: str = "", udf3: str = "",
+                       udf4: str = "", udf5: str = "", salt: str) -> str:
+    """PayU request hash format:
+      sha512(key|txnid|amount|productinfo|firstname|email|udf1|udf2|udf3|udf4|udf5||||||SALT)
+    Note the 5 empty pipes after udf5 — those are reserved for udf6-10 (legacy)."""
+    raw = f"{key}|{txnid}|{amount}|{productinfo}|{firstname}|{email}|{udf1}|{udf2}|{udf3}|{udf4}|{udf5}||||||{salt}"
+    return hashlib.sha512(raw.encode("utf-8")).hexdigest().lower()
+
+
+def _payu_response_hash(*, status: str, key: str, txnid: str, amount: str,
+                        productinfo: str, firstname: str, email: str,
+                        udf1: str = "", udf2: str = "", udf3: str = "",
+                        udf4: str = "", udf5: str = "", salt: str,
+                        additional_charges: str = "") -> str:
+    """PayU response hash format (REVERSED of request):
+      sha512(SALT|status||||||udf5|udf4|udf3|udf2|udf1|email|firstname|productinfo|amount|txnid|key)
+    If `additional_charges` is present in the response, prepend it: sha512(addl|<above>)."""
+    raw = f"{salt}|{status}||||||{udf5}|{udf4}|{udf3}|{udf2}|{udf1}|{email}|{firstname}|{productinfo}|{amount}|{txnid}|{key}"
+    if additional_charges:
+        raw = f"{additional_charges}|{raw}"
+    return hashlib.sha512(raw.encode("utf-8")).hexdigest().lower()
+
+
 @app.post("/api/payments/create-order")
 async def create_payment_order(body: dict = Body(...), user: dict = Depends(get_current_user)):
-    """Create a Razorpay order for the selected plan."""
+    """Create a PayU order: generates txnid + hash server-side and returns the
+    form payload + checkout URL. The frontend then auto-submits a POST form
+    to PayU's hosted checkout (no JS SDK required).
+    """
     plan_key = body.get("plan")
     if plan_key not in PLAN_PRICES:
         raise HTTPException(status_code=400, detail=f"Invalid plan: {plan_key}")
+    if not (PAYU_KEY and PAYU_SALT):
+        logger.error("PayU not configured — PAYU_KEY/PAYU_SALT env vars missing")
+        raise HTTPException(status_code=503, detail="Payment service is being configured. Please try again shortly.")
 
     plan = PLAN_PRICES[plan_key]
+    # PayU expects amount in major units (rupees with two decimals), not paise.
+    amount = f"{plan['amount'] / 100:.2f}"
+    txnid = f"spy_{user['user_id']}_{plan_key}_{uuid.uuid4().hex[:10]}"
+    productinfo = plan["description"]
+    firstname = (user.get("name") or "Customer").split()[0]
+    email = user.get("email") or ""
+    # Surface plan + user_id in udf1/udf2 so we can recover them on callback
+    # without trusting a separate query param.
+    udf1 = plan_key
+    udf2 = user["user_id"]
 
-    try:
-        order = razorpay_client.order.create({
-            "amount": plan["amount"],
-            "currency": plan["currency"],
-            "receipt": f"rcpt_{user['user_id']}_{plan_key}_{uuid.uuid4().hex[:8]}",
-            "notes": {
-                "user_id": user["user_id"],
-                "plan": plan_key,
-                "email": user["email"],
-            },
-        })
-    except Exception as e:
-        logger.error(f"Razorpay order creation failed: {e}")
-        raise HTTPException(status_code=502, detail="Payment service temporarily unavailable")
+    request_hash = _payu_request_hash(
+        key=PAYU_KEY, txnid=txnid, amount=amount, productinfo=productinfo,
+        firstname=firstname, email=email,
+        udf1=udf1, udf2=udf2, salt=PAYU_SALT,
+    )
 
-    # Store the order in DB for verification later
+    # Stash the order so we can reconcile when PayU calls us back
     await db.payment_orders.insert_one({
-        "order_id": order["id"],
+        "order_id": txnid,
         "user_id": user["user_id"],
         "plan": plan_key,
         "amount": plan["amount"],
         "currency": plan["currency"],
         "status": "created",
+        "gateway": "payu",
         "created_at": datetime.now(timezone.utc),
     })
 
+    # Build the absolute callback URLs (PayU posts back to surl/furl).
+    backend_base = os.environ.get("APP_BASE_URL", "https://api.spentyai.com").rstrip("/")
+    surl = f"{backend_base}/api/payments/payu/callback"
+    furl = f"{backend_base}/api/payments/payu/callback"
+
     return {
-        "order_id": order["id"],
-        "amount": plan["amount"],
-        "currency": plan["currency"],
-        "key_id": RAZORPAY_KEY_ID,
-        "description": plan["description"],
-        "prefill": {
-            "name": user.get("name", ""),
-            "email": user.get("email", ""),
+        "gateway": "payu",
+        "payment_url": PAYU_PAYMENT_URL,
+        # The frontend should POST every key in `form` to `payment_url`.
+        "form": {
+            "key":         PAYU_KEY,
+            "txnid":       txnid,
+            "amount":      amount,
+            "productinfo": productinfo,
+            "firstname":   firstname,
+            "email":       email,
+            "phone":       user.get("phone") or "",
+            "udf1":        udf1,
+            "udf2":        udf2,
+            "surl":        surl,
+            "furl":        furl,
+            "hash":        request_hash,
+            "service_provider": "payu_paisa",
         },
     }
 
 
-@app.post("/api/payments/verify")
-async def verify_payment(body: dict = Body(...), user: dict = Depends(get_current_user)):
-    """Verify Razorpay payment signature and activate subscription."""
-    razorpay_order_id = body.get("razorpay_order_id")
-    razorpay_payment_id = body.get("razorpay_payment_id")
-    razorpay_signature = body.get("razorpay_signature")
+@app.post("/api/payments/payu/callback")
+async def payu_callback(request: Request):
+    """Handle the PayU async callback (success and failure both POST here).
+    Verifies the response hash, activates the subscription if status==success,
+    and 303-redirects the user to the appropriate web page.
+    """
+    form = await request.form()
+    payload = {k: form.get(k, "") for k in form.keys()}
 
-    if not all([razorpay_order_id, razorpay_payment_id, razorpay_signature]):
-        raise HTTPException(status_code=400, detail="Missing payment details")
+    status      = payload.get("status", "")
+    txnid       = payload.get("txnid", "")
+    amount      = payload.get("amount", "")
+    productinfo = payload.get("productinfo", "")
+    firstname   = payload.get("firstname", "")
+    email       = payload.get("email", "")
+    udf1        = payload.get("udf1", "")
+    udf2        = payload.get("udf2", "")
+    udf3        = payload.get("udf3", "")
+    udf4        = payload.get("udf4", "")
+    udf5        = payload.get("udf5", "")
+    received_hash = payload.get("hash", "")
+    payu_payment_id = payload.get("mihpayid", "") or payload.get("payuMoneyId", "")
+    additional_charges = payload.get("additionalCharges", "")
 
-    # Verify signature
-    message = f"{razorpay_order_id}|{razorpay_payment_id}"
-    expected_signature = hmac.new(
-        RAZORPAY_KEY_SECRET.encode("utf-8"),
-        message.encode("utf-8"),
-        hashlib.sha256,
-    ).hexdigest()
+    web_base = os.environ.get("WEB_BASE_URL", "https://www.spentyai.com").rstrip("/")
+    fail_url = f"{web_base}/payment-failure?txnid={txnid}"
+    success_url = f"{web_base}/payment-success?txnid={txnid}"
 
-    if expected_signature != razorpay_signature:
-        logger.warning(f"Payment signature mismatch for order {razorpay_order_id}")
-        raise HTTPException(status_code=400, detail="Payment verification failed")
+    if not PAYU_SALT:
+        logger.error("PayU callback hit but PAYU_SALT not set — cannot verify")
+        return RedirectResponse(url=fail_url, status_code=303)
 
-    # Look up the order
-    order_doc = await db.payment_orders.find_one({
-        "order_id": razorpay_order_id,
-        "user_id": user["user_id"],
-    })
-    if not order_doc:
-        raise HTTPException(status_code=404, detail="Order not found")
+    expected_hash = _payu_response_hash(
+        status=status, key=PAYU_KEY, txnid=txnid, amount=amount,
+        productinfo=productinfo, firstname=firstname, email=email,
+        udf1=udf1, udf2=udf2, udf3=udf3, udf4=udf4, udf5=udf5,
+        salt=PAYU_SALT, additional_charges=additional_charges,
+    )
 
-    if order_doc.get("status") == "paid":
-        return {"message": "Payment already verified", "subscription_plan": order_doc["plan"]}
+    if not hmac.compare_digest(expected_hash, received_hash.lower()):
+        logger.warning(f"[PayU] Hash mismatch for txnid={txnid} status={status}")
+        return RedirectResponse(url=fail_url, status_code=303)
 
-    plan_key = order_doc["plan"]
+    order = await db.payment_orders.find_one({"order_id": txnid})
+    if not order:
+        logger.warning(f"[PayU] Unknown txnid in callback: {txnid}")
+        return RedirectResponse(url=fail_url, status_code=303)
+
+    if status != "success":
+        await db.payment_orders.update_one(
+            {"order_id": txnid},
+            {"$set": {"status": status, "payu_payment_id": payu_payment_id, "callback_at": datetime.now(timezone.utc)}},
+        )
+        return RedirectResponse(url=fail_url, status_code=303)
+
+    # Idempotent: a duplicate success callback shouldn't extend the subscription twice.
+    if order.get("status") == "paid":
+        return RedirectResponse(url=success_url, status_code=303)
+
+    plan_key = order.get("plan") or udf1
+    if plan_key not in PLAN_PRICES:
+        logger.error(f"[PayU] Unknown plan_key on success: {plan_key} (txnid={txnid})")
+        return RedirectResponse(url=fail_url, status_code=303)
     plan = PLAN_PRICES[plan_key]
+    user_id = order.get("user_id") or udf2
     now = datetime.now(timezone.utc)
     expiry = now + timedelta(days=plan["duration_days"])
 
-    # Update the order
     await db.payment_orders.update_one(
-        {"order_id": razorpay_order_id},
+        {"order_id": txnid},
         {"$set": {
             "status": "paid",
-            "razorpay_payment_id": razorpay_payment_id,
-            "razorpay_signature": razorpay_signature,
+            "payu_payment_id": payu_payment_id,
+            "payu_status_raw": status,
             "paid_at": now,
+            "callback_at": now,
         }},
     )
-
-    # Update user's subscription
     await db.users.update_one(
-        {"user_id": user["user_id"]},
+        {"user_id": user_id},
         {"$set": {
             "subscription_plan": plan_key,
             "subscription_status": "active",
+            "subscription_provider": "payu",
             "subscription_expiry": expiry.isoformat(),
-            "subscription_payment_id": razorpay_payment_id,
+            "subscription_payment_id": payu_payment_id,
             "subscription_updated_at": now,
         }},
     )
+    logger.info(f"[PayU] Activated {plan_key} for user_id={user_id} via txnid={txnid}")
+    return RedirectResponse(url=success_url, status_code=303)
 
+
+@app.get("/api/payments/payu/status/{txnid}")
+async def payu_status(txnid: str, user: dict = Depends(get_current_user)):
+    """Lightweight status lookup the frontend can poll on /payment-success
+    to confirm the order is paid before unlocking the UI."""
+    order = await db.payment_orders.find_one({"order_id": txnid, "user_id": user["user_id"]})
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
     return {
-        "message": "Payment verified successfully",
-        "subscription_plan": plan_key,
-        "subscription_status": "active",
-        "subscription_expiry": expiry.isoformat(),
+        "txnid": txnid,
+        "status": order.get("status", "created"),
+        "plan": order.get("plan"),
+        "paid": order.get("status") == "paid",
     }
 
 

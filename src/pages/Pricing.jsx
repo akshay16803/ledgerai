@@ -84,47 +84,30 @@ export default function Pricing() {
     setLoadingPlan(planKey);
 
     try {
-      // 1. Create order on backend
+      // 1. Ask backend to mint a PayU order (txnid + sha512 hash). The hash
+      //    is generated server-side using the PayU salt; the salt itself
+      //    NEVER reaches the browser.
       const orderData = await api.post('/api/payments/create-order', { plan: planKey });
 
-      // 2. Open Razorpay checkout
-      const options = {
-        key: orderData.key_id,
-        amount: orderData.amount,
-        currency: orderData.currency,
-        name: 'SpentyAI',
-        description: orderData.description,
-        order_id: orderData.order_id,
-        prefill: orderData.prefill,
-        theme: { color: '#1A3632' },
-        handler: async function (response) {
-          // 3. Verify payment on backend
-          try {
-            const result = await api.post('/api/payments/verify', {
-              razorpay_order_id: response.razorpay_order_id,
-              razorpay_payment_id: response.razorpay_payment_id,
-              razorpay_signature: response.razorpay_signature,
-            });
-            setPaymentSuccess(result.subscription_plan);
-            checkAuth(); // Refresh user data with subscription info
-          } catch (err) {
-            alert('Payment verification failed. Please contact support.');
-          }
-          setLoadingPlan(null);
-        },
-        modal: {
-          ondismiss: function () {
-            setLoadingPlan(null);
-          },
-        },
-      };
-
-      const rzp = new window.Razorpay(options);
-      rzp.on('payment.failed', function () {
-        alert('Payment failed. Please try again.');
-        setLoadingPlan(null);
+      // 2. Build a hidden form and POST it to PayU's hosted checkout. This is
+      //    PayU's recommended integration — no SDK required, no salt in JS.
+      //    After payment, PayU posts back to our /api/payments/payu/callback
+      //    which redirects the user to /payment-success or /payment-failure.
+      const form = document.createElement('form');
+      form.method = 'POST';
+      form.action = orderData.payment_url;
+      form.style.display = 'none';
+      Object.entries(orderData.form || {}).forEach(([name, value]) => {
+        const input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = name;
+        input.value = value ?? '';
+        form.appendChild(input);
       });
-      rzp.open();
+      document.body.appendChild(form);
+      form.submit();
+      // The browser navigates away to PayU. setLoadingPlan stays true until
+      // navigation, which is fine.
     } catch (err) {
       alert(err.message || 'Failed to initiate payment. Please try again.');
       setLoadingPlan(null);

@@ -138,7 +138,7 @@ export default function RefundPolicy() {
             </p>
             <ul style={{ paddingLeft: 20, margin: '8px 0' }}>
               <li>The email associated with your SpentyAI account.</li>
-              <li>The payment / order reference (PhonePe, UPI, or card last four digits).</li>
+              <li>The payment / order reference (PayU transaction ID, UPI reference, or card last four digits).</li>
               <li>A short reason for the refund request.</li>
             </ul>
             <p>
@@ -177,9 +177,9 @@ export default function RefundPolicy() {
 
           <Section title="12. Payment Gateway">
             <p>
-              SpentyAI processes all subscription payments through authorised third-party payment gateways
-              including <strong>PhonePe</strong>, Razorpay, and UPI payment networks regulated by the
-              National Payments Corporation of India (NPCI) and the Reserve Bank of India (RBI).
+              SpentyAI processes all subscription payments through <strong>PayU</strong> and UPI
+              payment networks regulated by the National Payments Corporation of India (NPCI) and
+              the Reserve Bank of India (RBI).
               SpentyAI does <strong>not</strong> store your card number, UPI PIN, CVV, or net-banking
               credentials at any point. All sensitive payment data is handled exclusively by the payment
               gateway on PCI-DSS compliant infrastructure.

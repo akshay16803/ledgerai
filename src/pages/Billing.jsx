@@ -115,43 +115,23 @@ export default function Billing() {
     try {
       const orderData = await api.post('/api/payments/create-order', { plan: planKey });
 
-      const options = {
-        key: orderData.key_id,
-        amount: orderData.amount,
-        currency: orderData.currency,
-        name: 'SpentyAI',
-        description: orderData.description,
-        order_id: orderData.order_id,
-        prefill: orderData.prefill,
-        theme: { color: '#1A3632' },
-        handler: async function (response) {
-          try {
-            const result = await api.post('/api/payments/verify', {
-              razorpay_order_id: response.razorpay_order_id,
-              razorpay_payment_id: response.razorpay_payment_id,
-              razorpay_signature: response.razorpay_signature,
-            });
-            setPaymentSuccess(result.subscription_plan);
-            await checkAuth();
-            setTimeout(() => navigate('/dashboard'), 2000);
-          } catch {
-            alert('Payment verification failed. Please contact support.');
-          }
-          setLoadingPlan(null);
-        },
-        modal: {
-          ondismiss: function () {
-            setLoadingPlan(null);
-          },
-        },
-      };
-
-      const rzp = new window.Razorpay(options);
-      rzp.on('payment.failed', function () {
-        alert('Payment failed. Please try again.');
-        setLoadingPlan(null);
+      // Auto-submit a hidden form to PayU's hosted checkout. The hash is
+      // generated server-side; the PayU salt never touches the browser.
+      // After payment PayU calls /api/payments/payu/callback which
+      // redirects to /payment-success or /payment-failure on the website.
+      const form = document.createElement('form');
+      form.method = 'POST';
+      form.action = orderData.payment_url;
+      form.style.display = 'none';
+      Object.entries(orderData.form || {}).forEach(([name, value]) => {
+        const input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = name;
+        input.value = value ?? '';
+        form.appendChild(input);
       });
-      rzp.open();
+      document.body.appendChild(form);
+      form.submit();
     } catch (err) {
       alert(err.message || 'Failed to initiate payment. Please try again.');
       setLoadingPlan(null);

@@ -102,7 +102,7 @@ export default function Privacy() {
           <Section title="4. Payment Data">
             <p>
               SpentyAI collects subscription payments through authorised third-party payment gateways
-              (including <strong>PhonePe</strong>, Razorpay, and UPI networks). We do <strong>not</strong> collect,
+              (including <strong>PayU</strong> and UPI networks). We do <strong>not</strong> collect,
               store, or process your card number, UPI PIN, CVV, net-banking credentials, or any other
               sensitive payment authentication data. All payment transactions are processed directly by
               the payment gateway on their PCI-DSS compliant infrastructure.
@@ -180,8 +180,8 @@ export default function Privacy() {
             <ul style={{ paddingLeft: 20, margin: '8px 0' }}>
               <li><strong>Google OAuth</strong> &mdash; for sign-in authentication and Gmail access.</li>
               <li><strong>Microsoft Graph API</strong> &mdash; for Outlook email access.</li>
-              <li><strong>PhonePe / Razorpay</strong> &mdash; to process subscription payments. Payment data is
-                governed by their respective privacy policies and PCI-DSS standards.</li>
+              <li><strong>PayU</strong> &mdash; to process subscription payments. Payment data is
+                governed by PayU's privacy policy and PCI-DSS standards.</li>
               <li><strong>Resend</strong> &mdash; to deliver verification and welcome emails to your address.</li>
               <li><strong>MongoDB Atlas</strong> &mdash; to securely store your account and financial data.</li>
               <li><strong>Railway</strong> &mdash; to host our application infrastructure.</li>
