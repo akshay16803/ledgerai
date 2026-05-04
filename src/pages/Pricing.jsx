@@ -11,7 +11,7 @@ const plans = [
     price: 199,
     period: '/month',
     effective: '₹199/mo',
-    desc: 'Flexible, cancel anytime.',
+    desc: '7-day free trial, then ₹199/month.',
     badge: null,
     cta: 'Start 7-Day Free Trial',
     highlighted: false,
@@ -23,7 +23,7 @@ const plans = [
     price: 449,
     period: '/3 months',
     effective: '₹150/mo',
-    desc: 'Three months of full access.',
+    desc: '7-day free trial, then ₹449 every 3 months.',
     badge: 'SAVE 25%',
     cta: 'Start 7-Day Free Trial',
     highlighted: false,
@@ -35,7 +35,7 @@ const plans = [
     price: 1499,
     period: '/year',
     effective: '₹125/mo',
-    desc: 'Best value for committed users.',
+    desc: '7-day free trial, then ₹1,499/year.',
     badge: 'MOST POPULAR • SAVE 37%',
     cta: 'Start 7-Day Free Trial',
     highlighted: true,
@@ -73,10 +73,27 @@ export default function Pricing() {
   const [loadingPlan, setLoadingPlan] = useState(null);
   const [paymentSuccess, setPaymentSuccess] = useState(null);
 
+  // Cross-platform billing block: if the user already has an active sub from
+  // Apple or Google, do NOT let them open a parallel PayU eMandate — that
+  // would double-charge them. Show a clear "manage on your phone" message
+  // instead. PayU subs (and no sub at all) still go through the normal flow.
+  const activeOnNativeStore = (
+    user
+    && user.subscription_status === 'active'
+    && (user.subscription_provider === 'apple' || user.subscription_provider === 'google')
+  );
+
   const handleSelectPlan = async (planKey) => {
     // If not logged in, redirect to login first
     if (!user) {
       navigate('/login');
+      return;
+    }
+
+    // Block double-billing — see comment above.
+    if (activeOnNativeStore) {
+      const where = user.subscription_provider === 'apple' ? 'iPhone (App Store)' : 'Android (Google Play)';
+      alert(`You already have an active SpentyAI subscription on ${where}. Manage it from the App Store / Play Store on that device. Subscribing here would double-charge you.`);
       return;
     }
 
@@ -123,6 +140,22 @@ export default function Pricing() {
   return (
     <div style={{ background: 'var(--bg-primary)', minHeight: '100vh' }}>
       <style>{`@keyframes spin { to { transform: rotate(360deg); } } .spin { animation: spin 0.8s linear infinite; }`}</style>
+
+      {/* Provider-mismatch banner: user has an active sub on iOS/Android, can't subscribe here */}
+      {activeOnNativeStore && (
+        <div style={{
+          position: 'fixed', top: 64, left: 0, right: 0, zIndex: 150,
+          background: 'rgba(194, 109, 92, 0.10)',
+          borderBottom: '1px solid var(--accent-1)',
+          padding: '12px 24px', textAlign: 'center',
+          fontSize: 13, fontFamily: 'var(--font-body)',
+          color: 'var(--text-primary)',
+        }}>
+          You have an active SpentyAI subscription on{' '}
+          <strong>{user?.subscription_provider === 'apple' ? 'iPhone (App Store)' : 'Android (Google Play)'}</strong>.
+          Manage it from the store on your phone — subscribing here would double-charge you.
+        </div>
+      )}
 
       {/* Payment success banner */}
       {paymentSuccess && (
@@ -193,7 +226,7 @@ export default function Pricing() {
             fontSize: 11, fontWeight: 600, letterSpacing: '0.15em', textTransform: 'uppercase'
           }}>
             <Sparkle size={12} weight="fill" />
-            7-day free trial · No card required
+            7-day free trial · ₹1 mandate verification
           </div>
         </div>
 
@@ -267,21 +300,21 @@ export default function Pricing() {
               <button
                 data-testid={`pricing-cta-${plan.key}`}
                 onClick={() => handleSelectPlan(plan.key)}
-                disabled={!!loadingPlan}
+                disabled={!!loadingPlan || activeOnNativeStore}
                 style={{
                   width: '100%',
                   padding: '12px 20px',
                   borderRadius: 2,
                   fontSize: 13,
                   fontWeight: 600,
-                  cursor: loadingPlan ? 'not-allowed' : 'pointer',
+                  cursor: (loadingPlan || activeOnNativeStore) ? 'not-allowed' : 'pointer',
                   fontFamily: 'var(--font-body)',
                   transition: 'all 0.2s',
                   background: plan.highlighted ? '#fff' : 'var(--brand-primary)',
                   color: plan.highlighted ? 'var(--brand-primary)' : '#fff',
                   border: 'none',
                   marginTop: 'auto',
-                  opacity: loadingPlan && loadingPlan !== plan.key ? 0.5 : 1,
+                  opacity: activeOnNativeStore ? 0.5 : (loadingPlan && loadingPlan !== plan.key ? 0.5 : 1),
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
@@ -289,7 +322,9 @@ export default function Pricing() {
                 }}
               >
                 {loadingPlan === plan.key && <SpinnerGap size={14} className="spin" />}
-                {loadingPlan === plan.key ? 'Processing…' : plan.cta}
+                {activeOnNativeStore
+                  ? 'Manage on phone'
+                  : (loadingPlan === plan.key ? 'Processing…' : plan.cta)}
               </button>
             </div>
           ))}

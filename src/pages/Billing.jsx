@@ -108,8 +108,26 @@ export default function Billing() {
     }
   };
 
+  // Cross-platform billing block: see Pricing.jsx for the rationale. If the
+  // user already has an active sub on Apple/Google, do NOT let them open a
+  // parallel PayU eMandate that would double-charge them.
+  const activeOnNativeStore = (
+    user
+    && user.subscription_status === 'active'
+    && (user.subscription_provider === 'apple' || user.subscription_provider === 'google')
+  );
+
+  // Detect "your subscription expired" arrival from api.js (302/402 redirect)
+  const expiredQuery = typeof window !== 'undefined'
+    && new URLSearchParams(window.location.search).get('expired') === '1';
+
   const handleSelectPlan = async (planKey) => {
     if (loadingPlan) return;
+    if (activeOnNativeStore) {
+      const where = user.subscription_provider === 'apple' ? 'iPhone (App Store)' : 'Android (Google Play)';
+      alert(`You already have an active SpentyAI subscription on ${where}. Manage it there — subscribing here would double-charge you.`);
+      return;
+    }
     setLoadingPlan(planKey);
 
     try {
@@ -159,6 +177,34 @@ export default function Billing() {
   return (
     <div style={{ background: 'var(--bg-primary)', minHeight: '100vh' }}>
       <style>{`@keyframes spin { to { transform: rotate(360deg); } } .spin { animation: spin 0.8s linear infinite; }`}</style>
+
+      {/* "Your subscription expired" banner — shown when api.js redirected here on 402 */}
+      {expiredQuery && !activeOnNativeStore && !isLifetime && (
+        <div style={{
+          background: 'rgba(194, 109, 92, 0.10)',
+          borderBottom: '1px solid var(--accent-1)',
+          padding: '14px 24px', textAlign: 'center',
+          fontSize: 14, fontWeight: 500, fontFamily: 'var(--font-body)',
+          color: 'var(--text-primary)',
+        }}>
+          Your SpentyAI subscription has expired. Choose a plan below to renew and restore access — your data is safe.
+        </div>
+      )}
+
+      {/* Provider-mismatch banner: active sub on iOS/Android, can't pay here */}
+      {activeOnNativeStore && (
+        <div style={{
+          background: 'rgba(194, 109, 92, 0.10)',
+          borderBottom: '1px solid var(--accent-1)',
+          padding: '14px 24px', textAlign: 'center',
+          fontSize: 14, fontFamily: 'var(--font-body)',
+          color: 'var(--text-primary)',
+        }}>
+          You have an active SpentyAI subscription on{' '}
+          <strong>{user?.subscription_provider === 'apple' ? 'iPhone (App Store)' : 'Android (Google Play)'}</strong>.
+          Manage it from the store on your phone — subscribing here would double-charge you.
+        </div>
+      )}
 
       {/* Payment success banner */}
       {paymentSuccess && (

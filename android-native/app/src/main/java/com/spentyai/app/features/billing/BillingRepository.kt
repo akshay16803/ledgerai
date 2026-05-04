@@ -30,7 +30,11 @@ data class SubscriptionStatus(
     val plan: String? = null,
     @SerialName("expires_at") val expiresAt: String? = null,
     val provider: String? = null,
-    @SerialName("product_id") val productId: String? = null
+    @SerialName("product_id") val productId: String? = null,
+    /** Raw subscription_status string from the backend — "active", "trialing",
+     *  "in_grace_period", "expired", "cancelled". Used by the paywall to
+     *  render a contextual "your subscription expired" banner. */
+    val status: String? = null
 )
 
 @Serializable

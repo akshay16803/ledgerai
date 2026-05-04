@@ -191,6 +191,10 @@ fun AppNavigation(
                 billingViewModel.loadAll()
             },
             onSignOut = { authManager.logout() },
+            // Surface backend-known status + provider so the paywall can show
+            // an "expired" or "managed-elsewhere" banner and block double-billing.
+            subscriptionStatus = billingState.currentStatus?.status,
+            subscriptionProvider = billingState.currentStatus?.provider,
         )
         return
     }

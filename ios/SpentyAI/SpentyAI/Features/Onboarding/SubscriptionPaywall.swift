@@ -5,6 +5,7 @@ struct SubscriptionPaywall: View {
 
 
     @Environment(LocalizationManager.self) var lang
+    @Environment(\.scenePhase) private var scenePhase
     @State private var viewModel = BillingViewModel()
     @State private var selectedProductId: String = "com.spentyai.yearly"
     @State private var showLifetimeOffer = false
@@ -12,7 +13,36 @@ struct SubscriptionPaywall: View {
     @State private var restoreResultMessage: String? = nil
     @State private var showRestoreResult = false
 
+    /// Caller provides the user's last-known subscription status + provider so
+    /// the paywall can show a contextual banner. New users → silent. Expired
+    /// users → "Your subscription expired, renew below". Users with an active
+    /// sub on PayU/Google → "Manage on Web/Android" (rare on iOS but possible
+    /// during cross-platform usage).
+    var subscriptionStatus: String? = nil
+    var subscriptionProvider: String? = nil
     var onSubscribed: (() -> Void)?
+
+    /// Returns the contextual banner string and whether subscribe should be
+    /// blocked (provider mismatch).
+    private var paywallContext: (banner: String?, block: Bool) {
+        let status = (subscriptionStatus ?? "").lowercased()
+        let provider = (subscriptionProvider ?? "").lowercased()
+        // Active sub on a non-Apple provider — blocking double-billing.
+        if status == "active", provider == "payu" {
+            return ("You have an active SpentyAI subscription on the web. Manage it at www.spentyai.com — subscribing here would double-charge you.", true)
+        }
+        if status == "active", provider == "google" {
+            return ("You have an active SpentyAI subscription on Android. Manage it in Google Play — subscribing here would double-charge you.", true)
+        }
+        // Expired / cancelled — friendly nudge, no block.
+        if status == "expired" || status == "cancelled" {
+            return ("Your SpentyAI subscription ended. Renew below to restore access — your data is safe.", false)
+        }
+        if status == "in_grace_period" {
+            return ("Your last payment didn't go through. Renew below to keep your access without interruption.", false)
+        }
+        return (nil, false)
+    }
 
     // MARK: - Brand Colors
 
@@ -29,6 +59,11 @@ struct SubscriptionPaywall: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 28) {
+                // Contextual reason banner (expired / managed-elsewhere)
+                if let bannerText = paywallContext.banner {
+                    reasonBanner(text: bannerText, isBlocking: paywallContext.block)
+                }
+
                 // Hero
                 heroSection
 
@@ -55,6 +90,20 @@ struct SubscriptionPaywall: View {
             await viewModel.checkEntitlements()
             if viewModel.isSubscribed {
                 onSubscribed?()
+            }
+        }
+        // Auto-restore on foreground: if Apple already considers the user
+        // subscribed (StoreKit Transaction.currentEntitlements has an entry)
+        // but our backend hasn't caught up yet (notification still in flight,
+        // /verify call previously failed offline, etc), this re-runs the check
+        // and silently flips the user back to active without them needing to
+        // tap "Restore Purchases".
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active {
+                Task {
+                    await viewModel.checkEntitlements()
+                    if viewModel.isSubscribed { onSubscribed?() }
+                }
             }
         }
         .alert("Error", isPresented: $viewModel.showError) {
@@ -280,8 +329,10 @@ struct SubscriptionPaywall: View {
         // Keep the CTA disabled with a "Connecting…" hint until the price for
         // the selected plan is in our local cache.
         let priceLoaded = viewModel.displayPrice(for: selectedProductId) != nil
+        let crossPlatformBlocked = paywallContext.block
 
         return Button {
+            if crossPlatformBlocked { return }
             if selectedProductId == "com.spentyai.monthly" && LifetimeOfferManager.shared.isOfferActive {
                 showLifetimeOffer = true
             } else {
@@ -294,20 +345,45 @@ struct SubscriptionPaywall: View {
             }
         } label: {
             HStack(spacing: 10) {
-                if !priceLoaded {
+                if !priceLoaded && !crossPlatformBlocked {
                     ProgressView()
                         .tint(.white)
                 }
-                Text(priceLoaded ? lang.s("continue_btn") : "Connecting to App Store…")
+                Text(crossPlatformBlocked
+                     ? "Manage on your other device"
+                     : (priceLoaded ? lang.s("continue_btn") : "Connecting to App Store…"))
                     .font(.headline)
                     .foregroundStyle(.white)
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 16)
-            .background(brandPrimary.opacity(priceLoaded ? 1.0 : 0.6),
+            .background(brandPrimary.opacity((priceLoaded && !crossPlatformBlocked) ? 1.0 : 0.6),
                         in: RoundedRectangle(cornerRadius: 14))
         }
-        .disabled(viewModel.isPurchasing || !priceLoaded)
+        .disabled(viewModel.isPurchasing || !priceLoaded || crossPlatformBlocked)
+    }
+
+    // MARK: - Reason Banner
+
+    /// Contextual banner above the hero — tells users why they're seeing the
+    /// paywall (expired sub, grace period, or active sub on a different
+    /// platform). Hidden for first-time users.
+    private func reasonBanner(text: String, isBlocking: Bool) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: isBlocking ? "exclamationmark.triangle.fill" : "info.circle.fill")
+                .font(.system(size: 16))
+                .foregroundStyle(isBlocking ? Color.spentyError : brandPrimary)
+                .padding(.top, 1)
+            Text(text)
+                .font(.subheadline)
+                .foregroundStyle(Color.spentyTextPrimary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .padding(14)
+        .background((isBlocking ? Color.spentyError : brandPrimary).opacity(0.08),
+                    in: RoundedRectangle(cornerRadius: 12))
+        .padding(.top, 4)
     }
 
     // MARK: - Detection Note

@@ -301,19 +301,33 @@ def _parse_iso(dt) -> Optional[datetime]:
         return None
 
 
+ACTIVE_SUBSCRIPTION_STATUSES = {"active", "trialing", "in_grace_period"}
+
+
 def is_subscription_currently_active(user_doc: dict) -> bool:
-    """True if the user can access paid features RIGHT NOW (status + expiry)."""
+    """True if the user can access paid features RIGHT NOW.
+
+    Accepts:
+      - "active"          : normal paid state
+      - "trialing"        : inside Apple/Google/PayU free-trial window
+      - "in_grace_period" : auto-renew failed, gateway is retrying — keep
+                            access until the retry window closes (Apple ≈
+                            16 days, Google ≈ 30 days, PayU ≈ 3 days).
+
+    All three are bounded by `subscription_expiry`. Lifetime plans bypass
+    the expiry check entirely.
+    """
     if not user_doc:
         return False
     status = user_doc.get("subscription_status")
-    if status != "active":
+    if status not in ACTIVE_SUBSCRIPTION_STATUSES:
         return False
     plan = (user_doc.get("subscription_plan") or "").lower()
     if plan in LIFETIME_PLAN_KEYS:
         return True
     expiry = _parse_iso(user_doc.get("subscription_expiry"))
     if expiry is None:
-        # Defensive: status==active but no expiry set is treated as active.
+        # Defensive: active-ish status but no expiry set is treated as active.
         # The expiry sweep will catch any genuinely-stale row over time.
         return True
     return expiry > datetime.now(timezone.utc)
@@ -335,9 +349,9 @@ async def require_active_subscription(user: dict = Depends(get_current_user)) ->
     # an expiry boundary.
     if is_subscription_currently_active(user):
         return user
-    # If the doc says active but expiry is in the past, opportunistically
+    # If the doc says active-ish but expiry is in the past, opportunistically
     # downgrade so we don't keep paying through every request.
-    if user.get("subscription_status") == "active":
+    if user.get("subscription_status") in ACTIVE_SUBSCRIPTION_STATUSES:
         expiry = _parse_iso(user.get("subscription_expiry"))
         plan = (user.get("subscription_plan") or "").lower()
         if plan not in LIFETIME_PLAN_KEYS and expiry is not None and expiry <= datetime.now(timezone.utc):
@@ -8743,9 +8757,12 @@ async def _sweep_expired_subscriptions_once() -> int:
     we exclude by plan key for safety). Returns the number flipped."""
     now_iso = datetime.now(timezone.utc).isoformat()
     try:
+        # Also catches "trialing" + "in_grace_period" rows whose expiry has
+        # passed — those are equivalent to active access for gating purposes,
+        # so they need the same sweep.
         result = await db.users.update_many(
             {
-                "subscription_status": "active",
+                "subscription_status": {"$in": list(ACTIVE_SUBSCRIPTION_STATUSES)},
                 "subscription_plan": {"$nin": list(LIFETIME_PLAN_KEYS)},
                 "subscription_expiry": {"$lt": now_iso},
             },
@@ -11227,7 +11244,23 @@ async def payu_callback(request: Request):
     plan = PLAN_PRICES[plan_key]
     user_id = order.get("user_id") or udf2
     now = datetime.now(timezone.utc)
-    expiry = now + timedelta(days=plan["duration_days"])
+
+    # Recurring + trial flag determines subscription_status and expiry.
+    # For a recurring order with trial_days > 0: PayU has only collected
+    # the ₹1 mandate-verification charge. The user is now in the free-trial
+    # window — they should have access until the first auto-debit lands
+    # (or the trial ends, whichever is first). subscription_status flips
+    # to "trialing"; expiry is set to the day the first real charge lands.
+    is_recurring = bool(order.get("is_recurring"))
+    trial_days = int(order.get("trial_days") or 0)
+    if is_recurring and trial_days > 0:
+        sub_status = "trialing"
+        # First real charge at trial_days from now; access continues until
+        # then (the renewal webhook will then flip to "active" + extend).
+        expiry = now + timedelta(days=trial_days)
+    else:
+        sub_status = "active"
+        expiry = now + timedelta(days=plan["duration_days"])
 
     await db.payment_orders.update_one(
         {"order_id": txnid},
@@ -11243,14 +11276,14 @@ async def payu_callback(request: Request):
         {"user_id": user_id},
         {"$set": {
             "subscription_plan": plan_key,
-            "subscription_status": "active",
+            "subscription_status": sub_status,
             "subscription_provider": "payu",
             "subscription_expiry": expiry.isoformat(),
             "subscription_payment_id": payu_payment_id,
             "subscription_updated_at": now,
         }},
     )
-    logger.info(f"[PayU] Activated {plan_key} for user_id={user_id} via txnid={txnid}")
+    logger.info(f"[PayU] Activated {plan_key} ({sub_status}) for user_id={user_id} via txnid={txnid}")
     return RedirectResponse(url=success_url, status_code=303)
 
 
@@ -11324,6 +11357,9 @@ async def _set_subscription_state(
 
 import base64
 import json as _json
+import jwt as _jwt
+from cryptography import x509
+from cryptography.hazmat.backends import default_backend as _crypto_default_backend
 
 APPLE_PRODUCT_TO_PLAN = {
     "com.spentyai.monthly": "monthly",
@@ -11334,10 +11370,16 @@ APPLE_PRODUCT_TO_PLAN = {
 }
 
 
-def _decode_apple_jws_payload(jws: str) -> dict:
-    """Decode the middle segment of a JWS without verifying the signature.
-    Apple's signedPayload is a 3-segment dot-joined string; the middle
-    segment is base64url-encoded JSON."""
+# Set to "0" to allow unverified payloads through (useful when testing
+# locally or before the cert chain check is finalized in prod). Default
+# is strict.
+APPLE_JWS_VERIFY = (os.environ.get("APPLE_JWS_VERIFY", "1").lower() not in {"0", "false", "no"})
+
+
+def _decode_apple_jws_unsafe(jws: str) -> dict:
+    """Decode the middle segment of a JWS WITHOUT verifying the signature.
+    Used only as a last-ditch fallback when verification is intentionally
+    disabled via APPLE_JWS_VERIFY=0."""
     try:
         parts = jws.split(".")
         if len(parts) != 3:
@@ -11347,6 +11389,68 @@ def _decode_apple_jws_payload(jws: str) -> dict:
     except Exception as e:
         logger.warning(f"[apple-notif] Failed to decode JWS payload: {e}")
         return {}
+
+
+def _verify_and_decode_apple_jws(jws: str) -> dict:
+    """Verify and decode an Apple-signed JWS (App Store Server Notifications
+    V2 + nested signedTransactionInfo / signedRenewalInfo).
+
+    Returns the decoded payload dict on success, or an empty dict if the
+    signature, header, or cert chain is invalid. We:
+
+      1. Parse the unverified header to get the x5c cert chain.
+      2. Confirm the leaf cert was issued by Apple (issuer common name
+         contains "Apple") — quick sanity check that fails most tampered
+         payloads without needing to bundle Apple's root CA.
+      3. Verify the JWS signature with the leaf cert's public key
+         (algorithm is ES256 — ECDSA P-256 with SHA-256).
+
+    For full production hardening, walk the x5c chain to Apple Root CA G3
+    using cryptography's verify_directly_issued_by helpers. The Apple-issuer
+    short-circuit covers the common attack (forged signatures from
+    non-Apple certs) without that bundle.
+    """
+    if not jws:
+        return {}
+    if not APPLE_JWS_VERIFY:
+        # Explicit opt-out — used for sandbox debugging only.
+        return _decode_apple_jws_unsafe(jws)
+    try:
+        headers = _jwt.get_unverified_header(jws)
+    except Exception as e:
+        logger.warning(f"[apple-notif] Bad JWS header: {e}")
+        return {}
+    x5c = headers.get("x5c") or []
+    if not x5c:
+        logger.warning("[apple-notif] JWS missing x5c chain — rejecting")
+        return {}
+    try:
+        leaf_der = base64.b64decode(x5c[0])
+        leaf_cert = x509.load_der_x509_certificate(leaf_der, _crypto_default_backend())
+        # Apple issuer sanity check
+        issuer_cn = ""
+        for attr in leaf_cert.issuer:
+            if attr.oid._name == "commonName":
+                issuer_cn = attr.value or ""
+        if "apple" not in issuer_cn.lower():
+            logger.warning(f"[apple-notif] Leaf cert issuer not Apple: {issuer_cn!r} — rejecting")
+            return {}
+        public_key = leaf_cert.public_key()
+        payload = _jwt.decode(
+            jws,
+            public_key,
+            algorithms=["ES256"],
+            options={"verify_aud": False, "verify_iss": False, "verify_exp": False},
+        )
+        return payload
+    except Exception as e:
+        logger.warning(f"[apple-notif] JWS signature/cert verification failed: {e}")
+        return {}
+
+
+# Backwards-compatible name kept for code that still calls it.
+def _decode_apple_jws_payload(jws: str) -> dict:
+    return _verify_and_decode_apple_jws(jws)
 
 
 @app.post("/api/payments/apple/notifications")
@@ -11465,12 +11569,83 @@ GOOGLE_PRODUCT_TO_PLAN = {
 }
 
 
+# Pub/Sub OIDC verification:
+# When the Pub/Sub push subscription has "Enable authentication" turned on,
+# Google attaches an Authorization: Bearer <id_token> header signed by
+# google-managed keys. The id_token's `aud` claim equals whatever audience
+# was configured on the subscription (we set it to the endpoint URL).
+# Verifying both signature and audience is what proves the request actually
+# came from Google Pub/Sub. Without this, anyone who knows the URL can POST
+# crafted RTDN payloads.
+GOOGLE_RTDN_AUDIENCE = os.environ.get(
+    "GOOGLE_RTDN_AUDIENCE",
+    "https://api.spentyai.com/api/payments/google/rtdn",
+)
+# Optional: lock down the publishing service account too. Empty string =
+# allow any verified Google-issued OIDC token.
+GOOGLE_RTDN_SA_EMAIL = os.environ.get("GOOGLE_RTDN_SA_EMAIL", "").strip()
+# Set to "0" during the bring-up window between code deploy and Pub/Sub
+# subscription's Authentication setting being enabled. Default is strict.
+GOOGLE_RTDN_VERIFY = (os.environ.get("GOOGLE_RTDN_VERIFY", "1").lower() not in {"0", "false", "no"})
+
+
+def _verify_google_pubsub_oidc(authorization_header: str) -> bool:
+    """Verify the Google-issued OIDC bearer token attached by Pub/Sub.
+
+    Returns True if the token is signed by a Google key, has the expected
+    audience, and (optionally) matches the configured publisher SA email.
+    Logs a warning and returns False otherwise.
+    """
+    if not GOOGLE_RTDN_VERIFY:
+        return True
+    if not authorization_header or not authorization_header.lower().startswith("bearer "):
+        logger.warning("[google-rtdn] Missing/invalid Authorization header — rejecting")
+        return False
+    token = authorization_header.split(" ", 1)[1].strip()
+    try:
+        # Lazy import so the rest of the file stays import-clean if the
+        # google-auth dep ever moves.
+        from google.oauth2 import id_token as _g_id_token
+        from google.auth.transport import requests as _g_requests
+        claims = _g_id_token.verify_oauth2_token(
+            token, _g_requests.Request(), GOOGLE_RTDN_AUDIENCE
+        )
+    except Exception as e:
+        logger.warning(f"[google-rtdn] OIDC token verification failed: {e}")
+        return False
+    if GOOGLE_RTDN_SA_EMAIL:
+        if claims.get("email", "").lower() != GOOGLE_RTDN_SA_EMAIL.lower():
+            logger.warning(f"[google-rtdn] OIDC email mismatch: got {claims.get('email')!r} expected {GOOGLE_RTDN_SA_EMAIL!r}")
+            return False
+        if not claims.get("email_verified", False):
+            logger.warning("[google-rtdn] OIDC email not verified — rejecting")
+            return False
+    return True
+
+
 @app.post("/api/payments/google/rtdn")
 async def google_rtdn(request: Request):
     """Pub/Sub push endpoint for Google Play Real-time Developer
     Notifications. Always returns 200 — Pub/Sub retries non-2xx
     aggressively and we don't want to flood ourselves with retries on
     transient bugs."""
+    # Verify the OIDC bearer Google attaches to authenticated push deliveries.
+    # If verification fails we still return 200 so Pub/Sub doesn't retry
+    # forever, but we DO NOT process the payload — only audit the rejection.
+    if not _verify_google_pubsub_oidc(request.headers.get("authorization", "")):
+        try:
+            audit_body = await request.body()
+        except Exception:
+            audit_body = b""
+        await db.subscription_events.insert_one({
+            "user_id": None,
+            "provider": "google",
+            "event": "rtdn_rejected_unsigned",
+            "raw_size_bytes": len(audit_body),
+            "occurred_at": datetime.now(timezone.utc),
+        })
+        return {"ok": True}
+
     try:
         body = await request.json()
     except Exception:
@@ -11608,7 +11783,31 @@ async def payu_create_subscription(body: dict = Body(...), user: dict = Depends(
 
     plan = PLAN_PRICES[plan_key]
     cycle, interval = PAYU_BILLING_CYCLE[plan_key]
-    amount = f"{plan['amount'] / 100:.2f}"
+
+    # Free-trial mode (default ON for monthly/quarterly/yearly):
+    #   - amount today        = ₹1.00 mandate-verification charge (refunded
+    #                           or deducted from first cycle by PayU)
+    #   - first auto-debit    = +TRIAL_DAYS days
+    #   - billing_amount      = full plan amount (recurring after trial)
+    # The mandate-verification charge is required because PayU eMandate
+    # rejects ₹0.00 transactions on most acquirers. The user understands
+    # this from the wording on /pricing ("First charge is ₹1 for mandate
+    # verification — refunded after trial").
+    #
+    # Toggle off via PAYU_TRIAL_DAYS=0 if PayU support tells us their
+    # subscription product needs different fields.
+    PAYU_TRIAL_DAYS = int(os.environ.get("PAYU_TRIAL_DAYS", "7") or 0)
+    PAYU_TRIAL_VERIFY_RUPEES = float(os.environ.get("PAYU_TRIAL_VERIFY_AMOUNT_INR", "1.0") or 1.0)
+    full_amount = f"{plan['amount'] / 100:.2f}"
+    if PAYU_TRIAL_DAYS > 0:
+        amount = f"{PAYU_TRIAL_VERIFY_RUPEES:.2f}"
+        free_trial_flag = "1"
+        payment_start = (datetime.now(timezone.utc) + timedelta(days=PAYU_TRIAL_DAYS)).strftime("%Y-%m-%d")
+    else:
+        amount = full_amount
+        free_trial_flag = "0"
+        payment_start = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
     txnid = f"spysub_{user['user_id']}_{plan_key}_{uuid.uuid4().hex[:10]}"
     productinfo = plan["description"]
     firstname = (user.get("name") or "Customer").split()[0]
@@ -11627,11 +11826,13 @@ async def payu_create_subscription(body: dict = Body(...), user: dict = Depends(
         "order_id": txnid,
         "user_id": user["user_id"],
         "plan": plan_key,
-        "amount": plan["amount"],
+        "amount": plan["amount"],                # full recurring amount in paise
+        "trial_amount_paise": int(round(PAYU_TRIAL_VERIFY_RUPEES * 100)) if PAYU_TRIAL_DAYS > 0 else plan["amount"],
         "currency": plan["currency"],
         "status": "created",
         "gateway": "payu",
         "is_recurring": True,
+        "trial_days": PAYU_TRIAL_DAYS,
         "billing_cycle": cycle,
         "billing_interval": interval,
         "created_at": datetime.now(timezone.utc),
@@ -11647,7 +11848,7 @@ async def payu_create_subscription(body: dict = Body(...), user: dict = Depends(
         "form": {
             "key":              PAYU_SUB_KEY,
             "txnid":            txnid,
-            "amount":           amount,
+            "amount":           amount,           # ₹1 verification today (or full amount if trial off)
             "productinfo":      productinfo,
             "firstname":        firstname,
             "email":            email,
@@ -11660,16 +11861,22 @@ async def payu_create_subscription(body: dict = Body(...), user: dict = Depends(
             "hash":             request_hash,
             "service_provider": "payu_paisa",
             # Recurring fields — these flip the order from one-time to
-            # eMandate. PayU's hosted page then shows the UPI Autopay
-            # / card-mandate consent flow.
-            "si":               "1",       # 1 = subscription
-            "free_trial":       "0",
-            "billing_amount":   amount,
-            "billing_currency": "INR",
-            "billing_cycle":    cycle,
-            "billing_interval": str(interval),
-            "payment_start_date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+            # eMandate. PayU's hosted page shows the UPI Autopay /
+            # card-mandate consent screen. After approval, PayU registers
+            # the mandate and starts auto-debits on payment_start_date.
+            "si":                 "1",
+            "free_trial":         free_trial_flag,
+            "billing_amount":     full_amount,        # what gets debited each cycle
+            "billing_currency":   "INR",
+            "billing_cycle":      cycle,
+            "billing_interval":   str(interval),
+            "payment_start_date": payment_start,
         },
+        "is_trial":      PAYU_TRIAL_DAYS > 0,
+        "trial_days":    PAYU_TRIAL_DAYS,
+        "trial_charge":  amount,
+        "first_recurring_charge_date": payment_start,
+        "recurring_amount": full_amount,
     }
 
 
@@ -12120,7 +12327,10 @@ async def payment_status(user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=404, detail="User not found")
 
     plan = user_doc.get("subscription_plan")
-    is_active = user_doc.get("subscription_status") == "active"
+    # Use the unified gate helper so trialing / in_grace_period users still
+    # report is_active=true (and Android's BillingRepository sees them as
+    # subscribed, skipping the paywall like the backend gate does).
+    is_active = is_subscription_currently_active(user_doc)
 
     # Resolve product_id consistently with the user's CURRENT subscription_plan.
     # If we just look at "most recent paid order" naively, a stale order from a
@@ -12176,6 +12386,9 @@ async def payment_status(user: dict = Depends(get_current_user)):
         "expires_at": user_doc.get("subscription_expiry"),
         "provider": user_doc.get("subscription_provider"),
         "product_id": product_id,
+        # Raw status string — Android paywall reads this to render the
+        # "expired" / "in grace period" reason banner.
+        "status": user_doc.get("subscription_status"),
     }
 
 

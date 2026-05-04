@@ -31,9 +31,13 @@ struct AppRouter: View {
             } else if !authManager.isAuthenticated {
                 LoginView(authManager: authManager)
             } else if let user = authManager.user, !user.hasActiveSubscription {
-                SubscriptionPaywall(onSubscribed: {
-                    Task { await authManager.checkSession() }
-                })
+                SubscriptionPaywall(
+                    subscriptionStatus: user.subscriptionStatus,
+                    subscriptionProvider: user.subscriptionProvider,
+                    onSubscribed: {
+                        Task { await authManager.checkSession() }
+                    }
+                )
             } else if isPad {
                 SidebarView()
             } else {

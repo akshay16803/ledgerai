@@ -82,6 +82,43 @@ import com.spentyai.app.features.billing.FallbackPlan
 import com.spentyai.app.features.billing.LifetimeOfferManager
 import com.spentyai.app.features.billing.LifetimeOfferSheet
 
+/**
+ * Contextual reason banner state for the paywall. Null banner = first-time
+ * user, no banner shown. Block = true means subscription CTAs are disabled
+ * (active sub on a different platform — would otherwise double-charge).
+ */
+private data class PaywallContext(val banner: String?, val block: Boolean)
+
+private fun computePaywallContext(status: String?, provider: String?): PaywallContext {
+    val s = (status ?: "").lowercase()
+    val p = (provider ?: "").lowercase()
+    if (s == "active" && p == "payu") {
+        return PaywallContext(
+            "You have an active SpentyAI subscription on the web. Manage it at www.spentyai.com — subscribing here would double-charge you.",
+            true
+        )
+    }
+    if (s == "active" && p == "apple") {
+        return PaywallContext(
+            "You have an active SpentyAI subscription on iPhone. Manage it in the App Store — subscribing here would double-charge you.",
+            true
+        )
+    }
+    if (s == "expired" || s == "cancelled") {
+        return PaywallContext(
+            "Your SpentyAI subscription ended. Renew below to restore access — your data is safe.",
+            false
+        )
+    }
+    if (s == "in_grace_period") {
+        return PaywallContext(
+            "Your last payment didn't go through. Renew below to keep your access without interruption.",
+            false
+        )
+    }
+    return PaywallContext(null, false)
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SubscriptionPaywallScreen(
@@ -89,12 +126,21 @@ fun SubscriptionPaywallScreen(
     onDismiss: () -> Unit,
     onSubscribed: () -> Unit,
     onSignOut: (() -> Unit)? = null,
+    /** Last-known subscription status from /api/auth/me, used to render
+     *  the "your subscription expired" banner above the hero. */
+    subscriptionStatus: String? = null,
+    /** Last-known subscription provider — used to block double-billing
+     *  when the user already pays elsewhere (apple/payu). */
+    subscriptionProvider: String? = null,
 ) {
     val state by viewModel.uiState.collectAsState()
     var selectedProductId by remember { mutableStateOf("com.spentyai.yearly") }
     var showPromoSection by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
+    val paywallCtx = remember(subscriptionStatus, subscriptionProvider) {
+        computePaywallContext(subscriptionStatus, subscriptionProvider)
+    }
 
     // Lifetime offer intercept — onboarding parity with iOS BillingView. New
     // users select Monthly and tap Continue → if the 1-hour offer window is
@@ -196,6 +242,12 @@ fun SubscriptionPaywallScreen(
                     .padding(bottom = 40.dp),
                 verticalArrangement = Arrangement.spacedBy(28.dp)
             ) {
+                // Contextual reason banner (expired / managed-elsewhere). New
+                // users see no banner.
+                paywallCtx.banner?.let { bannerText ->
+                    PaywallReasonBanner(text = bannerText, isBlocking = paywallCtx.block)
+                }
+
                 // Hero section
                 HeroSection()
 
@@ -214,9 +266,12 @@ fun SubscriptionPaywallScreen(
                     )
                 }
 
-                // Subscribe button
+                // Subscribe button — disabled when there's an active sub on
+                // a different platform (Apple/PayU), since starting a Play
+                // Billing flow would double-charge the user.
                 Button(
                     onClick = {
+                        if (paywallCtx.block) return@Button
                         val isMonthly = selectedProductId == BillingRepository.PRODUCT_MONTHLY
                         val offerOpen = LifetimeOfferManager.shared(context).isOfferActive
                         if (isMonthly && offerOpen && !state.isLifetime) {
@@ -231,7 +286,7 @@ fun SubscriptionPaywallScreen(
                             }
                         }
                     },
-                    enabled = !state.isPurchasing,
+                    enabled = !state.isPurchasing && !paywallCtx.block,
                     colors = SpentyStyle.primaryButtonColors(),
                     shape = RoundedCornerShape(14.dp),
                     modifier = Modifier
@@ -239,7 +294,7 @@ fun SubscriptionPaywallScreen(
                         .height(54.dp)
                 ) {
                     Text(
-                        "Continue",
+                        if (paywallCtx.block) "Manage on your other device" else "Continue",
                         style = SpentyType.Headline,
                         color = Color.White
                     )
@@ -807,5 +862,33 @@ private fun TermsSection() {
                 modifier = Modifier.clickable { uriHandler.openUri("https://spentyai.com/privacy") }
             )
         }
+    }
+}
+
+@Composable
+private fun PaywallReasonBanner(text: String, isBlocking: Boolean) {
+    val accent = if (isBlocking) SpentyError else SpentyPrimary
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(accent.copy(alpha = 0.08f))
+            .padding(14.dp),
+        verticalAlignment = Alignment.Top,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        // Coloured stripe acts as the icon — no extra import needed.
+        Box(
+            modifier = Modifier
+                .width(4.dp)
+                .height(28.dp)
+                .clip(RoundedCornerShape(2.dp))
+                .background(accent)
+        )
+        Text(
+            text = text,
+            style = SpentyType.Subheadline,
+            color = MaterialTheme.colorScheme.onBackground
+        )
     }
 }
