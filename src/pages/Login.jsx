@@ -2,19 +2,36 @@ import { s, getCurrentLanguage } from '../lib/localization';
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext.jsx';
-import { GoogleLogo } from '@phosphor-icons/react';
+import { GoogleLogo, AppleLogo } from '@phosphor-icons/react';
 
 export default function Login() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const [appleEnabled, setAppleEnabled] = useState(false);
 
   useEffect(() => {
     if (user) navigate('/dashboard', { replace: true });
   }, [user, navigate]);
 
+  // Probe whether Sign in with Apple is configured on the backend.
+  // We only render the button when the server confirms it's available,
+  // so we never show a button that 500s on click.
+  useEffect(() => {
+    const API = import.meta.env.REACT_APP_BACKEND_URL || '';
+    fetch(`${API}/api/auth/apple/web/config`, { credentials: 'include' })
+      .then(r => r.ok ? r.json() : { enabled: false })
+      .then(data => setAppleEnabled(Boolean(data?.enabled)))
+      .catch(() => setAppleEnabled(false));
+  }, []);
+
   const handleGoogleLogin = () => {
     const API = import.meta.env.REACT_APP_BACKEND_URL || '';
     window.location.href = `${API}/api/auth/google`;
+  };
+
+  const handleAppleLogin = () => {
+    const API = import.meta.env.REACT_APP_BACKEND_URL || '';
+    window.location.href = `${API}/api/auth/apple/web`;
   };
 
   return (
@@ -56,6 +73,26 @@ export default function Login() {
             <GoogleLogo size={20} weight="bold" />
             {s('sign_in_google')}
           </button>
+
+          {appleEnabled && (
+            <button
+              data-testid="apple-login-button"
+              onClick={handleAppleLogin}
+              style={{
+                width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                gap: 10, padding: '14px 24px', border: '1px solid #000',
+                borderRadius: 2, background: '#000', cursor: 'pointer',
+                fontSize: 15, fontWeight: 500, fontFamily: 'var(--font-body)',
+                color: '#fff', marginTop: 12,
+                transition: 'background 0.2s ease, box-shadow 0.2s ease'
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = '#1a1a1a'; e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.12)'; }}
+              onMouseLeave={e => { e.currentTarget.style.background = '#000'; e.currentTarget.style.boxShadow = 'none'; }}
+            >
+              <AppleLogo size={20} weight="fill" />
+              Sign in with Apple
+            </button>
+          )}
 
           <p style={{ marginTop: 24, fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5 }}>
             By signing in, you agree to our{' '}

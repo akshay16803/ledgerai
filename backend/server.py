@@ -55,6 +55,20 @@ GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET")
 MICROSOFT_CLIENT_ID = os.environ.get("MICROSOFT_CLIENT_ID")
 MICROSOFT_TENANT_ID = os.environ.get("MICROSOFT_TENANT_ID")
 MICROSOFT_CLIENT_SECRET = os.environ.get("MICROSOFT_CLIENT_SECRET")
+
+# Sign in with Apple (Web flow). To enable, create a Services ID in Apple
+# Developer (https://developer.apple.com/account/resources/identifiers/list/serviceId),
+# add the website domain + return URL ({BACKEND_URL}/api/auth/apple/web/callback),
+# create a private .p8 key, then set:
+#   APPLE_WEB_SERVICES_ID  e.g. "com.spentyai.web"
+#   APPLE_TEAM_ID          e.g. "857NZC8N95"
+#   APPLE_KEY_ID           the kid printed alongside your .p8
+#   APPLE_PRIVATE_KEY      contents of the .p8 file (with BEGIN/END lines preserved)
+# If unset, the web button is hidden gracefully via /api/auth/apple/web/config.
+APPLE_WEB_SERVICES_ID = os.environ.get("APPLE_WEB_SERVICES_ID", "").strip()
+APPLE_TEAM_ID = os.environ.get("APPLE_TEAM_ID", "").strip()
+APPLE_KEY_ID = os.environ.get("APPLE_KEY_ID", "").strip()
+APPLE_PRIVATE_KEY = os.environ.get("APPLE_PRIVATE_KEY", "").strip().replace("\\n", "\n")
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY")
 SENDER_EMAIL = os.environ.get("SENDER_EMAIL")
 
@@ -888,6 +902,254 @@ async def apple_mobile_login(request: Request):
             "subscription_status": (user_doc or {}).get("subscription_status"),
         },
     }
+
+
+def _get_apple_web_callback_uri(request: Request) -> str:
+    """Build the Apple OAuth callback URI pointing to the backend."""
+    base = _get_backend_url(request)
+    return f"{base}/api/auth/apple/web/callback"
+
+
+def _generate_apple_client_secret() -> str:
+    """Sign Apple's required ES256 JWT used as client_secret in token exchange.
+
+    Apple requires this to be a fresh JWT (max ~6 months lifetime). We mint
+    one per request — cheap and avoids rotation bugs.
+    """
+    import jwt as _pyjwt
+    if not (APPLE_TEAM_ID and APPLE_WEB_SERVICES_ID and APPLE_KEY_ID and APPLE_PRIVATE_KEY):
+        raise RuntimeError("Apple Web OAuth env vars are not fully configured")
+    now = int(datetime.now(timezone.utc).timestamp())
+    payload = {
+        "iss": APPLE_TEAM_ID,
+        "iat": now,
+        "exp": now + 3600,  # 1 hour is plenty for the token-exchange call
+        "aud": "https://appleid.apple.com",
+        "sub": APPLE_WEB_SERVICES_ID,
+    }
+    return _pyjwt.encode(
+        payload,
+        APPLE_PRIVATE_KEY,
+        algorithm="ES256",
+        headers={"kid": APPLE_KEY_ID, "alg": "ES256"},
+    )
+
+
+@app.get("/api/auth/apple/web/config")
+async def apple_web_config():
+    """Tells the frontend whether Sign in with Apple is enabled.
+
+    Used to hide the button when the Apple env vars aren't configured yet,
+    so we don't show a button that errors out on click.
+    """
+    enabled = bool(APPLE_WEB_SERVICES_ID and APPLE_TEAM_ID and APPLE_KEY_ID and APPLE_PRIVATE_KEY)
+    return {"enabled": enabled}
+
+
+@app.get("/api/auth/apple/web")
+async def apple_web_login(request: Request):
+    """Initiate Sign in with Apple (web flow)."""
+    if not (APPLE_WEB_SERVICES_ID and APPLE_TEAM_ID and APPLE_KEY_ID and APPLE_PRIVATE_KEY):
+        raise HTTPException(status_code=500, detail="Apple Web OAuth not configured")
+
+    callback_uri = _get_apple_web_callback_uri(request)
+    state = secrets.token_urlsafe(32)
+
+    await db.auth_oauth_states.insert_one({
+        "state": state,
+        "provider": "apple_web",
+        "redirect_uri": callback_uri,
+        "frontend_url": _get_frontend_url(request),
+        "created_at": datetime.now(timezone.utc),
+        "expires_at": datetime.now(timezone.utc) + timedelta(minutes=10),
+    })
+
+    params = {
+        "client_id": APPLE_WEB_SERVICES_ID,
+        "redirect_uri": callback_uri,
+        "response_type": "code id_token",
+        "scope": "name email",
+        "response_mode": "form_post",  # Apple posts the result back to us
+        "state": state,
+    }
+    apple_auth_url = f"https://appleid.apple.com/auth/authorize?{urlencode(params)}"
+    return RedirectResponse(apple_auth_url)
+
+
+@app.post("/api/auth/apple/web/callback")
+async def apple_web_callback(request: Request):
+    """Apple posts the authorization result back here as an HTML form.
+
+    Body fields (form-encoded):
+      code      — authorization code, exchange for tokens
+      id_token  — Apple-signed JWT containing the user identity
+      state     — same state we set on initiation
+      user      — JSON with name (only present on first sign-in)
+      error     — present on user cancel / failure
+    """
+    import base64 as _base64
+    from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicNumbers
+    from cryptography.hazmat.backends import default_backend as _default_backend
+    import jwt as _pyjwt
+
+    form = await request.form()
+    code = form.get("code")
+    id_token = form.get("id_token")
+    state = form.get("state")
+    err = form.get("error")
+    user_json = form.get("user")  # Only present on FIRST sign-in (consent screen)
+
+    frontend_url = _get_frontend_url(request)
+
+    if err:
+        logger.error(f"[AppleWeb] Apple returned error: {err}")
+        return RedirectResponse(f"{frontend_url}/login?error={err}")
+    if not code or not state:
+        return RedirectResponse(f"{frontend_url}/login?error=apple_missing_params")
+
+    # Validate state
+    state_doc = await db.auth_oauth_states.find_one({"state": state}, {"_id": 0})
+    if not state_doc or state_doc.get("provider") != "apple_web":
+        return RedirectResponse(f"{frontend_url}/login?error=apple_invalid_state")
+
+    await db.auth_oauth_states.delete_one({"state": state})
+    if state_doc.get("expires_at"):
+        expires_at = state_doc["expires_at"]
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        if expires_at < datetime.now(timezone.utc):
+            return RedirectResponse(f"{frontend_url}/login?error=apple_state_expired")
+
+    frontend_url = state_doc.get("frontend_url", frontend_url)
+    callback_uri = state_doc.get("redirect_uri", _get_apple_web_callback_uri(request))
+
+    # Exchange the code for tokens
+    try:
+        client_secret = _generate_apple_client_secret()
+        async with httpx.AsyncClient(timeout=15.0) as http_client:
+            token_resp = await http_client.post(
+                "https://appleid.apple.com/auth/token",
+                data={
+                    "client_id": APPLE_WEB_SERVICES_ID,
+                    "client_secret": client_secret,
+                    "code": code,
+                    "grant_type": "authorization_code",
+                    "redirect_uri": callback_uri,
+                },
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+        if token_resp.status_code != 200:
+            logger.error(f"[AppleWeb] Token exchange failed: {token_resp.status_code} {token_resp.text}")
+            return RedirectResponse(f"{frontend_url}/login?error=apple_token_exchange_failed")
+        token_data = token_resp.json()
+    except Exception as e:
+        logger.error(f"[AppleWeb] Token exchange error: {e}")
+        return RedirectResponse(f"{frontend_url}/login?error=apple_oauth_error")
+
+    # Verify the id_token (the one Apple posted is the same as token_data["id_token"]
+    # but we re-verify the latter for safety since it's signed against the same JWKS)
+    apple_id_token = token_data.get("id_token") or id_token
+
+    # Fetch JWKS + verify
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as http_client:
+            keys_resp = await http_client.get("https://appleid.apple.com/auth/keys")
+        apple_keys = keys_resp.json().get("keys", []) if keys_resp.status_code == 200 else []
+
+        header = _pyjwt.get_unverified_header(apple_id_token)
+        kid = header.get("kid")
+        alg = header.get("alg", "RS256")
+        matching_jwk = next((k for k in apple_keys if k.get("kid") == kid), None)
+        if not matching_jwk:
+            return RedirectResponse(f"{frontend_url}/login?error=apple_kid_mismatch")
+
+        def _b64url_to_int(s: str) -> int:
+            padding = "=" * (4 - len(s) % 4)
+            return int.from_bytes(_base64.urlsafe_b64decode(s + padding), "big")
+
+        n_int = _b64url_to_int(matching_jwk["n"])
+        e_int = _b64url_to_int(matching_jwk["e"])
+        public_key = RSAPublicNumbers(e_int, n_int).public_key(_default_backend())
+
+        payload = _pyjwt.decode(
+            apple_id_token,
+            public_key,
+            algorithms=[alg],
+            audience=APPLE_WEB_SERVICES_ID,
+            issuer="https://appleid.apple.com",
+            options={"verify_exp": True},
+        )
+    except Exception as e:
+        logger.error(f"[AppleWeb] id_token verification failed: {e}")
+        return RedirectResponse(f"{frontend_url}/login?error=apple_jwt_invalid")
+
+    apple_sub = payload.get("sub")
+    email = payload.get("email", "")
+    if not apple_sub:
+        return RedirectResponse(f"{frontend_url}/login?error=apple_no_sub")
+
+    # First-sign-in only: Apple gives the name in a separate form field
+    name = ""
+    if user_json:
+        try:
+            user_obj = json.loads(user_json)
+            n = user_obj.get("name") or {}
+            first = n.get("firstName") or ""
+            last = n.get("lastName") or ""
+            name = (first + " " + last).strip()
+        except Exception:
+            pass
+
+    # Lookup or create user (mirrors the mobile flow)
+    existing_user = await db.users.find_one({"apple_sub": apple_sub}, {"_id": 0})
+    if not existing_user and email:
+        existing_user = await db.users.find_one({"email": email}, {"_id": 0})
+
+    if existing_user:
+        user_id = existing_user["user_id"]
+        update_fields = {"apple_sub": apple_sub, "updated_at": datetime.now(timezone.utc)}
+        if email:
+            update_fields["email"] = email
+        if name and not (existing_user.get("name") or "").strip():
+            update_fields["name"] = name
+        await db.users.update_one({"user_id": user_id}, {"$set": update_fields})
+    else:
+        user_id = f"user_{uuid.uuid4().hex[:12]}"
+        await db.users.insert_one({
+            "user_id": user_id,
+            "apple_sub": apple_sub,
+            "email": email or f"{apple_sub}@apple.private",
+            "name": name,
+            "picture": None,
+            "email_verified": True,
+            "auth_provider": "apple",
+            "created_at": datetime.now(timezone.utc),
+        })
+        await seed_default_data(user_id)
+
+    # Mint a session and set cookie (same pattern as Google web)
+    session_token = secrets.token_urlsafe(48)
+    await db.user_sessions.insert_one({
+        "user_id": user_id,
+        "session_token": session_token,
+        "expires_at": datetime.now(timezone.utc) + timedelta(days=7),
+        "created_at": datetime.now(timezone.utc),
+    })
+
+    user_doc = existing_user or await db.users.find_one({"user_id": user_id}, {"_id": 0})
+    has_subscription = user_doc and user_doc.get("subscription_status") == "active"
+    redirect_target = "dashboard" if has_subscription else "billing"
+    response = RedirectResponse(f"{frontend_url}/{redirect_target}", status_code=302)
+    response.set_cookie(
+        key="session_token",
+        value=session_token,
+        httponly=True,
+        secure=True,
+        samesite="none",
+        path="/",
+        max_age=7 * 24 * 3600,
+    )
+    return response
 
 
 @app.post("/api/auth/demo-login")
