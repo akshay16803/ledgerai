@@ -84,15 +84,21 @@ export default function Pricing() {
     setLoadingPlan(planKey);
 
     try {
-      // 1. Ask backend to mint a PayU order (txnid + sha512 hash). The hash
-      //    is generated server-side using the PayU salt; the salt itself
-      //    NEVER reaches the browser.
-      const orderData = await api.post('/api/payments/create-order', { plan: planKey });
+      // Recurring plans (monthly/quarterly/yearly) → PayU Subscriptions /
+      //   eMandate. The first auto-debit happens at the next billing cycle;
+      //   the user is charged ₹0 today, just to lock in the mandate.
+      // One-time plans (lifetime / lifetime_offer) → PayU one-shot order.
+      // Either way the salt never reaches the browser — backend mints the
+      //   sha512 hash and we just POST a hidden form to PayU's hosted page.
+      const isRecurring = planKey === 'monthly' || planKey === 'quarterly' || planKey === 'yearly';
+      const endpoint = isRecurring
+        ? '/api/payments/payu/subscription/create'
+        : '/api/payments/create-order';
 
-      // 2. Build a hidden form and POST it to PayU's hosted checkout. This is
-      //    PayU's recommended integration — no SDK required, no salt in JS.
-      //    After payment, PayU posts back to our /api/payments/payu/callback
-      //    which redirects the user to /payment-success or /payment-failure.
+      const orderData = await api.post(endpoint, { plan: planKey });
+
+      // After payment, PayU posts back to our /api/payments/payu/callback
+      // which redirects the user to /payment-success or /payment-failure.
       const form = document.createElement('form');
       form.method = 'POST';
       form.action = orderData.payment_url;

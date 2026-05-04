@@ -113,7 +113,16 @@ export default function Billing() {
     setLoadingPlan(planKey);
 
     try {
-      const orderData = await api.post('/api/payments/create-order', { plan: planKey });
+      // Recurring plans (monthly/quarterly/yearly) → PayU Subscriptions /
+      //   eMandate. PayU collects the user's UPI/card mandate today and
+      //   auto-debits the plan amount each cycle.
+      // One-time plans (lifetime / lifetime_offer) → PayU one-shot order.
+      const isRecurring = planKey === 'monthly' || planKey === 'quarterly' || planKey === 'yearly';
+      const endpoint = isRecurring
+        ? '/api/payments/payu/subscription/create'
+        : '/api/payments/create-order';
+
+      const orderData = await api.post(endpoint, { plan: planKey });
 
       // Auto-submit a hidden form to PayU's hosted checkout. The hash is
       // generated server-side; the PayU salt never touches the browser.

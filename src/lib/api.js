@@ -82,16 +82,32 @@ async function doFetch(path, options) {
     ...options,
   });
   if (!res.ok) {
+    // 402 Payment Required → backend's require_active_subscription gate
+    // fired. Bounce the user to /billing so they can subscribe / renew,
+    // unless they're already there. Avoid an infinite redirect loop.
+    if (res.status === 402 && typeof window !== 'undefined') {
+      const onBilling = window.location.pathname.startsWith('/billing')
+        || window.location.pathname.startsWith('/pricing')
+        || window.location.pathname.startsWith('/payment-');
+      if (!onBilling) {
+        window.location.assign('/billing?expired=1');
+      }
+    }
     const err = await res.json().catch(() => ({ detail: res.statusText }));
     let errorMessage = 'Request failed';
     if (Array.isArray(err.detail)) {
       errorMessage = err.detail.map(e => e.msg || e.message || JSON.stringify(e)).join(', ');
     } else if (typeof err.detail === 'string') {
       errorMessage = err.detail;
+    } else if (err.detail && typeof err.detail === 'object' && err.detail.message) {
+      // 402 returns { detail: { error, message, ... } }
+      errorMessage = err.detail.message;
     } else if (err.message) {
       errorMessage = err.message;
     }
-    throw new Error(errorMessage);
+    const e = new Error(errorMessage);
+    e.status = res.status;
+    throw e;
   }
   return res.json();
 }

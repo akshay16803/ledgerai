@@ -268,6 +268,102 @@ async def get_current_user(request: Request) -> dict:
     return user_doc
 
 
+# ─── Subscription helpers + gate ────────────────────────────────────
+# Single source of truth for "is this user currently allowed to use the
+# paid app?" Used by:
+#   - the require_active_subscription FastAPI dependency (gates protected
+#     endpoints — closes the gap where the frontend's <ProtectedRoute>
+#     redirect was the only thing stopping a curl call)
+#   - the periodic expiry sweep below
+#   - any backend code that wants to check entitlement
+#
+# A user is "currently active" iff:
+#   subscription_status == "active"   AND
+#   (subscription_plan == "lifetime"  OR
+#    subscription_expiry is in the future)
+#
+# Lifetime is treated specially because expiry is set ~100 years out but
+# we don't want to depend on that arithmetic.
+
+LIFETIME_PLAN_KEYS = {"lifetime", "lifetime_offer"}
+
+
+def _parse_iso(dt) -> Optional[datetime]:
+    """Tolerant ISO-string -> aware datetime parser. Returns None on failure."""
+    if dt is None:
+        return None
+    if isinstance(dt, datetime):
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    try:
+        out = datetime.fromisoformat(str(dt).replace("Z", "+00:00"))
+        return out if out.tzinfo else out.replace(tzinfo=timezone.utc)
+    except Exception:
+        return None
+
+
+def is_subscription_currently_active(user_doc: dict) -> bool:
+    """True if the user can access paid features RIGHT NOW (status + expiry)."""
+    if not user_doc:
+        return False
+    status = user_doc.get("subscription_status")
+    if status != "active":
+        return False
+    plan = (user_doc.get("subscription_plan") or "").lower()
+    if plan in LIFETIME_PLAN_KEYS:
+        return True
+    expiry = _parse_iso(user_doc.get("subscription_expiry"))
+    if expiry is None:
+        # Defensive: status==active but no expiry set is treated as active.
+        # The expiry sweep will catch any genuinely-stale row over time.
+        return True
+    return expiry > datetime.now(timezone.utc)
+
+
+async def require_active_subscription(user: dict = Depends(get_current_user)) -> dict:
+    """FastAPI dependency: 402-Payment-Required if the user isn't actively subscribed.
+
+    Use on every endpoint that exposes paid functionality:
+        @app.get("/api/something")
+        async def something(user: dict = Depends(require_active_subscription)):
+            ...
+
+    Returns the user_doc, just like get_current_user does, so endpoints can
+    keep their existing signature.
+    """
+    # Fast path: take the doc from get_current_user. But also re-evaluate
+    # against current time, because that doc may have been loaded just before
+    # an expiry boundary.
+    if is_subscription_currently_active(user):
+        return user
+    # If the doc says active but expiry is in the past, opportunistically
+    # downgrade so we don't keep paying through every request.
+    if user.get("subscription_status") == "active":
+        expiry = _parse_iso(user.get("subscription_expiry"))
+        plan = (user.get("subscription_plan") or "").lower()
+        if plan not in LIFETIME_PLAN_KEYS and expiry is not None and expiry <= datetime.now(timezone.utc):
+            try:
+                await db.users.update_one(
+                    {"user_id": user["user_id"]},
+                    {"$set": {
+                        "subscription_status": "expired",
+                        "subscription_expired_at": datetime.now(timezone.utc),
+                    }},
+                )
+                logger.info(f"[subscription] Downgraded expired subscription for user_id={user['user_id']} (expiry={user.get('subscription_expiry')})")
+            except Exception as e:
+                logger.warning(f"[subscription] Failed to mark expired user_id={user['user_id']}: {e}")
+    raise HTTPException(
+        status_code=402,
+        detail={
+            "error": "subscription_required",
+            "message": "An active subscription is required to use this feature.",
+            "subscription_plan": user.get("subscription_plan"),
+            "subscription_status": user.get("subscription_status"),
+            "subscription_expiry": user.get("subscription_expiry"),
+        },
+    )
+
+
 # ─── Auth Routes ────────────────────────────────────────────────────
 
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "")
@@ -1156,7 +1252,7 @@ async def resend_verification(request: Request, user: dict = Depends(get_current
 # ─── Accounts Routes ───────────────────────────────────────────────
 
 @app.get("/api/accounts")
-async def list_accounts(user: dict = Depends(get_current_user)):
+async def list_accounts(user: dict = Depends(require_active_subscription)):
     accounts = await db.accounts.find(
         {"user_id": user["user_id"]}, {"_id": 0}
     ).to_list(1000)
@@ -1164,7 +1260,7 @@ async def list_accounts(user: dict = Depends(get_current_user)):
 
 
 @app.get("/api/accounts/{account_id}")
-async def get_account(account_id: str, user: dict = Depends(get_current_user)):
+async def get_account(account_id: str, user: dict = Depends(require_active_subscription)):
     """Get a single account by ID."""
     account = await db.accounts.find_one(
         {"account_id": account_id, "user_id": user["user_id"]}, {"_id": 0}
@@ -1175,7 +1271,7 @@ async def get_account(account_id: str, user: dict = Depends(get_current_user)):
 
 
 @app.post("/api/accounts", status_code=201)
-async def create_account(data: AccountCreate, user: dict = Depends(get_current_user)):
+async def create_account(data: AccountCreate, user: dict = Depends(require_active_subscription)):
     # B6: Validate account_type
     valid_account_types = {"asset", "liability", "equity", "investment"}
     if data.account_type not in valid_account_types:
@@ -1236,7 +1332,7 @@ async def create_account(data: AccountCreate, user: dict = Depends(get_current_u
 
 
 @app.put("/api/accounts/{account_id}")
-async def update_account(account_id: str, data: AccountUpdate, user: dict = Depends(get_current_user)):
+async def update_account(account_id: str, data: AccountUpdate, user: dict = Depends(require_active_subscription)):
     update_data = {k: v for k, v in data.dict().items() if v is not None}
     if not update_data:
         raise HTTPException(status_code=400, detail="No fields to update")
@@ -1278,7 +1374,7 @@ async def update_account(account_id: str, data: AccountUpdate, user: dict = Depe
 
 
 @app.delete("/api/accounts/{account_id}")
-async def delete_account(account_id: str, user: dict = Depends(get_current_user)):
+async def delete_account(account_id: str, user: dict = Depends(require_active_subscription)):
     tx_count = await db.transactions.count_documents(
         {"user_id": user["user_id"], "$or": [{"account_id": account_id}, {"to_account_id": account_id}]}
     )
@@ -1293,7 +1389,7 @@ async def delete_account(account_id: str, user: dict = Depends(get_current_user)
 
 
 @app.post("/api/accounts/{account_id}/recalculate")
-async def recalculate_balance_endpoint(account_id: str, user: dict = Depends(get_current_user)):
+async def recalculate_balance_endpoint(account_id: str, user: dict = Depends(require_active_subscription)):
     """Recalculate account balance from opening_balance + transactions after balance_as_of_date."""
     account = await db.accounts.find_one(
         {"account_id": account_id, "user_id": user["user_id"]}, {"_id": 0}
@@ -1432,7 +1528,7 @@ def _generate_amortization_schedule(outstanding: float, annual_rate: float, tenu
 
 
 @app.get("/api/accounts/{account_id}/amortization")
-async def get_amortization(account_id: str, user: dict = Depends(get_current_user)):
+async def get_amortization(account_id: str, user: dict = Depends(require_active_subscription)):
     """Generate loan amortization schedule for a loan account."""
     account = await db.accounts.find_one(
         {"account_id": account_id, "user_id": user["user_id"]}, {"_id": 0}
@@ -1486,7 +1582,7 @@ async def get_amortization(account_id: str, user: dict = Depends(get_current_use
 
 
 @app.get("/api/accounts/{account_id}/balance")
-async def get_account_balance(account_id: str, user: dict = Depends(get_current_user)):
+async def get_account_balance(account_id: str, user: dict = Depends(require_active_subscription)):
     """Get the current balance and recent activity for an account."""
     account = await db.accounts.find_one(
         {"account_id": account_id, "user_id": user["user_id"]}, {"_id": 0}
@@ -1510,7 +1606,7 @@ async def get_account_balance(account_id: str, user: dict = Depends(get_current_
 @app.get("/api/accounts/{account_id}/transactions")
 async def get_account_transactions(
     account_id: str,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_active_subscription),
     limit: int = 50,
     skip: int = 0,
     from_date: str = None,
@@ -1709,7 +1805,7 @@ async def delete_account_sub_type(sub_type_id: str, user: dict = Depends(get_cur
 # ─── Categories Routes ──────────────────────────────────────────────
 
 @app.get("/api/categories")
-async def list_categories(user: dict = Depends(get_current_user), category_type: Optional[str] = None):
+async def list_categories(user: dict = Depends(require_active_subscription), category_type: Optional[str] = None):
     query = {"user_id": user["user_id"]}
     if category_type:
         query["category_type"] = category_type
@@ -1718,7 +1814,7 @@ async def list_categories(user: dict = Depends(get_current_user), category_type:
 
 
 @app.post("/api/categories", status_code=201)
-async def create_category(data: CategoryCreate, user: dict = Depends(get_current_user)):
+async def create_category(data: CategoryCreate, user: dict = Depends(require_active_subscription)):
     cat = {
         "category_id": f"cat_{uuid.uuid4().hex[:12]}",
         "user_id": user["user_id"],
@@ -1733,7 +1829,7 @@ async def create_category(data: CategoryCreate, user: dict = Depends(get_current
 
 
 @app.put("/api/categories/{category_id}")
-async def update_category(category_id: str, data: CategoryUpdate, user: dict = Depends(get_current_user)):
+async def update_category(category_id: str, data: CategoryUpdate, user: dict = Depends(require_active_subscription)):
     update_data = {k: v for k, v in data.dict().items() if v is not None}
     if not update_data:
         raise HTTPException(status_code=400, detail="No fields to update")
@@ -1748,7 +1844,7 @@ async def update_category(category_id: str, data: CategoryUpdate, user: dict = D
 
 
 @app.delete("/api/categories/{category_id}")
-async def delete_category(category_id: str, user: dict = Depends(get_current_user)):
+async def delete_category(category_id: str, user: dict = Depends(require_active_subscription)):
     sub_count = await db.categories.count_documents(
         {"parent_id": category_id, "user_id": user["user_id"]}
     )
@@ -1764,7 +1860,7 @@ async def delete_category(category_id: str, user: dict = Depends(get_current_use
 
 
 @app.get("/api/categories/defaults")
-async def get_default_categories(user: dict = Depends(get_current_user)):
+async def get_default_categories(user: dict = Depends(require_active_subscription)):
     """Get the default category template (useful for resetting or reference)."""
     income_categories = [
         {"name": "Salary", "subcategories": ["Full-time", "Part-time", "Freelance"]},
@@ -1789,7 +1885,7 @@ async def get_default_categories(user: dict = Depends(get_current_user)):
 
 
 @app.post("/api/categories/merge")
-async def merge_categories(request: Request, user: dict = Depends(get_current_user)):
+async def merge_categories(request: Request, user: dict = Depends(require_active_subscription)):
     """Merge one category into another (reassign all transactions)."""
     body = await request.json()
     source_id = body.get("source_category_id")
@@ -1907,7 +2003,7 @@ async def enrich_transactions_with_names(user_id: str, transactions: list) -> li
 
 @app.get("/api/transactions")
 async def list_transactions(
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_active_subscription),
     transaction_type: Optional[str] = None,
     status: Optional[str] = None,
     from_date: Optional[str] = None,
@@ -1958,7 +2054,7 @@ async def list_transactions(
 
 @app.get("/api/transactions/pending")
 async def list_pending_transactions(
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_active_subscription),
     limit: int = 50,
     skip: int = 0,
 ):
@@ -1973,7 +2069,7 @@ async def list_pending_transactions(
 @app.get("/api/transactions/search")
 async def search_transactions(
     q: str = "",
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_active_subscription),
     limit: int = 50,
     skip: int = 0,
 ):
@@ -1999,7 +2095,7 @@ async def search_transactions(
 
 
 @app.get("/api/transactions/{transaction_id}")
-async def get_transaction(transaction_id: str, user: dict = Depends(get_current_user)):
+async def get_transaction(transaction_id: str, user: dict = Depends(require_active_subscription)):
     txn = await db.transactions.find_one(
         {"transaction_id": transaction_id, "user_id": user["user_id"]}, {"_id": 0}
     )
@@ -2010,7 +2106,7 @@ async def get_transaction(transaction_id: str, user: dict = Depends(get_current_
 
 
 @app.post("/api/transactions", status_code=201)
-async def create_transaction(data: TransactionCreate, user: dict = Depends(get_current_user)):
+async def create_transaction(data: TransactionCreate, user: dict = Depends(require_active_subscription)):
     if data.transaction_type in ["income", "expense"] and not data.category_id:
         raise HTTPException(status_code=400, detail="Category is required for income/expense")
     if data.transaction_type == "transfer" and not data.to_account_id:
@@ -2259,7 +2355,7 @@ async def reverse_transaction_balances(user_id: str, txn: dict):
 
 
 @app.put("/api/transactions/{transaction_id}")
-async def update_transaction(transaction_id: str, data: TransactionUpdate, user: dict = Depends(get_current_user)):
+async def update_transaction(transaction_id: str, data: TransactionUpdate, user: dict = Depends(require_active_subscription)):
     existing = await db.transactions.find_one(
         {"transaction_id": transaction_id, "user_id": user["user_id"]}, {"_id": 0}
     )
@@ -2287,7 +2383,7 @@ async def update_transaction(transaction_id: str, data: TransactionUpdate, user:
 
 
 @app.delete("/api/transactions/{transaction_id}")
-async def delete_transaction(transaction_id: str, user: dict = Depends(get_current_user)):
+async def delete_transaction(transaction_id: str, user: dict = Depends(require_active_subscription)):
     existing = await db.transactions.find_one(
         {"transaction_id": transaction_id, "user_id": user["user_id"]}, {"_id": 0}
     )
@@ -2304,7 +2400,7 @@ async def delete_transaction(transaction_id: str, user: dict = Depends(get_curre
 
 
 @app.post("/api/transactions/{transaction_id}/approve")
-async def approve_transaction(transaction_id: str, user: dict = Depends(get_current_user)):
+async def approve_transaction(transaction_id: str, user: dict = Depends(require_active_subscription)):
     existing = await db.transactions.find_one(
         {"transaction_id": transaction_id, "user_id": user["user_id"]}, {"_id": 0}
     )
@@ -2348,7 +2444,7 @@ async def approve_transaction(transaction_id: str, user: dict = Depends(get_curr
 
 
 @app.post("/api/transactions/{transaction_id}/reject")
-async def reject_transaction(transaction_id: str, user: dict = Depends(get_current_user)):
+async def reject_transaction(transaction_id: str, user: dict = Depends(require_active_subscription)):
     existing = await db.transactions.find_one(
         {"transaction_id": transaction_id, "user_id": user["user_id"]}, {"_id": 0}
     )
@@ -2375,7 +2471,7 @@ async def reject_transaction(transaction_id: str, user: dict = Depends(get_curre
 
 
 @app.post("/api/transactions/bulk-approve")
-async def bulk_approve_transactions(request: Request, user: dict = Depends(get_current_user)):
+async def bulk_approve_transactions(request: Request, user: dict = Depends(require_active_subscription)):
     """Approve multiple transactions at once."""
     body = await request.json()
     transaction_ids = body.get("transaction_ids", [])
@@ -2428,7 +2524,7 @@ async def bulk_approve_transactions(request: Request, user: dict = Depends(get_c
 
 
 @app.post("/api/transactions/bulk-reject")
-async def bulk_reject_transactions(request: Request, user: dict = Depends(get_current_user)):
+async def bulk_reject_transactions(request: Request, user: dict = Depends(require_active_subscription)):
     """Reject multiple transactions at once."""
     body = await request.json()
     transaction_ids = body.get("transaction_ids", [])
@@ -2465,7 +2561,7 @@ async def bulk_reject_transactions(request: Request, user: dict = Depends(get_cu
 
 
 @app.post("/api/transactions/bulk-delete")
-async def bulk_delete_transactions(request: Request, user: dict = Depends(get_current_user)):
+async def bulk_delete_transactions(request: Request, user: dict = Depends(require_active_subscription)):
     """Delete multiple transactions at once."""
     body = await request.json()
     transaction_ids = body.get("transaction_ids", [])
@@ -2494,7 +2590,7 @@ async def bulk_delete_transactions(request: Request, user: dict = Depends(get_cu
 
 
 @app.post("/api/transactions/bulk-update")
-async def bulk_update_transactions(request: Request, user: dict = Depends(get_current_user)):
+async def bulk_update_transactions(request: Request, user: dict = Depends(require_active_subscription)):
     """Update fields on multiple transactions at once (e.g., category, description)."""
     body = await request.json()
     transaction_ids = body.get("transaction_ids", [])
@@ -2530,7 +2626,7 @@ async def list_recurring(user: dict = Depends(get_current_user)):
 
 
 @app.post("/api/transactions/{transaction_id}/toggle-recurring")
-async def toggle_recurring(transaction_id: str, request: Request, user: dict = Depends(get_current_user)):
+async def toggle_recurring(transaction_id: str, request: Request, user: dict = Depends(require_active_subscription)):
     body = await request.json()
     is_recurring = body.get("is_recurring", False)
     recurring_frequency = body.get("recurring_frequency")  # monthly, weekly, yearly, quarterly
@@ -2754,7 +2850,7 @@ def _mandate_active_in_month(mandate: dict, month_start: date_cls, month_end: da
 
 
 @app.get("/api/mandates")
-async def list_mandates(user: dict = Depends(get_current_user)):
+async def list_mandates(user: dict = Depends(require_active_subscription)):
     """List every mandate on this user, newest first."""
     items = await db.mandates.find(
         {"user_id": user["user_id"]}, {"_id": 0}
@@ -2763,7 +2859,7 @@ async def list_mandates(user: dict = Depends(get_current_user)):
 
 
 @app.post("/api/mandates", status_code=201)
-async def create_mandate(payload: dict = Body(...), user: dict = Depends(get_current_user)):
+async def create_mandate(payload: dict = Body(...), user: dict = Depends(require_active_subscription)):
     """Manually create a mandate (for cases the AI didn't catch, or
     mandates the user knows about but didn't get an email for)."""
     merchant = (payload.get("merchant") or "").strip()
@@ -2801,7 +2897,7 @@ async def create_mandate(payload: dict = Body(...), user: dict = Depends(get_cur
 @app.get("/api/mandates/upcoming")
 async def upcoming_mandates(
     days: int = 30,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_active_subscription),
 ):
     """List mandates with upcoming charges in the next N days."""
     user_id = user["user_id"]
@@ -2934,7 +3030,7 @@ async def _compute_od_monthly_interest(user_id: str, account: dict) -> tuple:
     return round(total_interest, 2), round(max(0, balance), 2)
 
 @app.get("/api/mandates/{mandate_id}")
-async def get_mandate(mandate_id: str, user: dict = Depends(get_current_user)):
+async def get_mandate(mandate_id: str, user: dict = Depends(require_active_subscription)):
     """Get a single mandate by ID."""
     mandate = await db.mandates.find_one(
         {"mandate_id": mandate_id, "user_id": user["user_id"]}, {"_id": 0}
@@ -2945,7 +3041,7 @@ async def get_mandate(mandate_id: str, user: dict = Depends(get_current_user)):
 
 
 @app.put("/api/mandates/{mandate_id}")
-async def put_mandate(mandate_id: str, payload: dict = Body(...), user: dict = Depends(get_current_user)):
+async def put_mandate(mandate_id: str, payload: dict = Body(...), user: dict = Depends(require_active_subscription)):
     """Update a mandate (PUT). Same logic as PATCH."""
     mandate = await db.mandates.find_one(
         {"mandate_id": mandate_id, "user_id": user["user_id"]}, {"_id": 0}
@@ -2983,7 +3079,7 @@ async def put_mandate(mandate_id: str, payload: dict = Body(...), user: dict = D
 
 
 @app.patch("/api/mandates/{mandate_id}")
-async def update_mandate(mandate_id: str, payload: dict = Body(...), user: dict = Depends(get_current_user)):
+async def update_mandate(mandate_id: str, payload: dict = Body(...), user: dict = Depends(require_active_subscription)):
     mandate = await db.mandates.find_one(
         {"mandate_id": mandate_id, "user_id": user["user_id"]}, {"_id": 0}
     )
@@ -3021,7 +3117,7 @@ async def update_mandate(mandate_id: str, payload: dict = Body(...), user: dict 
 
 
 @app.delete("/api/mandates/{mandate_id}")
-async def delete_mandate(mandate_id: str, user: dict = Depends(get_current_user)):
+async def delete_mandate(mandate_id: str, user: dict = Depends(require_active_subscription)):
     res = await db.mandates.delete_one(
         {"mandate_id": mandate_id, "user_id": user["user_id"]}
     )
@@ -3032,7 +3128,7 @@ async def delete_mandate(mandate_id: str, user: dict = Depends(get_current_user)
 
 
 @app.post("/api/mandates/detect")
-async def detect_mandates(user: dict = Depends(get_current_user)):
+async def detect_mandates(user: dict = Depends(require_active_subscription)):
     """Auto-detect recurring mandates from transaction history."""
     user_id = user["user_id"]
 
@@ -3088,7 +3184,7 @@ async def detect_mandates(user: dict = Depends(get_current_user)):
 
 
 @app.get("/api/cashflow/projection")
-async def cashflow_projection(user: dict = Depends(get_current_user)):
+async def cashflow_projection(user: dict = Depends(require_active_subscription)):
     user_id = user["user_id"]
 
     recurring_txns = await db.transactions.find(
@@ -3237,7 +3333,7 @@ async def cashflow_projection(user: dict = Depends(get_current_user)):
 @app.get("/api/cashflow/history")
 async def cashflow_history(
     months: int = 12,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_active_subscription),
 ):
     """Get historical monthly cash flow (income - expense) for the last N months."""
     user_id = user["user_id"]
@@ -3426,7 +3522,7 @@ async def dashboard_monthly_comparison(user: dict = Depends(get_current_user)):
 @app.get("/api/reports/summary")
 async def reports_summary(
     start_date: str = None, end_date: str = None,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_active_subscription),
 ):
     user_id = user["user_id"]
     query = {"user_id": user_id, "status": "approved"}
@@ -3455,7 +3551,7 @@ async def reports_summary(
 @app.get("/api/reports/by-period")
 async def reports_by_period(
     start_date: str = None, end_date: str = None,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_active_subscription),
 ):
     user_id = user["user_id"]
     query = {"user_id": user_id, "status": "approved"}
@@ -3544,7 +3640,7 @@ def _aggregate_by_category(txns: list, cat_map: dict) -> list:
 @app.get("/api/reports/by-category")
 async def reports_by_category(
     start_date: str = None, end_date: str = None, transaction_type: str = None,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_active_subscription),
 ):
     user_id = user["user_id"]
     query = {"user_id": user_id, "status": "approved"}
@@ -3567,7 +3663,7 @@ async def reports_by_category(
 async def reports_by_account(
     start_date: str = None, end_date: str = None,
     account_id: str = None,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_active_subscription),
 ):
     """Get transaction summary grouped by account."""
     user_id = user["user_id"]
@@ -3622,7 +3718,7 @@ async def reports_by_account(
 @app.get("/api/reports/income-expense")
 async def reports_income_expense(
     start_date: str = None, end_date: str = None,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_active_subscription),
 ):
     """Detailed income vs expense breakdown with category drill-down."""
     user_id = user["user_id"]
@@ -3654,7 +3750,7 @@ async def reports_income_expense(
 async def export_report_csv(
     start_date: str = None, end_date: str = None,
     transaction_type: str = None,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_active_subscription),
 ):
     """Export transactions as CSV."""
     user_id = user["user_id"]
@@ -3712,7 +3808,7 @@ async def export_report_csv(
 async def export_report_pdf(
     start_date: str = None, end_date: str = None,
     transaction_type: str = None,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_active_subscription),
 ):
     """Generate and return a proper PDF report."""
     user_id = user["user_id"]
@@ -3929,7 +4025,7 @@ async def upload_statement(
     statement_type: str = Form("bank"),  # bank or credit_card
     period_from: Optional[str] = Form(None),  # YYYY-MM-DD
     period_to: Optional[str] = Form(None),    # YYYY-MM-DD
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_active_subscription),
 ):
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file provided")
@@ -3998,7 +4094,7 @@ async def upload_statement(
 
 
 @app.get("/api/statements/list")
-async def list_statements(user: dict = Depends(get_current_user)):
+async def list_statements(user: dict = Depends(require_active_subscription)):
     stmts = await db.statements.find(
         {"user_id": user["user_id"]}, {"_id": 0, "file_path": 0}
     ).sort("uploaded_at", -1).to_list(50)
@@ -4006,7 +4102,7 @@ async def list_statements(user: dict = Depends(get_current_user)):
 
 
 @app.get("/api/statements/{statement_id}")
-async def get_statement(statement_id: str, user: dict = Depends(get_current_user)):
+async def get_statement(statement_id: str, user: dict = Depends(require_active_subscription)):
     stmt = await db.statements.find_one(
         {"statement_id": statement_id, "user_id": user["user_id"]},
         {"_id": 0, "file_path": 0}
@@ -4017,7 +4113,7 @@ async def get_statement(statement_id: str, user: dict = Depends(get_current_user
 
 
 @app.post("/api/statements/{statement_id}/reconcile")
-async def reconcile_statement(statement_id: str, user: dict = Depends(get_current_user)):
+async def reconcile_statement(statement_id: str, user: dict = Depends(require_active_subscription)):
     stmt = await db.statements.find_one(
         {"statement_id": statement_id, "user_id": user["user_id"]}, {"_id": 0}
     )
@@ -4087,7 +4183,7 @@ async def reconcile_statement(statement_id: str, user: dict = Depends(get_curren
 
 @app.post("/api/statements/{statement_id}/add-missing")
 async def add_missing_entries(
-    statement_id: str, request: Request, user: dict = Depends(get_current_user)
+    statement_id: str, request: Request, user: dict = Depends(require_active_subscription)
 ):
     body = await request.json()
     entry_indices = body.get("entry_indices", [])
@@ -4133,7 +4229,7 @@ async def add_missing_entries(
 
 
 @app.delete("/api/statements/{statement_id}")
-async def delete_statement(statement_id: str, user: dict = Depends(get_current_user)):
+async def delete_statement(statement_id: str, user: dict = Depends(require_active_subscription)):
     stmt = await db.statements.find_one(
         {"statement_id": statement_id, "user_id": user["user_id"]}
     )
@@ -4155,7 +4251,7 @@ async def delete_statement(statement_id: str, user: dict = Depends(get_current_u
 
 
 @app.post("/api/statements/{statement_id}/reaudit")
-async def reaudit_statement(statement_id: str, user: dict = Depends(get_current_user)):
+async def reaudit_statement(statement_id: str, user: dict = Depends(require_active_subscription)):
     """Re-run the full parse + audit + correction pipeline on an already
     uploaded statement. Useful when the first audit found issues the
     auto-correction couldn't fully resolve, or the user wants a fresh
@@ -4195,7 +4291,7 @@ async def reaudit_statement(statement_id: str, user: dict = Depends(get_current_
 
 
 @app.post("/api/statements/{statement_id}/approve")
-async def approve_statement(statement_id: str, user: dict = Depends(get_current_user)):
+async def approve_statement(statement_id: str, user: dict = Depends(require_active_subscription)):
     """Approve all entries in a parsed statement and create transactions."""
     stmt = await db.statements.find_one(
         {"statement_id": statement_id, "user_id": user["user_id"]}, {"_id": 0}
@@ -4241,7 +4337,7 @@ async def approve_statement(statement_id: str, user: dict = Depends(get_current_
 
 
 @app.post("/api/statements/{statement_id}/reject")
-async def reject_statement(statement_id: str, user: dict = Depends(get_current_user)):
+async def reject_statement(statement_id: str, user: dict = Depends(require_active_subscription)):
     """Reject/dismiss a parsed statement."""
     stmt = await db.statements.find_one(
         {"statement_id": statement_id, "user_id": user["user_id"]}, {"_id": 0}
@@ -4258,7 +4354,7 @@ async def reject_statement(statement_id: str, user: dict = Depends(get_current_u
 
 
 @app.get("/api/statements/{statement_id}/entries")
-async def get_statement_entries(statement_id: str, user: dict = Depends(get_current_user)):
+async def get_statement_entries(statement_id: str, user: dict = Depends(require_active_subscription)):
     """Get all entries for a parsed statement."""
     stmt = await db.statements.find_one(
         {"statement_id": statement_id, "user_id": user["user_id"]}, {"_id": 0, "file_path": 0}
@@ -4271,7 +4367,7 @@ async def get_statement_entries(statement_id: str, user: dict = Depends(get_curr
 
 
 @app.post("/api/statements/{statement_id}/bulk-categorize")
-async def bulk_categorize_statement(statement_id: str, request: Request, user: dict = Depends(get_current_user)):
+async def bulk_categorize_statement(statement_id: str, request: Request, user: dict = Depends(require_active_subscription)):
     """Bulk update categories on statement entries."""
     body = await request.json()
     updates = body.get("updates", [])  # [{entry_index: int, category_id: str, subcategory_id?: str}]
@@ -4310,7 +4406,7 @@ async def update_statement_entry(
     statement_id: str,
     entry_index: int,
     payload: dict = Body(...),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_active_subscription),
 ):
     """Update a single parsed entry's category / subcategory / transaction_type
     on an already-parsed statement. Accepts any of
@@ -4393,7 +4489,7 @@ async def update_statement_entry(
 
 @app.post("/api/statements/{statement_id}/unlock")
 async def unlock_statement(
-    statement_id: str, request: Request, user: dict = Depends(get_current_user)
+    statement_id: str, request: Request, user: dict = Depends(require_active_subscription)
 ):
     """Retry parsing a password-protected PDF statement with a user-provided
     password. On success, the password is saved encrypted for this user+account
@@ -6111,7 +6207,7 @@ def get_gmail_flow(redirect_uri: str):
 
 
 @app.get("/api/gmail/connect")
-async def gmail_connect(request: Request, platform: Optional[str] = None, user: dict = Depends(get_current_user)):
+async def gmail_connect(request: Request, platform: Optional[str] = None, user: dict = Depends(require_active_subscription)):
     redirect_uri = get_gmail_redirect_uri(request)
     flow = get_gmail_flow(redirect_uri)
     auth_url, state = flow.authorization_url(
@@ -6210,7 +6306,7 @@ async def gmail_callback(request: Request, code: str = None, state: str = None, 
 
 
 @app.get("/api/gmail/status")
-async def gmail_status(user: dict = Depends(get_current_user)):
+async def gmail_status(user: dict = Depends(require_active_subscription)):
     tokens = await db.gmail_tokens.find(
         {"user_id": user["user_id"], "connected": True}, {"_id": 0}
     ).to_list(10)
@@ -6243,7 +6339,7 @@ async def gmail_status(user: dict = Depends(get_current_user)):
 
 
 @app.post("/api/gmail/disconnect")
-async def gmail_disconnect(request: Request, user: dict = Depends(get_current_user)):
+async def gmail_disconnect(request: Request, user: dict = Depends(require_active_subscription)):
     body = await request.json()
     gmail_email = body.get("gmail_email")
     if not gmail_email:
@@ -6264,7 +6360,7 @@ def get_outlook_redirect_uri(request: Request):
 
 
 @app.get("/api/outlook/connect")
-async def outlook_connect(request: Request, platform: Optional[str] = None, user: dict = Depends(get_current_user)):
+async def outlook_connect(request: Request, platform: Optional[str] = None, user: dict = Depends(require_active_subscription)):
     redirect_uri = get_outlook_redirect_uri(request)
     state = secrets.token_urlsafe(32)
 
@@ -6388,7 +6484,7 @@ async def outlook_callback(request: Request, code: str = None, state: str = None
 
 
 @app.get("/api/outlook/status")
-async def outlook_status(user: dict = Depends(get_current_user)):
+async def outlook_status(user: dict = Depends(require_active_subscription)):
     tokens = await db.outlook_tokens.find(
         {"user_id": user["user_id"], "connected": True}, {"_id": 0}
     ).to_list(10)
@@ -6419,7 +6515,7 @@ async def outlook_status(user: dict = Depends(get_current_user)):
 
 
 @app.post("/api/outlook/disconnect")
-async def outlook_disconnect(request: Request, user: dict = Depends(get_current_user)):
+async def outlook_disconnect(request: Request, user: dict = Depends(require_active_subscription)):
     body = await request.json()
     outlook_email = body.get("outlook_email")
     if not outlook_email:
@@ -6434,7 +6530,7 @@ async def outlook_disconnect(request: Request, user: dict = Depends(get_current_
 # ─── Outlook Email Sync Routes ──────────────────────────────────────
 
 @app.post("/api/outlook/start-sync")
-async def start_outlook_sync(request: Request, user: dict = Depends(get_current_user)):
+async def start_outlook_sync(request: Request, user: dict = Depends(require_active_subscription)):
     body = await request.json()
     outlook_email = body.get("outlook_email")
     sync_from_date = body.get("sync_from_date")
@@ -6465,7 +6561,7 @@ async def start_outlook_sync(request: Request, user: dict = Depends(get_current_
 
 
 @app.post("/api/outlook/retry-pending")
-async def retry_outlook_pending(request: Request, user: dict = Depends(get_current_user)):
+async def retry_outlook_pending(request: Request, user: dict = Depends(require_active_subscription)):
     body = await request.json()
     outlook_email = body.get("outlook_email", "")
 
@@ -7176,7 +7272,7 @@ async def process_outlook_pending_emails(user_id: str, outlook_email: str = ""):
 # ─── Email Sync Routes ──────────────────────────────────────────────
 
 @app.post("/api/email/start-sync")
-async def start_email_sync(request: Request, user: dict = Depends(get_current_user)):
+async def start_email_sync(request: Request, user: dict = Depends(require_active_subscription)):
     body = await request.json()
     gmail_email = body.get("gmail_email")
     sync_from_date = body.get("sync_from_date")
@@ -7208,7 +7304,7 @@ async def start_email_sync(request: Request, user: dict = Depends(get_current_us
 
 
 @app.post("/api/email/retry-pending")
-async def retry_pending_emails(request: Request, user: dict = Depends(get_current_user)):
+async def retry_pending_emails(request: Request, user: dict = Depends(require_active_subscription)):
     body = await request.json()
     gmail_email = body.get("gmail_email", "")
 
@@ -7232,7 +7328,7 @@ async def retry_pending_emails(request: Request, user: dict = Depends(get_curren
 
 
 @app.get("/api/email/sync-stats")
-async def email_sync_stats(user: dict = Depends(get_current_user), gmail_email: str = ""):
+async def email_sync_stats(user: dict = Depends(require_active_subscription), gmail_email: str = ""):
     if gmail_email:
         stats = await get_email_sync_stats(user["user_id"], gmail_email)
     else:
@@ -7241,7 +7337,7 @@ async def email_sync_stats(user: dict = Depends(get_current_user), gmail_email: 
 
 
 @app.get("/api/email/pending-review")
-async def get_pending_review_transactions(user: dict = Depends(get_current_user), limit: int = 50, skip: int = 0):
+async def get_pending_review_transactions(user: dict = Depends(require_active_subscription), limit: int = 50, skip: int = 0):
     txns = await db.transactions.find(
         {"user_id": user["user_id"], "status": "pending_review", "source": {"$in": ["email", "sms", "statement"]}},
         {"_id": 0}
@@ -7253,7 +7349,7 @@ async def get_pending_review_transactions(user: dict = Depends(get_current_user)
 
 
 @app.get("/api/email/debug-samples")
-async def email_debug_samples(email: str = "", user: dict = Depends(get_current_user)):
+async def email_debug_samples(email: str = "", user: dict = Depends(require_active_subscription)):
     """Debug: Return sample emails by status to diagnose 0 transactions issue."""
     user_id = user["user_id"]
 
@@ -8096,7 +8192,7 @@ async def analyze_email_with_ai(email_doc: dict, account_names: list, category_i
 # ─── SMS Routes ──────────────────────────────────────────────────────
 
 @app.post("/api/sms/upload")
-async def upload_sms(data: SmsUpload, user: dict = Depends(get_current_user)):
+async def upload_sms(data: SmsUpload, user: dict = Depends(require_active_subscription)):
     """Accept bulk SMS messages from mobile app for AI processing."""
     if not data.messages:
         raise HTTPException(status_code=400, detail="No SMS messages provided")
@@ -8137,7 +8233,7 @@ async def upload_sms(data: SmsUpload, user: dict = Depends(get_current_user)):
 
 
 @app.get("/api/sms/stats")
-async def sms_stats(user: dict = Depends(get_current_user)):
+async def sms_stats(user: dict = Depends(require_active_subscription)):
     user_id = user["user_id"]
     total_synced = await db.synced_sms.count_documents({"user_id": user_id})
     processed = await db.synced_sms.count_documents({"user_id": user_id, "ai_status": "processed"})
@@ -8159,7 +8255,7 @@ async def sms_stats(user: dict = Depends(get_current_user)):
 
 
 @app.post("/api/sms/retry-pending")
-async def retry_pending_sms(user: dict = Depends(get_current_user)):
+async def retry_pending_sms(user: dict = Depends(require_active_subscription)):
     pending_count = await db.synced_sms.count_documents(
         {"user_id": user["user_id"], "ai_status": {"$in": ["pending", "failed"]}}
     )
@@ -8172,7 +8268,7 @@ async def retry_pending_sms(user: dict = Depends(get_current_user)):
 
 
 @app.post("/api/sms/parse")
-async def parse_single_sms(body: dict = Body(...), user: dict = Depends(get_current_user)):
+async def parse_single_sms(body: dict = Body(...), user: dict = Depends(require_active_subscription)):
     """Parse a single SMS message and return extracted transaction data (without saving)."""
     message = body.get("message", "").strip()
     sender = body.get("sender", "").strip()
@@ -8194,7 +8290,7 @@ async def parse_single_sms(body: dict = Body(...), user: dict = Depends(get_curr
 
 
 @app.post("/api/sms/bulk-parse")
-async def bulk_parse_sms(body: dict = Body(...), user: dict = Depends(get_current_user)):
+async def bulk_parse_sms(body: dict = Body(...), user: dict = Depends(require_active_subscription)):
     """Trigger AI processing on all pending SMS messages."""
     pending_count = await db.synced_sms.count_documents(
         {"user_id": user["user_id"], "ai_status": {"$in": ["pending", "failed"]}}
@@ -8207,7 +8303,7 @@ async def bulk_parse_sms(body: dict = Body(...), user: dict = Depends(get_curren
 
 
 @app.post("/api/sms/detect-mandates")
-async def sms_detect_mandates(user: dict = Depends(get_current_user)):
+async def sms_detect_mandates(user: dict = Depends(require_active_subscription)):
     """Detect recurring mandates from processed SMS transactions."""
     user_id = user["user_id"]
 
@@ -8633,8 +8729,60 @@ async def _safe_process_sms(user_id: str):
         logger.error(f"Auto-retry SMS failed for {user_id}: {e}")
 
 
+# ─── Subscription expiry sweep ──────────────────────────────────────
+# Background task: every 30 minutes scan for users whose
+# subscription_expiry has passed and flip their subscription_status to
+# "expired". Without this, status stayed "active" forever.
+
+SUBSCRIPTION_SWEEP_INTERVAL_SECONDS = 30 * 60  # 30 minutes
+
+
+async def _sweep_expired_subscriptions_once() -> int:
+    """Find users whose subscription_expiry is in the past and mark them
+    expired. Skips lifetime users (their expiry is set ~100 years out but
+    we exclude by plan key for safety). Returns the number flipped."""
+    now_iso = datetime.now(timezone.utc).isoformat()
+    try:
+        result = await db.users.update_many(
+            {
+                "subscription_status": "active",
+                "subscription_plan": {"$nin": list(LIFETIME_PLAN_KEYS)},
+                "subscription_expiry": {"$lt": now_iso},
+            },
+            {
+                "$set": {
+                    "subscription_status": "expired",
+                    "subscription_expired_at": datetime.now(timezone.utc),
+                }
+            },
+        )
+        n = result.modified_count
+        if n:
+            logger.info(f"[subscription-sweep] Marked {n} expired subscriptions")
+        return n
+    except Exception as e:
+        logger.warning(f"[subscription-sweep] Failed: {e}")
+        return 0
+
+
+async def _subscription_sweep_loop():
+    """Periodic loop that runs the expiry sweep every N seconds."""
+    while True:
+        try:
+            await _sweep_expired_subscriptions_once()
+        except Exception as e:
+            logger.warning(f"[subscription-sweep] Loop iteration crashed: {e}")
+        await asyncio.sleep(SUBSCRIPTION_SWEEP_INTERVAL_SECONDS)
+
+
 @app.on_event("startup")
 async def startup_event():
+    # Subscription expiry sweep — kick off the periodic loop. Also run
+    # once immediately so any rows that expired between deploys get
+    # caught right away.
+    await _sweep_expired_subscriptions_once()
+    asyncio.create_task(_subscription_sweep_loop())
+
     # Clean up stale state from previous deploys
     # Reset stuck "processing" emails back to "pending"
     reset_result = await db.synced_emails.update_many(
@@ -8824,7 +8972,7 @@ async def _extract_gmail_attachments(service, msg_id: str, payload: dict) -> lis
 
 @app.get("/api/records")
 async def get_records(
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_active_subscription),
     search: str = "",
     date_from: str = "",
     date_to: str = "",
@@ -8885,7 +9033,7 @@ async def get_records(
 @app.get("/api/records/search")
 async def search_records(
     q: str = "",
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_active_subscription),
     limit: int = 50,
     skip: int = 0,
 ):
@@ -8916,7 +9064,7 @@ async def search_records(
 # =====================================================================
 
 @app.get("/api/records/{archive_id}/download-eml")
-async def download_eml(archive_id: str, user: dict = Depends(get_current_user)):
+async def download_eml(archive_id: str, user: dict = Depends(require_active_subscription)):
     record = await db.email_archives.find_one(
         {"archive_id": archive_id, "user_id": user["user_id"]}, {"_id": 0}
     )
@@ -8937,7 +9085,7 @@ async def download_eml(archive_id: str, user: dict = Depends(get_current_user)):
 
 
 @app.get("/api/records/{archive_id}/attachments/{att_index}/download")
-async def download_attachment(archive_id: str, att_index: int, user: dict = Depends(get_current_user)):
+async def download_attachment(archive_id: str, att_index: int, user: dict = Depends(require_active_subscription)):
     record = await db.email_archives.find_one(
         {"archive_id": archive_id, "user_id": user["user_id"]}, {"_id": 0}
     )
@@ -8959,7 +9107,7 @@ async def download_attachment(archive_id: str, att_index: int, user: dict = Depe
 
 
 @app.get("/api/records/{archive_id}/preview")
-async def preview_record(archive_id: str, user: dict = Depends(get_current_user)):
+async def preview_record(archive_id: str, user: dict = Depends(require_active_subscription)):
     record = await db.email_archives.find_one(
         {"archive_id": archive_id, "user_id": user["user_id"]},
         {"_id": 0, "raw_eml": 0, "attachments.data": 0}
@@ -8996,7 +9144,7 @@ async def preview_record(archive_id: str, user: dict = Depends(get_current_user)
 
 
 @app.get("/api/records/by-transaction/{transaction_id}")
-async def get_record_by_transaction(transaction_id: str, user: dict = Depends(get_current_user)):
+async def get_record_by_transaction(transaction_id: str, user: dict = Depends(require_active_subscription)):
     """Find the archive record linked to a given transaction."""
     record = await db.email_archives.find_one(
         {"transaction_id": transaction_id, "user_id": user["user_id"]},
@@ -9032,7 +9180,7 @@ async def get_record_by_transaction(transaction_id: str, user: dict = Depends(ge
 
 
 @app.get("/api/records/{archive_id}")
-async def get_record(archive_id: str, user: dict = Depends(get_current_user)):
+async def get_record(archive_id: str, user: dict = Depends(require_active_subscription)):
     """Get a single email record by ID."""
     record = await db.email_archives.find_one(
         {"archive_id": archive_id, "user_id": user["user_id"]},
@@ -9050,7 +9198,7 @@ async def get_record(archive_id: str, user: dict = Depends(get_current_user)):
 # --- Endpoint 6.8: DELETE /api/records/{archive_id} ---
 
 @app.delete("/api/records/{archive_id}")
-async def delete_record(archive_id: str, user: dict = Depends(get_current_user)):
+async def delete_record(archive_id: str, user: dict = Depends(require_active_subscription)):
     """Delete an email record."""
     result = await db.email_archives.delete_one(
         {"archive_id": archive_id, "user_id": user["user_id"]}
@@ -9064,7 +9212,7 @@ async def delete_record(archive_id: str, user: dict = Depends(get_current_user))
 
 
 @app.post("/api/records/download-zip")
-async def download_records_zip(request: Request, user: dict = Depends(get_current_user)):
+async def download_records_zip(request: Request, user: dict = Depends(require_active_subscription)):
     body = await request.json()
     archive_ids = body.get("archive_ids", [])
 
@@ -9116,7 +9264,7 @@ async def download_records_zip(request: Request, user: dict = Depends(get_curren
 # ─── Tax Summary ─────────────────────────────────────────────────────
 
 @app.post("/api/tax-summary")
-async def create_tax_summary(request: Request, user: dict = Depends(get_current_user)):
+async def create_tax_summary(request: Request, user: dict = Depends(require_active_subscription)):
     body = await request.json()
     name = body.get("name", "").strip()
     date_from = body.get("date_from", "")
@@ -9152,7 +9300,7 @@ async def create_tax_summary(request: Request, user: dict = Depends(get_current_
 
 
 @app.get("/api/tax-summary")
-async def list_tax_summaries(user: dict = Depends(get_current_user)):
+async def list_tax_summaries(user: dict = Depends(require_active_subscription)):
     summaries = await db.tax_summaries.find(
         {"user_id": user["user_id"]}, {"_id": 0}
     ).sort("created_at", -1).to_list(50)
@@ -9162,7 +9310,7 @@ async def list_tax_summaries(user: dict = Depends(get_current_user)):
     return {"summaries": summaries}
 
 @app.get("/api/tax-summary/available-emails")
-async def get_available_emails_for_tax(user: dict = Depends(get_current_user)):
+async def get_available_emails_for_tax(user: dict = Depends(require_active_subscription)):
     """Get all connected Gmail and Outlook emails available for tax summary scanning."""
     gmail_tokens = await db.gmail_tokens.find(
         {"user_id": user["user_id"], "connected": True}, {"_id": 0, "gmail_email": 1}
@@ -9183,7 +9331,7 @@ async def get_available_emails_for_tax(user: dict = Depends(get_current_user)):
 async def generate_tax_summary_from_transactions(
     date_from: str = None,
     date_to: str = None,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_active_subscription),
 ):
     """Generate a tax summary from existing transactions (without email scanning)."""
     user_id = user["user_id"]
@@ -9224,7 +9372,7 @@ async def generate_tax_summary_from_transactions(
 
 
 @app.get("/api/tax-summary/{summary_id}")
-async def get_tax_summary(summary_id: str, user: dict = Depends(get_current_user)):
+async def get_tax_summary(summary_id: str, user: dict = Depends(require_active_subscription)):
     summary = await db.tax_summaries.find_one(
         {"summary_id": summary_id, "user_id": user["user_id"]}, {"_id": 0}
     )
@@ -9241,7 +9389,7 @@ async def get_tax_summary(summary_id: str, user: dict = Depends(get_current_user
 
 
 @app.delete("/api/tax-summary/{summary_id}")
-async def delete_tax_summary(summary_id: str, user: dict = Depends(get_current_user)):
+async def delete_tax_summary(summary_id: str, user: dict = Depends(require_active_subscription)):
     result = await db.tax_summaries.delete_one(
         {"summary_id": summary_id, "user_id": user["user_id"]}
     )
@@ -9252,7 +9400,7 @@ async def delete_tax_summary(summary_id: str, user: dict = Depends(get_current_u
 
 
 @app.post("/api/tax-summary/{summary_id}/transactions")
-async def add_tax_summary_transaction(summary_id: str, request: Request, user: dict = Depends(get_current_user)):
+async def add_tax_summary_transaction(summary_id: str, request: Request, user: dict = Depends(require_active_subscription)):
     summary = await db.tax_summaries.find_one(
         {"summary_id": summary_id, "user_id": user["user_id"]}
     )
@@ -9279,7 +9427,7 @@ async def add_tax_summary_transaction(summary_id: str, request: Request, user: d
 
 
 @app.put("/api/tax-summary/{summary_id}/transactions/{txn_id}")
-async def update_tax_summary_transaction(summary_id: str, txn_id: str, request: Request, user: dict = Depends(get_current_user)):
+async def update_tax_summary_transaction(summary_id: str, txn_id: str, request: Request, user: dict = Depends(require_active_subscription)):
     body = await request.json()
     update_fields = {}
     for field in ["transaction_type", "amount", "date", "description", "category"]:
@@ -9304,7 +9452,7 @@ async def update_tax_summary_transaction(summary_id: str, txn_id: str, request: 
 
 
 @app.delete("/api/tax-summary/{summary_id}/transactions/{txn_id}")
-async def delete_tax_summary_transaction(summary_id: str, txn_id: str, user: dict = Depends(get_current_user)):
+async def delete_tax_summary_transaction(summary_id: str, txn_id: str, user: dict = Depends(require_active_subscription)):
     result = await db.tax_summary_transactions.delete_one(
         {"txn_id": txn_id, "summary_id": summary_id, "user_id": user["user_id"]}
     )
@@ -9315,7 +9463,7 @@ async def delete_tax_summary_transaction(summary_id: str, txn_id: str, user: dic
 
 
 @app.get("/api/tax-summary/{summary_id}/export")
-async def export_tax_summary(summary_id: str, user: dict = Depends(get_current_user)):
+async def export_tax_summary(summary_id: str, user: dict = Depends(require_active_subscription)):
     summary = await db.tax_summaries.find_one(
         {"summary_id": summary_id, "user_id": user["user_id"]}, {"_id": 0}
     )
@@ -9352,7 +9500,7 @@ async def export_tax_summary(summary_id: str, user: dict = Depends(get_current_u
     )
 
 @app.get("/api/tax-summary/{summary_id}/download")
-async def download_tax_summary(summary_id: str, user: dict = Depends(get_current_user)):
+async def download_tax_summary(summary_id: str, user: dict = Depends(require_active_subscription)):
     """Download a tax summary as CSV (alias for export endpoint)."""
     summary = await db.tax_summaries.find_one(
         {"summary_id": summary_id, "user_id": user["user_id"]}, {"_id": 0}
@@ -10005,7 +10153,7 @@ async def get_faq(user: dict = Depends(get_current_user)):
 # ─── Overdraft Interest Calculation ──────────────────────────────────
 
 @app.get("/api/accounts/{account_id}/od-interest")
-async def calculate_od_interest(account_id: str, month: str, user: dict = Depends(get_current_user)):
+async def calculate_od_interest(account_id: str, month: str, user: dict = Depends(require_active_subscription)):
     """
     Compute daily interest for an overdraft account for a given month.
     Query param `month` should be YYYY-MM (e.g., 2026-04).
@@ -10132,7 +10280,7 @@ async def calculate_od_interest(account_id: str, month: str, user: dict = Depend
 
 
 @app.post("/api/accounts/{account_id}/od-interest/calculate")
-async def calculate_od_interest_post(account_id: str, body: dict = Body(...), user: dict = Depends(get_current_user)):
+async def calculate_od_interest_post(account_id: str, body: dict = Body(...), user: dict = Depends(require_active_subscription)):
     """
     Calculate OD interest via POST (iOS uses this with fromDate/toDate).
     Body: { fromDate: str (ISO date), toDate: str (ISO date) }
@@ -10147,7 +10295,7 @@ async def calculate_od_interest_post(account_id: str, body: dict = Body(...), us
 
 
 @app.post("/api/accounts/{account_id}/od-interest")
-async def save_od_interest(account_id: str, body: dict = Body(...), user: dict = Depends(get_current_user)):
+async def save_od_interest(account_id: str, body: dict = Body(...), user: dict = Depends(require_active_subscription)):
     """
     Save the OD interest as an expense transaction on the OD account.
     Body: { amount: float, date: str (ISO), month: str (YYYY-MM), description?: str }
@@ -10201,7 +10349,7 @@ async def save_od_interest(account_id: str, body: dict = Body(...), user: dict =
 # ─── AI Chat Assistant ───────────────────────────────────────────────
 
 @app.post("/api/ai/chat")
-async def ai_chat(body: dict = Body(...), user: dict = Depends(get_current_user)):
+async def ai_chat(body: dict = Body(...), user: dict = Depends(require_active_subscription)):
     """
     AI chat assistant that answers questions about the user's finances
     and can post transactions when all required fields are provided.
@@ -10846,7 +10994,7 @@ You can help the user record purchase bills (expenses from vendors/suppliers). S
 async def get_chat_history(
     limit: int = 50,
     skip: int = 0,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_active_subscription),
 ):
     """Get AI chat conversation history."""
     messages = await db.ai_chat_history.find(
@@ -10863,7 +11011,7 @@ async def get_chat_history(
 # --- Endpoint 6.2: DELETE /api/ai/chat/history/clear ---
 
 @app.delete("/api/ai/chat/history/clear")
-async def clear_chat_history(user: dict = Depends(get_current_user)):
+async def clear_chat_history(user: dict = Depends(require_active_subscription)):
     """Clear all AI chat history for the user."""
     result = await db.ai_chat_history.delete_many({"user_id": user["user_id"]})
     return {"message": "Chat history cleared", "deleted": result.deleted_count}
@@ -10872,7 +11020,7 @@ async def clear_chat_history(user: dict = Depends(get_current_user)):
 # --- Endpoint 6.3: GET /api/ai/chat/suggestions ---
 
 @app.get("/api/ai/chat/suggestions")
-async def get_chat_suggestions(user: dict = Depends(get_current_user)):
+async def get_chat_suggestions(user: dict = Depends(require_active_subscription)):
     """Get contextual chat suggestions based on user's data."""
     user_id = user["user_id"]
     pending = await db.transactions.count_documents({"user_id": user_id, "status": "pending_review"})
@@ -11104,6 +11252,494 @@ async def payu_callback(request: Request):
     )
     logger.info(f"[PayU] Activated {plan_key} for user_id={user_id} via txnid={txnid}")
     return RedirectResponse(url=success_url, status_code=303)
+
+
+# ─── Cross-platform subscription state helper ───────────────────────
+# All three webhook handlers below funnel into this so the on-disk
+# subscription state stays consistent regardless of which gateway told us.
+
+async def _set_subscription_state(
+    *,
+    user_id: str,
+    plan_key: Optional[str],
+    status: str,                       # "active" | "expired" | "cancelled" | "on_hold"
+    expiry: Optional[datetime] = None, # absolute expiry; None for cancellations / lifetime
+    provider: str,                     # "apple" | "google" | "payu"
+    external_id: Optional[str] = None, # Apple originalTransactionId / Google purchaseToken / PayU mandate id
+    raw_event: Optional[str] = None,   # original notification type, for audit
+) -> None:
+    update = {
+        "subscription_status": status,
+        "subscription_provider": provider,
+        "subscription_updated_at": datetime.now(timezone.utc),
+    }
+    if plan_key:
+        update["subscription_plan"] = plan_key
+    if expiry is not None:
+        update["subscription_expiry"] = expiry.isoformat()
+    if external_id:
+        update["subscription_payment_id"] = external_id
+    if status == "expired":
+        update["subscription_expired_at"] = datetime.now(timezone.utc)
+    if status == "cancelled":
+        update["subscription_cancelled_at"] = datetime.now(timezone.utc)
+
+    await db.users.update_one({"user_id": user_id}, {"$set": update})
+
+    # Write an audit row so we have a paper trail across providers.
+    await db.subscription_events.insert_one({
+        "user_id": user_id,
+        "provider": provider,
+        "event": raw_event or status,
+        "plan": plan_key,
+        "status": status,
+        "expiry": expiry.isoformat() if expiry else None,
+        "external_id": external_id,
+        "occurred_at": datetime.now(timezone.utc),
+    })
+
+
+# ─── Apple App Store Server Notifications V2 ─────────────────────────
+# Apple posts to a URL configured in App Store Connect → App Information
+# whenever ANYTHING changes on a subscription: renewal, cancellation, refund,
+# billing retry, family-share grant, etc. The body is a signed JWS:
+#   { "signedPayload": "<header>.<payload>.<signature>" }
+# The payload contains another signed JWS with the actual transaction info.
+#
+# In a fully production-grade integration we'd verify the JWS chain against
+# Apple's root certificate. For now we trust that traffic to this URL only
+# comes from Apple (the URL itself is a shared secret) and decode the payload
+# without signature verification — but we DO record the raw envelope so we
+# can audit + harden later.
+#
+# Apple notification types we care about:
+#   - SUBSCRIBED          → first activation
+#   - DID_RENEW           → auto-renewal succeeded → extend expiry
+#   - DID_FAIL_TO_RENEW   → billing retry phase → keep active until expiry
+#   - EXPIRED             → final failure → mark expired
+#   - GRACE_PERIOD_EXPIRED → mark expired
+#   - REVOKE              → refund / family removal → mark cancelled
+#   - DID_CHANGE_RENEWAL_STATUS → user cancelled auto-renew (still active until expiry)
+#   - REFUND              → mark cancelled
+
+import base64
+import json as _json
+
+APPLE_PRODUCT_TO_PLAN = {
+    "com.spentyai.monthly": "monthly",
+    "com.spentyai.quarterly": "quarterly",
+    "com.spentyai.yearly": "yearly",
+    "com.spentyai.lifetime": "lifetime",
+    "com.spentyai.lifetime_offer": "lifetime_offer",
+}
+
+
+def _decode_apple_jws_payload(jws: str) -> dict:
+    """Decode the middle segment of a JWS without verifying the signature.
+    Apple's signedPayload is a 3-segment dot-joined string; the middle
+    segment is base64url-encoded JSON."""
+    try:
+        parts = jws.split(".")
+        if len(parts) != 3:
+            return {}
+        payload_b64 = parts[1] + "=" * (-len(parts[1]) % 4)
+        return _json.loads(base64.urlsafe_b64decode(payload_b64).decode("utf-8"))
+    except Exception as e:
+        logger.warning(f"[apple-notif] Failed to decode JWS payload: {e}")
+        return {}
+
+
+@app.post("/api/payments/apple/notifications")
+async def apple_server_notification(request: Request):
+    """Receives App Store Server Notifications V2 from Apple.
+    Always returns 200 (Apple retries on non-2xx for up to 3 days, which
+    creates noise; we'd rather log + accept than fight retries)."""
+    try:
+        body = await request.json()
+    except Exception:
+        return {"ok": True}
+
+    signed_payload = body.get("signedPayload", "")
+    notif = _decode_apple_jws_payload(signed_payload)
+    notif_type = notif.get("notificationType", "")
+    subtype = notif.get("subtype", "")
+
+    # Drill into the nested signed payloads for transaction + renewal info
+    data = notif.get("data", {}) or {}
+    txn = _decode_apple_jws_payload(data.get("signedTransactionInfo", "")) or {}
+    renewal = _decode_apple_jws_payload(data.get("signedRenewalInfo", "")) or {}
+
+    product_id = txn.get("productId") or renewal.get("productId") or ""
+    original_txn_id = txn.get("originalTransactionId") or renewal.get("originalTransactionId")
+    expires_ms = txn.get("expiresDate") or renewal.get("expirationIntent")
+    expiry = None
+    if isinstance(expires_ms, (int, float)) and expires_ms > 0:
+        expiry = datetime.fromtimestamp(expires_ms / 1000.0, tz=timezone.utc)
+
+    plan_key = APPLE_PRODUCT_TO_PLAN.get(product_id)
+
+    # Find the user by originalTransactionId (we recorded this when the
+    # purchase was first verified via /api/payments/apple/verify).
+    user_id = None
+    if original_txn_id:
+        order = await db.payment_orders.find_one({
+            "$or": [
+                {"original_transaction_id": original_txn_id},
+                {"subscription_payment_id": original_txn_id},
+            ]
+        })
+        if order:
+            user_id = order.get("user_id")
+        if not user_id:
+            user = await db.users.find_one({"subscription_payment_id": original_txn_id})
+            if user:
+                user_id = user.get("user_id")
+
+    logger.info(f"[apple-notif] type={notif_type} subtype={subtype} product={product_id} user_id={user_id}")
+
+    # Always log the raw envelope for audit
+    await db.subscription_events.insert_one({
+        "user_id": user_id,
+        "provider": "apple",
+        "event": notif_type,
+        "subtype": subtype,
+        "raw": notif,
+        "occurred_at": datetime.now(timezone.utc),
+    })
+
+    if not user_id:
+        # No user mapping yet (e.g. notification arrived before our /verify
+        # endpoint was hit). The subscription_events row is enough audit;
+        # we'll catch up on the next user-initiated /verify call.
+        return {"ok": True}
+
+    if notif_type in ("DID_RENEW", "SUBSCRIBED"):
+        await _set_subscription_state(
+            user_id=user_id, plan_key=plan_key, status="active",
+            expiry=expiry, provider="apple", external_id=original_txn_id,
+            raw_event=notif_type,
+        )
+    elif notif_type in ("EXPIRED", "GRACE_PERIOD_EXPIRED"):
+        await _set_subscription_state(
+            user_id=user_id, plan_key=plan_key, status="expired",
+            provider="apple", external_id=original_txn_id, raw_event=notif_type,
+        )
+    elif notif_type in ("REVOKE", "REFUND"):
+        await _set_subscription_state(
+            user_id=user_id, plan_key=plan_key, status="cancelled",
+            provider="apple", external_id=original_txn_id, raw_event=notif_type,
+        )
+    # DID_FAIL_TO_RENEW + DID_CHANGE_RENEWAL_STATUS: subscription is still
+    # active until expiry — only audit, no state change.
+
+    return {"ok": True}
+
+
+# ─── Google Play Real-time Developer Notifications (RTDN) ────────────
+# Google publishes a Pub/Sub message to a topic we configure in Play
+# Console whenever a subscription event happens. Pub/Sub then POSTs that
+# message to an HTTPS push endpoint (this one). Google's RTDN payload:
+#   {
+#     "message": {
+#       "data": "<base64-encoded JSON>",
+#       "messageId": "...", "publishTime": "..."
+#     },
+#     "subscription": "projects/<id>/subscriptions/<name>"
+#   }
+# Decoding `data` gives:
+#   {
+#     "version": "1.0",
+#     "packageName": "com.spentyai.app",
+#     "subscriptionNotification": { "notificationType": N, "purchaseToken": "...", "subscriptionId": "..." }
+#   }
+# notificationType values:
+#   1 RECOVERED, 2 RENEWED, 3 CANCELED, 4 PURCHASED, 5 ON_HOLD,
+#   6 IN_GRACE_PERIOD, 7 RESTARTED, 12 REVOKED, 13 EXPIRED
+
+GOOGLE_PRODUCT_TO_PLAN = {
+    "com.spentyai.monthly": "monthly",
+    "com.spentyai.quarterly": "quarterly",
+    "com.spentyai.yearly": "yearly",
+    "com.spentyai.lifetime": "lifetime",
+    "com.spentyai.lifetime_offer": "lifetime_offer",
+}
+
+
+@app.post("/api/payments/google/rtdn")
+async def google_rtdn(request: Request):
+    """Pub/Sub push endpoint for Google Play Real-time Developer
+    Notifications. Always returns 200 — Pub/Sub retries non-2xx
+    aggressively and we don't want to flood ourselves with retries on
+    transient bugs."""
+    try:
+        body = await request.json()
+    except Exception:
+        return {"ok": True}
+
+    msg = (body or {}).get("message", {}) or {}
+    data_b64 = msg.get("data", "")
+    if not data_b64:
+        return {"ok": True}
+
+    try:
+        decoded = _json.loads(base64.b64decode(data_b64).decode("utf-8"))
+    except Exception as e:
+        logger.warning(f"[google-rtdn] Failed to decode message data: {e}")
+        return {"ok": True}
+
+    sub_notif = decoded.get("subscriptionNotification") or {}
+    one_time_notif = decoded.get("oneTimeProductNotification") or {}
+    package_name = decoded.get("packageName", "")
+
+    # Resolve plan + identifying token (Google's purchaseToken is durable
+    # across renewals for the same subscription)
+    notif_type = sub_notif.get("notificationType") or one_time_notif.get("notificationType")
+    purchase_token = sub_notif.get("purchaseToken") or one_time_notif.get("purchaseToken")
+    product_id = sub_notif.get("subscriptionId") or one_time_notif.get("sku") or ""
+    plan_key = GOOGLE_PRODUCT_TO_PLAN.get(product_id)
+
+    user_id = None
+    if purchase_token:
+        order = await db.payment_orders.find_one({
+            "$or": [
+                {"google_purchase_token": purchase_token},
+                {"subscription_payment_id": purchase_token},
+            ]
+        })
+        if order:
+            user_id = order.get("user_id")
+        if not user_id:
+            user = await db.users.find_one({"google_purchase_token": purchase_token})
+            if user:
+                user_id = user.get("user_id")
+
+    logger.info(f"[google-rtdn] type={notif_type} pkg={package_name} product={product_id} user_id={user_id}")
+
+    await db.subscription_events.insert_one({
+        "user_id": user_id,
+        "provider": "google",
+        "event": f"rtdn_{notif_type}",
+        "raw": decoded,
+        "occurred_at": datetime.now(timezone.utc),
+    })
+
+    if not user_id:
+        return {"ok": True}
+
+    # Map RTDN notification types to our subscription_status
+    SUB_ACTIVE = (1, 2, 4, 7)        # RECOVERED, RENEWED, PURCHASED, RESTARTED
+    SUB_CANCELLED = (3, 12)           # CANCELED, REVOKED
+    SUB_EXPIRED = (13,)               # EXPIRED
+    SUB_ON_HOLD = (5, 6)              # ON_HOLD, IN_GRACE_PERIOD (still active)
+
+    if sub_notif and notif_type in SUB_ACTIVE:
+        # We don't know the new expiry from the RTDN payload alone —
+        # in production we'd call the Play Developer API
+        # purchases.subscriptions.get to fetch the authoritative state.
+        # For now extend by the plan's duration as a best-effort.
+        plan = PLAN_PRICES.get(plan_key) if plan_key else None
+        expiry = (datetime.now(timezone.utc) + timedelta(days=plan["duration_days"])) if plan else None
+        await _set_subscription_state(
+            user_id=user_id, plan_key=plan_key, status="active",
+            expiry=expiry, provider="google", external_id=purchase_token,
+            raw_event=f"rtdn_{notif_type}",
+        )
+    elif sub_notif and notif_type in SUB_CANCELLED:
+        await _set_subscription_state(
+            user_id=user_id, plan_key=plan_key, status="cancelled",
+            provider="google", external_id=purchase_token,
+            raw_event=f"rtdn_{notif_type}",
+        )
+    elif sub_notif and notif_type in SUB_EXPIRED:
+        await _set_subscription_state(
+            user_id=user_id, plan_key=plan_key, status="expired",
+            provider="google", external_id=purchase_token,
+            raw_event=f"rtdn_{notif_type}",
+        )
+    # SUB_ON_HOLD: don't change status — Google is retrying the charge.
+    # Audit row above is enough.
+
+    return {"ok": True}
+
+
+# ─── PayU recurring (Subscriptions / eMandate) ───────────────────────
+# PayU's "Subscription" product turns a one-time payment into a recurring
+# auto-debit. Two pieces:
+#   1. /api/payments/payu/subscription/create — generates a subscription
+#      transaction (similar to one-time but with billing_amount + billing_cycle
+#      + billing_interval set, telling PayU to set up an eMandate).
+#   2. /api/payments/payu/webhook — receives PayU's recurring webhook events
+#      (SUBSCRIPTION_CREATED, RENEWAL_SUCCESS, RENEWAL_FAILED, MANDATE_CANCELLED).
+#
+# PayU support has to enable "Subscriptions" / "eMandate" on the merchant ID
+# before this works — they hand over a separate SUBSCRIPTION_KEY and SALT.
+# We reuse PAYU_KEY/PAYU_SALT here as a default; if PayU issues separate
+# keys, set PAYU_SUB_KEY/PAYU_SUB_SALT in env vars.
+
+PAYU_SUB_KEY  = os.environ.get("PAYU_SUB_KEY")  or PAYU_KEY
+PAYU_SUB_SALT = os.environ.get("PAYU_SUB_SALT") or PAYU_SALT
+
+PAYU_BILLING_CYCLE = {
+    # plan_key -> (billing_amount in rupees, billing_cycle, billing_interval)
+    "monthly":   ("monthly",   1),
+    "quarterly": ("monthly",   3),
+    "yearly":    ("yearly",    1),
+}
+
+
+@app.post("/api/payments/payu/subscription/create")
+async def payu_create_subscription(body: dict = Body(...), user: dict = Depends(get_current_user)):
+    """Mint a PayU recurring (eMandate) order. The user is sent to PayU's
+    hosted checkout where they authorise an auto-debit mandate (UPI Autopay
+    or card). After that PayU auto-charges them on each cycle and posts
+    SUBSCRIPTION_RENEWAL events to /api/payments/payu/webhook.
+
+    Lifetime / lifetime_offer plans are NOT recurring — those go through
+    the regular /api/payments/create-order endpoint."""
+    plan_key = body.get("plan")
+    if plan_key not in PLAN_PRICES:
+        raise HTTPException(status_code=400, detail=f"Invalid plan: {plan_key}")
+    if plan_key in LIFETIME_PLAN_KEYS:
+        raise HTTPException(status_code=400, detail="Lifetime plans are one-time, not recurring. Use /api/payments/create-order.")
+    if plan_key not in PAYU_BILLING_CYCLE:
+        raise HTTPException(status_code=400, detail=f"Plan not supported for recurring: {plan_key}")
+    if not (PAYU_SUB_KEY and PAYU_SUB_SALT):
+        raise HTTPException(status_code=503, detail="PayU recurring not configured. Contact support.")
+
+    plan = PLAN_PRICES[plan_key]
+    cycle, interval = PAYU_BILLING_CYCLE[plan_key]
+    amount = f"{plan['amount'] / 100:.2f}"
+    txnid = f"spysub_{user['user_id']}_{plan_key}_{uuid.uuid4().hex[:10]}"
+    productinfo = plan["description"]
+    firstname = (user.get("name") or "Customer").split()[0]
+    email = user.get("email") or ""
+    udf1 = plan_key
+    udf2 = user["user_id"]
+    udf3 = "recurring"
+
+    request_hash = _payu_request_hash(
+        key=PAYU_SUB_KEY, txnid=txnid, amount=amount, productinfo=productinfo,
+        firstname=firstname, email=email,
+        udf1=udf1, udf2=udf2, udf3=udf3, salt=PAYU_SUB_SALT,
+    )
+
+    await db.payment_orders.insert_one({
+        "order_id": txnid,
+        "user_id": user["user_id"],
+        "plan": plan_key,
+        "amount": plan["amount"],
+        "currency": plan["currency"],
+        "status": "created",
+        "gateway": "payu",
+        "is_recurring": True,
+        "billing_cycle": cycle,
+        "billing_interval": interval,
+        "created_at": datetime.now(timezone.utc),
+    })
+
+    backend_base = os.environ.get("APP_BASE_URL", "https://api.spentyai.com").rstrip("/")
+    surl = f"{backend_base}/api/payments/payu/callback"
+    furl = f"{backend_base}/api/payments/payu/callback"
+
+    return {
+        "gateway": "payu",
+        "payment_url": PAYU_PAYMENT_URL,
+        "form": {
+            "key":              PAYU_SUB_KEY,
+            "txnid":            txnid,
+            "amount":           amount,
+            "productinfo":      productinfo,
+            "firstname":        firstname,
+            "email":            email,
+            "phone":            user.get("phone") or "",
+            "udf1":             udf1,
+            "udf2":             udf2,
+            "udf3":             udf3,
+            "surl":             surl,
+            "furl":             furl,
+            "hash":             request_hash,
+            "service_provider": "payu_paisa",
+            # Recurring fields — these flip the order from one-time to
+            # eMandate. PayU's hosted page then shows the UPI Autopay
+            # / card-mandate consent flow.
+            "si":               "1",       # 1 = subscription
+            "free_trial":       "0",
+            "billing_amount":   amount,
+            "billing_currency": "INR",
+            "billing_cycle":    cycle,
+            "billing_interval": str(interval),
+            "payment_start_date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+        },
+    }
+
+
+@app.post("/api/payments/payu/webhook")
+async def payu_webhook(request: Request):
+    """Async webhook for PayU recurring events (separate from the per-order
+    /callback endpoint above). PayU posts here on RENEWAL_SUCCESS,
+    RENEWAL_FAILED, MANDATE_CANCELLED, etc."""
+    try:
+        if request.headers.get("content-type", "").startswith("application/json"):
+            payload = await request.json()
+        else:
+            form = await request.form()
+            payload = {k: form.get(k, "") for k in form.keys()}
+    except Exception:
+        return {"ok": True}
+
+    event = (payload.get("event") or payload.get("status") or "").upper()
+    txnid = payload.get("txnid") or payload.get("subscription_id") or ""
+    mandate_id = payload.get("mandate_id") or payload.get("subscription_id") or ""
+
+    user_id = None
+    plan_key = payload.get("udf1")
+    if not plan_key:
+        order = await db.payment_orders.find_one({"order_id": txnid})
+        if order:
+            user_id = order.get("user_id")
+            plan_key = order.get("plan")
+    else:
+        user_id = payload.get("udf2")
+
+    logger.info(f"[payu-webhook] event={event} txnid={txnid} mandate_id={mandate_id} user_id={user_id}")
+
+    await db.subscription_events.insert_one({
+        "user_id": user_id,
+        "provider": "payu",
+        "event": event,
+        "raw": payload,
+        "occurred_at": datetime.now(timezone.utc),
+    })
+
+    if not user_id:
+        return {"ok": True}
+
+    # Map PayU events to subscription_status
+    if event in ("SUBSCRIPTION_RENEWAL_SUCCESS", "RENEWAL_SUCCESS", "SUCCESS", "AUTHORIZED", "CAPTURED"):
+        plan = PLAN_PRICES.get(plan_key) if plan_key else None
+        expiry = (datetime.now(timezone.utc) + timedelta(days=plan["duration_days"])) if plan else None
+        await _set_subscription_state(
+            user_id=user_id, plan_key=plan_key, status="active",
+            expiry=expiry, provider="payu", external_id=mandate_id or txnid,
+            raw_event=event,
+        )
+    elif event in ("SUBSCRIPTION_RENEWAL_FAILED", "RENEWAL_FAILED", "FAILED", "DECLINED"):
+        # Don't immediately expire on a single failed retry — PayU will retry
+        # for ~3 days. Only flip if the existing expiry has passed.
+        user = await db.users.find_one({"user_id": user_id}, {"subscription_expiry": 1})
+        expiry = _parse_iso((user or {}).get("subscription_expiry"))
+        if expiry is None or expiry <= datetime.now(timezone.utc):
+            await _set_subscription_state(
+                user_id=user_id, plan_key=plan_key, status="expired",
+                provider="payu", external_id=mandate_id or txnid, raw_event=event,
+            )
+    elif event in ("MANDATE_CANCELLED", "SUBSCRIPTION_CANCELLED", "CANCELLED", "REFUND"):
+        await _set_subscription_state(
+            user_id=user_id, plan_key=plan_key, status="cancelled",
+            provider="payu", external_id=mandate_id or txnid, raw_event=event,
+        )
+
+    return {"ok": True}
 
 
 @app.get("/api/payments/payu/status/{txnid}")
@@ -12047,7 +12683,7 @@ async def reject_demat_statement(statement_id: str, user: dict = Depends(get_cur
 @app.post("/api/receipts/upload")
 async def upload_receipt(
     file: UploadFile = File(...),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_active_subscription),
 ):
     """Upload a receipt/bill image or PDF. Returns receipt_id and metadata."""
     if not file.filename:
@@ -12107,7 +12743,7 @@ async def upload_receipt(
 
 
 @app.post("/api/receipts/{receipt_id}/parse")
-async def parse_receipt(receipt_id: str, user: dict = Depends(get_current_user)):
+async def parse_receipt(receipt_id: str, user: dict = Depends(require_active_subscription)):
     """Use AI (GPT-4o) to extract transaction details from a receipt image/PDF."""
     receipt = await db.receipts.find_one(
         {"receipt_id": receipt_id, "user_id": user["user_id"]}, {"_id": 0}
@@ -12247,7 +12883,7 @@ Only return the JSON object, no extra text. Be conservative — only fill fields
 @app.post("/api/bills/parse-upload")
 async def parse_bill_upload(
     file: UploadFile = File(...),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_active_subscription),
 ):
     """Upload a purchase invoice / bill image or PDF and extract structured data via AI."""
     if not async_openai_client:
@@ -12365,7 +13001,7 @@ For tax_rate, use the per-item GST rate (e.g. 5, 12, 18, 28), not the total tax 
 
 
 @app.get("/api/receipts/{receipt_id}/download")
-async def download_receipt(receipt_id: str, user: dict = Depends(get_current_user)):
+async def download_receipt(receipt_id: str, user: dict = Depends(require_active_subscription)):
     """Download a receipt file."""
     receipt = await db.receipts.find_one(
         {"receipt_id": receipt_id, "user_id": user["user_id"]}, {"_id": 0}
@@ -12394,7 +13030,7 @@ async def download_receipt(receipt_id: str, user: dict = Depends(get_current_use
 
 
 @app.get("/api/receipts/by-transaction/{transaction_id}")
-async def get_receipt_by_transaction(transaction_id: str, user: dict = Depends(get_current_user)):
+async def get_receipt_by_transaction(transaction_id: str, user: dict = Depends(require_active_subscription)):
     """Get receipt linked to a specific transaction."""
     receipt = await db.receipts.find_one(
         {"transaction_id": transaction_id, "user_id": user["user_id"]},
@@ -12413,7 +13049,7 @@ async def get_receipt_by_transaction(transaction_id: str, user: dict = Depends(g
 
 @app.get("/api/receipts")
 async def list_receipts(
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_active_subscription),
     limit: int = 50,
     skip: int = 0,
 ):
@@ -12438,7 +13074,7 @@ async def list_receipts(
 
 
 @app.get("/api/receipts/{receipt_id}")
-async def get_receipt(receipt_id: str, user: dict = Depends(get_current_user)):
+async def get_receipt(receipt_id: str, user: dict = Depends(require_active_subscription)):
     """Get a single receipt by ID."""
     receipt = await db.receipts.find_one(
         {"receipt_id": receipt_id, "user_id": user["user_id"]},
@@ -12458,7 +13094,7 @@ async def get_receipt(receipt_id: str, user: dict = Depends(get_current_user)):
 # --- Endpoint 6.10: DELETE /api/receipts/{receipt_id} ---
 
 @app.delete("/api/receipts/{receipt_id}")
-async def delete_receipt(receipt_id: str, user: dict = Depends(get_current_user)):
+async def delete_receipt(receipt_id: str, user: dict = Depends(require_active_subscription)):
     """Delete a receipt."""
     receipt = await db.receipts.find_one(
         {"receipt_id": receipt_id, "user_id": user["user_id"]}, {"_id": 0}
@@ -12487,7 +13123,7 @@ async def delete_receipt(receipt_id: str, user: dict = Depends(get_current_user)
 # --- Endpoint 6.11: POST /api/receipts/{receipt_id}/link ---
 
 @app.post("/api/receipts/{receipt_id}/link")
-async def link_receipt_to_transaction(receipt_id: str, body: dict = Body(...), user: dict = Depends(get_current_user)):
+async def link_receipt_to_transaction(receipt_id: str, body: dict = Body(...), user: dict = Depends(require_active_subscription)):
     """Link a receipt to a transaction."""
     receipt = await db.receipts.find_one(
         {"receipt_id": receipt_id, "user_id": user["user_id"]}, {"_id": 0}
@@ -12583,7 +13219,7 @@ def amount_to_words_inr(amount: float) -> str:
 # ─── Customers CRUD ──────────────────────────────────────────────────
 
 @app.post("/api/customers", status_code=201)
-async def create_customer(request: Request, user: dict = Depends(get_current_user)):
+async def create_customer(request: Request, user: dict = Depends(require_active_subscription)):
     body = await request.json()
     now = datetime.now(timezone.utc)
     customer = {
@@ -12613,7 +13249,7 @@ async def create_customer(request: Request, user: dict = Depends(get_current_use
 @app.get("/api/customers")
 async def list_customers(
     request: Request,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_active_subscription),
     q: Optional[str] = None,
     limit: int = 100,
     skip: int = 0,
@@ -12656,7 +13292,7 @@ async def list_customers(
 
 
 @app.get("/api/customers/{customer_id}")
-async def get_customer(customer_id: str, user: dict = Depends(get_current_user)):
+async def get_customer(customer_id: str, user: dict = Depends(require_active_subscription)):
     customer = await db.customers.find_one(
         {"customer_id": customer_id, "user_id": user["user_id"]}, {"_id": 0}
     )
@@ -12666,7 +13302,7 @@ async def get_customer(customer_id: str, user: dict = Depends(get_current_user))
 
 
 @app.put("/api/customers/{customer_id}")
-async def update_customer(customer_id: str, request: Request, user: dict = Depends(get_current_user)):
+async def update_customer(customer_id: str, request: Request, user: dict = Depends(require_active_subscription)):
     body = await request.json()
     customer = await db.customers.find_one(
         {"customer_id": customer_id, "user_id": user["user_id"]}, {"_id": 0}
@@ -12691,7 +13327,7 @@ async def update_customer(customer_id: str, request: Request, user: dict = Depen
 
 
 @app.delete("/api/customers/{customer_id}")
-async def delete_customer(customer_id: str, user: dict = Depends(get_current_user)):
+async def delete_customer(customer_id: str, user: dict = Depends(require_active_subscription)):
     result = await db.customers.delete_one(
         {"customer_id": customer_id, "user_id": user["user_id"]}
     )
@@ -12704,7 +13340,7 @@ async def delete_customer(customer_id: str, user: dict = Depends(get_current_use
 @app.get("/api/customers/{customer_id}/invoices")
 async def get_customer_invoices(
     customer_id: str,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_active_subscription),
     limit: int = 50,
     skip: int = 0,
 ):
@@ -12848,13 +13484,13 @@ async def _auto_post_invoice_transaction(user_id: str, invoice: dict, amount: fl
 
 
 @app.get("/api/invoices/count")
-async def get_invoice_count(user: dict = Depends(get_current_user)):
+async def get_invoice_count(user: dict = Depends(require_active_subscription)):
     count = await db.invoices.count_documents({"user_id": user["user_id"]})
     return {"count": count}
 
 
 @app.get("/api/invoices/debtors")
-async def get_debtors(user: dict = Depends(get_current_user)):
+async def get_debtors(user: dict = Depends(require_active_subscription)):
     pipeline = [
         {"$match": {"user_id": user["user_id"], "payment_status": {"$in": ["unpaid", "partial"]}}},
         {"$group": {
@@ -12879,7 +13515,7 @@ async def get_debtors(user: dict = Depends(get_current_user)):
 
 
 @app.get("/api/invoices/aging")
-async def get_aging(user: dict = Depends(get_current_user)):
+async def get_aging(user: dict = Depends(require_active_subscription)):
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     invoices = await db.invoices.find(
         {"user_id": user["user_id"], "payment_status": {"$in": ["unpaid", "partial"]}},
@@ -12952,7 +13588,7 @@ async def get_aging(user: dict = Depends(get_current_user)):
 
 
 @app.get("/api/invoices/sales-by-customer")
-async def get_sales_by_customer(user: dict = Depends(get_current_user)):
+async def get_sales_by_customer(user: dict = Depends(require_active_subscription)):
     pipeline = [
         {"$match": {"user_id": user["user_id"]}},
         {"$group": {
@@ -12977,7 +13613,7 @@ async def get_sales_by_customer(user: dict = Depends(get_current_user)):
 
 
 @app.post("/api/invoices", status_code=201)
-async def create_invoice(request: Request, user: dict = Depends(get_current_user)):
+async def create_invoice(request: Request, user: dict = Depends(require_active_subscription)):
     body = await request.json()
     now = datetime.now(timezone.utc)
 
@@ -13047,7 +13683,7 @@ async def create_invoice(request: Request, user: dict = Depends(get_current_user
 
 @app.get("/api/invoices")
 async def list_invoices(
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_active_subscription),
     status: Optional[str] = None,
     customer_id: Optional[str] = None,
     from_date: Optional[str] = None,
@@ -13070,7 +13706,7 @@ async def list_invoices(
     return {"items": camelise(invoices), "total": total}
 
 @app.get("/api/invoices/next-number")
-async def get_next_invoice_number(user: dict = Depends(get_current_user)):
+async def get_next_invoice_number(user: dict = Depends(require_active_subscription)):
     """Preview the next invoice number without consuming it."""
     settings = await db.user_settings.find_one({"user_id": user["user_id"]}, {"_id": 0})
     prefix = (settings or {}).get("invoice_prefix", "INV")
@@ -13078,7 +13714,7 @@ async def get_next_invoice_number(user: dict = Depends(get_current_user)):
     return {"next_number": f"{prefix}-{next_num:04d}"}
 
 @app.get("/api/invoices/stats")
-async def invoice_stats(user: dict = Depends(get_current_user)):
+async def invoice_stats(user: dict = Depends(require_active_subscription)):
     """Get invoice statistics for the user."""
     user_id = user["user_id"]
     total = await db.invoices.count_documents({"user_id": user_id})
@@ -13124,7 +13760,7 @@ async def invoice_stats(user: dict = Depends(get_current_user)):
 
 
 @app.get("/api/invoices/{invoice_id}")
-async def get_invoice(invoice_id: str, user: dict = Depends(get_current_user)):
+async def get_invoice(invoice_id: str, user: dict = Depends(require_active_subscription)):
     invoice = await db.invoices.find_one(
         {"invoice_id": invoice_id, "user_id": user["user_id"]}, {"_id": 0}
     )
@@ -13134,7 +13770,7 @@ async def get_invoice(invoice_id: str, user: dict = Depends(get_current_user)):
 
 
 @app.put("/api/invoices/{invoice_id}")
-async def update_invoice(invoice_id: str, request: Request, user: dict = Depends(get_current_user)):
+async def update_invoice(invoice_id: str, request: Request, user: dict = Depends(require_active_subscription)):
     body = await request.json()
     invoice = await db.invoices.find_one(
         {"invoice_id": invoice_id, "user_id": user["user_id"]}, {"_id": 0}
@@ -13183,7 +13819,7 @@ async def update_invoice(invoice_id: str, request: Request, user: dict = Depends
 
 
 @app.delete("/api/invoices/{invoice_id}")
-async def delete_invoice(invoice_id: str, user: dict = Depends(get_current_user)):
+async def delete_invoice(invoice_id: str, user: dict = Depends(require_active_subscription)):
     invoice = await db.invoices.find_one(
         {"invoice_id": invoice_id, "user_id": user["user_id"]}, {"_id": 0}
     )
@@ -13206,7 +13842,7 @@ async def delete_invoice(invoice_id: str, user: dict = Depends(get_current_user)
 
 
 @app.post("/api/invoices/{invoice_id}/record-payment")
-async def record_payment(invoice_id: str, request: Request, user: dict = Depends(get_current_user)):
+async def record_payment(invoice_id: str, request: Request, user: dict = Depends(require_active_subscription)):
     body = await request.json()
     invoice = await db.invoices.find_one(
         {"invoice_id": invoice_id, "user_id": user["user_id"]}, {"_id": 0}
@@ -13603,7 +14239,7 @@ def _generate_invoice_pdf_bytes(invoice: dict, settings: dict, *, doc_kind: str 
 
 
 @app.get("/api/invoices/{invoice_id}/pdf")
-async def get_invoice_pdf(invoice_id: str, user: dict = Depends(get_current_user)):
+async def get_invoice_pdf(invoice_id: str, user: dict = Depends(require_active_subscription)):
     """Generate a real PDF for the invoice and return it as application/pdf."""
     invoice = await db.invoices.find_one(
         {"invoice_id": invoice_id, "user_id": user["user_id"]}, {"_id": 0}
@@ -13622,7 +14258,7 @@ async def get_invoice_pdf(invoice_id: str, user: dict = Depends(get_current_user
 
 
 @app.post("/api/invoices/{invoice_id}/mark-paid")
-async def mark_invoice_paid(invoice_id: str, request: Request, user: dict = Depends(get_current_user)):
+async def mark_invoice_paid(invoice_id: str, request: Request, user: dict = Depends(require_active_subscription)):
     """Mark an invoice as fully paid."""
     invoice = await db.invoices.find_one(
         {"invoice_id": invoice_id, "user_id": user["user_id"]}, {"_id": 0}
@@ -13663,7 +14299,7 @@ async def mark_invoice_paid(invoice_id: str, request: Request, user: dict = Depe
 
 
 @app.post("/api/invoices/{invoice_id}/duplicate")
-async def duplicate_invoice(invoice_id: str, user: dict = Depends(get_current_user)):
+async def duplicate_invoice(invoice_id: str, user: dict = Depends(require_active_subscription)):
     """Create a duplicate of an existing invoice with a new number."""
     invoice = await db.invoices.find_one(
         {"invoice_id": invoice_id, "user_id": user["user_id"]}, {"_id": 0}
@@ -13695,7 +14331,7 @@ async def duplicate_invoice(invoice_id: str, user: dict = Depends(get_current_us
 # ─── Vendors CRUD ──────────────────────────────────────────────────
 
 @app.post("/api/vendors", status_code=201)
-async def create_vendor(request: Request, user: dict = Depends(get_current_user)):
+async def create_vendor(request: Request, user: dict = Depends(require_active_subscription)):
     body = await request.json()
     now = datetime.now(timezone.utc)
     vendor = {
@@ -13724,7 +14360,7 @@ async def create_vendor(request: Request, user: dict = Depends(get_current_user)
 @app.get("/api/vendors")
 async def list_vendors(
     request: Request,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_active_subscription),
     q: Optional[str] = None,
     limit: int = 100,
     skip: int = 0,
@@ -13744,7 +14380,7 @@ async def list_vendors(
 
 
 @app.get("/api/vendors/{vendor_id}")
-async def get_vendor(vendor_id: str, user: dict = Depends(get_current_user)):
+async def get_vendor(vendor_id: str, user: dict = Depends(require_active_subscription)):
     vendor = await db.vendors.find_one(
         {"vendor_id": vendor_id, "user_id": user["user_id"]}, {"_id": 0}
     )
@@ -13754,7 +14390,7 @@ async def get_vendor(vendor_id: str, user: dict = Depends(get_current_user)):
 
 
 @app.put("/api/vendors/{vendor_id}")
-async def update_vendor(vendor_id: str, request: Request, user: dict = Depends(get_current_user)):
+async def update_vendor(vendor_id: str, request: Request, user: dict = Depends(require_active_subscription)):
     body = await request.json()
     vendor = await db.vendors.find_one(
         {"vendor_id": vendor_id, "user_id": user["user_id"]}, {"_id": 0}
@@ -13779,7 +14415,7 @@ async def update_vendor(vendor_id: str, request: Request, user: dict = Depends(g
 
 
 @app.delete("/api/vendors/{vendor_id}")
-async def delete_vendor(vendor_id: str, user: dict = Depends(get_current_user)):
+async def delete_vendor(vendor_id: str, user: dict = Depends(require_active_subscription)):
     result = await db.vendors.delete_one(
         {"vendor_id": vendor_id, "user_id": user["user_id"]}
     )
@@ -13792,7 +14428,7 @@ async def delete_vendor(vendor_id: str, user: dict = Depends(get_current_user)):
 @app.get("/api/vendors/{vendor_id}/bills")
 async def get_vendor_bills(
     vendor_id: str,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_active_subscription),
     limit: int = 50,
     skip: int = 0,
 ):
@@ -13863,13 +14499,13 @@ async def _auto_post_bill_transaction(user_id: str, bill: dict, amount: float) -
 
 
 @app.get("/api/bills/count")
-async def get_bill_count(user: dict = Depends(get_current_user)):
+async def get_bill_count(user: dict = Depends(require_active_subscription)):
     count = await db.bills.count_documents({"user_id": user["user_id"]})
     return {"count": count}
 
 
 @app.get("/api/bills/creditors")
-async def get_creditors(user: dict = Depends(get_current_user)):
+async def get_creditors(user: dict = Depends(require_active_subscription)):
     pipeline = [
         {"$match": {"user_id": user["user_id"], "payment_status": {"$in": ["unpaid", "partial"]}}},
         {"$group": {
@@ -13894,7 +14530,7 @@ async def get_creditors(user: dict = Depends(get_current_user)):
 
 
 @app.get("/api/bills/aging")
-async def get_bill_aging(user: dict = Depends(get_current_user)):
+async def get_bill_aging(user: dict = Depends(require_active_subscription)):
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     bills = await db.bills.find(
         {"user_id": user["user_id"], "payment_status": {"$in": ["unpaid", "partial"]}},
@@ -13967,7 +14603,7 @@ async def get_bill_aging(user: dict = Depends(get_current_user)):
 
 
 @app.get("/api/bills/purchases-by-vendor")
-async def get_purchases_by_vendor(user: dict = Depends(get_current_user)):
+async def get_purchases_by_vendor(user: dict = Depends(require_active_subscription)):
     pipeline = [
         {"$match": {"user_id": user["user_id"]}},
         {"$group": {
@@ -13992,7 +14628,7 @@ async def get_purchases_by_vendor(user: dict = Depends(get_current_user)):
 
 
 @app.post("/api/bills", status_code=201)
-async def create_bill(request: Request, user: dict = Depends(get_current_user)):
+async def create_bill(request: Request, user: dict = Depends(require_active_subscription)):
     body = await request.json()
     now = datetime.now(timezone.utc)
 
@@ -14063,7 +14699,7 @@ async def create_bill(request: Request, user: dict = Depends(get_current_user)):
 
 @app.get("/api/bills")
 async def list_bills(
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_active_subscription),
     status: Optional[str] = None,
     vendor_id: Optional[str] = None,
     from_date: Optional[str] = None,
@@ -14086,7 +14722,7 @@ async def list_bills(
     return {"items": bills, "total": total}
 
 @app.get("/api/bills/next-number")
-async def get_next_bill_number(user: dict = Depends(get_current_user)):
+async def get_next_bill_number(user: dict = Depends(require_active_subscription)):
     """Preview the next bill number without consuming it."""
     settings = await db.user_settings.find_one({"user_id": user["user_id"]}, {"_id": 0})
     prefix = (settings or {}).get("bill_prefix", "BILL")
@@ -14094,7 +14730,7 @@ async def get_next_bill_number(user: dict = Depends(get_current_user)):
     return {"next_number": f"{prefix}-{next_num:04d}"}
 
 @app.get("/api/bills/stats")
-async def bill_stats(user: dict = Depends(get_current_user)):
+async def bill_stats(user: dict = Depends(require_active_subscription)):
     """Get bill statistics for the user."""
     user_id = user["user_id"]
     total = await db.bills.count_documents({"user_id": user_id})
@@ -14136,7 +14772,7 @@ async def bill_stats(user: dict = Depends(get_current_user)):
 
 
 @app.get("/api/bills/{bill_id}")
-async def get_bill(bill_id: str, user: dict = Depends(get_current_user)):
+async def get_bill(bill_id: str, user: dict = Depends(require_active_subscription)):
     bill = await db.bills.find_one(
         {"bill_id": bill_id, "user_id": user["user_id"]}, {"_id": 0}
     )
@@ -14146,7 +14782,7 @@ async def get_bill(bill_id: str, user: dict = Depends(get_current_user)):
 
 
 @app.put("/api/bills/{bill_id}")
-async def update_bill(bill_id: str, request: Request, user: dict = Depends(get_current_user)):
+async def update_bill(bill_id: str, request: Request, user: dict = Depends(require_active_subscription)):
     body = await request.json()
     bill = await db.bills.find_one(
         {"bill_id": bill_id, "user_id": user["user_id"]}, {"_id": 0}
@@ -14195,7 +14831,7 @@ async def update_bill(bill_id: str, request: Request, user: dict = Depends(get_c
 
 
 @app.delete("/api/bills/{bill_id}")
-async def delete_bill(bill_id: str, user: dict = Depends(get_current_user)):
+async def delete_bill(bill_id: str, user: dict = Depends(require_active_subscription)):
     bill = await db.bills.find_one(
         {"bill_id": bill_id, "user_id": user["user_id"]}, {"_id": 0}
     )
@@ -14218,7 +14854,7 @@ async def delete_bill(bill_id: str, user: dict = Depends(get_current_user)):
 
 
 @app.post("/api/bills/{bill_id}/record-payment")
-async def record_bill_payment(bill_id: str, request: Request, user: dict = Depends(get_current_user)):
+async def record_bill_payment(bill_id: str, request: Request, user: dict = Depends(require_active_subscription)):
     body = await request.json()
     bill = await db.bills.find_one(
         {"bill_id": bill_id, "user_id": user["user_id"]}, {"_id": 0}
@@ -14285,7 +14921,7 @@ async def record_bill_payment(bill_id: str, request: Request, user: dict = Depen
 
 
 @app.get("/api/bills/{bill_id}/pdf")
-async def get_bill_pdf(bill_id: str, user: dict = Depends(get_current_user)):
+async def get_bill_pdf(bill_id: str, user: dict = Depends(require_active_subscription)):
     """Generate a real PDF for the purchase bill and return it as application/pdf."""
     bill = await db.bills.find_one(
         {"bill_id": bill_id, "user_id": user["user_id"]}, {"_id": 0}
@@ -14304,7 +14940,7 @@ async def get_bill_pdf(bill_id: str, user: dict = Depends(get_current_user)):
 
 
 @app.post("/api/bills/{bill_id}/mark-paid")
-async def mark_bill_paid(bill_id: str, request: Request, user: dict = Depends(get_current_user)):
+async def mark_bill_paid(bill_id: str, request: Request, user: dict = Depends(require_active_subscription)):
     """Mark a bill as fully paid."""
     bill = await db.bills.find_one(
         {"bill_id": bill_id, "user_id": user["user_id"]}, {"_id": 0}
@@ -14345,7 +14981,7 @@ async def mark_bill_paid(bill_id: str, request: Request, user: dict = Depends(ge
 
 
 @app.post("/api/bills/{bill_id}/duplicate")
-async def duplicate_bill(bill_id: str, user: dict = Depends(get_current_user)):
+async def duplicate_bill(bill_id: str, user: dict = Depends(require_active_subscription)):
     """Create a duplicate of an existing bill with a new number."""
     bill = await db.bills.find_one(
         {"bill_id": bill_id, "user_id": user["user_id"]}, {"_id": 0}
