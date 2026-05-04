@@ -2,6 +2,11 @@ import Foundation
 
 extension Notification.Name {
     static let userSessionExpired = Notification.Name("userSessionExpired")
+    /// Posted when ANY API call returns HTTP 402 ("subscription required").
+    /// Observed by AuthManager which refreshes /api/auth/me — the refreshed
+    /// user.hasActiveSubscription will be false, which causes AppRouter to
+    /// re-route to the existing SubscriptionPaywall.
+    static let subscriptionRequired = Notification.Name("subscriptionRequired")
 }
 
 final class APIClient: Sendable {
@@ -203,6 +208,23 @@ final class APIClient: Sendable {
                 throw APIError.unauthorized
             }
 
+            // 402 = subscription required. Backend's require_active_subscription
+            // dep returns this on every paid endpoint when the user's plan is
+            // expired or cancelled. Body shape:
+            //   { "detail": { "error": "subscription_required",
+            //                 "message": "Your subscription has expired..." } }
+            // Post a notification so AuthManager can refresh /auth/me; the
+            // refreshed hasActiveSubscription=false will let AppRouter re-route
+            // the user to the existing SubscriptionPaywall — no per-screen
+            // changes needed.
+            if http.statusCode == 402 {
+                let message = parseDetail(from: data) ?? "Your subscription has expired. Please renew to continue."
+                Task { @MainActor in
+                    NotificationCenter.default.post(name: .subscriptionRequired, object: nil)
+                }
+                throw APIError.subscriptionRequired(message)
+            }
+
             let detail = parseDetail(from: data)
 
             switch http.statusCode {
@@ -218,10 +240,20 @@ final class APIClient: Sendable {
         }
     }
 
+    /// Extracts a human-readable message from FastAPI's error body.
+    /// Handles both shapes:
+    ///   - { "detail": "Some string" }                                (most endpoints)
+    ///   - { "detail": { "error": "...", "message": "..." } }         (402 subscription gate)
     private func parseDetail(from data: Data) -> String? {
-        if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-           let detail = json["detail"] as? String {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        if let detail = json["detail"] as? String {
             return detail
+        }
+        if let detailObj = json["detail"] as? [String: Any],
+           let message = detailObj["message"] as? String {
+            return message
         }
         return nil
     }

@@ -2,6 +2,19 @@ package com.spentyai.app.core.network
 
 import kotlinx.serialization.Serializable
 
+/**
+ * The 402 body shape from the backend's require_active_subscription gate is:
+ *   { "detail": { "error": "subscription_required",
+ *                 "message": "Your subscription has expired..." } }
+ * Other endpoints use a flat string { "detail": "..." }. The nested object is
+ * decoded into ApiSubscriptionDetail; flat strings keep the existing path.
+ */
+@Serializable
+data class ApiSubscriptionDetail(
+    val error: String? = null,
+    val message: String? = null
+)
+
 @Serializable
 data class ApiErrorResponse(
     val error: String? = null,
@@ -13,6 +26,18 @@ sealed class ApiError : Exception() {
     data class HttpError(val code: Int, val errorBody: String?) : ApiError() {
         override val message: String
             get() = "HTTP $code: ${errorBody ?: "Unknown error"}"
+    }
+
+    /**
+     * HTTP 402 — backend's require_active_subscription gate fired. The
+     * associated [userMessage] is the human-readable string to surface; the
+     * UI layer collects ApiClient.subscriptionExpiredFlow to re-route to
+     * SubscriptionPaywallScreen so most callers can keep showing this as a
+     * generic banner without special-casing.
+     */
+    data class SubscriptionRequired(val userMessage: String) : ApiError() {
+        override val message: String
+            get() = userMessage
     }
 
     data class NetworkError(val throwable: Throwable) : ApiError() {

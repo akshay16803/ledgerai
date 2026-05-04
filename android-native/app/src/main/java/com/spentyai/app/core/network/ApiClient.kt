@@ -9,7 +9,12 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNamingStrategy
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -135,6 +140,39 @@ class ApiClient(private val tokenStore: TokenStore) {
 
     val endpoints: ApiEndpoints = retrofit.create(ApiEndpoints::class.java)
 
+    /**
+     * Emits once every time any API call returns HTTP 402
+     * (require_active_subscription gate). AppNavigation collects this and
+     * triggers BillingViewModel.loadAll() so the existing
+     * isSubscriptionActive paywall gate re-routes the user to
+     * SubscriptionPaywallScreen — no per-screen wiring required.
+     */
+    private val _subscriptionExpiredFlow = MutableSharedFlow<String>(extraBufferCapacity = 1)
+    val subscriptionExpiredFlow: SharedFlow<String> = _subscriptionExpiredFlow.asSharedFlow()
+
+    /**
+     * Decodes the FastAPI error body. Handles both shapes:
+     *   - { "detail": "Some string" }                                 (most endpoints)
+     *   - { "detail": { "error": "...", "message": "..." } }          (402 subscription gate)
+     */
+    private fun parseSubscriptionMessage(errorBody: String?): String {
+        val fallback = "Your subscription has expired. Please renew to continue."
+        if (errorBody.isNullOrBlank()) return fallback
+        return try {
+            val element = json.parseToJsonElement(errorBody)
+            val obj = element as? JsonObject ?: return fallback
+            val detail = obj["detail"]
+            // Nested object form
+            (detail as? JsonObject)?.let { d ->
+                (d["message"] as? JsonPrimitive)?.contentOrNull
+            }
+                ?: (detail as? JsonPrimitive)?.contentOrNull
+                ?: fallback
+        } catch (_: Exception) {
+            fallback
+        }
+    }
+
     suspend fun <T> safeApiCall(call: suspend () -> Response<T>): ApiResult<T> {
         return try {
             val response = call()
@@ -150,6 +188,15 @@ class ApiClient(private val tokenStore: TokenStore) {
                     401 -> {
                         tokenStore.clearToken()
                         ApiResult.Failure(ApiError.Unauthorized)
+                    }
+                    402 -> {
+                        // Subscription expired or cancelled. Notify the app
+                        // shell so it can refresh subscription state and
+                        // re-gate the user to SubscriptionPaywallScreen.
+                        val errorBody = response.errorBody()?.string()
+                        val msg = parseSubscriptionMessage(errorBody)
+                        _subscriptionExpiredFlow.tryEmit(msg)
+                        ApiResult.Failure(ApiError.SubscriptionRequired(msg))
                     }
                     else -> {
                         val errorBody = response.errorBody()?.string()

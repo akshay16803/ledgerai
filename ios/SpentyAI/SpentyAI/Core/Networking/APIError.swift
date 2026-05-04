@@ -2,6 +2,11 @@ import Foundation
 
 enum APIError: LocalizedError {
     case unauthorized
+    /// HTTP 402 — backend's require_active_subscription gate fired. The
+    /// associated message is what we surface to the user. The .subscriptionRequired
+    /// notification has already been posted from APIClient.validateResponse;
+    /// AppRouter will re-route to SubscriptionPaywall once AuthManager refreshes.
+    case subscriptionRequired(String)
     case badRequest(String)
     case notFound
     case serverError(String)
@@ -14,6 +19,8 @@ enum APIError: LocalizedError {
         switch self {
         case .unauthorized:
             return "Your session has expired. Please sign in again."
+        case .subscriptionRequired(let message):
+            return message
         case .badRequest(let message):
             return message
         case .notFound:

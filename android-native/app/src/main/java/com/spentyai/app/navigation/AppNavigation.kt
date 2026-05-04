@@ -158,6 +158,19 @@ fun AppNavigation(
             billingViewModel.loadAll()
         }
     }
+
+    // Cross-app 402 handler: any API call that hits the backend's
+    // require_active_subscription gate emits on apiClient.subscriptionExpiredFlow.
+    // Re-querying status flips currentStatus.isActive=false, which triggers the
+    // gate at line ~172 below to route the user to SubscriptionPaywallScreen.
+    // No per-screen wiring needed — every call site keeps its existing error
+    // banner UX, but expired users now get bounced to the paywall automatically.
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        apiClient.subscriptionExpiredFlow.collect {
+            billingViewModel.loadAll()
+        }
+    }
+
     val billingState by billingViewModel.uiState.collectAsState()
     val statusResolved = billingState.currentStatus != null
     val isSubscriptionActive = billingState.currentStatus?.isActive == true

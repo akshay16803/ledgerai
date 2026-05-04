@@ -12,6 +12,7 @@ final class AuthManager {
     var lastLoginError: String?
 
     private var sessionExpiredObserver: NSObjectProtocol?
+    private var subscriptionRequiredObserver: NSObjectProtocol?
 
     init() {
         sessionExpiredObserver = NotificationCenter.default.addObserver(
@@ -23,10 +24,28 @@ final class AuthManager {
                 await self?.logout()
             }
         }
+
+        // Any 402 from APIClient flips the user back to "needs subscription"
+        // by re-fetching /auth/me. The refreshed user record carries
+        // subscription_status=inactive, which AppRouter inspects via
+        // user.hasActiveSubscription to route to SubscriptionPaywall —
+        // mirrors the existing session-expired pattern, no per-screen wiring.
+        subscriptionRequiredObserver = NotificationCenter.default.addObserver(
+            forName: .subscriptionRequired,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                await self?.checkSession()
+            }
+        }
     }
 
     deinit {
         if let observer = sessionExpiredObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        if let observer = subscriptionRequiredObserver {
             NotificationCenter.default.removeObserver(observer)
         }
     }
