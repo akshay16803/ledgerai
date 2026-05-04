@@ -255,6 +255,7 @@ export default function Landing() {
           <a href="/privacy" style={{ fontSize: 12, color: 'var(--text-muted)', textDecoration: 'underline' }}>Privacy Policy</a>
           <a href="/terms" style={{ fontSize: 12, color: 'var(--text-muted)', textDecoration: 'underline' }}>Terms of Service</a>
           <a href="/refund-policy" style={{ fontSize: 12, color: 'var(--text-muted)', textDecoration: 'underline' }}>Refund Policy</a>
+          <a href="/shipping-policy" style={{ fontSize: 12, color: 'var(--text-muted)', textDecoration: 'underline' }}>Shipping &amp; Delivery</a>
         </div>
       </footer>
     </div>

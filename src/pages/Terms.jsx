@@ -144,6 +144,9 @@ export default function Terms() {
               Subscriptions auto-renew at the end of each billing period unless cancelled before the renewal date.
               Access to paid features is granted immediately upon successful payment confirmation. For refund and
               cancellation terms, see our <a href="/refund-policy" style={{ color: 'var(--brand-primary)', textDecoration: 'underline' }}>Refund &amp; Cancellation Policy</a>.
+              SpentyAI is a fully digital service — no physical goods are shipped. See our{' '}
+              <a href="/shipping-policy" style={{ color: 'var(--brand-primary)', textDecoration: 'underline' }}>Shipping &amp; Delivery Policy</a>{' '}
+              for delivery timelines and activation details.
             </p>
           </Section>
 
