@@ -2,6 +2,7 @@ import { s, getCurrentLanguage } from '../lib/localization';
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext.jsx';
+import { trackLead } from '../lib/pixel';
 import { GoogleLogo, AppleLogo } from '@phosphor-icons/react';
 
 export default function Login() {
@@ -10,7 +11,27 @@ export default function Login() {
   const [appleEnabled, setAppleEnabled] = useState(false);
 
   useEffect(() => {
-    if (user) navigate('/dashboard', { replace: true });
+    if (user) {
+      // Meta Pixel: fire Lead exactly once per user_id (i.e. on first ever
+      // sign-in we observe). OAuth callback returns here authenticated, so
+      // this is the cleanest place to detect "new account just created".
+      // Trade-off: existing users who sign in after Pixel ships will fire
+      // one Lead each (one-time noise). A localStorage flag dedupes from
+      // then on. We deliberately swallow any storage errors.
+      try {
+        const uid = user.user_id || user.id || user.email;
+        if (uid) {
+          const key = `pixel_lead_${uid}`;
+          if (!localStorage.getItem(key)) {
+            trackLead({ content_name: 'free_signup' });
+            localStorage.setItem(key, '1');
+          }
+        }
+      } catch {
+        /* storage unavailable — never block login */
+      }
+      navigate('/dashboard', { replace: true });
+    }
   }, [user, navigate]);
 
   // Probe whether Sign in with Apple is configured on the backend.

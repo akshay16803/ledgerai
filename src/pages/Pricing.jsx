@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { api } from '../lib/api';
+import { trackViewContent } from '../lib/pixel';
 import { Check, ArrowLeft, Sparkle, SpinnerGap, CheckCircle } from '@phosphor-icons/react';
 
 const plans = [
@@ -72,6 +73,11 @@ export default function Pricing() {
   const { user, checkAuth } = useAuth();
   const [loadingPlan, setLoadingPlan] = useState(null);
   const [paymentSuccess, setPaymentSuccess] = useState(null);
+
+  // Meta Pixel: track pricing page view (lead-funnel signal).
+  useEffect(() => {
+    trackViewContent({ content_name: 'pricing_page', content_category: 'subscription' });
+  }, []);
 
   // Cross-platform billing block: if the user already has an active sub from
   // Apple or Google, do NOT let them open a parallel PayU eMandate — that

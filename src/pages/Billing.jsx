@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { api } from '../lib/api';
+import { trackInitiateCheckout, trackAddPaymentInfo } from '../lib/pixel';
 import { Check, Sparkle, SpinnerGap, CheckCircle, Ticket, ArrowRight, Robot } from '@phosphor-icons/react';
 
 const plans = [
@@ -130,6 +131,19 @@ export default function Billing() {
     }
     setLoadingPlan(planKey);
 
+    // Meta Pixel: user clicked Subscribe / Start Trial — fire InitiateCheckout
+    // with plan price + name. Wrapped in helper which try/catches internally.
+    const selectedPlan = plans.find(p => p.key === planKey);
+    if (selectedPlan) {
+      trackInitiateCheckout({
+        content_name: selectedPlan.name,
+        content_ids: [planKey],
+        value: selectedPlan.price,
+        currency: 'INR',
+        num_items: 1,
+      });
+    }
+
     try {
       // Recurring plans (monthly/quarterly/yearly) → PayU Subscriptions /
       //   eMandate. PayU collects the user's UPI/card mandate today and
@@ -158,6 +172,15 @@ export default function Billing() {
         form.appendChild(input);
       });
       document.body.appendChild(form);
+      // Meta Pixel: fire AddPaymentInfo right before redirecting to PayU's
+      // hosted checkout (user is committing to the payment flow).
+      if (selectedPlan) {
+        trackAddPaymentInfo({
+          content_category: 'subscription',
+          value: selectedPlan.price,
+          currency: 'INR',
+        });
+      }
       form.submit();
     } catch (err) {
       alert(err.message || 'Failed to initiate payment. Please try again.');

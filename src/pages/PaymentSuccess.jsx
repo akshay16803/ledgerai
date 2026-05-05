@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
+import { trackPurchase } from '../lib/pixel';
 
 // Landed here from PayU after a successful payment.
 // PayU's callback handler on the backend has already verified the response
@@ -26,6 +27,26 @@ export default function PaymentSuccess() {
         if (res?.paid) {
           setPlan(res.plan);
           setStatus('paid');
+          // Meta Pixel: fire Purchase exactly once on confirmed payment.
+          // eventID is deterministic (`purchase_<txnid>`) so the backend
+          // CAPI Purchase event (Step 6) can dedupe with the same eventID.
+          // Guarded by a sessionStorage flag so refreshing this page
+          // doesn't double-fire.
+          try {
+            const dedupeKey = `pixel_purchase_${txnid}`;
+            if (txnid && !sessionStorage.getItem(dedupeKey)) {
+              trackPurchase({
+                content_name: res.plan,
+                content_ids: res.plan ? [res.plan] : undefined,
+                value: res.amount,
+                currency: res.currency || 'INR',
+                order_id: txnid,
+              });
+              sessionStorage.setItem(dedupeKey, '1');
+            }
+          } catch {
+            /* noop */
+          }
           await checkAuth();
           return;
         }

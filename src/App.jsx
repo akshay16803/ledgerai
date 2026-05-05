@@ -1,6 +1,7 @@
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { useEffect } from 'react';
 import { useAuth } from './contexts/AuthContext.jsx';
+import { trackPageView } from './lib/pixel';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
 import Landing from './pages/Landing.jsx';
 import Features from './pages/Features.jsx';
@@ -62,6 +63,14 @@ function ProtectedRoute({ children, requireSubscription = true }) {
 }
 
 export default function App() {
+  // Meta Pixel: fire PageView on every SPA route change. The base Pixel
+  // snippet in index.html only fires PageView on initial load — React Router
+  // navigations don't trigger a full page load, so we fire manually here.
+  const location = useLocation();
+  useEffect(() => {
+    trackPageView();
+  }, [location.pathname, location.search]);
+
   // Global: prevent rapid double-clicks on submit/guarded buttons without
   // flipping `disabled` mid-dispatch — that was suppressing the form's
   // submit activation (some browsers skip requestSubmit when the submit
