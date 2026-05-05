@@ -33,12 +33,20 @@ logger = logging.getLogger(__name__)
 # ── Configuration ────────────────────────────────────────────────────
 META_PIXEL_ID = (os.environ.get("META_PIXEL_ID") or "").strip()
 META_CAPI_ACCESS_TOKEN = (os.environ.get("META_CAPI_ACCESS_TOKEN") or "").strip()
+# Meta App ID, used only for diagnostics/logging today; payload-side it is
+# implicit in the Pixel/Dataset endpoint we POST to. Required for app-source
+# events to be properly attributed once the Meta App is linked to the dataset.
+META_APP_ID = (os.environ.get("META_APP_ID") or "").strip()
 # Optional Meta Test Events code — set per environment to land events in the
 # Test Events tab in Events Manager instead of production.
 META_CAPI_TEST_EVENT_CODE = (os.environ.get("META_CAPI_TEST_EVENT_CODE") or "").strip()
 
 GRAPH_API_VERSION = os.environ.get("META_CAPI_GRAPH_VERSION", "v19.0").strip() or "v19.0"
 PARTNER_AGENT = "spentyai-capi-v1"
+
+# Bundle id for both iOS + Android (same id used in App Store + Play Store).
+# Used to build the app_data.extinfo array for action_source="app" events.
+SPENTYAI_BUNDLE_ID = "com.spentyai.app"
 
 # Module-level enabled flag. If credentials are missing we no-op so that
 # dev environments without the keys don't crash on import or call.
@@ -173,6 +181,39 @@ async def send_capi_event(
         }
         if custom_data:
             event["custom_data"] = custom_data
+
+        # App-source events (iOS / Android subscription webhooks) get an
+        # app_data block so Meta can attribute them properly. The fields here
+        # are the ones the backend can know without an installed Meta SDK.
+        # Meta's extinfo is a 16-slot array. Empirically Meta REJECTS the
+        # event (error_subcode 2804043) if "OS version" (index 4) is empty,
+        # so we fill it with a generic placeholder that satisfies validation
+        # for both iOS and Android (Meta does not strictly format-check it).
+        # Other slots can be empty — Meta tolerates that.
+        if action_source == "app":
+            extinfo = [
+                "a2",                  # extinfo schema version literal
+                SPENTYAI_BUNDLE_ID,    # bundle id / package name
+                "",                    # bundle long version
+                "",                    # bundle short version
+                "16.0",                # OS version (non-empty REQUIRED by Meta)
+                "",                    # device model
+                "en_IN",               # locale (India default)
+                "",                    # tz abbrev
+                "",                    # carrier
+                "",                    # screen width
+                "",                    # screen height
+                "",                    # screen density
+                "",                    # cpu cores
+                "",                    # total disk space
+                "",                    # free disk space
+                "Asia/Kolkata",        # tz name
+            ]
+            event["app_data"] = {
+                "advertiser_tracking_enabled": 1,
+                "application_tracking_enabled": 1,
+                "extinfo": extinfo,
+            }
 
         body: dict = {
             "data": [event],
