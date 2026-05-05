@@ -9,6 +9,11 @@ struct SubscriptionPaywall: View {
     @State private var viewModel = BillingViewModel()
     @State private var selectedProductId: String = "com.spentyai.yearly"
     @State private var showLifetimeOffer = false
+    /// See BillingView for the full rationale: once the user dismisses the
+    /// lifetime intercept once, subsequent Continue taps go straight to the
+    /// chosen plan. Prevents an inescapable loop within the 30-min offer
+    /// window.
+    @State private var lifetimeUpsellDismissedThisSession = false
     @State private var isRestoring = false
     @State private var restoreResultMessage: String? = nil
     @State private var showRestoreResult = false
@@ -130,8 +135,11 @@ struct SubscriptionPaywall: View {
                     }
                 },
                 onDecline: {
-                    // User declined — return to plan selection, no automatic purchase
+                    // User declined — return to plan selection, no automatic purchase.
+                    // Set the session flag so the next Continue tap on a
+                    // recurring plan bypasses the upsell instead of looping.
                     showLifetimeOffer = false
+                    lifetimeUpsellDismissedThisSession = true
                 }
             )
         }
@@ -333,7 +341,18 @@ struct SubscriptionPaywall: View {
 
         return Button {
             if crossPlatformBlocked { return }
-            if selectedProductId == "com.spentyai.monthly" && LifetimeOfferManager.shared.isOfferActive {
+            // Lifetime upsell intercept: shown ONCE per session for any
+            // recurring plan (monthly / quarterly / yearly) when the 30-min
+            // offer window is still open. Lifetime tap goes straight through.
+            // After the user dismisses once, every subsequent tap goes direct
+            // to purchase — otherwise they're trapped in a loop.
+            let isRecurringPlan = selectedProductId == "com.spentyai.monthly"
+                || selectedProductId == "com.spentyai.quarterly"
+                || selectedProductId == "com.spentyai.yearly"
+            let shouldIntercept = isRecurringPlan
+                && LifetimeOfferManager.shared.isOfferActive
+                && !lifetimeUpsellDismissedThisSession
+            if shouldIntercept {
                 showLifetimeOffer = true
             } else {
                 Task {

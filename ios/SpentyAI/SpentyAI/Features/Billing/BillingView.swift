@@ -8,6 +8,12 @@ struct BillingView: View {
     @State private var viewModel = BillingViewModel()
     @State private var showLifetimeOffer = false
     @State private var isUpgradeMode = false
+    /// Once the user has tapped "No thanks" on the lifetime intercept once
+    /// in this view's lifetime, do NOT intercept again — taking the user
+    /// straight to their chosen plan. Without this flag they're stuck in a
+    /// loop because LifetimeOfferManager.isOfferActive stays true for the
+    /// full 30-min window.
+    @State private var lifetimeUpsellDismissedThisSession = false
 
     // MARK: - Brand Colors
 
@@ -114,10 +120,13 @@ struct BillingView: View {
                 onDecline: {
                     // User declined the lifetime offer — close the sheet only.
                     // Do NOT auto-purchase anything. If the user still wants the
-                    // monthly plan they originally tapped, they can tap Subscribe again.
+                    // recurring plan they originally tapped, they can tap
+                    // Subscribe again — this time it bypasses the upsell because
+                    // we set the session flag.
                     // (Auto-purchasing here would violate App Store guideline 3.1.1.)
                     showLifetimeOffer = false
                     isUpgradeMode = false
+                    lifetimeUpsellDismissedThisSession = true
                 }
             )
         }
@@ -256,7 +265,20 @@ struct BillingView: View {
 
                 Button {
                     if crossPlatformBlock.active { return }
-                    if plan.productId == "com.spentyai.monthly" && LifetimeOfferManager.shared.isOfferActive {
+                    // Lifetime upsell intercept: shown ONCE per session for any
+                    // recurring plan (monthly / quarterly / yearly) when the
+                    // 30-min offer window is still open. Lifetime tap goes
+                    // straight through (no point upselling lifetime to itself).
+                    // After the user dismisses once, every subsequent tap goes
+                    // direct to purchase — otherwise they'd be trapped in a
+                    // loop because isOfferActive stays true for 30 min.
+                    let isRecurringPlan = plan.productId == "com.spentyai.monthly"
+                        || plan.productId == "com.spentyai.quarterly"
+                        || plan.productId == "com.spentyai.yearly"
+                    let shouldIntercept = isRecurringPlan
+                        && LifetimeOfferManager.shared.isOfferActive
+                        && !lifetimeUpsellDismissedThisSession
+                    if shouldIntercept {
                         isUpgradeMode = false
                         showLifetimeOffer = true
                     } else {
