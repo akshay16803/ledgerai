@@ -34,6 +34,10 @@ import resend
 import hashlib
 import hmac
 
+# Meta Conversions API (server-side conversion event helper).
+# send_capi_event is fire-and-forget; never raises, never blocks.
+from lib.meta_capi import send_capi_event
+
 load_dotenv()
 
 logging.basicConfig(level=logging.INFO)
@@ -553,6 +557,21 @@ async def google_callback(request: Request, response: Response, code: str = None
         })
         await seed_default_data(user_id)
         asyncio.create_task(send_verification_email(email, name, verification_token, frontend_url))
+        # Meta CAPI: CompleteRegistration on NEW user only (web flow).
+        try:
+            await send_capi_event(
+                event_name="CompleteRegistration",
+                event_id=f"reg_{user_id}",
+                user_email=email,
+                user_id=str(user_id),
+                client_ip=(request.client.host if request.client else None),
+                client_user_agent=request.headers.get("user-agent"),
+                fbp=request.cookies.get("_fbp"),
+                fbc=request.cookies.get("_fbc"),
+                action_source="website",
+            )
+        except Exception as _capi_err:
+            logger.warning(f"[CAPI] Google web Registration enqueue failed user_id={user_id}: {_capi_err}")
 
     # Create session
     session_token = secrets.token_urlsafe(48)
@@ -667,6 +686,19 @@ async def google_mobile_login(request: Request, response: Response):
             "created_at": datetime.now(timezone.utc),
         })
         await seed_default_data(user_id)
+        # Meta CAPI: CompleteRegistration on NEW user only (Google mobile).
+        try:
+            await send_capi_event(
+                event_name="CompleteRegistration",
+                event_id=f"reg_{user_id}",
+                user_email=email,
+                user_id=str(user_id),
+                client_ip=(request.client.host if request.client else None),
+                client_user_agent=request.headers.get("user-agent"),
+                action_source="app",
+            )
+        except Exception as _capi_err:
+            logger.warning(f"[CAPI] Google mobile Registration enqueue failed user_id={user_id}: {_capi_err}")
 
     # Create session
     session_token = secrets.token_urlsafe(48)
@@ -880,6 +912,21 @@ async def apple_mobile_login(request: Request):
             "created_at": datetime.now(timezone.utc),
         })
         await seed_default_data(user_id)
+        # Meta CAPI: CompleteRegistration on NEW user only (Apple mobile).
+        # Skip when Apple returned a private-relay-only stub email (no `email`
+        # in JWT) — sending a synthetic @apple.private hash adds no value.
+        try:
+            await send_capi_event(
+                event_name="CompleteRegistration",
+                event_id=f"reg_{user_id}",
+                user_email=email or None,
+                user_id=str(user_id),
+                client_ip=(request.client.host if request.client else None),
+                client_user_agent=request.headers.get("user-agent"),
+                action_source="app",
+            )
+        except Exception as _capi_err:
+            logger.warning(f"[CAPI] Apple mobile Registration enqueue failed user_id={user_id}: {_capi_err}")
 
     # ── 8. Mint session ───────────────────────────────────────────────────
     session_token = secrets.token_urlsafe(48)
@@ -1126,6 +1173,21 @@ async def apple_web_callback(request: Request):
             "created_at": datetime.now(timezone.utc),
         })
         await seed_default_data(user_id)
+        # Meta CAPI: CompleteRegistration on NEW user only (Apple web).
+        try:
+            await send_capi_event(
+                event_name="CompleteRegistration",
+                event_id=f"reg_{user_id}",
+                user_email=email or None,
+                user_id=str(user_id),
+                client_ip=(request.client.host if request.client else None),
+                client_user_agent=request.headers.get("user-agent"),
+                fbp=request.cookies.get("_fbp"),
+                fbc=request.cookies.get("_fbc"),
+                action_source="website",
+            )
+        except Exception as _capi_err:
+            logger.warning(f"[CAPI] Apple web Registration enqueue failed user_id={user_id}: {_capi_err}")
 
     # Mint a session and set cookie (same pattern as Google web)
     session_token = secrets.token_urlsafe(48)
@@ -11577,6 +11639,34 @@ async def payu_callback(request: Request):
         }},
     )
     logger.info(f"[PayU] Activated {plan_key} ({sub_status}) for user_id={user_id} via txnid={txnid} mandate_id={payu_mandate_id}")
+
+    # Fire Meta CAPI Purchase event (server-side, deduped against the browser
+    # Pixel via event_id="purchase_<txnid>"). Fire-and-forget — never blocks.
+    try:
+        user_doc = await db.users.find_one({"user_id": user_id}, {"_id": 0, "phone": 1, "email": 1})
+        capi_phone = (user_doc or {}).get("phone") or ""
+        capi_email = email or (user_doc or {}).get("email") or ""
+        capi_value = float(amount) if amount else None
+        await send_capi_event(
+            event_name="Purchase",
+            event_id=f"purchase_{txnid}",
+            user_email=capi_email,
+            user_phone=capi_phone,
+            user_id=str(user_id) if user_id else None,
+            client_ip=(request.client.host if request.client else None),
+            client_user_agent=request.headers.get("user-agent"),
+            fbp=request.cookies.get("_fbp"),
+            fbc=request.cookies.get("_fbc"),
+            value=capi_value,
+            currency="INR",
+            content_name=plan_key,
+            content_ids=[plan_key] if plan_key else None,
+            order_id=txnid,
+            action_source="website",
+        )
+    except Exception as _capi_err:
+        logger.warning(f"[CAPI] PayU Purchase enqueue failed txnid={txnid}: {_capi_err}")
+
     return RedirectResponse(url=success_url, status_code=303)
 
 
@@ -11816,6 +11906,40 @@ async def apple_server_notification(request: Request):
             expiry=expiry, provider="apple", external_id=original_txn_id,
             raw_event=notif_type,
         )
+        # Fire Meta CAPI Purchase event for new paid subs / auto-renewals.
+        # Apple notifications carry no browser context — action_source="app".
+        try:
+            user_doc = await db.users.find_one(
+                {"user_id": user_id},
+                {"_id": 0, "email": 1, "phone": 1},
+            ) or {}
+            # Apple JWS price field is in micro-units (1_000_000 = 1 unit of currency).
+            apple_price_micros = txn.get("price") or renewal.get("price")
+            apple_currency = txn.get("currency") or renewal.get("currency") or "INR"
+            capi_value = None
+            if isinstance(apple_price_micros, (int, float)) and apple_price_micros > 0:
+                capi_value = float(apple_price_micros) / 1_000_000.0
+            elif plan_key:
+                # Fallback: look up our local price (paise → rupees).
+                _plan = PLAN_PRICES.get(plan_key)
+                if _plan:
+                    capi_value = float(_plan["amount"]) / 100.0
+                    apple_currency = _plan.get("currency", "INR")
+            await send_capi_event(
+                event_name="Purchase",
+                event_id=f"purchase_apple_{original_txn_id}",
+                user_email=user_doc.get("email"),
+                user_phone=user_doc.get("phone"),
+                user_id=str(user_id),
+                value=capi_value,
+                currency=apple_currency or "INR",
+                content_name=plan_key,
+                content_ids=[plan_key] if plan_key else None,
+                order_id=original_txn_id,
+                action_source="app",
+            )
+        except Exception as _capi_err:
+            logger.warning(f"[CAPI] Apple Purchase enqueue failed otxn={original_txn_id}: {_capi_err}")
     elif notif_type in ("EXPIRED", "GRACE_PERIOD_EXPIRED"):
         await _set_subscription_state(
             user_id=user_id, plan_key=plan_key, status="expired",
@@ -12012,6 +12136,34 @@ async def google_rtdn(request: Request):
             expiry=expiry, provider="google", external_id=purchase_token,
             raw_event=f"rtdn_{notif_type}",
         )
+        # Fire Meta CAPI Purchase event ONLY on initial PURCHASED (type 4).
+        # Renewals (type 2) and recovery events (type 1, 7) are not new
+        # conversions and would inflate ad-attribution numbers if reported.
+        if notif_type == 4:
+            try:
+                user_doc = await db.users.find_one(
+                    {"user_id": user_id},
+                    {"_id": 0, "email": 1, "phone": 1},
+                ) or {}
+                capi_value = None
+                if plan and plan.get("amount") is not None:
+                    # PLAN_PRICES amounts are stored in paise; CAPI expects rupees.
+                    capi_value = float(plan["amount"]) / 100.0
+                await send_capi_event(
+                    event_name="Purchase",
+                    event_id=f"purchase_google_{purchase_token}",
+                    user_email=user_doc.get("email"),
+                    user_phone=user_doc.get("phone"),
+                    user_id=str(user_id),
+                    value=capi_value,
+                    currency=(plan or {}).get("currency", "INR"),
+                    content_name=plan_key,
+                    content_ids=[plan_key] if plan_key else None,
+                    order_id=purchase_token,
+                    action_source="app",
+                )
+            except Exception as _capi_err:
+                logger.warning(f"[CAPI] Google Purchase enqueue failed token={purchase_token}: {_capi_err}")
     elif sub_notif and notif_type in SUB_CANCELLED:
         await _set_subscription_state(
             user_id=user_id, plan_key=plan_key, status="cancelled",
