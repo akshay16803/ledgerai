@@ -212,7 +212,7 @@ final class BillingViewModel {
                     productId: productId
                 )
 
-                if response.success {
+                if response.isSuccess {
                     await transaction.finish()
                     await loadStatus()
                     await loadHistory()
