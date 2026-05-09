@@ -13,6 +13,7 @@ final class AuthManager {
 
     private var sessionExpiredObserver: NSObjectProtocol?
     private var subscriptionRequiredObserver: NSObjectProtocol?
+    private var subscriptionActivatedObserver: NSObjectProtocol?
 
     init() {
         sessionExpiredObserver = NotificationCenter.default.addObserver(
@@ -39,6 +40,20 @@ final class AuthManager {
                 await self?.checkSession()
             }
         }
+
+        // Inverse of the above — fired by BillingViewModel after a
+        // successful purchase / promo activation. Refreshes /auth/me so
+        // AppRouter sees user.hasActiveSubscription=true and routes to
+        // MainTabView instead of leaving the user on a stale view.
+        subscriptionActivatedObserver = NotificationCenter.default.addObserver(
+            forName: .subscriptionActivated,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                await self?.checkSession()
+            }
+        }
     }
 
     deinit {
@@ -46,6 +61,9 @@ final class AuthManager {
             NotificationCenter.default.removeObserver(observer)
         }
         if let observer = subscriptionRequiredObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        if let observer = subscriptionActivatedObserver {
             NotificationCenter.default.removeObserver(observer)
         }
     }

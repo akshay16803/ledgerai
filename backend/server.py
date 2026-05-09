@@ -611,6 +611,13 @@ async def get_me(user: dict = Depends(get_current_user)):
     user_out["subscription_plan"] = user.get("subscription_plan")
     user_out["subscription_status"] = user.get("subscription_status")
     user_out["subscription_expiry"] = user.get("subscription_expiry")
+    # subscription_provider is REQUIRED by the iOS paywall and BillingView's
+    # cross-platform-block banner ("You're subscribed via PayU / Google,
+    # manage on your other device — subscribing here would double-charge
+    # you"). Without it the banner never shows on iOS even when the user
+    # actually paid through web/Android, so they could open Apple's purchase
+    # sheet and get double-billed.
+    user_out["subscription_provider"] = user.get("subscription_provider")
     return user_out
 
 
@@ -12556,9 +12563,41 @@ async def verify_apple_payment(body: dict = Body(...), user: dict = Depends(get_
 
     plan = PLAN_PRICES.get(plan_key, PLAN_PRICES["monthly"])
     now = datetime.now(timezone.utc)
-    expiry = now + timedelta(days=plan["duration_days"])
 
-    # Store payment record
+    # Extract the Apple transaction identifiers from the verifyReceipt
+    # response so the App Store Server Notifications V2 webhook can find
+    # this user later (renewal, refund, billing-retry events). Without
+    # these IDs persisted, the V2 handler's lookup
+    #   {"$or": [{"original_transaction_id": ...},
+    #            {"subscription_payment_id": ...}]}
+    # misses every row → user_id is None → the webhook silently drops
+    # every renewal/refund. Symptom in production: subscribers stop
+    # auto-renewing into the next month, refunded users keep paid access.
+    latest_receipt_info = result.get("latest_receipt_info") or []
+    in_app = result.get("receipt", {}).get("in_app") or []
+    # latest_receipt_info is the renewal-aware list; fall back to in_app for
+    # one-time purchases (lifetime / lifetime_offer).
+    txn_records = latest_receipt_info if latest_receipt_info else in_app
+    # Pick the record matching this product_id, else the most recent.
+    matching = [t for t in txn_records if t.get("product_id") == product_id]
+    txn_record = (matching or txn_records or [{}])[-1]
+    apple_transaction_id = txn_record.get("transaction_id")
+    apple_original_transaction_id = txn_record.get("original_transaction_id") or apple_transaction_id
+
+    # Apple returns expires_date_ms for auto-renewing subs (monthly /
+    # quarterly / yearly). Use that when present so our local expiry
+    # exactly matches Apple's billing cycle. Lifetime / lifetime_offer
+    # are non-renewing — fall back to a plan-table calculated expiry.
+    expires_ms = txn_record.get("expires_date_ms")
+    if expires_ms:
+        try:
+            expiry = datetime.fromtimestamp(int(expires_ms) / 1000, tz=timezone.utc)
+        except (TypeError, ValueError):
+            expiry = now + timedelta(days=plan["duration_days"])
+    else:
+        expiry = now + timedelta(days=plan["duration_days"])
+
+    # Store payment record (with Apple txn IDs so webhooks can find this row)
     order_id = f"apple_{uuid.uuid4().hex[:12]}"
     await db.payment_orders.insert_one({
         "order_id": order_id,
@@ -12571,9 +12610,15 @@ async def verify_apple_payment(body: dict = Body(...), user: dict = Depends(get_
         "status": "paid",
         "paid_at": now,
         "created_at": now,
+        # Apple transaction identifiers — required by the V2 webhook lookup.
+        "apple_transaction_id": apple_transaction_id,
+        "original_transaction_id": apple_original_transaction_id,
     })
 
-    # Activate subscription
+    # Activate subscription. We also stash original_transaction_id on the
+    # user doc so the V2 handler's secondary lookup
+    # ({"subscription_payment_id": ...}) hits even if the order row is
+    # ever pruned.
     await db.users.update_one(
         {"user_id": user["user_id"]},
         {"$set": {
@@ -12581,6 +12626,7 @@ async def verify_apple_payment(body: dict = Body(...), user: dict = Depends(get_
             "subscription_status": "active",
             "subscription_expiry": expiry.isoformat(),
             "subscription_provider": "apple",
+            "subscription_payment_id": apple_original_transaction_id,
             "updated_at": now,
         }},
     )
@@ -12617,19 +12663,60 @@ async def apple_webhook(request: Request):
     if not notification_type or not original_transaction_id:
         raise HTTPException(status_code=400, detail="Missing required fields: notification_type and original_transaction_id")
 
-    # Handle cancellation/expiry
-    if notification_type in ("CANCEL", "DID_FAIL_TO_RENEW", "REFUND"):
-        # Find user by apple transaction — search payment_orders
-        order = await db.payment_orders.find_one({
-            "payment_provider": "apple",
-            "status": "paid",
-            "apple_transaction_id": original_transaction_id,
-        })
-        if order:
-            await db.users.update_one(
-                {"user_id": order["user_id"]},
-                {"$set": {"subscription_status": "cancelled", "updated_at": datetime.now(timezone.utc)}},
-            )
+    # Find user by apple transaction — search payment_orders. Used by all
+    # downstream branches.
+    order = await db.payment_orders.find_one({
+        "payment_provider": "apple",
+        "status": "paid",
+        "$or": [
+            {"original_transaction_id": original_transaction_id},
+            {"apple_transaction_id": original_transaction_id},
+        ],
+    })
+    if not order:
+        return {"status": "ok"}
+
+    user_id = order["user_id"]
+    now = datetime.now(timezone.utc)
+
+    # Apple distinguishes three different events that the legacy V1 webhook
+    # used to lump together as "cancelled":
+    #   - REFUND          : money returned, access must end immediately.
+    #   - CANCEL          : user toggled auto-renew off in Apple Settings;
+    #                       they keep paid access until the current billing
+    #                       cycle expires.
+    #   - DID_FAIL_TO_RENEW : Apple's auto-charge failed and entered a
+    #                       retry window. Access should continue (the
+    #                       backend gate already grants 30-day grace).
+    # The previous logic flipped the user to "cancelled" for all three,
+    # which prematurely revoked access for users who had only turned off
+    # auto-renew or were in a transient billing-retry state.
+    if notification_type == "REFUND":
+        await db.users.update_one(
+            {"user_id": user_id},
+            {"$set": {
+                "subscription_status": "expired",
+                "updated_at": now,
+            }},
+        )
+    elif notification_type == "CANCEL":
+        # Auto-renew disabled — access keeps until expiry. Mark a flag for
+        # UI ("Renews on…" → "Cancels on…") without yanking the gate.
+        await db.users.update_one(
+            {"user_id": user_id},
+            {"$set": {
+                "subscription_auto_renew": False,
+                "updated_at": now,
+            }},
+        )
+    elif notification_type == "DID_FAIL_TO_RENEW":
+        await db.users.update_one(
+            {"user_id": user_id},
+            {"$set": {
+                "subscription_status": "in_grace_period",
+                "updated_at": now,
+            }},
+        )
 
     return {"status": "ok"}
 

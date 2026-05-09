@@ -128,10 +128,15 @@ struct SubscriptionPaywall: View {
                 // confirming the purchase (required by guideline 3.1.1).
                 offerPrice: viewModel.displayPrice(for: "com.spentyai.lifetime_offer"),
                 onAccept: {
-                    await viewModel.purchasePlan("com.spentyai.lifetime_offer")
+                    let didSucceed = await viewModel.purchasePlan("com.spentyai.lifetime_offer")
                     await MainActor.run {
                         showLifetimeOffer = false
-                        if viewModel.isSubscribed { onSubscribed?() }
+                        // Fire on the verify-success boolean directly, not on
+                        // viewModel.isSubscribed — the latter races against the
+                        // backend's Mongo write of users.subscription_status.
+                        // Failing to fire here is what kept users stuck on the
+                        // paywall after a successful Apple charge.
+                        if didSucceed { onSubscribed?() }
                     }
                 },
                 onDecline: {
@@ -356,8 +361,8 @@ struct SubscriptionPaywall: View {
                 showLifetimeOffer = true
             } else {
                 Task {
-                    await viewModel.purchasePlan(selectedProductId)
-                    if viewModel.isSubscribed {
+                    let didSucceed = await viewModel.purchasePlan(selectedProductId)
+                    if didSucceed {
                         onSubscribed?()
                     }
                 }

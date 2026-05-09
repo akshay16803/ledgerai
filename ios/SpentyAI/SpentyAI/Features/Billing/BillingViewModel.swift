@@ -178,9 +178,15 @@ final class BillingViewModel {
 
     // MARK: - Purchase
 
+    /// Returns true if the purchase fully succeeded server-side (Apple
+    /// verified + backend marked the user active). Callers can use the return
+    /// value to immediately route the user out of the paywall instead of
+    /// reading `isSubscribed`, which depends on a separate `loadStatus()`
+    /// call that races with the backend's Mongo write.
     @MainActor
-    func purchasePlan(_ productId: String) async {
-        guard !isPurchasing else { return }
+    @discardableResult
+    func purchasePlan(_ productId: String) async -> Bool {
+        guard !isPurchasing else { return false }
 
         // Defensive: if the product isn't in our cache, try one more reload
         // before giving up. Covers the race where a reviewer (or fast user)
@@ -192,11 +198,15 @@ final class BillingViewModel {
         guard let product = storeProducts[productId] else {
             errorMessage = "Unable to connect to the App Store. Please check your internet connection and try again."
             showError = true
-            return
+            return false
         }
 
         isPurchasing = true
         purchasingProductId = productId
+        defer {
+            isPurchasing = false
+            purchasingProductId = nil
+        }
 
         do {
             let result = try await product.purchase()
@@ -214,29 +224,51 @@ final class BillingViewModel {
 
                 if response.isSuccess {
                     await transaction.finish()
+                    // Optimistically mark as subscribed locally so the UI
+                    // doesn't bounce back to the paywall while loadStatus is
+                    // racing against the backend's Mongo write.
+                    currentStatus = SubscriptionStatus(
+                        isActive: true,
+                        plan: response.plan,
+                        productId: productId,
+                        expiresAt: response.expiry,
+                        provider: "apple",
+                        autoRenew: nil,
+                        status: "active"
+                    )
+                    // Tell AuthManager to refresh /auth/me so that any
+                    // entry point — paywall (with onSubscribed) AND
+                    // BillingView (which has no callback) — sees
+                    // user.hasActiveSubscription flip to true and
+                    // AppRouter advances to the dashboard.
+                    NotificationCenter.default.post(name: .subscriptionActivated, object: nil)
+                    // Best-effort refresh — if it returns stale data we still
+                    // routed the user through above. The transaction listener
+                    // + AuthManager.checkSession will reconcile shortly.
                     await loadStatus()
                     await loadHistory()
+                    return true
                 } else {
                     errorMessage = response.message ?? "Purchase verification failed."
                     showError = true
+                    return false
                 }
 
             case .userCancelled:
-                break
+                return false
 
             case .pending:
                 errorMessage = "Purchase is pending approval."
                 showError = true
+                return false
 
             @unknown default:
-                break
+                return false
             }
         } catch {
             handleError(error)
+            return false
         }
-
-        isPurchasing = false
-        purchasingProductId = nil
     }
 
     // MARK: - Promo Code
@@ -282,6 +314,12 @@ final class BillingViewModel {
             if response.valid == true || response.subscriptionPlan != nil {
                 promoCode = ""
                 promoValid = nil
+                // Promo activation grants access. Notify AuthManager so the
+                // refreshed user.hasActiveSubscription routes the user out
+                // of any paywall they happened to be on. Without this the
+                // promo-activating user stays on the paywall until they
+                // background+foreground the app.
+                NotificationCenter.default.post(name: .subscriptionActivated, object: nil)
                 await loadStatus()
                 await loadHistory()
             }

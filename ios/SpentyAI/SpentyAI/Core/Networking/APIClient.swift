@@ -7,6 +7,15 @@ extension Notification.Name {
     /// user.hasActiveSubscription will be false, which causes AppRouter to
     /// re-route to the existing SubscriptionPaywall.
     static let subscriptionRequired = Notification.Name("subscriptionRequired")
+    /// Inverse of `subscriptionRequired`. Posted by BillingViewModel after
+    /// a successful purchase OR promo-code activation. AuthManager observes
+    /// it and re-fetches /api/auth/me so the new subscriptionStatus="active"
+    /// propagates to AppRouter, which then routes from any in-app screen
+    /// (BillingView, SubscriptionPaywall) to MainTabView. Without this, a
+    /// user activating a promo from inside Settings → Subscription would
+    /// still see paywall-gated UI on other tabs because AuthManager.user
+    /// stays stale until the next app foreground / route change.
+    static let subscriptionActivated = Notification.Name("subscriptionActivated")
 }
 
 final class APIClient: Sendable {

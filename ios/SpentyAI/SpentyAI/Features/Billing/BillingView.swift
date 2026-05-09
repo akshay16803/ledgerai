@@ -14,6 +14,12 @@ struct BillingView: View {
     /// loop because LifetimeOfferManager.isOfferActive stays true for the
     /// full 30-min window.
     @State private var lifetimeUpsellDismissedThisSession = false
+    /// Restore Purchases UI state. Apple Guideline 3.1.1 requires Restore
+    /// to be reachable everywhere a Subscribe button is shown — paywall +
+    /// Settings → Subscription both qualify.
+    @State private var isRestoring = false
+    @State private var restoreResultMessage: String? = nil
+    @State private var showRestoreResult = false
 
     // MARK: - Brand Colors
 
@@ -73,6 +79,12 @@ struct BillingView: View {
                 if viewModel.isSubscribed && !viewModel.isLifetime {
                     cancelSection
                 }
+
+                // Restore Purchases — required by App Store Guideline 3.1.1
+                // alongside any Subscribe affordance. Lets reinstalled users
+                // OR cross-device users (same Apple ID, new device) recover
+                // their existing subscription without paying again.
+                restoreSection
             }
             .padding()
         }
@@ -87,6 +99,11 @@ struct BillingView: View {
             Button(lang.s("ok")) { viewModel.showError = false }
         } message: {
             Text(viewModel.errorMessage)
+        }
+        .alert("Restore Purchases", isPresented: $showRestoreResult) {
+            Button("OK") { showRestoreResult = false }
+        } message: {
+            Text(restoreResultMessage ?? "")
         }
         .alert(lang.s("cancel_subscription"), isPresented: $viewModel.showCancelConfirmation) {
             Button("Keep Plan", role: .cancel) {}
@@ -556,6 +573,62 @@ struct BillingView: View {
             )
             .shadow(color: .black.opacity(0.05), radius: 8, y: 2)
         }
+    }
+
+    // MARK: - Restore Purchases
+
+    /// Always-visible Restore button. Calls `AppStore.sync()` (StoreKit 2)
+    /// then re-checks entitlements through the existing BillingViewModel
+    /// path. Mirrors `SubscriptionPaywall.restoreButton` so the behavior
+    /// is identical from either entry point. Posts `subscriptionActivated`
+    /// indirectly via `viewModel.checkEntitlements` → `loadStatus` (which
+    /// now updates `currentStatus`); also explicitly fires the notification
+    /// here so any other observer (AuthManager → AppRouter) reroutes.
+    @ViewBuilder
+    private var restoreSection: some View {
+        VStack(spacing: 8) {
+            Button {
+                Task {
+                    isRestoring = true
+                    do {
+                        try await AppStore.sync()
+                        await viewModel.checkEntitlements()
+                        if viewModel.isSubscribed {
+                            // Notify AuthManager so AppRouter sees the new
+                            // active state immediately. Without this the
+                            // restore appears to "do nothing" until the
+                            // user backgrounds + foregrounds.
+                            NotificationCenter.default.post(name: .subscriptionActivated, object: nil)
+                            restoreResultMessage = "Subscription restored successfully."
+                        } else {
+                            restoreResultMessage = "No active subscription found for this Apple ID."
+                        }
+                    } catch {
+                        restoreResultMessage = "Restore failed. Please try again or contact us at customersupport@spentyai.com."
+                    }
+                    showRestoreResult = true
+                    isRestoring = false
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    if isRestoring {
+                        ProgressView().scaleEffect(0.8)
+                    }
+                    Text(isRestoring ? "Restoring…" : "Restore Purchases")
+                }
+                .font(.subheadline)
+                .foregroundStyle(brandPrimary)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+            }
+            .disabled(isRestoring)
+
+            Text("Already paid on another device or reinstalled? Tap to restore.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .padding(.top, 8)
     }
 
     // MARK: - Cancel / Manage
