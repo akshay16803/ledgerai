@@ -53,36 +53,34 @@ final class BillingViewModel {
 
     init(repository: BillingRepository = .shared) {
         self.repository = repository
-        startTransactionListener()
+        // The Transaction.updates listener used to live here, but
+        // BillingViewModel is created per-screen (paywall + billing
+        // settings) — so when either view dismissed, the listener
+        // died and we silently dropped any background renewal /
+        // refund / family-share event that arrived while the user
+        // was on the dashboard.
+        //
+        // The listener is now owned by AppleTransactionObserver, a
+        // process-lifetime singleton started in SpentyAIApp.init.
+        // This view model just observes Notification.Name
+        // .subscriptionActivated to refresh its local state when
+        // the singleton picks up a server-side change.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleSubscriptionActivated),
+            name: .subscriptionActivated,
+            object: nil
+        )
     }
 
     deinit {
-        transactionListenerTask?.cancel()
+        NotificationCenter.default.removeObserver(self)
     }
 
-    // MARK: - Transaction listener (Apple guideline 3.1.2)
-    // Listen for renewals / refunds / family-share grants in-process so the
-    // app's local subscription state stays in sync with the App Store.
-
-    private var transactionListenerTask: Task<Void, Never>?
-
-    private func startTransactionListener() {
-        transactionListenerTask = Task.detached { [weak self] in
-            for await result in StoreKit.Transaction.updates {
-                guard let self else { return }
-                if case .verified(let transaction) = result {
-                    if Self.allProductIds.contains(transaction.productID) {
-                        // Re-sync server-side status, then finish the transaction.
-                        await MainActor.run {
-                            Task {
-                                await self.loadStatus()
-                                await self.loadHistory()
-                            }
-                        }
-                        await transaction.finish()
-                    }
-                }
-            }
+    @objc private func handleSubscriptionActivated() {
+        Task { @MainActor in
+            await self.loadStatus()
+            await self.loadHistory()
         }
     }
 
@@ -244,29 +242,28 @@ final class BillingViewModel {
 
                 if response.isSuccess {
                     await transaction.finish()
-                    // Optimistically mark as subscribed locally so the UI
-                    // doesn't bounce back to the paywall while loadStatus is
-                    // racing against the backend's Mongo write.
+                    // Use the backend's response as the source of truth for
+                    // local state. The earlier code awaited loadStatus()
+                    // immediately after, which raced the backend's Mongo
+                    // write — a stale read flipped isActive=false and
+                    // bounced the user back to the paywall (the original
+                    // 1.0 (13) "stuck on paywall" report). We now skip the
+                    // immediate re-fetch entirely and let the
+                    // .subscriptionActivated notification + AuthManager's
+                    // checkSession() debounce handle reconciliation.
                     currentStatus = SubscriptionStatus(
                         isActive: true,
                         plan: response.plan,
                         productId: productId,
                         expiresAt: response.expiry,
                         provider: "apple",
-                        autoRenew: nil,
+                        autoRenew: true,
                         status: "active"
                     )
-                    // Tell AuthManager to refresh /auth/me so that any
-                    // entry point — paywall (with onSubscribed) AND
-                    // BillingView (which has no callback) — sees
-                    // user.hasActiveSubscription flip to true and
-                    // AppRouter advances to the dashboard.
+                    // Notify the rest of the app: AuthManager re-fetches
+                    // /auth/me and AppRouter advances to the dashboard.
+                    // BillingView observes this too and self-refreshes.
                     NotificationCenter.default.post(name: .subscriptionActivated, object: nil)
-                    // Best-effort refresh — if it returns stale data we still
-                    // routed the user through above. The transaction listener
-                    // + AuthManager.checkSession will reconcile shortly.
-                    await loadStatus()
-                    await loadHistory()
                     return true
                 } else {
                     errorMessage = response.message ?? "Purchase verification failed."

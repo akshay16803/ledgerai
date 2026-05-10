@@ -11865,7 +11865,14 @@ async def apple_server_notification(request: Request):
 
     product_id = txn.get("productId") or renewal.get("productId") or ""
     original_txn_id = txn.get("originalTransactionId") or renewal.get("originalTransactionId")
-    expires_ms = txn.get("expiresDate") or renewal.get("expirationIntent")
+    transaction_id = txn.get("transactionId") or original_txn_id
+    # IMPORTANT: only `expiresDate` is a timestamp. `expirationIntent` is an
+    # integer enum (1=customer cancelled, 2=billing error, 3=price change,
+    # 4=product unavailable, 5=other) — feeding it into datetime.fromtimestamp
+    # produces nonsense expiry dates (e.g. epoch 1970-01-01 +1ms = "1969…").
+    # We therefore use ONLY expiresDate from the signed transaction; fall back
+    # to renewal.recentSubscriptionStartDate when expiry is missing entirely.
+    expires_ms = txn.get("expiresDate")
     expiry = None
     if isinstance(expires_ms, (int, float)) and expires_ms > 0:
         expiry = datetime.fromtimestamp(expires_ms / 1000.0, tz=timezone.utc)
@@ -11934,7 +11941,11 @@ async def apple_server_notification(request: Request):
                     apple_currency = _plan.get("currency", "INR")
             await send_capi_event(
                 event_name="Purchase",
-                event_id=f"purchase_apple_{original_txn_id}",
+                # Per-transaction event_id so Meta records every renewal as
+                # its own conversion. Using only originalTransactionId made
+                # Meta dedupe every renewal against the first purchase →
+                # we lost ~95% of renewal conversions in attribution.
+                event_id=f"purchase_apple_{original_txn_id}_{transaction_id}",
                 user_email=user_doc.get("email"),
                 user_phone=user_doc.get("phone"),
                 user_id=str(user_id),
@@ -11942,7 +11953,7 @@ async def apple_server_notification(request: Request):
                 currency=apple_currency or "INR",
                 content_name=plan_key,
                 content_ids=[plan_key] if plan_key else None,
-                order_id=original_txn_id,
+                order_id=transaction_id,
                 action_source="app",
             )
         except Exception as _capi_err:
@@ -11952,7 +11963,16 @@ async def apple_server_notification(request: Request):
             user_id=user_id, plan_key=plan_key, status="expired",
             provider="apple", external_id=original_txn_id, raw_event=notif_type,
         )
-    elif notif_type in ("REVOKE", "REFUND"):
+    elif notif_type == "REFUND":
+        # Money returned to customer → access ends immediately, regardless
+        # of remaining expiry. Different from CANCEL/auto-renew-off.
+        await _set_subscription_state(
+            user_id=user_id, plan_key=plan_key, status="cancelled",
+            provider="apple", external_id=original_txn_id, raw_event=notif_type,
+        )
+    elif notif_type == "REVOKE":
+        # Family Sharing revocation — access ends immediately for the
+        # family member (the buyer keeps theirs).
         await _set_subscription_state(
             user_id=user_id, plan_key=plan_key, status="cancelled",
             provider="apple", external_id=original_txn_id, raw_event=notif_type,
@@ -13006,15 +13026,41 @@ class PromoCodeRequest(BaseModel):
     code: str
 
 
+# Promo activation is restricted to App Review staff and the SpentyAI
+# team. Public users cannot redeem — that would constitute a paid
+# digital purchase outside StoreKit and violate Apple Guideline 3.1.1.
+# To add a tester, append their email here (lower-case) and redeploy.
+ALLOWED_PROMO_EMAILS = {
+    e.strip().lower()
+    for e in os.environ.get(
+        "ALLOWED_PROMO_EMAILS",
+        # Default whitelist: App Review demo account + founder.
+        "spentyai6@gmail.com,akshaychouhan16803@gmail.com",
+    ).split(",")
+    if e.strip()
+}
+
+
+def _user_can_redeem_promo(user: dict) -> bool:
+    """A user may redeem a promo code only if their email is on the
+    explicit whitelist. Without this check any logged-in user could
+    grant themselves lifetime by guessing one of the codes."""
+    email = (user.get("email") or "").strip().lower()
+    return bool(email) and email in ALLOWED_PROMO_EMAILS
+
+
 @app.post("/api/promo/validate")
 async def validate_promo_code(data: PromoCodeRequest, user: dict = Depends(get_current_user)):
-    """Check if a promo code is valid."""
+    """Check if a promo code is valid (whitelisted users only)."""
+    if not _user_can_redeem_promo(user):
+        raise HTTPException(status_code=403, detail="Promo codes are not available for your account.")
+
     code = data.code.strip().upper()
     if code not in PROMO_CODES:
         raise HTTPException(status_code=400, detail="Invalid promo code")
 
     # Check if user already has active subscription
-    if user.get("subscription_status") == "active":
+    if user.get("subscription_status") in ACTIVE_SUBSCRIPTION_STATUSES:
         raise HTTPException(status_code=400, detail="You already have an active subscription")
 
     return {"valid": True, "code": code, "description": PROMO_CODES[code]["description"], "message": PROMO_CODES[code]["description"]}
@@ -13022,12 +13068,15 @@ async def validate_promo_code(data: PromoCodeRequest, user: dict = Depends(get_c
 
 @app.post("/api/promo/activate")
 async def activate_promo_code(data: PromoCodeRequest, user: dict = Depends(get_current_user)):
-    """Activate a promo code — grants lifetime subscription."""
+    """Activate a promo code — grants lifetime subscription (whitelisted users only)."""
+    if not _user_can_redeem_promo(user):
+        raise HTTPException(status_code=403, detail="Promo codes are not available for your account.")
+
     code = data.code.strip().upper()
     if code not in PROMO_CODES:
         raise HTTPException(status_code=400, detail="Invalid promo code")
 
-    if user.get("subscription_status") == "active":
+    if user.get("subscription_status") in ACTIVE_SUBSCRIPTION_STATUSES:
         raise HTTPException(status_code=400, detail="You already have an active subscription")
 
     now = datetime.now(timezone.utc)
