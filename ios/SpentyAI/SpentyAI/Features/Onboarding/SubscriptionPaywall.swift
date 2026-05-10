@@ -121,12 +121,22 @@ struct SubscriptionPaywall: View {
         } message: {
             Text(restoreResultMessage ?? "")
         }
-        .sheet(isPresented: $showLifetimeOffer) {
+        .sheet(isPresented: $showLifetimeOffer, onDismiss: {
+            // Treat ANY dismissal — explicit "No thanks" tap, swipe-down,
+            // even an iOS gesture — as a hard decline. Without this, the
+            // pull-down gesture closed the sheet without setting the
+            // "dismissed this session" flag, so the next Continue tap
+            // re-presented the upsell — an inescapable loop until the
+            // user found the small grey "No thanks, go back" link.
+            // Reported by user 2026-05-10.
+            lifetimeUpsellDismissedThisSession = true
+        }) {
             LifetimeOfferSheet(
                 showTimer: true,
                 // Pass the actual StoreKit price so the user sees it before
                 // confirming the purchase (required by guideline 3.1.1).
                 offerPrice: viewModel.displayPrice(for: "com.spentyai.lifetime_offer"),
+                fullPrice: viewModel.displayPrice(for: "com.spentyai.lifetime"),
                 onAccept: {
                     let didSucceed = await viewModel.purchasePlan("com.spentyai.lifetime_offer")
                     await MainActor.run {
@@ -141,8 +151,9 @@ struct SubscriptionPaywall: View {
                 },
                 onDecline: {
                     // User declined — return to plan selection, no automatic purchase.
-                    // Set the session flag so the next Continue tap on a
-                    // recurring plan bypasses the upsell instead of looping.
+                    // The .sheet's onDismiss handler ALSO sets the flag, so
+                    // both the explicit button tap and the swipe-down end
+                    // up at the same place.
                     showLifetimeOffer = false
                     lifetimeUpsellDismissedThisSession = true
                 }

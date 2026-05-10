@@ -121,12 +121,23 @@ struct BillingView: View {
                     .background(.ultraThinMaterial)
             }
         }
-        .sheet(isPresented: $showLifetimeOffer) {
+        .sheet(isPresented: $showLifetimeOffer, onDismiss: {
+            // Treat ANY dismissal — explicit "No thanks" tap, swipe-down,
+            // even an iOS gesture — as a hard decline. Without this, the
+            // pull-down gesture closed the sheet without setting the
+            // "dismissed this session" flag, so the next Subscribe tap
+            // re-presented the upsell — an inescapable loop until the
+            // user found the small grey "No thanks, go back" link.
+            // Reported by user 2026-05-10.
+            isUpgradeMode = false
+            lifetimeUpsellDismissedThisSession = true
+        }) {
             let upgrade = isUpgradeMode
             LifetimeOfferSheet(
                 showTimer: !upgrade,
                 // Pass the actual StoreKit price so it is visible before purchase (guideline 3.1.1).
                 offerPrice: viewModel.displayPrice(for: "com.spentyai.lifetime_offer"),
+                fullPrice: viewModel.displayPrice(for: "com.spentyai.lifetime"),
                 onAccept: {
                     await viewModel.purchasePlan("com.spentyai.lifetime_offer")
                     await MainActor.run {
@@ -136,10 +147,9 @@ struct BillingView: View {
                 },
                 onDecline: {
                     // User declined the lifetime offer — close the sheet only.
-                    // Do NOT auto-purchase anything. If the user still wants the
-                    // recurring plan they originally tapped, they can tap
-                    // Subscribe again — this time it bypasses the upsell because
-                    // we set the session flag.
+                    // Do NOT auto-purchase anything. The .sheet's onDismiss
+                    // handler ALSO sets the session flag, so both swipe-down
+                    // and the explicit button end up at the same state.
                     // (Auto-purchasing here would violate App Store guideline 3.1.1.)
                     showLifetimeOffer = false
                     isUpgradeMode = false

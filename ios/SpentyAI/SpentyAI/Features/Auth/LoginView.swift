@@ -72,8 +72,14 @@ struct LoginView: View {
 
     private var brandingSection: some View {
         VStack(spacing: 16) {
-            // App icon — mirrors the real app icon for brand consistency
-            Image(uiImage: UIImage(named: "AppIcon") ?? UIImage())
+            // App icon — references the AppLogo image set (a copy of
+            // appicon.png in Assets.xcassets). UIImage(named:"AppIcon")
+            // returns nil because iOS reserves the AppIcon set for the
+            // home-screen / system icon and won't expose it via the
+            // image-loading APIs — that's why nothing was rendering
+            // before. AppLogo is a regular image set sourced from the
+            // exact same 1024×1024 PNG, so the brand mark is identical.
+            Image("AppLogo")
                 .resizable()
                 .scaledToFit()
                 .frame(width: 96, height: 96)
@@ -173,19 +179,13 @@ struct LoginView: View {
                     .transition(.opacity)
             }
 
-            // ── Demo / Reviewer Account ───────────────────────────
-            // A low-profile entry point for App Review so reviewers can
-            // access a pre-seeded demo account without Google/Apple OAuth.
-            Button {
-                Task { await viewModel.signInWithDemo() }
-            } label: {
-                Text("View Demo Account")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .underline()
-            }
-            .disabled(viewModel.isLoading)
-            .padding(.top, 4)
+            // Demo/reviewer entry point removed 2026-05-10 per product
+            // request — public users should not see it. App Review can
+            // still sign in with the demo account via Google or Apple
+            // Sign-In using the credentials provided in App Review
+            // Information; the backend /auth/demo-login endpoint and
+            // viewModel.signInWithDemo() function are intentionally
+            // kept available for that fallback path.
 
             // Terms / footer
             Text("By continuing you agree to our\n[Terms of Service](https://spentyai.com/terms) & [Privacy Policy](https://spentyai.com/privacy)")

@@ -13,6 +13,11 @@ struct LifetimeOfferSheet: View {
     /// Displayed in the header and CTA button so the user sees the exact charge
     /// before confirming (required by App Store guideline 3.1.1).
     var offerPrice: String? = nil
+    /// The StoreKit-localised price string for the regular `com.spentyai.lifetime`
+    /// product (the price the user will pay AFTER the 30-min offer expires).
+    /// Shown next to the discounted offer price so the urgency is verifiable
+    /// rather than implied — closes a dark-pattern concern with the timer.
+    var fullPrice: String? = nil
     let onAccept: () async -> Void
     let onDecline: () -> Void
 
@@ -83,19 +88,28 @@ struct LifetimeOfferSheet: View {
                     .foregroundStyle(.white.opacity(0.6))
             }
 
-            // Price display
+            // Price display — show the discounted offer price PROMINENTLY
+            // and the regular post-offer price struck-through next to it
+            // so the 50%-off claim is verifiable, not just implied. Without
+            // this comparison the 30-min countdown looked like a manipulative
+            // dark pattern (price never visibly changed during the timer).
             VStack(spacing: 8) {
                 Text("One-time purchase")
                     .font(.title3.weight(.medium))
                     .foregroundStyle(.white.opacity(0.38))
-                    .strikethrough(false)
 
-                // Show the actual StoreKit price so the user sees the exact
-                // charge before confirming (guideline 3.1.1 price clarity).
                 if let price = offerPrice {
-                    Text(price)
-                        .font(.system(size: 36, weight: .bold))
-                        .foregroundStyle(.white)
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        Text(price)
+                            .font(.system(size: 36, weight: .bold))
+                            .foregroundStyle(.white)
+                        if showTimer, let regular = fullPrice, regular != price {
+                            Text(regular)
+                                .font(.system(size: 20, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.45))
+                                .strikethrough(true, color: .white.opacity(0.6))
+                        }
+                    }
                 } else {
                     ProgressView()
                         .tint(.white)
@@ -103,7 +117,9 @@ struct LifetimeOfferSheet: View {
                         .frame(height: 44)
                 }
 
-                Text("LIMITED TIME OFFER  ·  50% OFF")
+                Text(showTimer
+                     ? "LIMITED TIME OFFER  ·  50% OFF"
+                     : "EXCLUSIVE LIFETIME RATE")
                     .font(.system(size: 11, weight: .bold))
                     .tracking(0.4)
                     .foregroundStyle(darkBg)
@@ -194,12 +210,26 @@ struct LifetimeOfferSheet: View {
                 }
                 .disabled(isPurchasing || offerPrice == nil)
 
+                // Secondary "decline" CTA — needs to read as a real
+                // button so users have a visible exit. Previous version
+                // was tiny grey text below the giant green primary CTA;
+                // users couldn't find it and felt trapped (reported by
+                // user 2026-05-10). Now full-width with a visible
+                // outline + body-sized text matching the primary.
                 Button {
                     onDecline()
                 } label: {
-                    Text(showTimer ? "No thanks, go back" : "Maybe later")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                    Text(showTimer ? "No thanks, continue with my plan" : "Maybe later")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(Color.spentyPrimary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(Color.spentyPrimary.opacity(0.06),
+                                    in: RoundedRectangle(cornerRadius: 14))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14)
+                                .stroke(Color.spentyPrimary.opacity(0.3), lineWidth: 1.2)
+                        )
                 }
                 .disabled(isPurchasing)
 
@@ -218,14 +248,22 @@ struct LifetimeOfferSheet: View {
     @ViewBuilder
     private var urgencyNote: some View {
         if showTimer {
-            // Timer countdown
+            // Timer countdown — wording explicitly states what changes
+            // when the timer hits zero (offer goes away, regular price
+            // applies) so the urgency is honest rather than implied.
             HStack(spacing: 10) {
                 Image(systemName: "clock.fill")
                     .foregroundStyle(.orange)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Offer expires in")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    if let regular = fullPrice {
+                        Text("Offer expires in — then \(regular)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("Offer expires in")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                     Text(displayTime)
                         .font(.system(size: 20, weight: .bold, design: .monospaced))
                         .foregroundStyle(.orange)
