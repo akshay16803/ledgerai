@@ -215,10 +215,30 @@ final class BillingViewModel {
             case .success(let verification):
                 let transaction = try checkVerified(verification)
 
-                // Send receipt to backend
-                let jwsRepresentation = verification.jwsRepresentation
+                // Send the StoreKit 2 JWS to the backend.
+                //
+                // The backend verifies the ES256 signature with the leaf
+                // cert from the JWS x5c chain (see _verify_and_decode_apple_jws
+                // in server.py) — no call to Apple's legacy /verifyReceipt
+                // endpoint is needed.
+                //
+                // History of this code path:
+                //   v1.0   (build 13): sent JWS as `receiptData` (camelCase) →
+                //                       backend rejected with HTTP 400
+                //                       "receipt_data is required" → user stuck
+                //                       on paywall, never charged twice but
+                //                       also never marked subscribed.
+                //   v1.0.2 (build 15): switched to snake_case CodingKeys → request
+                //                       reached backend → backend forwarded JWS to
+                //                       legacy /verifyReceipt → Apple returned
+                //                       status 21002 ("malformed receipt-data").
+                //   v1.0.2 (build 16): backend now JWS-verifies locally. Sending
+                //                       the JWS as `receipt_data` is the correct
+                //                       contract.
+                let signedTransactionJWS = verification.jwsRepresentation
+
                 let response = try await repository.verifyApplePurchase(
-                    receiptData: jwsRepresentation,
+                    receiptData: signedTransactionJWS,
                     productId: productId
                 )
 
@@ -354,6 +374,12 @@ final class BillingViewModel {
             if let transaction = try? checkVerified(result) {
                 if Self.allProductIds.contains(transaction.productID) {
                     await loadStatus()
+                    // Apple guidance: finish every consumed transaction, even
+                    // those discovered via currentEntitlements. Without this,
+                    // StoreKit replays the same transaction on every launch
+                    // and Apple's queue can hold up new purchases on review
+                    // devices.
+                    await transaction.finish()
                     return
                 }
             }

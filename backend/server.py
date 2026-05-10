@@ -12520,11 +12520,27 @@ async def get_payment_plans(user: dict = Depends(get_current_user)):
 
 @app.post("/api/payments/apple/verify")
 async def verify_apple_payment(body: dict = Body(...), user: dict = Depends(get_current_user)):
-    """Verify an Apple In-App Purchase receipt and activate subscription."""
-    receipt_data = body.get("receipt_data")
-    product_id = body.get("product_id", "")
-    if not receipt_data:
-        raise HTTPException(status_code=400, detail="receipt_data is required")
+    """Verify an Apple In-App Purchase using the StoreKit 2 JWS sent from
+    the iOS app and activate the subscription.
+
+    The body is `{"receipt_data": <jws>, "product_id": <sku>}` where
+    `receipt_data` is `Transaction.jwsRepresentation` from StoreKit 2 —
+    a JSON Web Signature that Apple already cryptographically signed.
+    Verifying that signature with the leaf cert from the JWS header is
+    cheaper, faster and more reliable than calling the legacy
+    `/verifyReceipt` HTTP endpoint, which only accepts the StoreKit 1
+    base64 receipt blob and rejects every JWS with status 21002
+    ("malformed receipt-data"). That mismatch caused the 2026-05-10 P0
+    where every paying user saw "Apple receipt verification failed
+    (status: 21002)" right after Apple charged their card.
+
+    Reuses `_verify_and_decode_apple_jws` (same helper used by V2 server
+    notifications) so we have a single trusted entry point for Apple JWS
+    decoding."""
+    jws = body.get("receipt_data") or body.get("signed_transaction") or ""
+    requested_product_id = body.get("product_id", "")
+    if not jws:
+        raise HTTPException(status_code=400, detail="receipt_data (StoreKit 2 JWS) is required")
 
     # Map Apple product IDs to plan keys. lifetime_offer is the 50%-off
     # one-time SKU surfaced via the Monthly intercept and the subscriber
@@ -12536,59 +12552,50 @@ async def verify_apple_payment(body: dict = Body(...), user: dict = Depends(get_
         "com.spentyai.lifetime": "lifetime",
         "com.spentyai.lifetime_offer": "lifetime_offer",
     }
-    plan_key = apple_plan_map.get(product_id, "monthly")
 
-    # Verify receipt with Apple (production first, then sandbox)
-    verify_url = "https://buy.itunes.apple.com/verifyReceipt"
-    payload = {"receipt-data": receipt_data, "password": os.environ.get("APPLE_SHARED_SECRET", "")}
+    payload = _verify_and_decode_apple_jws(jws)
+    if not payload:
+        raise HTTPException(
+            status_code=400,
+            detail="Apple receipt verification failed (could not validate JWS signature)",
+        )
 
-    try:
-        async with httpx.AsyncClient() as http_client:
-            resp = await http_client.post(verify_url, json=payload)
-            result = resp.json()
-            # If status 21007, it's a sandbox receipt — retry with sandbox URL
-            if result.get("status") == 21007:
-                sandbox_url = "https://sandbox.itunes.apple.com/verifyReceipt"
-                resp = await http_client.post(sandbox_url, json=payload)
-                result = resp.json()
+    # Pull canonical fields from the verified JWS payload — never trust the
+    # client-supplied product_id over what Apple signed.
+    signed_product_id = payload.get("productId") or payload.get("product_id") or ""
+    product_id = signed_product_id or requested_product_id
+    if product_id not in apple_plan_map:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown Apple productId in receipt: {product_id!r}",
+        )
+    plan_key = apple_plan_map[product_id]
 
-        if result.get("status") != 0:
-            raise HTTPException(status_code=400, detail=f"Apple receipt verification failed (status: {result.get('status')})")
+    # Bundle-id sanity check — refuses receipts from other apps if the
+    # iOS client is ever spoofed. snake_case fallback covers both legacy
+    # and StoreKit 2 payload styles.
+    expected_bundle = os.environ.get("APPLE_BUNDLE_ID", "com.spentyai.app")
+    signed_bundle = payload.get("bundleId") or payload.get("bundle_id") or ""
+    if signed_bundle and signed_bundle != expected_bundle:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Receipt bundleId {signed_bundle!r} does not match {expected_bundle!r}",
+        )
 
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Apple receipt verification error: {e}")
-        raise HTTPException(status_code=502, detail="Apple verification service unavailable")
+    apple_transaction_id = str(payload.get("transactionId") or payload.get("transaction_id") or "")
+    apple_original_transaction_id = str(
+        payload.get("originalTransactionId")
+        or payload.get("original_transaction_id")
+        or apple_transaction_id
+    )
+    environment = (payload.get("environment") or "").lower()  # "sandbox" / "production"
 
     plan = PLAN_PRICES.get(plan_key, PLAN_PRICES["monthly"])
     now = datetime.now(timezone.utc)
 
-    # Extract the Apple transaction identifiers from the verifyReceipt
-    # response so the App Store Server Notifications V2 webhook can find
-    # this user later (renewal, refund, billing-retry events). Without
-    # these IDs persisted, the V2 handler's lookup
-    #   {"$or": [{"original_transaction_id": ...},
-    #            {"subscription_payment_id": ...}]}
-    # misses every row → user_id is None → the webhook silently drops
-    # every renewal/refund. Symptom in production: subscribers stop
-    # auto-renewing into the next month, refunded users keep paid access.
-    latest_receipt_info = result.get("latest_receipt_info") or []
-    in_app = result.get("receipt", {}).get("in_app") or []
-    # latest_receipt_info is the renewal-aware list; fall back to in_app for
-    # one-time purchases (lifetime / lifetime_offer).
-    txn_records = latest_receipt_info if latest_receipt_info else in_app
-    # Pick the record matching this product_id, else the most recent.
-    matching = [t for t in txn_records if t.get("product_id") == product_id]
-    txn_record = (matching or txn_records or [{}])[-1]
-    apple_transaction_id = txn_record.get("transaction_id")
-    apple_original_transaction_id = txn_record.get("original_transaction_id") or apple_transaction_id
-
-    # Apple returns expires_date_ms for auto-renewing subs (monthly /
-    # quarterly / yearly). Use that when present so our local expiry
-    # exactly matches Apple's billing cycle. Lifetime / lifetime_offer
-    # are non-renewing — fall back to a plan-table calculated expiry.
-    expires_ms = txn_record.get("expires_date_ms")
+    # StoreKit 2 ships expiresDate as ms since epoch on auto-renewing subs.
+    # Lifetime / lifetime_offer are non-renewing — fall back to plan table.
+    expires_ms = payload.get("expiresDate") or payload.get("expires_date_ms")
     if expires_ms:
         try:
             expiry = datetime.fromtimestamp(int(expires_ms) / 1000, tz=timezone.utc)
@@ -12597,28 +12604,41 @@ async def verify_apple_payment(body: dict = Body(...), user: dict = Depends(get_
     else:
         expiry = now + timedelta(days=plan["duration_days"])
 
-    # Store payment record (with Apple txn IDs so webhooks can find this row)
-    order_id = f"apple_{uuid.uuid4().hex[:12]}"
-    await db.payment_orders.insert_one({
-        "order_id": order_id,
+    # Idempotent payment_orders write — if the same originalTransactionId
+    # comes through twice (network retry, transaction listener replay) we
+    # update the same row instead of inserting a duplicate.
+    order_lookup = {
         "user_id": user["user_id"],
-        "plan": plan_key,
-        "amount": plan["amount"],
-        "currency": plan["currency"],
         "payment_provider": "apple",
-        "product_id": product_id,
-        "status": "paid",
-        "paid_at": now,
-        "created_at": now,
-        # Apple transaction identifiers — required by the V2 webhook lookup.
-        "apple_transaction_id": apple_transaction_id,
         "original_transaction_id": apple_original_transaction_id,
-    })
+    }
+    existing_order = await db.payment_orders.find_one(order_lookup)
+    order_id = existing_order["order_id"] if existing_order else f"apple_{uuid.uuid4().hex[:12]}"
+    await db.payment_orders.update_one(
+        order_lookup,
+        {
+            "$set": {
+                "plan": plan_key,
+                "amount": plan["amount"],
+                "currency": plan["currency"],
+                "product_id": product_id,
+                "status": "paid",
+                "paid_at": now,
+                "apple_transaction_id": apple_transaction_id,
+                "environment": environment,
+                "updated_at": now,
+            },
+            "$setOnInsert": {
+                "order_id": order_id,
+                "created_at": now,
+            },
+        },
+        upsert=True,
+    )
 
-    # Activate subscription. We also stash original_transaction_id on the
-    # user doc so the V2 handler's secondary lookup
-    # ({"subscription_payment_id": ...}) hits even if the order row is
-    # ever pruned.
+    # Activate subscription. subscription_payment_id stores the
+    # original_transaction_id so the V2 webhook's secondary lookup hits
+    # even if the payment_orders row is ever pruned.
     await db.users.update_one(
         {"user_id": user["user_id"]},
         {"$set": {
@@ -12627,98 +12647,38 @@ async def verify_apple_payment(body: dict = Body(...), user: dict = Depends(get_
             "subscription_expiry": expiry.isoformat(),
             "subscription_provider": "apple",
             "subscription_payment_id": apple_original_transaction_id,
+            "subscription_auto_renew": True,
             "updated_at": now,
         }},
     )
 
+    logger.info(
+        f"[apple-verify] Activated user={user['user_id']} plan={plan_key} "
+        f"productId={product_id} originalTxn={apple_original_transaction_id} env={environment}"
+    )
+
     return {
+        "success": True,
         "message": "Subscription activated",
         "plan": plan_key,
         "expiry": expiry.isoformat(),
+        "environment": environment,
     }
 
 
-@app.post("/api/payments/apple/webhook")
-async def apple_webhook(request: Request):
-    """Handle Apple App Store server notifications (subscription events)."""
-    try:
-        body = await request.json()
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid JSON body")
-
-    notification_type = body.get("notification_type", "")
-    unified_receipt = body.get("unified_receipt", {})
-    latest_receipt_info = (unified_receipt.get("latest_receipt_info") or [{}])
-    if latest_receipt_info:
-        latest = latest_receipt_info[-1] if isinstance(latest_receipt_info, list) else {}
-    else:
-        latest = {}
-
-    original_transaction_id = latest.get("original_transaction_id", "")
-    logger.info(f"Apple webhook: {notification_type} for txn {original_transaction_id}")
-
-    # TODO: Implement Apple App Store signature verification (StoreKit 2 JWS)
-    # to ensure webhook payloads are authentic and haven't been tampered with.
-    # Basic payload validation
-    if not notification_type or not original_transaction_id:
-        raise HTTPException(status_code=400, detail="Missing required fields: notification_type and original_transaction_id")
-
-    # Find user by apple transaction — search payment_orders. Used by all
-    # downstream branches.
-    order = await db.payment_orders.find_one({
-        "payment_provider": "apple",
-        "status": "paid",
-        "$or": [
-            {"original_transaction_id": original_transaction_id},
-            {"apple_transaction_id": original_transaction_id},
-        ],
-    })
-    if not order:
-        return {"status": "ok"}
-
-    user_id = order["user_id"]
-    now = datetime.now(timezone.utc)
-
-    # Apple distinguishes three different events that the legacy V1 webhook
-    # used to lump together as "cancelled":
-    #   - REFUND          : money returned, access must end immediately.
-    #   - CANCEL          : user toggled auto-renew off in Apple Settings;
-    #                       they keep paid access until the current billing
-    #                       cycle expires.
-    #   - DID_FAIL_TO_RENEW : Apple's auto-charge failed and entered a
-    #                       retry window. Access should continue (the
-    #                       backend gate already grants 30-day grace).
-    # The previous logic flipped the user to "cancelled" for all three,
-    # which prematurely revoked access for users who had only turned off
-    # auto-renew or were in a transient billing-retry state.
-    if notification_type == "REFUND":
-        await db.users.update_one(
-            {"user_id": user_id},
-            {"$set": {
-                "subscription_status": "expired",
-                "updated_at": now,
-            }},
-        )
-    elif notification_type == "CANCEL":
-        # Auto-renew disabled — access keeps until expiry. Mark a flag for
-        # UI ("Renews on…" → "Cancels on…") without yanking the gate.
-        await db.users.update_one(
-            {"user_id": user_id},
-            {"$set": {
-                "subscription_auto_renew": False,
-                "updated_at": now,
-            }},
-        )
-    elif notification_type == "DID_FAIL_TO_RENEW":
-        await db.users.update_one(
-            {"user_id": user_id},
-            {"$set": {
-                "subscription_status": "in_grace_period",
-                "updated_at": now,
-            }},
-        )
-
-    return {"status": "ok"}
+# Removed legacy V1 /api/payments/apple/webhook on 2026-05-10.
+# It accepted unverified JSON and could be used by anyone who knew an
+# original_transaction_id to flip arbitrary users to expired/cancelled.
+# All Apple subscription lifecycle events now flow through the V2
+# endpoint at /api/payments/apple/notifications, which JWS-verifies
+# every payload via _verify_and_decode_apple_jws.
+@app.post("/api/payments/apple/webhook", deprecated=True, include_in_schema=False)
+async def apple_webhook_deprecated(request: Request):
+    """Stub — V1 unverified webhook removed. Returns 410 Gone."""
+    raise HTTPException(
+        status_code=410,
+        detail="V1 Apple webhook removed. Use /api/payments/apple/notifications (V2).",
+    )
 
 
 # Map Android (Google Play) product IDs to internal plan keys. iOS uses the
@@ -12996,18 +12956,30 @@ async def payment_status(user: dict = Depends(get_current_user)):
 
 @app.post("/api/payments/cancel")
 async def cancel_subscription(user: dict = Depends(get_current_user)):
-    """Cancel the user's subscription (keeps access until expiry)."""
+    """Disable auto-renew on the user's subscription. Access continues
+    until the natural expiry — the cron sweep flips the status to
+    expired once expiry passes.
+
+    Earlier this handler set subscription_status="cancelled" directly,
+    which the gate (`is_subscription_currently_active`) treats as
+    "no longer active" → user lost dashboard access immediately even
+    though the docstring promised access until expiry. The Apple V2
+    DID_CHANGE_RENEWAL_STATUS notification arrives shortly after, but
+    until it does the user is locked out. Setting auto_renew=False and
+    leaving status="active" matches the documented contract."""
     user_doc = await db.users.find_one({"user_id": user["user_id"]}, {"_id": 0})
     if not user_doc:
         raise HTTPException(status_code=404, detail="User not found")
 
-    if user_doc.get("subscription_status") != "active":
+    current_status = user_doc.get("subscription_status")
+    if current_status not in ACTIVE_SUBSCRIPTION_STATUSES:
         raise HTTPException(status_code=400, detail="No active subscription to cancel")
 
     await db.users.update_one(
         {"user_id": user["user_id"]},
         {"$set": {
-            "subscription_status": "cancelled",
+            "subscription_auto_renew": False,
+            "subscription_cancelled_at": datetime.now(timezone.utc),
             "updated_at": datetime.now(timezone.utc),
         }},
     )
