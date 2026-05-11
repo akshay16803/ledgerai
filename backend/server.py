@@ -13109,6 +13109,64 @@ async def activate_promo_code(data: PromoCodeRequest, user: dict = Depends(get_c
     }
 
 
+# ─── Admin: Customer Export ──────────────────────────────────────────
+#
+# One-off admin endpoint that returns the full users + payment_orders
+# dump for the authenticated caller to triage real customers. Gated by
+# email whitelist (same ALLOWED_PROMO_EMAILS list — App Review demo
+# account + founder), so a normal logged-in user gets 403.
+#
+# Added 2026-05-10 at user's request to answer "are these real purchases
+# or my test purchases?". Safe to keep — the email gate ensures only the
+# founder + demo account can fetch it.
+
+@app.get("/api/admin/customer-export")
+async def admin_customer_export(user: dict = Depends(get_current_user)):
+    """Return all users + payment_orders for admin triage. Whitelisted only."""
+    if not _user_can_redeem_promo(user):
+        raise HTTPException(status_code=403, detail="Admin access required.")
+
+    # All users — strip Mongo _id.
+    users_cursor = db.users.find({}, {"_id": 0})
+    users_list = await users_cursor.to_list(length=100000)
+
+    # All payment_orders — strip Mongo _id.
+    orders_cursor = db.payment_orders.find({}, {"_id": 0}).sort("created_at", -1)
+    orders_list = await orders_cursor.to_list(length=100000)
+
+    # Subscription events (Apple V2 webhook audit trail).
+    events_cursor = db.subscription_events.find({}, {"_id": 0}).sort("occurred_at", -1)
+    events_list = await events_cursor.to_list(length=100000)
+
+    # Promo activations.
+    promo_cursor = db.promo_activations.find({}, {"_id": 0}).sort("activated_at", -1)
+    promo_list = await promo_cursor.to_list(length=100000)
+
+    # Normalise datetimes for JSON.
+    def _serialise(doc):
+        out = {}
+        for k, v in doc.items():
+            if isinstance(v, datetime):
+                out[k] = v.isoformat()
+            else:
+                out[k] = v
+        return out
+
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "counts": {
+            "users": len(users_list),
+            "payment_orders": len(orders_list),
+            "subscription_events": len(events_list),
+            "promo_activations": len(promo_list),
+        },
+        "users": [_serialise(u) for u in users_list],
+        "payment_orders": [_serialise(o) for o in orders_list],
+        "subscription_events": [_serialise(e) for e in events_list],
+        "promo_activations": [_serialise(p) for p in promo_list],
+    }
+
+
 # ─── Demat / Trading Income ──────────────────────────────────────────
 
 DEMAT_UPLOAD_DIR = "/app/uploads/demat_statements"
