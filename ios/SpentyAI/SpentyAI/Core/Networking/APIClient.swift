@@ -16,6 +16,12 @@ extension Notification.Name {
     /// still see paywall-gated UI on other tabs because AuthManager.user
     /// stays stale until the next app foreground / route change.
     static let subscriptionActivated = Notification.Name("subscriptionActivated")
+    /// Posted whenever an account is created, updated or deleted server-side
+    /// via a non-AccountListView path (today only the AI chat fires this
+    /// when it creates an account from a chat command). AccountListView and
+    /// dashboard balance widgets observe it to reload without a manual
+    /// pull-to-refresh.
+    static let accountsDidChange = Notification.Name("accountsDidChange")
 }
 
 final class APIClient: Sendable {

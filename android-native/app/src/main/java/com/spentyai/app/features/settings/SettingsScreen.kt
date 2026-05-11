@@ -1,5 +1,7 @@
 package com.spentyai.app.features.settings
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -27,6 +29,9 @@ import androidx.compose.material.icons.filled.CurrencyExchange
 import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.Computer
+import androidx.compose.material.icons.filled.OpenInNew
+import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.PersonOff
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Shield
@@ -80,6 +85,10 @@ fun SettingsScreen(
     onNavigateToCurrencySettings: () -> Unit
 ) {
     val state by viewModel.uiState.collectAsState()
+    // Pulled up here (was already pulled down for Reset / Delete dialogs
+    // at line ~612/662) so the "Use SpentyAI on the web" row can fire an
+    // Intent.ACTION_VIEW without re-fetching LocalContext.
+    val context = LocalContext.current
 
     LaunchedEffect(Unit) {
         viewModel.loadSettings()
@@ -352,6 +361,32 @@ fun SettingsScreen(
                     }
                 }
 
+                // Web App Section — promotes the companion www.spentyai.com
+                // site. Slots between Invoice Customization and Privacy to
+                // match iOS SettingsView.webAppSection ordering and keep
+                // the "do more with SpentyAI" sections grouped together.
+                SectionHeader(title = "Also on the web", icon = Icons.Default.Public)
+                SettingsCard {
+                    SettingsNavigationRow(
+                        icon = Icons.Default.Computer,
+                        iconColor = SpentyPrimary,
+                        title = "Use SpentyAI on the web",
+                        subtitle = "Bigger screen for reconciliation, invoices and reports — same account, fully synced.",
+                        onClick = {
+                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.spentyai.com"))
+                            context.startActivity(intent)
+                        },
+                        trailingIcon = Icons.Default.OpenInNew,
+                        subtitleMaxLines = 2
+                    )
+                }
+                Text(
+                    text = "Open www.spentyai.com in any browser and sign in with the same Google or Apple account.",
+                    style = SpentyType.Caption2,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)
+                )
+
                 // Privacy Section — lets the user revoke / re-grant AI processing
                 // consent (mirrors iOS SettingsView.privacySection). Required by
                 // Apple guideline 5.1.1(i) and Google Play User Data policy:
@@ -454,7 +489,16 @@ private fun SettingsNavigationRow(
     iconColor: Color,
     title: String,
     subtitle: String,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    // Optional override for the trailing chevron. Used by the "Use
+    // SpentyAI on the web" row to render an OpenInNew icon instead, so
+    // it's visually obvious the row leaves the app. Defaults to the
+    // existing ChevronRight so callers don't have to change.
+    trailingIcon: ImageVector = Icons.Default.ChevronRight,
+    // Optional override for subtitle line cap. Default 1 preserves
+    // existing rows; the web-app row passes 2 so its descriptive copy
+    // doesn't truncate at narrow widths.
+    subtitleMaxLines: Int = 1
 ) {
     Row(
         modifier = Modifier
@@ -488,11 +532,11 @@ private fun SettingsNavigationRow(
                 text = subtitle,
                 style = SpentyType.Caption1,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1
+                maxLines = subtitleMaxLines
             )
         }
         Icon(
-            imageVector = Icons.Default.ChevronRight,
+            imageVector = trailingIcon,
             contentDescription = null,
             modifier = Modifier.size(20.dp),
             tint = MaterialTheme.colorScheme.onSurfaceVariant

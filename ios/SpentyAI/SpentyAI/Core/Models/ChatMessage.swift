@@ -10,6 +10,11 @@ struct ChatMessage: Codable, Identifiable {
     var invoice: Invoice?
     var billCreated: Bool?
     var bill: Bill?
+    // Set true (with `account` populated) when the AI created a new
+    // financial account via the chat flow. The UI uses this to fire a
+    // refresh notification so AccountListView reloads.
+    var accountCreated: Bool?
+    var account: Account?
 
     enum CodingKeys: String, CodingKey {
         case id = "messageId"
@@ -21,12 +26,15 @@ struct ChatMessage: Codable, Identifiable {
         case invoice
         case billCreated
         case bill
+        case accountCreated
+        case account
     }
 
     init(id: String = UUID().uuidString, role: String? = nil, content: String? = nil,
          transactionPosted: Bool? = nil, transaction: Transaction? = nil,
          invoiceCreated: Bool? = nil, invoice: Invoice? = nil,
-         billCreated: Bool? = nil, bill: Bill? = nil) {
+         billCreated: Bool? = nil, bill: Bill? = nil,
+         accountCreated: Bool? = nil, account: Account? = nil) {
         self.id = id
         self.role = role
         self.content = content
@@ -36,6 +44,8 @@ struct ChatMessage: Codable, Identifiable {
         self.invoice = invoice
         self.billCreated = billCreated
         self.bill = bill
+        self.accountCreated = accountCreated
+        self.account = account
     }
 
     init(from decoder: Decoder) throws {
@@ -49,5 +59,7 @@ struct ChatMessage: Codable, Identifiable {
         self.invoice = try container.decodeIfPresent(Invoice.self, forKey: .invoice)
         self.billCreated = try container.decodeIfPresent(Bool.self, forKey: .billCreated)
         self.bill = try container.decodeIfPresent(Bill.self, forKey: .bill)
+        self.accountCreated = try container.decodeIfPresent(Bool.self, forKey: .accountCreated)
+        self.account = try container.decodeIfPresent(Account.self, forKey: .account)
     }
 }

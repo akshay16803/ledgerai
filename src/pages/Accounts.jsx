@@ -1218,6 +1218,16 @@ export default function Accounts() {
 
   useEffect(() => { loadAccounts(); loadSubTypes(); }, [loadAccounts, loadSubTypes]);
 
+  // Listen for AI-driven account creation (Dashboard.jsx's AIChatPanel
+  // dispatches `spenty:accountsChanged` whenever the chat endpoint
+  // returns account_created:true). Mirrors iOS .accountsDidChange
+  // observer on AccountListView + Android AppEvents.accountsChanged.
+  useEffect(() => {
+    const handler = () => { loadAccounts(); };
+    window.addEventListener('spenty:accountsChanged', handler);
+    return () => window.removeEventListener('spenty:accountsChanged', handler);
+  }, [loadAccounts]);
+
   // Get sub-type options for a given account type
   const getSubTypeOptions = useCallback((accType) => {
     return (subTypesMap[accType] || []).map(st => ({ value: st.name.toLowerCase().replace(/\s+/g, '_'), label: st.name }));

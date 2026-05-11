@@ -10,7 +10,16 @@ data class ChatMessage(
     val content: String,
     val timestamp: String? = null,
     @SerialName("created_at") val createdAt: String? = null,
-    val metadata: ChatMetadata? = null
+    val metadata: ChatMetadata? = null,
+    // AI-side entity creation flags (mirror backend response shape).
+    // When true the corresponding entity has been saved server-side and
+    // the UI should refresh the relevant list. Added 2026-05-12 for AI
+    // account creation; transaction/invoice/bill flags wired in same
+    // commit for completeness.
+    @SerialName("transaction_posted") val transactionPosted: Boolean? = null,
+    @SerialName("invoice_created") val invoiceCreated: Boolean? = null,
+    @SerialName("bill_created") val billCreated: Boolean? = null,
+    @SerialName("account_created") val accountCreated: Boolean? = null
 )
 
 @Serializable

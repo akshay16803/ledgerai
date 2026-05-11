@@ -74,6 +74,17 @@ class AccountsViewModel(private val apiClient: ApiClient) : ViewModel() {
     private val _uiState = MutableStateFlow(AccountsUiState())
     val uiState: StateFlow<AccountsUiState> = _uiState.asStateFlow()
 
+    init {
+        // Reload when an account is created outside this screen — today
+        // only AI chat fires AppEvents.accountsChanged. Mirror of iOS's
+        // .onReceive(.accountsDidChange) on AccountListView.
+        viewModelScope.launch {
+            com.spentyai.app.core.events.AppEvents.accountsChanged.collect {
+                loadAccounts()
+            }
+        }
+    }
+
     // MARK: - Computed Properties
 
     fun filteredAccounts(): List<Account> {

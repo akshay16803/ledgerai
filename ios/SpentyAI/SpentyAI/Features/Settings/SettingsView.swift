@@ -96,11 +96,61 @@ struct SettingsView: View {
             businessProfileSection
             currencyLocaleSection
             invoiceCustomizationSection
+            webAppSection
             privacySection
             legalSupportSection
             accountSection
         }
         .scrollContentBackground(.hidden)
+    }
+
+    // MARK: - Web App Section
+
+    /// Promotes the companion web app at spentyai.com. Many SpentyAI users
+    /// keep the iPhone app for capture-on-the-go and prefer the larger
+    /// desktop UI for reconciliation, multi-line invoice editing, and bulk
+    /// imports. Surfacing the link here means they don't have to discover
+    /// it via the marketing site. Slots between Invoice Customization and
+    /// Privacy so the existing "do more with SpentyAI" sections stay
+    /// grouped together; never above Business Profile so first-run users
+    /// still see the onboarding sections first.
+    private var webAppSection: some View {
+        Section {
+            Button {
+                if let url = URL(string: "https://www.spentyai.com") {
+                    UIApplication.shared.open(url)
+                }
+            } label: {
+                HStack(spacing: 14) {
+                    sectionIcon("laptopcomputer", color: .spentyPrimary)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Use SpentyAI on the web")
+                            .font(SpentyFonts.body)
+                            .foregroundStyle(.primary)
+                        Text("Bigger screen for reconciliation, invoices and reports — same account, fully synced.")
+                            .font(SpentyFonts.caption1)
+                            .foregroundStyle(.spentyTextSecondary)
+                            .multilineTextAlignment(.leading)
+                    }
+                    Spacer()
+                    Image(systemName: "arrow.up.right.square")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.spentyTextSecondary)
+                }
+                .padding(.vertical, 4)
+            }
+            .buttonStyle(.plain)
+        } header: {
+            Label("Also on the web", systemImage: "globe")
+                .font(SpentyFonts.caption1)
+                .fontWeight(.semibold)
+                .foregroundColor(.spentyPrimary)
+                .textCase(nil)
+        } footer: {
+            Text("Open www.spentyai.com in any browser and sign in with the same Google or Apple account.")
+                .font(SpentyFonts.caption2)
+                .foregroundStyle(.spentyTextSecondary)
+        }
     }
 
     // MARK: - Privacy Section

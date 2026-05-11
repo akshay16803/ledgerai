@@ -10957,6 +10957,22 @@ You can help the user create sales invoices. STRICT RULES:
 8. NEVER create an invoice without explicit user confirmation of the details.
 9. You can answer questions about existing invoices, outstanding amounts, debtor status, and customer sales history using the data above.
 
+═══ CREATING ACCOUNTS ═══
+You can help the user add a new financial account (bank account, credit card, cash wallet, loan, brokerage / demat). STRICT RULES:
+1. You MUST have AT MINIMUM: name (e.g. "HDFC Savings", "ICICI Credit Card") AND account_type (one of: "asset", "liability", "equity", "investment").
+2. Map the user's words: bank accounts / savings / cash / wallet / FD → "asset"; credit card / loan / mortgage / overdraft → "liability"; capital / owner equity → "equity"; demat / brokerage / mutual funds → "investment".
+3. ASK for missing required info one at a time — do NOT guess. Sensible defaults you may suggest but still confirm: opening_balance = 0, currency = "INR". Optional fields you can ask about: account_number (last 4 is fine), sub_type (e.g. "savings", "credit_card", "demat"), description, balance_as_of_date (ISO).
+4. For account_type "liability" where the user mentions a loan, ALSO ask about: loan_sanctioned_amount, loan_interest_rate (annual %), loan_tenure_months, loan_emi_amount, loan_emi_day (1–28). If they want an EMI auto-tracked, all four EMI fields must be present together; otherwise skip them.
+5. For account_type "investment" with demat sub_type, ASK for broker_name.
+6. Before creating, show a short summary: name, type, opening balance + currency, and any optional fields they provided.
+7. Reject duplicates politely: if an account with the same name already exists in the ACCOUNTS list above, warn the user and confirm they really want a second one.
+8. When ALL required fields are confirmed by the user, output the account JSON wrapped EXACTLY like this:
+|||ACCOUNT|||
+{{"name": "...", "account_type": "asset|liability|equity|investment", "sub_type": "... or null", "account_number": "... or null", "opening_balance": 0, "currency": "INR", "description": "... or null", "balance_as_of_date": "YYYY-MM-DD or null", "loan_interest_rate": null, "loan_tenure_months": null, "loan_emi_amount": null, "loan_emi_day": null, "loan_sanctioned_amount": null, "broker_name": "... or null"}}
+|||ACCOUNT|||
+9. The server auto-generates the account_id and recalculates the balance — do NOT invent an account_id.
+10. NEVER create an account without explicit user confirmation.
+
 ═══ CREATING PURCHASE BILLS ═══
 You can help the user record purchase bills (expenses from vendors/suppliers). STRICT RULES:
 1. You MUST have AT MINIMUM: vendor_id (pick from existing vendors or ask to create), at least one line item with description and rate, bill_type ("simple" or "gst"), and payment_status ("paid", "partial", or "unpaid").
@@ -11332,6 +11348,110 @@ You can help the user record purchase bills (expenses from vendors/suppliers). S
                 clean_reply = clean_reply.replace(f"|||BILL|||{bill_parts[1]}|||BILL|||", "")
                 clean_reply += "\n\n⚠️ I tried to create a bill but the format was invalid. Let me try again — please confirm the details."
 
+    # ── Check for account creation ──
+    # Mirrors the transaction / invoice / bill sentinel pattern above.
+    # When the model emits |||ACCOUNT|||{json}|||ACCOUNT|||, validate
+    # the payload, refuse on duplicate name+account_number (same guard
+    # as POST /api/accounts), insert via the same insert path so balance
+    # recalculation + optional loan-EMI auto-creation still apply.
+    account_created = False
+    created_account = None
+
+    if "|||ACCOUNT|||" in clean_reply:
+        acc_parts = clean_reply.split("|||ACCOUNT|||")
+        if len(acc_parts) >= 3:
+            acc_json_str = acc_parts[1].strip()
+            try:
+                acc_data = json.loads(acc_json_str)
+                acc_errors = []
+
+                acc_name = (acc_data.get("name") or "").strip()
+                acc_type = (acc_data.get("account_type") or "").strip().lower()
+                if not acc_name:
+                    acc_errors.append("Account name is required")
+                if acc_type not in {"asset", "liability", "equity", "investment"}:
+                    acc_errors.append("account_type must be asset, liability, equity, or investment")
+
+                # Duplicate guard — same name + same account_number (matches
+                # /api/accounts/create logic at server.py:1628).
+                acc_number = acc_data.get("account_number")
+                dup_query = {"user_id": user_id, "name": acc_name}
+                if acc_number:
+                    dup_query["account_number"] = acc_number
+                if not acc_errors:
+                    dup = await db.accounts.find_one(dup_query)
+                    if dup:
+                        acc_errors.append(f"An account named '{acc_name}' already exists")
+
+                if acc_errors:
+                    clean_reply = clean_reply.replace(f"|||ACCOUNT|||{acc_parts[1]}|||ACCOUNT|||", "")
+                    clean_reply += f"\n\n⚠️ Could not create account: {', '.join(acc_errors)}"
+                else:
+                    acc_opening = float(acc_data.get("opening_balance") or 0)
+                    acc_currency = (acc_data.get("currency") or "INR").upper()
+                    acc_now = datetime.now(timezone.utc)
+                    acc_doc = {
+                        "account_id": "acc_" + uuid.uuid4().hex[:12],
+                        "user_id": user_id,
+                        "name": acc_name,
+                        "account_type": acc_type,
+                        "sub_type": acc_data.get("sub_type"),
+                        "account_number": acc_number,
+                        "opening_balance": acc_opening,
+                        "balance": acc_opening,
+                        "currency": acc_currency,
+                        "description": acc_data.get("description"),
+                        "balance_as_of_date": acc_data.get("balance_as_of_date"),
+                        "loan_interest_rate": acc_data.get("loan_interest_rate"),
+                        "loan_tenure_months": acc_data.get("loan_tenure_months"),
+                        "loan_emi_amount": acc_data.get("loan_emi_amount"),
+                        "loan_emi_day": acc_data.get("loan_emi_day"),
+                        "loan_sanctioned_amount": acc_data.get("loan_sanctioned_amount"),
+                        "broker_name": acc_data.get("broker_name"),
+                        "created_at": acc_now,
+                        "updated_at": acc_now,
+                        "source": "ai_chat",
+                    }
+                    await db.accounts.insert_one(acc_doc)
+                    # Recalculate to apply opening_balance + any prior transactions
+                    # tied to this account_id (none expected for fresh accounts but
+                    # keeps parity with the manual create endpoint).
+                    try:
+                        await recalculate_account_balance(user_id, acc_doc["account_id"])
+                    except Exception as _rb_err:
+                        logger.warning(f"[ai-chat] recalculate_account_balance failed: {_rb_err}")
+                    # If a complete loan-EMI schedule was provided, create the
+                    # recurring expense the same way POST /api/accounts does.
+                    if (acc_type == "liability"
+                        and acc_doc["loan_emi_amount"]
+                        and acc_doc["loan_emi_day"]
+                        and acc_doc["loan_tenure_months"]):
+                        try:
+                            await _create_loan_emi_recurring(user_id, acc_doc)
+                        except Exception as _emi_err:
+                            logger.warning(f"[ai-chat] loan EMI auto-create failed: {_emi_err}")
+
+                    acc_doc.pop("_id", None)
+                    account_created = True
+                    created_account = {
+                        "account_id": acc_doc["account_id"],
+                        "name": acc_doc["name"],
+                        "account_type": acc_doc["account_type"],
+                        "sub_type": acc_doc.get("sub_type"),
+                        "opening_balance": acc_doc["opening_balance"],
+                        "balance": acc_doc["balance"],
+                        "currency": acc_doc["currency"],
+                    }
+
+                    clean_reply = clean_reply.replace(f"|||ACCOUNT|||{acc_parts[1]}|||ACCOUNT|||", "").strip()
+                    if not clean_reply:
+                        symbol = {"INR": "₹", "USD": "$", "EUR": "€", "GBP": "£"}.get(acc_currency, acc_currency + " ")
+                        clean_reply = f"✅ Account '{acc_name}' created — opening balance {symbol}{acc_opening:,.2f}"
+
+            except json.JSONDecodeError:
+                clean_reply = clean_reply.replace(f"|||ACCOUNT|||{acc_parts[1]}|||ACCOUNT|||", "")
+                clean_reply += "\n\n⚠️ I tried to create the account but the format was invalid. Could you confirm the details again?"
+
     # Persist both user and assistant messages to chat history
     now_ts = datetime.now(timezone.utc)
     try:
@@ -11339,7 +11459,8 @@ You can help the user record purchase bills (expenses from vendors/suppliers). S
             {"user_id": user_id, "role": "user", "content": message, "created_at": now_ts},
             {"user_id": user_id, "role": "assistant", "content": clean_reply.strip(),
              "transaction_posted": transaction_posted, "invoice_created": invoice_created,
-             "bill_created": bill_created, "created_at": now_ts + timedelta(milliseconds=1)},
+             "bill_created": bill_created, "account_created": account_created,
+             "created_at": now_ts + timedelta(milliseconds=1)},
         ])
     except Exception as e:
         logger.error(f"Failed to persist chat history: {e}")
@@ -11352,6 +11473,8 @@ You can help the user record purchase bills (expenses from vendors/suppliers). S
         "invoice": created_invoice,
         "bill_created": bill_created,
         "bill": created_bill,
+        "account_created": account_created,
+        "account": created_account,
     }
 
 

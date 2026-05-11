@@ -102,6 +102,13 @@ class AIChatViewModel(
                             scrollToBottomTrigger = it.scrollToBottomTrigger + 1
                         )
                     }
+                    // If the AI just created a financial account, push a
+                    // refresh event so any open AccountListScreen reloads
+                    // without the user having to pull-to-refresh. Mirrors
+                    // iOS's .accountsDidChange NotificationCenter post.
+                    if (result.data.accountCreated == true) {
+                        com.spentyai.app.core.events.AppEvents.notifyAccountsChanged()
+                    }
                     // Speak the AI response if voice response or voice mode is active.
                     if (context != null && (_isVoiceResponseEnabled.value || _isVoiceModeActive.value)) {
                         val content = result.data.content

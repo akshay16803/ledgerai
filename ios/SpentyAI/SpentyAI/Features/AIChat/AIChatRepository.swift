@@ -20,6 +20,11 @@ struct ChatResponse: Codable {
     let invoice: Invoice?
     let billCreated: Bool?
     let bill: Bill?
+    // New 2026-05-12: AI can now create accounts. Mirrors the
+    // transaction/invoice/bill fields above. account_created indicates
+    // a successful insert; account carries the new Account payload.
+    let accountCreated: Bool?
+    let account: Account?
 
     /// Convert the flat API response into a ChatMessage for the UI.
     var asChatMessage: ChatMessage {
@@ -31,7 +36,9 @@ struct ChatResponse: Codable {
             invoiceCreated: invoiceCreated,
             invoice: invoice,
             billCreated: billCreated,
-            bill: bill
+            bill: bill,
+            accountCreated: accountCreated,
+            account: account
         )
     }
 }

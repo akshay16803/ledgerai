@@ -70,6 +70,12 @@ struct AccountListView: View {
                     await viewModel.loadSubTypes()
                 }
             }
+            // Reload when an account is created/updated outside this screen
+            // (today only the AI chat fires .accountsDidChange when it
+            // creates an account from a chat command).
+            .onReceive(NotificationCenter.default.publisher(for: .accountsDidChange)) { _ in
+                Task { await viewModel.loadAccounts() }
+            }
         }
     }
 

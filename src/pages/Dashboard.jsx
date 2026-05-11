@@ -225,6 +225,19 @@ function AIChatPanel() {
       if (res.bill_created && res.bill) {
         assistantMessage.bill = res.bill;
       }
+      // AI account creation (added 2026-05-12). Mirrors the
+      // transaction/invoice/bill branches above. We surface the created
+      // account on the message so the AIChatPanel can render a success
+      // pill, AND we dispatch a window event so any open Accounts page
+      // hot-refreshes without the user reloading. Pattern mirrors iOS's
+      // .accountsDidChange NotificationCenter post and Android's
+      // AppEvents.notifyAccountsChanged().
+      if (res.account_created && res.account) {
+        assistantMessage.account = res.account;
+        try {
+          window.dispatchEvent(new CustomEvent('spenty:accountsChanged', { detail: res.account }));
+        } catch (_e) { /* SSR / older browsers — safe to ignore */ }
+      }
       setMessages(prev => [...prev, assistantMessage]);
     } catch (err) {
       setMessages(prev => [...prev, { role: 'assistant', content: 'Sorry, something went wrong. Please try again.' }]);

@@ -71,6 +71,14 @@ final class AIChatViewModel {
             messages.append(response)
             scrollToLastMessageTop()
 
+            // If the AI just created an account, fire a refresh notification
+            // so any open AccountListView (and dashboard balance widgets) pick
+            // it up without the user having to pull-to-refresh. Mirrors the
+            // pattern used for AI-posted transactions.
+            if response.accountCreated == true {
+                NotificationCenter.default.post(name: .accountsDidChange, object: nil)
+            }
+
             // Speak the response if voice responses are enabled or voice mode is active
             if (isVoiceResponseEnabled || isVoiceModeActive), let content = response.content, !content.isEmpty {
                 speechManager.speak(content)
