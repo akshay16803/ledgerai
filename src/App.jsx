@@ -45,7 +45,12 @@ function PageBoundary({ children }) {
   return <ErrorBoundary fullScreen={false}>{children}</ErrorBoundary>;
 }
 
-function ProtectedRoute({ children, requireSubscription = true }) {
+function ProtectedRoute({ children, requireSubscription = false }) {
+  // Pivot 2026-05-13: SpentyAI is free for every signed-in user.
+  // requireSubscription default flipped to false. The only routes that
+  // should still pass requireSubscription={true} are the EmailSync +
+  // SMSSync pages (gated as the paid Premium tier); everything else
+  // just requires a signed-in user.
   const { user, loading } = useAuth();
   if (loading) {
     return (
@@ -55,9 +60,11 @@ function ProtectedRoute({ children, requireSubscription = true }) {
     );
   }
   if (!user) return <Navigate to="/login" replace />;
-  // Gate behind subscription — redirect to billing if no active plan
+  // Premium-only routes (Email Sync, SMS Sync) bounce to Billing if the
+  // user doesn't have an active subscription. All other routes are free
+  // for signed-in users.
   if (requireSubscription && user.subscription_status !== 'active') {
-    return <Navigate to="/billing" replace />;
+    return <Navigate to="/billing?reason=premium_required" replace />;
   }
   return children;
 }
@@ -121,7 +128,7 @@ export default function App() {
       <Route path="/cashflow" element={<ProtectedRoute><AppLayout><PageBoundary><CashFlow /></PageBoundary></AppLayout></ProtectedRoute>} />
       <Route path="/reconciliation" element={<ProtectedRoute><AppLayout><PageBoundary><Reconciliation /></PageBoundary></AppLayout></ProtectedRoute>} />
       <Route path="/reports" element={<ProtectedRoute><AppLayout><PageBoundary><Reports /></PageBoundary></AppLayout></ProtectedRoute>} />
-      <Route path="/email-sync" element={<ProtectedRoute><AppLayout><PageBoundary><EmailSync /></PageBoundary></AppLayout></ProtectedRoute>} />
+      <Route path="/email-sync" element={<ProtectedRoute requireSubscription={true}><AppLayout><PageBoundary><EmailSync /></PageBoundary></AppLayout></ProtectedRoute>} />
       <Route path="/records" element={<ProtectedRoute><AppLayout><PageBoundary><Records /></PageBoundary></AppLayout></ProtectedRoute>} />
       <Route path="/past-insights" element={<ProtectedRoute><AppLayout><PageBoundary><TaxSummary /></PageBoundary></AppLayout></ProtectedRoute>} />
       <Route path="/feature-requests" element={<ProtectedRoute><AppLayout><PageBoundary><FeatureRequests /></PageBoundary></AppLayout></ProtectedRoute>} />

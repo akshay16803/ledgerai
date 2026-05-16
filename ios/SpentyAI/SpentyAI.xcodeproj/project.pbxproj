@@ -71,6 +71,7 @@
 		61F97D2B4D28550E6BFD5F13 /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BA646FC247883F4D4CD4033 /* DashboardView.swift */; };
 		628DB16339870EAD4A6D7D3B /* BillingViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = E65698741C9C2DC3FA3441A5 /* BillingViewModel.swift */; };
 		AABBCC112233445566778899 /* AppleTransactionObserver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 998877665544332211FFEEDD /* AppleTransactionObserver.swift */; };
+		BBCCDD223344556677889900 /* PremiumFeatureSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABBCCDDEEFF112233445566 /* PremiumFeatureSheet.swift */; };
 		63099DEE2AC6048FC3C7167E /* ReconciliationViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 530595B48B91CEAF5F85870F /* ReconciliationViewModel.swift */; };
 		659BDABD1EE2900468D5A1EC /* AccountFormView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0AA5E63CA1F5E68390AE29DF /* AccountFormView.swift */; };
 		6836D64285E61A796FE62766 /* CashFlowChartView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15A61798A6079246EADEEF0C /* CashFlowChartView.swift */; };
@@ -329,6 +330,7 @@
 		E5F6A7B8C9D0E1F2A3B4C5D6 /* AppShortcuts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppShortcuts.swift; sourceTree = "<group>"; };
 		E65698741C9C2DC3FA3441A5 /* BillingViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BillingViewModel.swift; sourceTree = "<group>"; };
 		998877665544332211FFEEDD /* AppleTransactionObserver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleTransactionObserver.swift; sourceTree = "<group>"; };
+		AABBCCDDEEFF112233445566 /* PremiumFeatureSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PremiumFeatureSheet.swift; sourceTree = "<group>"; };
 		E9E599087BE5B3106A9784FA /* Statement.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Statement.swift; sourceTree = "<group>"; };
 		EC7DE4AFD07DDBC4BCFFF9CE /* CustomerFormView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CustomerFormView.swift; sourceTree = "<group>"; };
 		EC8863F87B4BDEB927A429CC /* VendorRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VendorRepository.swift; sourceTree = "<group>"; };
@@ -794,6 +796,7 @@
 				AA11BB22CC33DD44EE55FF01 /* LifetimeOfferManager.swift */,
 				AA11BB22CC33DD44EE55FF03 /* LifetimeOfferSheet.swift */,
 				998877665544332211FFEEDD /* AppleTransactionObserver.swift */,
+				AABBCCDDEEFF112233445566 /* PremiumFeatureSheet.swift */,
 			);
 			path = Billing;
 			sourceTree = "<group>";
@@ -977,6 +980,7 @@
 				E452840A602311E2425F9568 /* BillingView.swift in Sources */,
 				628DB16339870EAD4A6D7D3B /* BillingViewModel.swift in Sources */,
 				AABBCC112233445566778899 /* AppleTransactionObserver.swift in Sources */,
+				BBCCDD223344556677889900 /* PremiumFeatureSheet.swift in Sources */,
 				E13DABCF84618621007FE4ED /* PaymentHistoryView.swift in Sources */,
 				AA11BB22CC33DD44EE55FF02 /* LifetimeOfferManager.swift in Sources */,
 				AA11BB22CC33DD44EE55FF04 /* LifetimeOfferSheet.swift in Sources */,

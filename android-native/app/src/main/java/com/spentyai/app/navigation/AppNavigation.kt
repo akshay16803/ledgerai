@@ -172,32 +172,14 @@ fun AppNavigation(
     }
 
     val billingState by billingViewModel.uiState.collectAsState()
-    val statusResolved = billingState.currentStatus != null
     val isSubscriptionActive = billingState.currentStatus?.isActive == true
 
-    // Show a loading state until we have a definitive status from the backend.
-    // (currentStatus is null until loadAll() completes — even before isLoading flips.)
-    if (!statusResolved) {
-        LoadingView()
-        return
-    }
-
-    if (statusResolved && !isSubscriptionActive) {
-        com.spentyai.app.features.onboarding.SubscriptionPaywallScreen(
-            viewModel = billingViewModel,
-            onDismiss = { /* gate cannot be dismissed without signing out */ },
-            onSubscribed = {
-                // Status flipped → re-query so the gate releases.
-                billingViewModel.loadAll()
-            },
-            onSignOut = { authManager.logout() },
-            // Surface backend-known status + provider so the paywall can show
-            // an "expired" or "managed-elsewhere" banner and block double-billing.
-            subscriptionStatus = billingState.currentStatus?.status,
-            subscriptionProvider = billingState.currentStatus?.provider,
-        )
-        return
-    }
+    // Pivot 2026-05-13: SpentyAI is free for every signed-in user. The
+    // full-app SubscriptionPaywall is no longer presented after sign-in.
+    // EmailSync + SMSSync each present their own PremiumFeatureSheet on
+    // entry. We still load the billing state so `isSubscriptionActive`
+    // is available downstream for those feature-level gates, but it's
+    // no longer routing the user away from the dashboard.
 
     val pastInsightsRepository = remember { PastInsightsRepository(apiClient) }
     val pastInsightsViewModel = remember { PastInsightsViewModel(pastInsightsRepository) }

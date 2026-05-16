@@ -30,15 +30,13 @@ struct AppRouter: View {
                 })
             } else if !authManager.isAuthenticated {
                 LoginView(authManager: authManager)
-            } else if let user = authManager.user, !user.hasActiveSubscription {
-                SubscriptionPaywall(
-                    subscriptionStatus: user.subscriptionStatus,
-                    subscriptionProvider: user.subscriptionProvider,
-                    onSubscribed: {
-                        Task { await authManager.checkSession() }
-                    }
-                )
             } else if isPad {
+                // Pivot 2026-05-13: SpentyAI is free for every signed-in
+                // user. The full-app SubscriptionPaywall is no longer
+                // shown after sign-in. Email Sync and SMS Auto-detection
+                // each present their own PremiumFeatureSheet on entry,
+                // and BillingView is still reachable from Settings for
+                // anyone who wants to manage or start a subscription.
                 SidebarView()
             } else {
                 MainTabView()

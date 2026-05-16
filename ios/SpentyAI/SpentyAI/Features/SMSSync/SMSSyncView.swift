@@ -2,6 +2,8 @@ import SwiftUI
 
 struct SMSSyncView: View {
 
+    @Environment(AuthManager.self) var authManager
+    @Environment(\.dismiss) private var dismiss
     @State private var viewModel = SMSSyncViewModel()
 
     // AI Processing Consent — required by Apple guideline 5.1.1(i)/5.1.2(i) before
@@ -9,6 +11,16 @@ struct SMSSyncView: View {
     // The pending action is invoked once consent is granted.
     @State private var showConsentSheet = false
     @State private var pendingAIAction: (() -> Void)?
+
+    // Premium gate (added 2026-05-13). SMS Auto-Detection is the paid
+    // tier. If the user isn't subscribed, present the modern
+    // PremiumFeatureSheet on entry. See EmailSyncView for the matching
+    // gate; rationale is identical.
+    @State private var showPremiumSheet = false
+
+    private var hasPremium: Bool {
+        authManager.user?.hasActiveSubscription == true
+    }
 
     var body: some View {
         ScrollView {
@@ -26,7 +38,19 @@ struct SMSSyncView: View {
         .navigationTitle("SMS Sync")
         .navigationBarTitleDisplayMode(.large)
         .task {
+            if !hasPremium {
+                showPremiumSheet = true
+            }
             await viewModel.loadStats()
+        }
+        .sheet(isPresented: $showPremiumSheet, onDismiss: {
+            if !hasPremium { dismiss() }
+        }) {
+            PremiumFeatureSheet.smsSync(onClose: {
+                showPremiumSheet = false
+            })
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showConsentSheet) {
             AIConsentSheet {

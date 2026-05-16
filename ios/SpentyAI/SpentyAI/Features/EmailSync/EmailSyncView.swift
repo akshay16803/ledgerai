@@ -4,6 +4,8 @@ struct EmailSyncView: View {
 
 
     @Environment(LocalizationManager.self) var lang
+    @Environment(AuthManager.self) var authManager
+    @Environment(\.dismiss) private var dismiss
     @State private var viewModel = EmailSyncViewModel()
 
     // AI Processing Consent — required by Apple guideline 5.1.1(i)/5.1.2(i) before
@@ -11,6 +13,17 @@ struct EmailSyncView: View {
     // The pending action is invoked once consent is granted.
     @State private var showConsentSheet = false
     @State private var pendingAIAction: (() -> Void)?
+
+    // Premium gate (added 2026-05-13). Email Sync is the paid tier. If
+    // the user isn't subscribed, present the modern PremiumFeatureSheet
+    // on entry. Backend already 402s the actual sync endpoints, but
+    // showing the upsell sheet locally makes the UX feel intentional
+    // rather than punitive.
+    @State private var showPremiumSheet = false
+
+    private var hasPremium: Bool {
+        authManager.user?.hasActiveSubscription == true
+    }
 
     var body: some View {
         ScrollView {
@@ -34,12 +47,33 @@ struct EmailSyncView: View {
             await viewModel.loadAll()
         }
         .task {
+            // Gate Premium: open the Unlock modal on entry if the user
+            // isn't subscribed. We still load stats in the background so
+            // that subscribers see real data while non-subscribers see a
+            // dimmed preview behind the sheet.
+            if !hasPremium {
+                showPremiumSheet = true
+            }
             await viewModel.loadAll()
         }
         .overlay {
             if viewModel.isLoading && !viewModel.hasAnyAccount && viewModel.syncStatsResponse == nil {
                 LoadingView(message: "Loading sync status...")
             }
+        }
+        .sheet(isPresented: $showPremiumSheet, onDismiss: {
+            // If the user dismissed without subscribing, bounce them out
+            // of EmailSync (they can't actually use it). This avoids the
+            // "I closed the sheet and now I'm staring at a screen I
+            // can't use" trap.
+            if !hasPremium { dismiss() }
+        }) {
+            PremiumFeatureSheet.emailSync(onClose: {
+                showPremiumSheet = false
+            })
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+            .interactiveDismissDisabled(false)
         }
         .sheet(isPresented: $viewModel.showSyncDatePicker, onDismiss: {
             viewModel.cancelSyncDatePicker()
