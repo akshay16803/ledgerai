@@ -62,15 +62,27 @@ fun EmailSyncScreen(
     // makes the UX feel intentional rather than a punitive error toast.
     val billingState by billingViewModel.uiState.collectAsState()
     val hasPremium = billingState.currentStatus?.isActive == true
+    val statusLoaded = billingState.currentStatus != null
     var showPremiumSheet by remember { mutableStateOf(false) }
-    var justSubscribed by remember { mutableStateOf(false) }
+    var initialGateChecked by remember { mutableStateOf(false) }
 
+    // Initial gate decision — runs ONCE after the backend subscription
+    // status has loaded. Waiting for `statusLoaded` avoids the flash
+    // where currentStatus is briefly null on first composition and the
+    // sheet would otherwise open for subscribers too.
+    LaunchedEffect(statusLoaded) {
+        if (!statusLoaded || initialGateChecked) return@LaunchedEffect
+        initialGateChecked = true
+        if (!hasPremium) showPremiumSheet = true
+    }
+
+    // Auto-close on successful purchase. Without this, after Play returns
+    // success and the backend marks the user active, hasPremium flips to
+    // true but the sheet stays open — the user paid yet still sees
+    // "Unlock Email Sync" instead of the unlocked screen.
     LaunchedEffect(hasPremium) {
-        // Only open the sheet on entry for non-subscribers. If they
-        // subscribe successfully we flip `justSubscribed=true` first so
-        // the sheet-close path doesn't bounce them back out.
-        if (!hasPremium && !justSubscribed) {
-            showPremiumSheet = true
+        if (hasPremium && showPremiumSheet) {
+            showPremiumSheet = false
         }
     }
 
@@ -107,15 +119,19 @@ fun EmailSyncScreen(
     }
 
     // Premium gate sheet — presented on entry for non-subscribers (mirror of
-    // iOS PremiumFeatureSheet.emailSync). onDismiss without subscribing
-    // pops the user back to where they came from so they don't land on a
+    // iOS PremiumFeatureSheet.emailSync). Both the gesture-dismiss path
+    // (onDismissRequest) and the in-sheet "Maybe later" button (onClose)
+    // route through `closeSheet()`. If the user closes the sheet WITHOUT
+    // having become premium (the success path is handled by the auto-close
+    // LaunchedEffect above), pop the screen — they shouldn't be left on a
     // screen they can't actually use.
     if (showPremiumSheet) {
+        val closeSheet: () -> Unit = {
+            showPremiumSheet = false
+            if (!hasPremium) onBack()
+        }
         ModalBottomSheet(
-            onDismissRequest = {
-                showPremiumSheet = false
-                if (!hasPremium && !justSubscribed) onBack()
-            },
+            onDismissRequest = closeSheet,
             containerColor = MaterialTheme.colorScheme.surface
         ) {
             PremiumFeatureSheet.EmailSync(
@@ -126,15 +142,13 @@ fun EmailSyncScreen(
                     val details = billingState.productDetailsList
                         .firstOrNull { it.productId == BillingRepository.PRODUCT_MONTHLY }
                         ?: return@onSub
-                    // Mark before launching so the LaunchedEffect(hasPremium)
-                    // re-trigger doesn't re-open the sheet between purchase
-                    // success and the backend / Play status refresh.
-                    justSubscribed = true
                     billingViewModel.purchaseSubscription(details, act)
+                    // No need to mark a local flag — when Play returns
+                    // success the backend flips currentStatus.isActive,
+                    // the auto-close LaunchedEffect fires, and the !hasPremium
+                    // check in closeSheet keeps the user on this screen.
                 },
-                onClose = {
-                    showPremiumSheet = false
-                }
+                onClose = closeSheet
             )
         }
     }

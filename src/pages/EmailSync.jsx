@@ -678,12 +678,25 @@ export default function EmailSync() {
   // modal on mount. Mirrors iOS EmailSyncView + Android EmailSyncScreen.
   // Backend already 402s /api/email/* endpoints for free users — this just
   // makes the UX intentional rather than letting them hit error toasts.
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const hasPremium = user?.subscription_status === 'active';
-  const [showPremiumModal, setShowPremiumModal] = useState(!hasPremium);
+  const [showPremiumModal, setShowPremiumModal] = useState(false);
+  const [initialGateChecked, setInitialGateChecked] = useState(false);
+
+  // Wait for AuthContext to finish loading before deciding whether to
+  // open the modal. Without this guard, subscribers see a brief flash of
+  // the upsell modal during the auth round-trip because `user` is null
+  // on first render and `hasPremium` resolves to false.
   useEffect(() => {
-    // If the user subscribes mid-session (e.g. completes PayU and returns),
-    // close the modal automatically.
+    if (authLoading || initialGateChecked) return;
+    setInitialGateChecked(true);
+    if (!hasPremium) setShowPremiumModal(true);
+  }, [authLoading, hasPremium, initialGateChecked]);
+
+  // Auto-close if the user subscribes mid-session (e.g. completes PayU
+  // and returns to /email-sync — AuthContext.checkAuth re-runs on mount
+  // and flips user.subscription_status to 'active').
+  useEffect(() => {
     if (hasPremium) setShowPremiumModal(false);
   }, [hasPremium]);
 
