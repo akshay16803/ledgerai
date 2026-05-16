@@ -411,7 +411,12 @@ export default function Billing() {
           <div style={{ flex: 1, height: 1, background: 'var(--border-subtle)' }} />
         </div>
 
-        {/* Plan cards */}
+        {/* Plan cards
+            Post-pivot 2026-05-13: only show monthly to free users. Existing
+            quarterly/yearly/lifetime subscribers keep working server-side but
+            the legacy SKUs are no longer surfaced to new users. If an existing
+            subscriber is on a legacy plan, show only their current plan so
+            they can see "Current" without being upsold a different cycle. */}
         <div style={{
           display: 'grid',
           gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
@@ -419,7 +424,14 @@ export default function Billing() {
           alignItems: 'stretch',
           marginBottom: 56,
         }}>
-          {plans.map(plan => (
+          {plans
+            .filter(plan => {
+              if (user?.subscription_status === 'active' && user?.subscription_plan) {
+                return plan.key === user.subscription_plan;
+              }
+              return plan.key === 'monthly';
+            })
+            .map(plan => (
             <div
               key={plan.key}
               data-testid={`billing-${plan.key}`}

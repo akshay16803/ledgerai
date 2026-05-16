@@ -542,6 +542,7 @@ fun AppNavigation(
             composable(Screen.EmailSync.route) {
                 EmailSyncScreen(
                     viewModel = emailSyncViewModel,
+                    billingViewModel = billingViewModel,
                     onNavigateToPendingReview = {
                         navController.navigate("pending_review")
                     },

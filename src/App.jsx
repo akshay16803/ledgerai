@@ -128,7 +128,13 @@ export default function App() {
       <Route path="/cashflow" element={<ProtectedRoute><AppLayout><PageBoundary><CashFlow /></PageBoundary></AppLayout></ProtectedRoute>} />
       <Route path="/reconciliation" element={<ProtectedRoute><AppLayout><PageBoundary><Reconciliation /></PageBoundary></AppLayout></ProtectedRoute>} />
       <Route path="/reports" element={<ProtectedRoute><AppLayout><PageBoundary><Reports /></PageBoundary></AppLayout></ProtectedRoute>} />
-      <Route path="/email-sync" element={<ProtectedRoute requireSubscription={true}><AppLayout><PageBoundary><EmailSync /></PageBoundary></AppLayout></ProtectedRoute>} />
+      {/* Email Sync is Premium (₹199/month) but the gate now lives INSIDE the
+          EmailSync page as an inline modal that mirrors the iOS/Android
+          PremiumFeatureSheet. We no longer redirect free users to /billing
+          (which exposed the legacy multi-plan ladder); the page renders the
+          polished single-CTA sheet and lets the user either subscribe or
+          back out to the dashboard. requireSubscription is therefore false. */}
+      <Route path="/email-sync" element={<ProtectedRoute requireSubscription={false}><AppLayout><PageBoundary><EmailSync /></PageBoundary></AppLayout></ProtectedRoute>} />
       <Route path="/records" element={<ProtectedRoute><AppLayout><PageBoundary><Records /></PageBoundary></AppLayout></ProtectedRoute>} />
       <Route path="/past-insights" element={<ProtectedRoute><AppLayout><PageBoundary><TaxSummary /></PageBoundary></AppLayout></ProtectedRoute>} />
       <Route path="/feature-requests" element={<ProtectedRoute><AppLayout><PageBoundary><FeatureRequests /></PageBoundary></AppLayout></ProtectedRoute>} />

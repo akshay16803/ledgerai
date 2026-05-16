@@ -219,12 +219,27 @@ struct BillingView: View {
 
     // MARK: - Plan Cards
 
+    /// Plans visible in Manage Subscription after the 2026-05-13 pivot:
+    ///   • Free users see ONLY the monthly tier (₹199/month) — the legacy
+    ///     quarterly/yearly/lifetime SKUs are retired from the UI even
+    ///     though the records remain Active in ASC for existing subs.
+    ///   • Active subscribers see ONLY their current plan so they can read
+    ///     pricing + "Current Plan" without being shown upsell ladders.
+    private var visiblePlans: [FallbackPlan] {
+        if let activePid = viewModel.currentStatus?.productId,
+           viewModel.isSubscribed,
+           let match = Self.fallbackPlans.first(where: { $0.productId == activePid }) {
+            return [match]
+        }
+        return Self.fallbackPlans.filter { $0.productId == "com.spentyai.monthly" }
+    }
+
     private var planCardsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(lang.s("choose_plan"))
                 .font(.title3.weight(.semibold))
 
-            ForEach(Self.fallbackPlans, id: \.productId) { plan in
+            ForEach(visiblePlans, id: \.productId) { plan in
                 planCard(plan)
             }
         }

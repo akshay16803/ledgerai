@@ -31,6 +31,12 @@ import com.spentyai.app.core.models.*
 import com.spentyai.app.core.theme.*
 import com.spentyai.app.features.aiconsent.AIConsentDialog
 import com.spentyai.app.features.aiconsent.AIConsentManager
+import android.app.Activity
+import com.spentyai.app.features.billing.BillingRepository
+import com.spentyai.app.features.billing.BillingViewModel
+import com.spentyai.app.features.billing.PremiumFeatureSheet
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import java.text.NumberFormat
 import java.util.*
 
@@ -42,16 +48,38 @@ import java.util.*
 @Composable
 fun EmailSyncScreen(
     viewModel: EmailSyncViewModel,
+    billingViewModel: BillingViewModel,
     onNavigateToPendingReview: () -> Unit,
     onBack: () -> Unit
 ) {
     LaunchedEffect(Unit) { viewModel.loadAll() }
+
+    // ── Premium gate (added 2026-05-13) ──────────────────────────────────────
+    // Mirror of iOS EmailSyncView: Email Sync is the paid Premium tier
+    // (com.spentyai.monthly @ ₹199/month). If the user isn't subscribed,
+    // present the PremiumFeatureSheet on entry. Backend already 402s the
+    // actual /api/email/* endpoints, but showing the upsell sheet locally
+    // makes the UX feel intentional rather than a punitive error toast.
+    val billingState by billingViewModel.uiState.collectAsState()
+    val hasPremium = billingState.currentStatus?.isActive == true
+    var showPremiumSheet by remember { mutableStateOf(false) }
+    var justSubscribed by remember { mutableStateOf(false) }
+
+    LaunchedEffect(hasPremium) {
+        // Only open the sheet on entry for non-subscribers. If they
+        // subscribe successfully we flip `justSubscribed=true` first so
+        // the sheet-close path doesn't bounce them back out.
+        if (!hasPremium && !justSubscribed) {
+            showPremiumSheet = true
+        }
+    }
 
     // ── AI consent gate ──────────────────────────────────────────────────────
     // Required by Apple guideline 5.1.1(i) / 5.1.2(i) and Google Play's User
     // Data policy: before any data is sent to OpenAI we must show the user
     // exactly what is sent and get an explicit opt-in. Mirrors AIChatScreen.
     val context = LocalContext.current
+    val activity = context as? Activity
     var showConsentSheet by remember { mutableStateOf(false) }
     var pendingAIAction by remember { mutableStateOf<(() -> Unit)?>(null) }
 
@@ -76,6 +104,39 @@ fun EmailSyncScreen(
                 pendingAIAction = null
             }
         )
+    }
+
+    // Premium gate sheet — presented on entry for non-subscribers (mirror of
+    // iOS PremiumFeatureSheet.emailSync). onDismiss without subscribing
+    // pops the user back to where they came from so they don't land on a
+    // screen they can't actually use.
+    if (showPremiumSheet) {
+        ModalBottomSheet(
+            onDismissRequest = {
+                showPremiumSheet = false
+                if (!hasPremium && !justSubscribed) onBack()
+            },
+            containerColor = MaterialTheme.colorScheme.surface
+        ) {
+            PremiumFeatureSheet.EmailSync(
+                priceDisplay = billingViewModel.displayPrice(BillingRepository.PRODUCT_MONTHLY) ?: "₹199",
+                isPurchasing = billingState.isPurchasing,
+                onSubscribe = onSub@{
+                    val act = activity ?: return@onSub
+                    val details = billingState.productDetailsList
+                        .firstOrNull { it.productId == BillingRepository.PRODUCT_MONTHLY }
+                        ?: return@onSub
+                    // Mark before launching so the LaunchedEffect(hasPremium)
+                    // re-trigger doesn't re-open the sheet between purchase
+                    // success and the backend / Play status refresh.
+                    justSubscribed = true
+                    billingViewModel.purchaseSubscription(details, act)
+                },
+                onClose = {
+                    showPremiumSheet = false
+                }
+            )
+        }
     }
 
     Scaffold(

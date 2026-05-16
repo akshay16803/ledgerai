@@ -1,4 +1,5 @@
 import SwiftUI
+import StoreKit  // Required for `AppStore.sync()` in restorePurchases()
 
 // MARK: - Premium Feature Sheet
 //
@@ -34,6 +35,7 @@ struct PremiumFeatureSheet: View {
     let onClose: () -> Void
 
     // MARK: - State
+    @Environment(AuthManager.self) private var authManager
     @State private var viewModel = BillingViewModel()
     @State private var isAnimating = false
     @State private var showError = false
@@ -316,6 +318,15 @@ struct PremiumFeatureSheet: View {
         Task {
             let ok = await viewModel.purchasePlan(Self.monthlyProductId)
             if ok {
+                // Refresh /api/auth/me BEFORE closing the sheet. Without this,
+                // the parent view's `.sheet(onDismiss:)` evaluates `hasPremium`
+                // against a stale `authManager.user` (the .subscriptionActivated
+                // notification → checkSession() pipeline is async and would
+                // not have resolved yet), which then incorrectly calls
+                // `dismiss()` and kicks the user OUT of the very screen they
+                // just paid to unlock. Awaiting here makes hasPremium=true
+                // by the time onDismiss runs.
+                await authManager.checkSession()
                 await MainActor.run { onClose() }
             } else if !viewModel.errorMessage.isEmpty {
                 await MainActor.run {
@@ -334,6 +345,9 @@ struct PremiumFeatureSheet: View {
                 try await AppStore.sync()
                 await viewModel.checkEntitlements()
                 if viewModel.isSubscribed {
+                    // Same race fix as purchase() — refresh auth state before
+                    // dismissing so the parent's onDismiss sees hasPremium=true.
+                    await authManager.checkSession()
                     await MainActor.run { onClose() }
                 }
             } catch {
@@ -398,4 +412,5 @@ extension PremiumFeatureSheet {
 
 #Preview {
     PremiumFeatureSheet.emailSync(onClose: {})
+        .environment(AuthManager())
 }
