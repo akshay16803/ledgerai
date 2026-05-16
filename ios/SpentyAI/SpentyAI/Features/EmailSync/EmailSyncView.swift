@@ -21,6 +21,13 @@ struct EmailSyncView: View {
     // rather than punitive.
     @State private var showPremiumSheet = false
 
+    /// Set by `PremiumFeatureSheet.onSubscribed` the moment StoreKit +
+    /// backend `/verify` succeed — BEFORE the subsequent /auth/me refresh.
+    /// Used by `.sheet(onDismiss:)` to skip the bounce-back-to-dashboard
+    /// path even if `authManager.user` hasn't refreshed yet (or the
+    /// refresh failed transiently). Local source of truth for "they paid".
+    @State private var justSubscribed = false
+
     private var hasPremium: Bool {
         authManager.user?.hasActiveSubscription == true
     }
@@ -63,14 +70,16 @@ struct EmailSyncView: View {
         }
         .sheet(isPresented: $showPremiumSheet, onDismiss: {
             // If the user dismissed without subscribing, bounce them out
-            // of EmailSync (they can't actually use it). This avoids the
-            // "I closed the sheet and now I'm staring at a screen I
-            // can't use" trap.
-            if !hasPremium { dismiss() }
+            // of EmailSync (they can't actually use it). Check the local
+            // `justSubscribed` flag FIRST so a successful purchase whose
+            // /auth/me refresh hasn't landed (or failed) still keeps the
+            // user on this screen.
+            if !justSubscribed && !hasPremium { dismiss() }
         }) {
-            PremiumFeatureSheet.emailSync(onClose: {
-                showPremiumSheet = false
-            })
+            PremiumFeatureSheet.emailSync(
+                onClose: { showPremiumSheet = false },
+                onSubscribed: { justSubscribed = true }
+            )
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
             .interactiveDismissDisabled(false)

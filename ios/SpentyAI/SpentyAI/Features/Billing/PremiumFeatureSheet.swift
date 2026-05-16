@@ -34,12 +34,25 @@ struct PremiumFeatureSheet: View {
 
     let onClose: () -> Void
 
+    /// Called the moment the StoreKit purchase + backend /verify return
+    /// success — BEFORE we await `authManager.checkSession()` and BEFORE
+    /// `onClose()` fires. Lets the parent record "the user paid" in
+    /// local state so the `.sheet(onDismiss:)` doesn't kick them out
+    /// if the subsequent /auth/me network refresh happens to fail.
+    var onSubscribed: (() -> Void)? = nil
+
     // MARK: - State
     @Environment(AuthManager.self) private var authManager
     @State private var viewModel = BillingViewModel()
     @State private var isAnimating = false
     @State private var showError = false
     @State private var errorMessage = ""
+
+    /// True between "StoreKit returned success" and "we've fully closed
+    /// the sheet". Used to keep the Subscribe button disabled across the
+    /// auth-refresh round-trip so a determined user can't double-tap and
+    /// trigger a second purchase in that ~500 ms window.
+    @State private var isFinalizing = false
 
     // Brand palette
     private let darkBg = Color(red: 0.055, green: 0.122, blue: 0.071)   // brand deep green
@@ -264,7 +277,7 @@ struct PremiumFeatureSheet: View {
     private var primaryCTA: some View {
         Button(action: purchase) {
             HStack(spacing: 10) {
-                if viewModel.isPurchasing {
+                if viewModel.isPurchasing || isFinalizing {
                     ProgressView().tint(.white)
                 } else {
                     Image(systemName: "sparkles")
@@ -283,7 +296,7 @@ struct PremiumFeatureSheet: View {
             )
             .shadow(color: Color.spentyPrimary.opacity(0.32), radius: 16, x: 0, y: 8)
         }
-        .disabled(viewModel.isPurchasing || !viewModel.areProductsLoaded)
+        .disabled(viewModel.isPurchasing || isFinalizing || !viewModel.areProductsLoaded)
         .opacity(viewModel.areProductsLoaded ? 1 : 0.55)
     }
 
@@ -318,14 +331,27 @@ struct PremiumFeatureSheet: View {
         Task {
             let ok = await viewModel.purchasePlan(Self.monthlyProductId)
             if ok {
-                // Refresh /api/auth/me BEFORE closing the sheet. Without this,
-                // the parent view's `.sheet(onDismiss:)` evaluates `hasPremium`
-                // against a stale `authManager.user` (the .subscriptionActivated
-                // notification → checkSession() pipeline is async and would
-                // not have resolved yet), which then incorrectly calls
-                // `dismiss()` and kicks the user OUT of the very screen they
-                // just paid to unlock. Awaiting here makes hasPremium=true
-                // by the time onDismiss runs.
+                // Lock the CTA across the finalize sequence so a determined
+                // user can't double-tap during the auth-refresh round-trip
+                // and kick off a second StoreKit purchase. viewModel.isPurchasing
+                // already flipped back to false (its `defer` block runs at the
+                // end of purchasePlan), which is why we need our own flag.
+                await MainActor.run { isFinalizing = true }
+
+                // Signal the parent BEFORE the network refresh. This way the
+                // parent's local "justSubscribed" state is set even if the
+                // subsequent /auth/me call fails — protecting the user from
+                // a logout that would otherwise cascade from `user=nil`.
+                // The backend has already verified + persisted the purchase,
+                // so this is the authoritative "they paid" signal locally.
+                await MainActor.run { onSubscribed?() }
+
+                // Best-effort refresh of /api/auth/me so AppRouter, gated
+                // surfaces, and Settings see the fresh subscription status.
+                // checkSession swallows errors internally; if it fails the
+                // user stays signed in with the LOCAL knowledge that they
+                // just paid (via onSubscribed), and the next foreground or
+                // navigation will retry the refresh.
                 await authManager.checkSession()
                 await MainActor.run { onClose() }
             } else if !viewModel.errorMessage.isEmpty {
@@ -345,8 +371,11 @@ struct PremiumFeatureSheet: View {
                 try await AppStore.sync()
                 await viewModel.checkEntitlements()
                 if viewModel.isSubscribed {
-                    // Same race fix as purchase() — refresh auth state before
-                    // dismissing so the parent's onDismiss sees hasPremium=true.
+                    // Mirror of purchase() finalize sequence — same hardening
+                    // for the restore path so a network-flaky checkSession
+                    // doesn't log the user out after a successful restore.
+                    await MainActor.run { isFinalizing = true }
+                    await MainActor.run { onSubscribed?() }
                     await authManager.checkSession()
                     await MainActor.run { onClose() }
                 }
@@ -366,7 +395,10 @@ extension PremiumFeatureSheet {
 
     /// Premium sheet preset for Email Sync. Use this when a free user
     /// opens EmailSyncView (or tries to start a sync via that screen).
-    static func emailSync(onClose: @escaping () -> Void) -> PremiumFeatureSheet {
+    static func emailSync(
+        onClose: @escaping () -> Void,
+        onSubscribed: (() -> Void)? = nil
+    ) -> PremiumFeatureSheet {
         PremiumFeatureSheet(
             featureIcon: "envelope.badge.shield.half.filled.fill",
             featureName: "Email Sync",
@@ -383,12 +415,16 @@ extension PremiumFeatureSheet {
                  "Read-only & encrypted",
                  "We never send, delete or modify mail. Tokens are bank-grade encrypted."),
             ],
-            onClose: onClose
+            onClose: onClose,
+            onSubscribed: onSubscribed
         )
     }
 
     /// Premium sheet preset for SMS Auto-Detection.
-    static func smsSync(onClose: @escaping () -> Void) -> PremiumFeatureSheet {
+    static func smsSync(
+        onClose: @escaping () -> Void,
+        onSubscribed: (() -> Void)? = nil
+    ) -> PremiumFeatureSheet {
         PremiumFeatureSheet(
             featureIcon: "message.badge.waveform.fill",
             featureName: "Auto Transaction Detection",
@@ -405,7 +441,8 @@ extension PremiumFeatureSheet {
                  "Stays on your device",
                  "Messages are parsed locally. We only store the transaction, never the SMS."),
             ],
-            onClose: onClose
+            onClose: onClose,
+            onSubscribed: onSubscribed
         )
     }
 }

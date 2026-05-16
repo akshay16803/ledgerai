@@ -18,6 +18,12 @@ struct SMSSyncView: View {
     // gate; rationale is identical.
     @State private var showPremiumSheet = false
 
+    /// Local "they paid" flag — set by PremiumFeatureSheet.onSubscribed
+    /// before checkSession runs. Lets onDismiss skip the pop-back path
+    /// if the auth-refresh fails or hasn't landed yet. Identical to the
+    /// pattern in EmailSyncView.
+    @State private var justSubscribed = false
+
     private var hasPremium: Bool {
         authManager.user?.hasActiveSubscription == true
     }
@@ -44,11 +50,14 @@ struct SMSSyncView: View {
             await viewModel.loadStats()
         }
         .sheet(isPresented: $showPremiumSheet, onDismiss: {
-            if !hasPremium { dismiss() }
+            // Local justSubscribed flag protects the user from being kicked
+            // out if /auth/me hasn't refreshed yet (or failed transiently).
+            if !justSubscribed && !hasPremium { dismiss() }
         }) {
-            PremiumFeatureSheet.smsSync(onClose: {
-                showPremiumSheet = false
-            })
+            PremiumFeatureSheet.smsSync(
+                onClose: { showPremiumSheet = false },
+                onSubscribed: { justSubscribed = true }
+            )
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
         }

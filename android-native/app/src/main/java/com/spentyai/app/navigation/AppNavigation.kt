@@ -171,15 +171,11 @@ fun AppNavigation(
         }
     }
 
-    val billingState by billingViewModel.uiState.collectAsState()
-    val isSubscriptionActive = billingState.currentStatus?.isActive == true
-
     // Pivot 2026-05-13: SpentyAI is free for every signed-in user. The
     // full-app SubscriptionPaywall is no longer presented after sign-in.
     // EmailSync + SMSSync each present their own PremiumFeatureSheet on
-    // entry. We still load the billing state so `isSubscriptionActive`
-    // is available downstream for those feature-level gates, but it's
-    // no longer routing the user away from the dashboard.
+    // entry, reading billing state directly from `billingViewModel` —
+    // no top-level isSubscriptionActive flag is needed here anymore.
 
     val pastInsightsRepository = remember { PastInsightsRepository(apiClient) }
     val pastInsightsViewModel = remember { PastInsightsViewModel(pastInsightsRepository) }
@@ -207,8 +203,10 @@ fun AppNavigation(
         Screen.BillDetail.route,
         Screen.CustomerDetail.route,
         Screen.VendorDetail.route,
-        Screen.AiChat.route,
-        Screen.SubscriptionPaywall.route
+        Screen.AiChat.route
+        // Screen.SubscriptionPaywall.route removed — destination is no longer
+        // navigated to anywhere in the app post-pivot. Settings still routes
+        // to Screen.Subscription.route (the canonical entry).
     )
     val showBottomBar = currentRoute !in hideBottomBarRoutes
 
@@ -687,15 +685,9 @@ fun AppNavigation(
                     onSubscribed = { navController.popBackStack() }
                 )
             }
-
-            // Subscription Paywall
-            composable(Screen.SubscriptionPaywall.route) {
-                SubscriptionPaywallScreen(
-                    viewModel = billingViewModel,
-                    onDismiss = { navController.popBackStack() },
-                    onSubscribed = { navController.popBackStack() }
-                )
-            }
+            // Note: Screen.SubscriptionPaywall.route duplicate destination
+            // removed — post-pivot nothing navigates to it. Settings → Manage
+            // Subscription uses Screen.Subscription.route above.
         }
     }
 }
