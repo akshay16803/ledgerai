@@ -666,6 +666,12 @@ async def get_me(user: dict = Depends(get_current_user)):
     user_out["premium_features"] = {
         "email_sync": is_premium,
         "sms_auto_detection": is_premium,
+        "invoices": is_premium,
+        "purchases": is_premium,
+        "mandates": is_premium,
+        "reconciliation": is_premium,
+        "records": is_premium,
+        "past_insights": is_premium,
         # AI chat + everything else is free for now — explicit flag so the
         # client can read this map authoritatively rather than hard-coding.
         "ai_chat": True,
@@ -3257,7 +3263,7 @@ def _mandate_active_in_month(mandate: dict, month_start: date_cls, month_end: da
 
 
 @app.get("/api/mandates")
-async def list_mandates(user: dict = Depends(get_current_user)):
+async def list_mandates(user: dict = Depends(require_active_subscription)):
     """List every mandate on this user, newest first."""
     items = await db.mandates.find(
         {"user_id": user["user_id"]}, {"_id": 0}
@@ -3266,7 +3272,7 @@ async def list_mandates(user: dict = Depends(get_current_user)):
 
 
 @app.post("/api/mandates", status_code=201)
-async def create_mandate(payload: dict = Body(...), user: dict = Depends(get_current_user)):
+async def create_mandate(payload: dict = Body(...), user: dict = Depends(require_active_subscription)):
     """Manually create a mandate (for cases the AI didn't catch, or
     mandates the user knows about but didn't get an email for)."""
     merchant = (payload.get("merchant") or "").strip()
@@ -3304,7 +3310,7 @@ async def create_mandate(payload: dict = Body(...), user: dict = Depends(get_cur
 @app.get("/api/mandates/upcoming")
 async def upcoming_mandates(
     days: int = 30,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_active_subscription),
 ):
     """List mandates with upcoming charges in the next N days."""
     user_id = user["user_id"]
@@ -3437,7 +3443,7 @@ async def _compute_od_monthly_interest(user_id: str, account: dict) -> tuple:
     return round(total_interest, 2), round(max(0, balance), 2)
 
 @app.get("/api/mandates/{mandate_id}")
-async def get_mandate(mandate_id: str, user: dict = Depends(get_current_user)):
+async def get_mandate(mandate_id: str, user: dict = Depends(require_active_subscription)):
     """Get a single mandate by ID."""
     mandate = await db.mandates.find_one(
         {"mandate_id": mandate_id, "user_id": user["user_id"]}, {"_id": 0}
@@ -3448,7 +3454,7 @@ async def get_mandate(mandate_id: str, user: dict = Depends(get_current_user)):
 
 
 @app.put("/api/mandates/{mandate_id}")
-async def put_mandate(mandate_id: str, payload: dict = Body(...), user: dict = Depends(get_current_user)):
+async def put_mandate(mandate_id: str, payload: dict = Body(...), user: dict = Depends(require_active_subscription)):
     """Update a mandate (PUT). Same logic as PATCH."""
     mandate = await db.mandates.find_one(
         {"mandate_id": mandate_id, "user_id": user["user_id"]}, {"_id": 0}
@@ -3486,7 +3492,7 @@ async def put_mandate(mandate_id: str, payload: dict = Body(...), user: dict = D
 
 
 @app.patch("/api/mandates/{mandate_id}")
-async def update_mandate(mandate_id: str, payload: dict = Body(...), user: dict = Depends(get_current_user)):
+async def update_mandate(mandate_id: str, payload: dict = Body(...), user: dict = Depends(require_active_subscription)):
     mandate = await db.mandates.find_one(
         {"mandate_id": mandate_id, "user_id": user["user_id"]}, {"_id": 0}
     )
@@ -3524,7 +3530,7 @@ async def update_mandate(mandate_id: str, payload: dict = Body(...), user: dict 
 
 
 @app.delete("/api/mandates/{mandate_id}")
-async def delete_mandate(mandate_id: str, user: dict = Depends(get_current_user)):
+async def delete_mandate(mandate_id: str, user: dict = Depends(require_active_subscription)):
     res = await db.mandates.delete_one(
         {"mandate_id": mandate_id, "user_id": user["user_id"]}
     )
@@ -3535,7 +3541,7 @@ async def delete_mandate(mandate_id: str, user: dict = Depends(get_current_user)
 
 
 @app.post("/api/mandates/detect")
-async def detect_mandates(user: dict = Depends(get_current_user)):
+async def detect_mandates(user: dict = Depends(require_active_subscription)):
     """Auto-detect recurring mandates from transaction history."""
     user_id = user["user_id"]
 
@@ -4432,7 +4438,7 @@ async def upload_statement(
     statement_type: str = Form("bank"),  # bank or credit_card
     period_from: Optional[str] = Form(None),  # YYYY-MM-DD
     period_to: Optional[str] = Form(None),    # YYYY-MM-DD
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_active_subscription),
 ):
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file provided")
@@ -4501,7 +4507,7 @@ async def upload_statement(
 
 
 @app.get("/api/statements/list")
-async def list_statements(user: dict = Depends(get_current_user)):
+async def list_statements(user: dict = Depends(require_active_subscription)):
     stmts = await db.statements.find(
         {"user_id": user["user_id"]}, {"_id": 0, "file_path": 0}
     ).sort("uploaded_at", -1).to_list(50)
@@ -4509,7 +4515,7 @@ async def list_statements(user: dict = Depends(get_current_user)):
 
 
 @app.get("/api/statements/{statement_id}")
-async def get_statement(statement_id: str, user: dict = Depends(get_current_user)):
+async def get_statement(statement_id: str, user: dict = Depends(require_active_subscription)):
     stmt = await db.statements.find_one(
         {"statement_id": statement_id, "user_id": user["user_id"]},
         {"_id": 0, "file_path": 0}
@@ -4520,7 +4526,7 @@ async def get_statement(statement_id: str, user: dict = Depends(get_current_user
 
 
 @app.post("/api/statements/{statement_id}/reconcile")
-async def reconcile_statement(statement_id: str, user: dict = Depends(get_current_user)):
+async def reconcile_statement(statement_id: str, user: dict = Depends(require_active_subscription)):
     stmt = await db.statements.find_one(
         {"statement_id": statement_id, "user_id": user["user_id"]}, {"_id": 0}
     )
@@ -4590,7 +4596,7 @@ async def reconcile_statement(statement_id: str, user: dict = Depends(get_curren
 
 @app.post("/api/statements/{statement_id}/add-missing")
 async def add_missing_entries(
-    statement_id: str, request: Request, user: dict = Depends(get_current_user)
+    statement_id: str, request: Request, user: dict = Depends(require_active_subscription)
 ):
     body = await request.json()
     entry_indices = body.get("entry_indices", [])
@@ -4636,7 +4642,7 @@ async def add_missing_entries(
 
 
 @app.delete("/api/statements/{statement_id}")
-async def delete_statement(statement_id: str, user: dict = Depends(get_current_user)):
+async def delete_statement(statement_id: str, user: dict = Depends(require_active_subscription)):
     stmt = await db.statements.find_one(
         {"statement_id": statement_id, "user_id": user["user_id"]}
     )
@@ -4658,7 +4664,7 @@ async def delete_statement(statement_id: str, user: dict = Depends(get_current_u
 
 
 @app.post("/api/statements/{statement_id}/reaudit")
-async def reaudit_statement(statement_id: str, user: dict = Depends(get_current_user)):
+async def reaudit_statement(statement_id: str, user: dict = Depends(require_active_subscription)):
     """Re-run the full parse + audit + correction pipeline on an already
     uploaded statement. Useful when the first audit found issues the
     auto-correction couldn't fully resolve, or the user wants a fresh
@@ -4698,7 +4704,7 @@ async def reaudit_statement(statement_id: str, user: dict = Depends(get_current_
 
 
 @app.post("/api/statements/{statement_id}/approve")
-async def approve_statement(statement_id: str, user: dict = Depends(get_current_user)):
+async def approve_statement(statement_id: str, user: dict = Depends(require_active_subscription)):
     """Approve all entries in a parsed statement and create transactions."""
     stmt = await db.statements.find_one(
         {"statement_id": statement_id, "user_id": user["user_id"]}, {"_id": 0}
@@ -4744,7 +4750,7 @@ async def approve_statement(statement_id: str, user: dict = Depends(get_current_
 
 
 @app.post("/api/statements/{statement_id}/reject")
-async def reject_statement(statement_id: str, user: dict = Depends(get_current_user)):
+async def reject_statement(statement_id: str, user: dict = Depends(require_active_subscription)):
     """Reject/dismiss a parsed statement."""
     stmt = await db.statements.find_one(
         {"statement_id": statement_id, "user_id": user["user_id"]}, {"_id": 0}
@@ -4761,7 +4767,7 @@ async def reject_statement(statement_id: str, user: dict = Depends(get_current_u
 
 
 @app.get("/api/statements/{statement_id}/entries")
-async def get_statement_entries(statement_id: str, user: dict = Depends(get_current_user)):
+async def get_statement_entries(statement_id: str, user: dict = Depends(require_active_subscription)):
     """Get all entries for a parsed statement."""
     stmt = await db.statements.find_one(
         {"statement_id": statement_id, "user_id": user["user_id"]}, {"_id": 0, "file_path": 0}
@@ -4774,7 +4780,7 @@ async def get_statement_entries(statement_id: str, user: dict = Depends(get_curr
 
 
 @app.post("/api/statements/{statement_id}/bulk-categorize")
-async def bulk_categorize_statement(statement_id: str, request: Request, user: dict = Depends(get_current_user)):
+async def bulk_categorize_statement(statement_id: str, request: Request, user: dict = Depends(require_active_subscription)):
     """Bulk update categories on statement entries."""
     body = await request.json()
     updates = body.get("updates", [])  # [{entry_index: int, category_id: str, subcategory_id?: str}]
@@ -4813,7 +4819,7 @@ async def update_statement_entry(
     statement_id: str,
     entry_index: int,
     payload: dict = Body(...),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_active_subscription),
 ):
     """Update a single parsed entry's category / subcategory / transaction_type
     on an already-parsed statement. Accepts any of
@@ -4896,7 +4902,7 @@ async def update_statement_entry(
 
 @app.post("/api/statements/{statement_id}/unlock")
 async def unlock_statement(
-    statement_id: str, request: Request, user: dict = Depends(get_current_user)
+    statement_id: str, request: Request, user: dict = Depends(require_active_subscription)
 ):
     """Retry parsing a password-protected PDF statement with a user-provided
     password. On success, the password is saved encrypted for this user+account
@@ -9403,7 +9409,7 @@ async def _extract_gmail_attachments(service, msg_id: str, payload: dict) -> lis
 
 @app.get("/api/records")
 async def get_records(
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_active_subscription),
     search: str = "",
     date_from: str = "",
     date_to: str = "",
@@ -9464,7 +9470,7 @@ async def get_records(
 @app.get("/api/records/search")
 async def search_records(
     q: str = "",
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_active_subscription),
     limit: int = 50,
     skip: int = 0,
 ):
@@ -9495,7 +9501,7 @@ async def search_records(
 # =====================================================================
 
 @app.get("/api/records/{archive_id}/download-eml")
-async def download_eml(archive_id: str, user: dict = Depends(get_current_user)):
+async def download_eml(archive_id: str, user: dict = Depends(require_active_subscription)):
     record = await db.email_archives.find_one(
         {"archive_id": archive_id, "user_id": user["user_id"]}, {"_id": 0}
     )
@@ -9516,7 +9522,7 @@ async def download_eml(archive_id: str, user: dict = Depends(get_current_user)):
 
 
 @app.get("/api/records/{archive_id}/attachments/{att_index}/download")
-async def download_attachment(archive_id: str, att_index: int, user: dict = Depends(get_current_user)):
+async def download_attachment(archive_id: str, att_index: int, user: dict = Depends(require_active_subscription)):
     record = await db.email_archives.find_one(
         {"archive_id": archive_id, "user_id": user["user_id"]}, {"_id": 0}
     )
@@ -9538,7 +9544,7 @@ async def download_attachment(archive_id: str, att_index: int, user: dict = Depe
 
 
 @app.get("/api/records/{archive_id}/preview")
-async def preview_record(archive_id: str, user: dict = Depends(get_current_user)):
+async def preview_record(archive_id: str, user: dict = Depends(require_active_subscription)):
     record = await db.email_archives.find_one(
         {"archive_id": archive_id, "user_id": user["user_id"]},
         {"_id": 0, "raw_eml": 0, "attachments.data": 0}
@@ -9575,7 +9581,7 @@ async def preview_record(archive_id: str, user: dict = Depends(get_current_user)
 
 
 @app.get("/api/records/by-transaction/{transaction_id}")
-async def get_record_by_transaction(transaction_id: str, user: dict = Depends(get_current_user)):
+async def get_record_by_transaction(transaction_id: str, user: dict = Depends(require_active_subscription)):
     """Find the archive record linked to a given transaction."""
     record = await db.email_archives.find_one(
         {"transaction_id": transaction_id, "user_id": user["user_id"]},
@@ -9611,7 +9617,7 @@ async def get_record_by_transaction(transaction_id: str, user: dict = Depends(ge
 
 
 @app.get("/api/records/{archive_id}")
-async def get_record(archive_id: str, user: dict = Depends(get_current_user)):
+async def get_record(archive_id: str, user: dict = Depends(require_active_subscription)):
     """Get a single email record by ID."""
     record = await db.email_archives.find_one(
         {"archive_id": archive_id, "user_id": user["user_id"]},
@@ -9629,7 +9635,7 @@ async def get_record(archive_id: str, user: dict = Depends(get_current_user)):
 # --- Endpoint 6.8: DELETE /api/records/{archive_id} ---
 
 @app.delete("/api/records/{archive_id}")
-async def delete_record(archive_id: str, user: dict = Depends(get_current_user)):
+async def delete_record(archive_id: str, user: dict = Depends(require_active_subscription)):
     """Delete an email record."""
     result = await db.email_archives.delete_one(
         {"archive_id": archive_id, "user_id": user["user_id"]}
@@ -9643,7 +9649,7 @@ async def delete_record(archive_id: str, user: dict = Depends(get_current_user))
 
 
 @app.post("/api/records/download-zip")
-async def download_records_zip(request: Request, user: dict = Depends(get_current_user)):
+async def download_records_zip(request: Request, user: dict = Depends(require_active_subscription)):
     body = await request.json()
     archive_ids = body.get("archive_ids", [])
 
@@ -9695,7 +9701,7 @@ async def download_records_zip(request: Request, user: dict = Depends(get_curren
 # ─── Tax Summary ─────────────────────────────────────────────────────
 
 @app.post("/api/tax-summary")
-async def create_tax_summary(request: Request, user: dict = Depends(get_current_user)):
+async def create_tax_summary(request: Request, user: dict = Depends(require_active_subscription)):
     body = await request.json()
     name = body.get("name", "").strip()
     date_from = body.get("date_from", "")
@@ -9731,7 +9737,7 @@ async def create_tax_summary(request: Request, user: dict = Depends(get_current_
 
 
 @app.get("/api/tax-summary")
-async def list_tax_summaries(user: dict = Depends(get_current_user)):
+async def list_tax_summaries(user: dict = Depends(require_active_subscription)):
     summaries = await db.tax_summaries.find(
         {"user_id": user["user_id"]}, {"_id": 0}
     ).sort("created_at", -1).to_list(50)
@@ -9741,7 +9747,7 @@ async def list_tax_summaries(user: dict = Depends(get_current_user)):
     return {"summaries": summaries}
 
 @app.get("/api/tax-summary/available-emails")
-async def get_available_emails_for_tax(user: dict = Depends(get_current_user)):
+async def get_available_emails_for_tax(user: dict = Depends(require_active_subscription)):
     """Get all connected Gmail and Outlook emails available for tax summary scanning."""
     gmail_tokens = await db.gmail_tokens.find(
         {"user_id": user["user_id"], "connected": True}, {"_id": 0, "gmail_email": 1}
@@ -9762,7 +9768,7 @@ async def get_available_emails_for_tax(user: dict = Depends(get_current_user)):
 async def generate_tax_summary_from_transactions(
     date_from: str = None,
     date_to: str = None,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_active_subscription),
 ):
     """Generate a tax summary from existing transactions (without email scanning)."""
     user_id = user["user_id"]
@@ -9803,7 +9809,7 @@ async def generate_tax_summary_from_transactions(
 
 
 @app.get("/api/tax-summary/{summary_id}")
-async def get_tax_summary(summary_id: str, user: dict = Depends(get_current_user)):
+async def get_tax_summary(summary_id: str, user: dict = Depends(require_active_subscription)):
     summary = await db.tax_summaries.find_one(
         {"summary_id": summary_id, "user_id": user["user_id"]}, {"_id": 0}
     )
@@ -9820,7 +9826,7 @@ async def get_tax_summary(summary_id: str, user: dict = Depends(get_current_user
 
 
 @app.delete("/api/tax-summary/{summary_id}")
-async def delete_tax_summary(summary_id: str, user: dict = Depends(get_current_user)):
+async def delete_tax_summary(summary_id: str, user: dict = Depends(require_active_subscription)):
     result = await db.tax_summaries.delete_one(
         {"summary_id": summary_id, "user_id": user["user_id"]}
     )
@@ -9831,7 +9837,7 @@ async def delete_tax_summary(summary_id: str, user: dict = Depends(get_current_u
 
 
 @app.post("/api/tax-summary/{summary_id}/transactions")
-async def add_tax_summary_transaction(summary_id: str, request: Request, user: dict = Depends(get_current_user)):
+async def add_tax_summary_transaction(summary_id: str, request: Request, user: dict = Depends(require_active_subscription)):
     summary = await db.tax_summaries.find_one(
         {"summary_id": summary_id, "user_id": user["user_id"]}
     )
@@ -9858,7 +9864,7 @@ async def add_tax_summary_transaction(summary_id: str, request: Request, user: d
 
 
 @app.put("/api/tax-summary/{summary_id}/transactions/{txn_id}")
-async def update_tax_summary_transaction(summary_id: str, txn_id: str, request: Request, user: dict = Depends(get_current_user)):
+async def update_tax_summary_transaction(summary_id: str, txn_id: str, request: Request, user: dict = Depends(require_active_subscription)):
     body = await request.json()
     update_fields = {}
     for field in ["transaction_type", "amount", "date", "description", "category"]:
@@ -9883,7 +9889,7 @@ async def update_tax_summary_transaction(summary_id: str, txn_id: str, request: 
 
 
 @app.delete("/api/tax-summary/{summary_id}/transactions/{txn_id}")
-async def delete_tax_summary_transaction(summary_id: str, txn_id: str, user: dict = Depends(get_current_user)):
+async def delete_tax_summary_transaction(summary_id: str, txn_id: str, user: dict = Depends(require_active_subscription)):
     result = await db.tax_summary_transactions.delete_one(
         {"txn_id": txn_id, "summary_id": summary_id, "user_id": user["user_id"]}
     )
@@ -9894,7 +9900,7 @@ async def delete_tax_summary_transaction(summary_id: str, txn_id: str, user: dic
 
 
 @app.get("/api/tax-summary/{summary_id}/export")
-async def export_tax_summary(summary_id: str, user: dict = Depends(get_current_user)):
+async def export_tax_summary(summary_id: str, user: dict = Depends(require_active_subscription)):
     summary = await db.tax_summaries.find_one(
         {"summary_id": summary_id, "user_id": user["user_id"]}, {"_id": 0}
     )
@@ -9931,7 +9937,7 @@ async def export_tax_summary(summary_id: str, user: dict = Depends(get_current_u
     )
 
 @app.get("/api/tax-summary/{summary_id}/download")
-async def download_tax_summary(summary_id: str, user: dict = Depends(get_current_user)):
+async def download_tax_summary(summary_id: str, user: dict = Depends(require_active_subscription)):
     """Download a tax summary as CSV (alias for export endpoint)."""
     summary = await db.tax_summaries.find_one(
         {"summary_id": summary_id, "user_id": user["user_id"]}, {"_id": 0}
@@ -13986,7 +13992,7 @@ Only return the JSON object, no extra text. Be conservative — only fill fields
 @app.post("/api/bills/parse-upload")
 async def parse_bill_upload(
     file: UploadFile = File(...),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_active_subscription),
 ):
     """Upload a purchase invoice / bill image or PDF and extract structured data via AI."""
     if not async_openai_client:
@@ -14443,7 +14449,7 @@ async def delete_customer(customer_id: str, user: dict = Depends(get_current_use
 @app.get("/api/customers/{customer_id}/invoices")
 async def get_customer_invoices(
     customer_id: str,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_active_subscription),
     limit: int = 50,
     skip: int = 0,
 ):
@@ -14716,7 +14722,7 @@ async def get_sales_by_customer(user: dict = Depends(get_current_user)):
 
 
 @app.post("/api/invoices", status_code=201)
-async def create_invoice(request: Request, user: dict = Depends(get_current_user)):
+async def create_invoice(request: Request, user: dict = Depends(require_active_subscription)):
     body = await request.json()
     now = datetime.now(timezone.utc)
 
@@ -14786,7 +14792,7 @@ async def create_invoice(request: Request, user: dict = Depends(get_current_user
 
 @app.get("/api/invoices")
 async def list_invoices(
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_active_subscription),
     status: Optional[str] = None,
     customer_id: Optional[str] = None,
     from_date: Optional[str] = None,
@@ -14863,7 +14869,7 @@ async def invoice_stats(user: dict = Depends(get_current_user)):
 
 
 @app.get("/api/invoices/{invoice_id}")
-async def get_invoice(invoice_id: str, user: dict = Depends(get_current_user)):
+async def get_invoice(invoice_id: str, user: dict = Depends(require_active_subscription)):
     invoice = await db.invoices.find_one(
         {"invoice_id": invoice_id, "user_id": user["user_id"]}, {"_id": 0}
     )
@@ -14873,7 +14879,7 @@ async def get_invoice(invoice_id: str, user: dict = Depends(get_current_user)):
 
 
 @app.put("/api/invoices/{invoice_id}")
-async def update_invoice(invoice_id: str, request: Request, user: dict = Depends(get_current_user)):
+async def update_invoice(invoice_id: str, request: Request, user: dict = Depends(require_active_subscription)):
     body = await request.json()
     invoice = await db.invoices.find_one(
         {"invoice_id": invoice_id, "user_id": user["user_id"]}, {"_id": 0}
@@ -14922,7 +14928,7 @@ async def update_invoice(invoice_id: str, request: Request, user: dict = Depends
 
 
 @app.delete("/api/invoices/{invoice_id}")
-async def delete_invoice(invoice_id: str, user: dict = Depends(get_current_user)):
+async def delete_invoice(invoice_id: str, user: dict = Depends(require_active_subscription)):
     invoice = await db.invoices.find_one(
         {"invoice_id": invoice_id, "user_id": user["user_id"]}, {"_id": 0}
     )
@@ -14945,7 +14951,7 @@ async def delete_invoice(invoice_id: str, user: dict = Depends(get_current_user)
 
 
 @app.post("/api/invoices/{invoice_id}/record-payment")
-async def record_payment(invoice_id: str, request: Request, user: dict = Depends(get_current_user)):
+async def record_payment(invoice_id: str, request: Request, user: dict = Depends(require_active_subscription)):
     body = await request.json()
     invoice = await db.invoices.find_one(
         {"invoice_id": invoice_id, "user_id": user["user_id"]}, {"_id": 0}
@@ -15342,7 +15348,7 @@ def _generate_invoice_pdf_bytes(invoice: dict, settings: dict, *, doc_kind: str 
 
 
 @app.get("/api/invoices/{invoice_id}/pdf")
-async def get_invoice_pdf(invoice_id: str, user: dict = Depends(get_current_user)):
+async def get_invoice_pdf(invoice_id: str, user: dict = Depends(require_active_subscription)):
     """Generate a real PDF for the invoice and return it as application/pdf."""
     invoice = await db.invoices.find_one(
         {"invoice_id": invoice_id, "user_id": user["user_id"]}, {"_id": 0}
@@ -15361,7 +15367,7 @@ async def get_invoice_pdf(invoice_id: str, user: dict = Depends(get_current_user
 
 
 @app.post("/api/invoices/{invoice_id}/mark-paid")
-async def mark_invoice_paid(invoice_id: str, request: Request, user: dict = Depends(get_current_user)):
+async def mark_invoice_paid(invoice_id: str, request: Request, user: dict = Depends(require_active_subscription)):
     """Mark an invoice as fully paid."""
     invoice = await db.invoices.find_one(
         {"invoice_id": invoice_id, "user_id": user["user_id"]}, {"_id": 0}
@@ -15402,7 +15408,7 @@ async def mark_invoice_paid(invoice_id: str, request: Request, user: dict = Depe
 
 
 @app.post("/api/invoices/{invoice_id}/duplicate")
-async def duplicate_invoice(invoice_id: str, user: dict = Depends(get_current_user)):
+async def duplicate_invoice(invoice_id: str, user: dict = Depends(require_active_subscription)):
     """Create a duplicate of an existing invoice with a new number."""
     invoice = await db.invoices.find_one(
         {"invoice_id": invoice_id, "user_id": user["user_id"]}, {"_id": 0}
@@ -15731,7 +15737,7 @@ async def get_purchases_by_vendor(user: dict = Depends(get_current_user)):
 
 
 @app.post("/api/bills", status_code=201)
-async def create_bill(request: Request, user: dict = Depends(get_current_user)):
+async def create_bill(request: Request, user: dict = Depends(require_active_subscription)):
     body = await request.json()
     now = datetime.now(timezone.utc)
 
@@ -15802,7 +15808,7 @@ async def create_bill(request: Request, user: dict = Depends(get_current_user)):
 
 @app.get("/api/bills")
 async def list_bills(
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_active_subscription),
     status: Optional[str] = None,
     vendor_id: Optional[str] = None,
     from_date: Optional[str] = None,
@@ -15875,7 +15881,7 @@ async def bill_stats(user: dict = Depends(get_current_user)):
 
 
 @app.get("/api/bills/{bill_id}")
-async def get_bill(bill_id: str, user: dict = Depends(get_current_user)):
+async def get_bill(bill_id: str, user: dict = Depends(require_active_subscription)):
     bill = await db.bills.find_one(
         {"bill_id": bill_id, "user_id": user["user_id"]}, {"_id": 0}
     )
@@ -15885,7 +15891,7 @@ async def get_bill(bill_id: str, user: dict = Depends(get_current_user)):
 
 
 @app.put("/api/bills/{bill_id}")
-async def update_bill(bill_id: str, request: Request, user: dict = Depends(get_current_user)):
+async def update_bill(bill_id: str, request: Request, user: dict = Depends(require_active_subscription)):
     body = await request.json()
     bill = await db.bills.find_one(
         {"bill_id": bill_id, "user_id": user["user_id"]}, {"_id": 0}
@@ -15934,7 +15940,7 @@ async def update_bill(bill_id: str, request: Request, user: dict = Depends(get_c
 
 
 @app.delete("/api/bills/{bill_id}")
-async def delete_bill(bill_id: str, user: dict = Depends(get_current_user)):
+async def delete_bill(bill_id: str, user: dict = Depends(require_active_subscription)):
     bill = await db.bills.find_one(
         {"bill_id": bill_id, "user_id": user["user_id"]}, {"_id": 0}
     )
@@ -15957,7 +15963,7 @@ async def delete_bill(bill_id: str, user: dict = Depends(get_current_user)):
 
 
 @app.post("/api/bills/{bill_id}/record-payment")
-async def record_bill_payment(bill_id: str, request: Request, user: dict = Depends(get_current_user)):
+async def record_bill_payment(bill_id: str, request: Request, user: dict = Depends(require_active_subscription)):
     body = await request.json()
     bill = await db.bills.find_one(
         {"bill_id": bill_id, "user_id": user["user_id"]}, {"_id": 0}
@@ -16024,7 +16030,7 @@ async def record_bill_payment(bill_id: str, request: Request, user: dict = Depen
 
 
 @app.get("/api/bills/{bill_id}/pdf")
-async def get_bill_pdf(bill_id: str, user: dict = Depends(get_current_user)):
+async def get_bill_pdf(bill_id: str, user: dict = Depends(require_active_subscription)):
     """Generate a real PDF for the purchase bill and return it as application/pdf."""
     bill = await db.bills.find_one(
         {"bill_id": bill_id, "user_id": user["user_id"]}, {"_id": 0}
@@ -16043,7 +16049,7 @@ async def get_bill_pdf(bill_id: str, user: dict = Depends(get_current_user)):
 
 
 @app.post("/api/bills/{bill_id}/mark-paid")
-async def mark_bill_paid(bill_id: str, request: Request, user: dict = Depends(get_current_user)):
+async def mark_bill_paid(bill_id: str, request: Request, user: dict = Depends(require_active_subscription)):
     """Mark a bill as fully paid."""
     bill = await db.bills.find_one(
         {"bill_id": bill_id, "user_id": user["user_id"]}, {"_id": 0}
@@ -16084,7 +16090,7 @@ async def mark_bill_paid(bill_id: str, request: Request, user: dict = Depends(ge
 
 
 @app.post("/api/bills/{bill_id}/duplicate")
-async def duplicate_bill(bill_id: str, user: dict = Depends(get_current_user)):
+async def duplicate_bill(bill_id: str, user: dict = Depends(require_active_subscription)):
     """Create a duplicate of an existing bill with a new number."""
     bill = await db.bills.find_one(
         {"bill_id": bill_id, "user_id": user["user_id"]}, {"_id": 0}

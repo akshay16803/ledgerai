@@ -2,8 +2,10 @@ import { s, getCurrentLanguage } from '../lib/localization';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
+import { useAuth } from '../contexts/AuthContext.jsx';
 import { SalesInvoiceModal } from '../components/SalesInvoiceModal';
 import { InternationalInvoiceModal } from '../components/InternationalInvoiceModal';
+import PremiumGateModal from '../components/PremiumGateModal';
 import { usesExistingForms, getCountryConfig, formatCountryCurrency } from '../lib/countryConfig';
 import { Plus, Eye, PencilSimple, Trash, Printer, CurrencyInr, Receipt, X, Gear, Copy, Check } from '@phosphor-icons/react';
 
@@ -490,6 +492,21 @@ export default function Invoices() {
   const navigate = useNavigate();
   const [lang, setLang] = useState(getCurrentLanguage());
   useEffect(() => { const h = () => setLang(getCurrentLanguage()); window.addEventListener('languageChanged', h); return () => window.removeEventListener('languageChanged', h); }, []);
+
+  // Premium gate — Invoices is the paid Premium tier.
+  const { user, loading: authLoading } = useAuth();
+  const hasPremium = user?.subscription_status === 'active';
+  const [showPremiumModal, setShowPremiumModal] = useState(false);
+  const [initialGateChecked, setInitialGateChecked] = useState(false);
+  useEffect(() => {
+    if (authLoading || initialGateChecked) return;
+    setInitialGateChecked(true);
+    if (!hasPremium) setShowPremiumModal(true);
+  }, [authLoading, hasPremium, initialGateChecked]);
+  useEffect(() => {
+    if (hasPremium) setShowPremiumModal(false);
+  }, [hasPremium]);
+
   const [invoices, setInvoices] = useState([]);
   const [accounts, setAccounts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -776,6 +793,10 @@ export default function Invoices() {
           onClose={() => setRecordingPayment(null)}
           onSuccess={handlePaymentRecorded}
         />
+      )}
+
+      {showPremiumModal && (
+        <PremiumGateModal feature="invoices" onClose={() => setShowPremiumModal(false)} />
       )}
     </div>
   );

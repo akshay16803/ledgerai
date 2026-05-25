@@ -4,10 +4,20 @@ struct MandatesListView: View {
 
 
     @Environment(LocalizationManager.self) var lang
+    @Environment(AuthManager.self) var authManager
+    @Environment(\.dismiss) private var dismiss
     @Bindable var viewModel: CashFlowViewModel
 
     @State private var editingMandateId: String?
     @State private var editAmount: String = ""
+
+    // Premium gate — Mandates is the paid Premium tier.
+    @State private var showPremiumSheet = false
+    @State private var justSubscribed = false
+
+    private var hasPremium: Bool {
+        authManager.user?.hasActiveSubscription == true
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -26,6 +36,22 @@ struct MandatesListView: View {
             } else {
                 mandatesList
             }
+        }
+        .task {
+            if !hasPremium {
+                showPremiumSheet = true
+            }
+        }
+        .sheet(isPresented: $showPremiumSheet, onDismiss: {
+            if !justSubscribed && !hasPremium { dismiss() }
+        }) {
+            PremiumFeatureSheet.mandates(
+                onClose: { showPremiumSheet = false },
+                onSubscribed: { justSubscribed = true }
+            )
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+            .interactiveDismissDisabled(false)
         }
     }
 

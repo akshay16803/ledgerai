@@ -6,6 +6,8 @@ import { PurchaseBillModal } from '../components/PurchaseBillModal';
 import { InternationalInvoiceModal } from '../components/InternationalInvoiceModal';
 import { usesExistingForms, getCountryConfig, formatCountryCurrency } from '../lib/countryConfig';
 import { Plus, Eye, PencilSimple, Trash, Printer, CurrencyInr, Package, X, Gear, UploadSimple, SpinnerGap, Robot, Copy, Check } from '@phosphor-icons/react';
+import { useAuth } from '../contexts/AuthContext.jsx';
+import PremiumGateModal from '../components/PremiumGateModal';
 
 const PAYMENT_METHODS = [
   { value: 'upi', label: 'UPI' },
@@ -495,6 +497,21 @@ export default function Purchases() {
   const navigate = useNavigate();
   const [lang, setLang] = useState(getCurrentLanguage());
   useEffect(() => { const h = () => setLang(getCurrentLanguage()); window.addEventListener('languageChanged', h); return () => window.removeEventListener('languageChanged', h); }, []);
+
+  // Premium gate — Purchases is the paid Premium tier.
+  const { user, loading: authLoading } = useAuth();
+  const hasPremium = user?.subscription_status === 'active';
+  const [showPremiumModal, setShowPremiumModal] = useState(false);
+  const [initialGateChecked, setInitialGateChecked] = useState(false);
+  useEffect(() => {
+    if (authLoading || initialGateChecked) return;
+    setInitialGateChecked(true);
+    if (!hasPremium) setShowPremiumModal(true);
+  }, [authLoading, hasPremium, initialGateChecked]);
+  useEffect(() => {
+    if (hasPremium) setShowPremiumModal(false);
+  }, [hasPremium]);
+
   const [bills, setBills] = useState([]);
   const [accounts, setAccounts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -838,6 +855,10 @@ export default function Purchases() {
           onClose={() => setRecordingPayment(null)}
           onSuccess={handlePaymentRecorded}
         />
+      )}
+
+      {showPremiumModal && (
+        <PremiumGateModal feature="purchases" onClose={() => setShowPremiumModal(false)} />
       )}
     </div>
   );

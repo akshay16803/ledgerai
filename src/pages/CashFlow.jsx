@@ -1,7 +1,10 @@
 import { s, getCurrentLanguage } from '../lib/localization';
 import { useState, useEffect, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { getCached, setCache } from '../lib/cache';
+import { useAuth } from '../contexts/AuthContext.jsx';
+import PremiumGateModal from '../components/PremiumGateModal';
 import {
   TrendUp, TrendDown, Repeat, ArrowRight,
   CurrencyInr, CalendarBlank, Check, X, CaretDown, Receipt, Pause, Play, Trash,
@@ -237,6 +240,25 @@ function ProjectionChart({ data }) {
 export default function CashFlow() {
   const [lang, setLang] = useState(getCurrentLanguage());
   useEffect(() => { const h = () => setLang(getCurrentLanguage()); window.addEventListener('languageChanged', h); return () => window.removeEventListener('languageChanged', h); }, []);
+
+  // CashFlow page itself stays FREE — only the dedicated Mandates deep-link
+  // (`/cashflow?tab=mandates`) is gated behind Premium, mirroring Android +
+  // iOS (where MandatesListView / Screen.Mandates.route are gated).
+  const [searchParams] = useSearchParams();
+  const isMandatesTab = searchParams.get('tab') === 'mandates';
+  const { user, loading: authLoading } = useAuth();
+  const hasPremium = user?.subscription_status === 'active';
+  const [showPremiumModal, setShowPremiumModal] = useState(false);
+  const [initialGateChecked, setInitialGateChecked] = useState(false);
+  useEffect(() => {
+    if (authLoading || initialGateChecked) return;
+    setInitialGateChecked(true);
+    if (isMandatesTab && !hasPremium) setShowPremiumModal(true);
+  }, [authLoading, hasPremium, initialGateChecked, isMandatesTab]);
+  useEffect(() => {
+    if (hasPremium) setShowPremiumModal(false);
+  }, [hasPremium]);
+
   const cached = getCached('cashflow');
   const [projection, setProjection] = useState(cached?.projection || null);
   const [allTransactions, setAllTransactions] = useState(cached?.transactions || []);
@@ -256,12 +278,17 @@ export default function CashFlow() {
 
   const loadData = useCallback(async () => {
     try {
+      // /api/mandates is gated behind Premium since 2026-05-26. Skip the
+      // request for free users so the page doesn't log a 402 every load.
+      const mandatesPromise = hasPremium
+        ? api.get('/api/mandates').catch(() => ({ mandates: [] }))
+        : Promise.resolve({ mandates: [] });
       const [proj, txnData, accs, cats, mnd] = await Promise.all([
         api.get('/api/cashflow/projection'),
         api.get('/api/transactions?status=approved&limit=500'),
         api.get('/api/accounts'),
         api.get('/api/categories'),
-        api.get('/api/mandates').catch(() => ({ mandates: [] })),
+        mandatesPromise,
       ]);
       setProjection(proj);
       setAllTransactions(txnData.transactions || []);
@@ -276,7 +303,7 @@ export default function CashFlow() {
       // Cash flow will show empty state on error
     }
     setLoading(false);
-  }, []);
+  }, [hasPremium]);
 
   const toggleTile = (tile) => {
     setExpandedTile(prev => prev === tile ? null : tile);
@@ -1225,6 +1252,10 @@ export default function CashFlow() {
           source={viewingMandateSource}
           onClose={() => setViewingMandateSource(null)}
         />
+      )}
+
+      {showPremiumModal && (
+        <PremiumGateModal feature="mandates" onClose={() => setShowPremiumModal(false)} />
       )}
     </div>
   );

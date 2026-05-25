@@ -2,6 +2,8 @@ import { s, getCurrentLanguage } from '../lib/localization';
 import { useState, useEffect, useCallback, Fragment } from 'react';
 import { api } from '../lib/api';
 import { getCached, setCache } from '../lib/cache';
+import { useAuth } from '../contexts/AuthContext.jsx';
+import PremiumGateModal from '../components/PremiumGateModal';
 import {
   FileText, Upload, ArrowClockwise, Check, X, Warning,
   CheckCircle, XCircle, Question, Scales, Trash, Eye, LockKey, Plus
@@ -163,6 +165,21 @@ function QuickCategoryModal({ mode, parentId, parentName, categoryType, onClose,
 export default function Reconciliation() {
   const [lang, setLang] = useState(getCurrentLanguage());
   useEffect(() => { const h = () => setLang(getCurrentLanguage()); window.addEventListener('languageChanged', h); return () => window.removeEventListener('languageChanged', h); }, []);
+
+  // Premium gate — Reconciliation is the paid Premium tier.
+  const { user, loading: authLoading } = useAuth();
+  const hasPremium = user?.subscription_status === 'active';
+  const [showPremiumModal, setShowPremiumModal] = useState(false);
+  const [initialGateChecked, setInitialGateChecked] = useState(false);
+  useEffect(() => {
+    if (authLoading || initialGateChecked) return;
+    setInitialGateChecked(true);
+    if (!hasPremium) setShowPremiumModal(true);
+  }, [authLoading, hasPremium, initialGateChecked]);
+  useEffect(() => {
+    if (hasPremium) setShowPremiumModal(false);
+  }, [hasPremium]);
+
   const cached = getCached('reconciliation');
   const [statements, setStatements] = useState(Array.isArray(cached?.statements) ? cached.statements : []);
   const [accounts, setAccounts] = useState(Array.isArray(cached?.accounts) ? cached.accounts : []);
@@ -1448,6 +1465,10 @@ export default function Reconciliation() {
           onApply={handleBulkCategorize}
           applying={bulkCatting}
         />
+      )}
+
+      {showPremiumModal && (
+        <PremiumGateModal feature="reconciliation" onClose={() => setShowPremiumModal(false)} />
       )}
     </div>
   );

@@ -6,9 +6,19 @@ struct PurchaseListView: View {
 
 
     @Environment(LocalizationManager.self) var lang
+    @Environment(AuthManager.self) var authManager
+    @Environment(\.dismiss) private var dismiss
     @State private var viewModel = PurchasesViewModel()
     @State private var showDeleteConfirm = false
     @State private var billToDelete: Bill?
+
+    // Premium gate — Purchases is the paid Premium tier.
+    @State private var showPremiumSheet = false
+    @State private var justSubscribed = false
+
+    private var hasPremium: Bool {
+        authManager.user?.hasActiveSubscription == true
+    }
 
     // MARK: - Body
 
@@ -88,7 +98,21 @@ struct PurchaseListView: View {
             Text(lang.s("delete_bill_confirm"))
         }
         .task {
+            if !hasPremium {
+                showPremiumSheet = true
+            }
             await viewModel.loadAll()
+        }
+        .sheet(isPresented: $showPremiumSheet, onDismiss: {
+            if !justSubscribed && !hasPremium { dismiss() }
+        }) {
+            PremiumFeatureSheet.purchases(
+                onClose: { showPremiumSheet = false },
+                onSubscribed: { justSubscribed = true }
+            )
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+            .interactiveDismissDisabled(false)
         }
     }
 

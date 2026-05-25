@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../lib/api';
 import { getCached, setCache } from '../lib/cache';
+import { useAuth } from '../contexts/AuthContext.jsx';
+import PremiumGateModal from '../components/PremiumGateModal';
 import {
   Plus, Trash, PencilSimple, DownloadSimple, ArrowLeft,
   TrendUp, TrendDown, Scales, Lightning, CalendarBlank,
@@ -15,6 +17,20 @@ function formatCurrency(amount) {
 }
 
 export default function TaxSummary() {
+  // Premium gate — Past Insights is the paid Premium tier.
+  const { user, loading: authLoading } = useAuth();
+  const hasPremium = user?.subscription_status === 'active';
+  const [showPremiumModal, setShowPremiumModal] = useState(false);
+  const [initialGateChecked, setInitialGateChecked] = useState(false);
+  useEffect(() => {
+    if (authLoading || initialGateChecked) return;
+    setInitialGateChecked(true);
+    if (!hasPremium) setShowPremiumModal(true);
+  }, [authLoading, hasPremium, initialGateChecked]);
+  useEffect(() => {
+    if (hasPremium) setShowPremiumModal(false);
+  }, [hasPremium]);
+
   const cached = getCached('taxsummary');
   const [summaries, setSummaries] = useState(cached?.summaries || []);
   const [availableEmails, setAvailableEmails] = useState([]);
@@ -263,6 +279,10 @@ export default function TaxSummary() {
             />
           ))}
         </div>
+      )}
+
+      {showPremiumModal && (
+        <PremiumGateModal feature="past_insights" onClose={() => setShowPremiumModal(false)} />
       )}
     </div>
   );

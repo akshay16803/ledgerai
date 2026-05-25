@@ -420,6 +420,162 @@ extension PremiumFeatureSheet {
         )
     }
 
+    /// Premium sheet preset for Invoices.
+    static func invoices(
+        onClose: @escaping () -> Void,
+        onSubscribed: (() -> Void)? = nil
+    ) -> PremiumFeatureSheet {
+        PremiumFeatureSheet(
+            featureIcon: "doc.text.fill",
+            featureName: "Invoices",
+            headline: "Invoice clients,\nget paid faster.",
+            subhead: "Create GST-ready invoices in seconds, share them as PDF, and track every rupee that's still owed.",
+            bullets: [
+                ("doc.badge.plus",
+                 "One-tap invoices",
+                 "Pick a customer, add line items, hit send — we generate the GST PDF for you."),
+                ("indianrupeesign.circle.fill",
+                 "Track receivables",
+                 "See exactly who owes you what, how old it is, and chase only the late ones."),
+                ("checkmark.seal.fill",
+                 "Record payments cleanly",
+                 "Mark paid, capture partials, and stay reconciled with your ledger automatically."),
+            ],
+            onClose: onClose,
+            onSubscribed: onSubscribed
+        )
+    }
+
+    /// Premium sheet preset for Purchases (Bills).
+    static func purchases(
+        onClose: @escaping () -> Void,
+        onSubscribed: (() -> Void)? = nil
+    ) -> PremiumFeatureSheet {
+        PremiumFeatureSheet(
+            featureIcon: "cart.fill",
+            featureName: "Purchases",
+            headline: "Every vendor bill,\norganised and on time.",
+            subhead: "Log purchase bills, track what you owe each vendor, and never miss a payment deadline again.",
+            bullets: [
+                ("tray.and.arrow.down.fill",
+                 "Bill in seconds",
+                 "Snap a bill or fill the form — itemised, GST-aware and saved against the vendor."),
+                ("clock.badge.exclamationmark.fill",
+                 "Aging at a glance",
+                 "0-30, 31-60, 60+ days — see which payables are about to slip into overdue."),
+                ("creditcard.fill",
+                 "Record payments fast",
+                 "Pay in full, split across modes, or close with a credit note — all stay tied to the bill."),
+            ],
+            onClose: onClose,
+            onSubscribed: onSubscribed
+        )
+    }
+
+    /// Premium sheet preset for Mandates / Recurring.
+    static func mandates(
+        onClose: @escaping () -> Void,
+        onSubscribed: (() -> Void)? = nil
+    ) -> PremiumFeatureSheet {
+        PremiumFeatureSheet(
+            featureIcon: "arrow.triangle.2.circlepath",
+            featureName: "Mandates",
+            headline: "Never get surprised\nby a recurring charge.",
+            subhead: "Track every SIP, EMI, subscription and auto-debit in one place — and see exactly what's hitting your account next.",
+            bullets: [
+                ("calendar.badge.clock",
+                 "Upcoming debits, mapped",
+                 "Know what's debiting tomorrow, this week, this month — before the bank does it."),
+                ("bell.badge.fill",
+                 "No more missed renewals",
+                 "We surface auto-renew dates from your statements and SMS so nothing slips through."),
+                ("chart.bar.fill",
+                 "Plan your cash flow",
+                 "Project balances forward, accounting for every committed recurring outflow."),
+            ],
+            onClose: onClose,
+            onSubscribed: onSubscribed
+        )
+    }
+
+    /// Premium sheet preset for Reconciliation.
+    static func reconciliation(
+        onClose: @escaping () -> Void,
+        onSubscribed: (() -> Void)? = nil
+    ) -> PremiumFeatureSheet {
+        PremiumFeatureSheet(
+            featureIcon: "arrow.left.arrow.right.circle.fill",
+            featureName: "Reconciliation",
+            headline: "Match every line\nto your statement.",
+            subhead: "Upload your bank or card statement and we'll reconcile it against your ledger — finding misses, duplicates and mismatches.",
+            bullets: [
+                ("doc.text.magnifyingglass",
+                 "Statement upload",
+                 "PDF, CSV or scanned — we parse every transaction and line it up against what you've logged."),
+                ("exclamationmark.triangle.fill",
+                 "Catch the gaps",
+                 "Missing entries, double-posts and amount mismatches surface in a clear review queue."),
+                ("checkmark.circle.fill",
+                 "Close the period clean",
+                 "Approve a statement and your books are locked, audited and ready for tax season."),
+            ],
+            onClose: onClose,
+            onSubscribed: onSubscribed
+        )
+    }
+
+    /// Premium sheet preset for Records.
+    static func records(
+        onClose: @escaping () -> Void,
+        onSubscribed: (() -> Void)? = nil
+    ) -> PremiumFeatureSheet {
+        PremiumFeatureSheet(
+            featureIcon: "tray.full.fill",
+            featureName: "Records",
+            headline: "Every receipt,\nfiled and searchable.",
+            subhead: "Every email receipt, statement and attachment we ingest is archived, indexed and one search away — forever.",
+            bullets: [
+                ("magnifyingglass",
+                 "Find any receipt fast",
+                 "Search by vendor, amount, date or category — across years of statements and emails."),
+                ("paperclip",
+                 "Originals stay attached",
+                 "PDFs, images and EML files stay linked to the transaction they belong to."),
+                ("lock.shield.fill",
+                 "Encrypted at rest",
+                 "Your records are AES-encrypted in our vault and only ever decrypted for you."),
+            ],
+            onClose: onClose,
+            onSubscribed: onSubscribed
+        )
+    }
+
+    /// Premium sheet preset for Past Insights (Tax Summary).
+    static func pastInsights(
+        onClose: @escaping () -> Void,
+        onSubscribed: (() -> Void)? = nil
+    ) -> PremiumFeatureSheet {
+        PremiumFeatureSheet(
+            featureIcon: "chart.line.uptrend.xyaxis",
+            featureName: "Past Insights",
+            headline: "Your finances,\nlooked at clearly.",
+            subhead: "Generate tax-ready summaries from any period — built from your real ledger, ready to hand to your CA.",
+            bullets: [
+                ("calendar",
+                 "Any period, instantly",
+                 "FY, quarter, month, custom dates — we slice the books however your CA needs."),
+                ("doc.richtext.fill",
+                 "CA-ready exports",
+                 "PDF + Excel out of the box, with category breakdowns, vendor totals and tax buckets."),
+                ("brain.head.profile",
+                 "Spot the patterns",
+                 "Where your money went, where it's growing, and where you're leaking — across years."),
+            ],
+            onClose: onClose,
+            onSubscribed: onSubscribed
+        )
+    }
+
     /// Premium sheet preset for SMS Auto-Detection.
     static func smsSync(
         onClose: @escaping () -> Void,

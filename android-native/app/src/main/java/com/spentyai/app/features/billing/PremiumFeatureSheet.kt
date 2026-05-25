@@ -5,12 +5,25 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ReceiptLong
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.CompareArrows
 import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Inbox
+import androidx.compose.material.icons.filled.Insights
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Repeat
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material.icons.filled.Sms
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.UploadFile
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -67,6 +80,150 @@ object PremiumFeatureSheet {
                 Bullet(Icons.Filled.Bolt,        "Set it once, forget it",  "Connect Gmail in 30 seconds. New emails auto-parse on arrival."),
                 Bullet(Icons.Filled.CheckCircle, "Smart review queue",      "Anything we're unsure about waits for you — never silently wrong."),
                 Bullet(Icons.Filled.Lock,        "Read-only & encrypted",   "We never send, delete or modify mail. Tokens are bank-grade encrypted."),
+            ),
+            priceDisplay = priceDisplay,
+            isPurchasing = isPurchasing,
+            onSubscribe = onSubscribe,
+            onClose = onClose,
+        )
+    }
+
+    @Composable
+    fun Invoices(
+        priceDisplay: String,
+        isPurchasing: Boolean,
+        onSubscribe: () -> Unit,
+        onClose: () -> Unit
+    ) {
+        Sheet(
+            featureIcon = Icons.AutoMirrored.Filled.ReceiptLong,
+            featureName = "Invoices",
+            headline = "Invoice clients,\nget paid faster.",
+            subhead = "Create GST-ready invoices in seconds, share them as PDF, and track every rupee that's still owed.",
+            bullets = listOf(
+                Bullet(Icons.Filled.Bolt,        "One-tap invoices",          "Pick a customer, add line items, hit send — we generate the GST PDF for you."),
+                Bullet(Icons.Filled.CheckCircle, "Track receivables",         "See exactly who owes you what, how old it is, and chase only the late ones."),
+                Bullet(Icons.Filled.Lock,        "Record payments cleanly",   "Mark paid, capture partials, and stay reconciled with your ledger automatically."),
+            ),
+            priceDisplay = priceDisplay,
+            isPurchasing = isPurchasing,
+            onSubscribe = onSubscribe,
+            onClose = onClose,
+        )
+    }
+
+    @Composable
+    fun Purchases(
+        priceDisplay: String,
+        isPurchasing: Boolean,
+        onSubscribe: () -> Unit,
+        onClose: () -> Unit
+    ) {
+        Sheet(
+            featureIcon = Icons.Filled.ShoppingCart,
+            featureName = "Purchases",
+            headline = "Every vendor bill,\norganised and on time.",
+            subhead = "Log purchase bills, track what you owe each vendor, and never miss a payment deadline again.",
+            bullets = listOf(
+                Bullet(Icons.Filled.UploadFile,  "Bill in seconds",     "Snap a bill or fill the form — itemised, GST-aware and saved against the vendor."),
+                Bullet(Icons.Filled.Warning,     "Aging at a glance",   "0-30, 31-60, 60+ days — see which payables are about to slip into overdue."),
+                Bullet(Icons.Filled.CheckCircle, "Record payments fast", "Pay in full, split across modes, or close with a credit note — all stay tied to the bill."),
+            ),
+            priceDisplay = priceDisplay,
+            isPurchasing = isPurchasing,
+            onSubscribe = onSubscribe,
+            onClose = onClose,
+        )
+    }
+
+    @Composable
+    fun Mandates(
+        priceDisplay: String,
+        isPurchasing: Boolean,
+        onSubscribe: () -> Unit,
+        onClose: () -> Unit
+    ) {
+        Sheet(
+            featureIcon = Icons.Filled.Repeat,
+            featureName = "Mandates",
+            headline = "Never get surprised\nby a recurring charge.",
+            subhead = "Track every SIP, EMI, subscription and auto-debit in one place — and see exactly what's hitting your account next.",
+            bullets = listOf(
+                Bullet(Icons.Filled.CalendarMonth,  "Upcoming debits, mapped", "Know what's debiting tomorrow, this week, this month — before the bank does it."),
+                Bullet(Icons.Filled.Notifications,  "No more missed renewals", "We surface auto-renew dates from your statements and SMS so nothing slips through."),
+                Bullet(Icons.Filled.Insights,       "Plan your cash flow",     "Project balances forward, accounting for every committed recurring outflow."),
+            ),
+            priceDisplay = priceDisplay,
+            isPurchasing = isPurchasing,
+            onSubscribe = onSubscribe,
+            onClose = onClose,
+        )
+    }
+
+    @Composable
+    fun Reconciliation(
+        priceDisplay: String,
+        isPurchasing: Boolean,
+        onSubscribe: () -> Unit,
+        onClose: () -> Unit
+    ) {
+        Sheet(
+            featureIcon = Icons.Filled.CompareArrows,
+            featureName = "Reconciliation",
+            headline = "Match every line\nto your statement.",
+            subhead = "Upload your bank or card statement and we'll reconcile it against your ledger — finding misses, duplicates and mismatches.",
+            bullets = listOf(
+                Bullet(Icons.Filled.UploadFile,   "Statement upload",      "PDF, CSV or scanned — we parse every transaction and line it up against what you've logged."),
+                Bullet(Icons.Filled.Warning,      "Catch the gaps",        "Missing entries, double-posts and amount mismatches surface in a clear review queue."),
+                Bullet(Icons.Filled.CheckCircle,  "Close the period clean", "Approve a statement and your books are locked, audited and ready for tax season."),
+            ),
+            priceDisplay = priceDisplay,
+            isPurchasing = isPurchasing,
+            onSubscribe = onSubscribe,
+            onClose = onClose,
+        )
+    }
+
+    @Composable
+    fun Records(
+        priceDisplay: String,
+        isPurchasing: Boolean,
+        onSubscribe: () -> Unit,
+        onClose: () -> Unit
+    ) {
+        Sheet(
+            featureIcon = Icons.Filled.Inbox,
+            featureName = "Records",
+            headline = "Every receipt,\nfiled and searchable.",
+            subhead = "Every email receipt, statement and attachment we ingest is archived, indexed and one search away — forever.",
+            bullets = listOf(
+                Bullet(Icons.Filled.Search,  "Find any receipt fast",   "Search by vendor, amount, date or category — across years of statements and emails."),
+                Bullet(Icons.Filled.Folder,  "Originals stay attached", "PDFs, images and EML files stay linked to the transaction they belong to."),
+                Bullet(Icons.Filled.Lock,    "Encrypted at rest",       "Your records are AES-encrypted in our vault and only ever decrypted for you."),
+            ),
+            priceDisplay = priceDisplay,
+            isPurchasing = isPurchasing,
+            onSubscribe = onSubscribe,
+            onClose = onClose,
+        )
+    }
+
+    @Composable
+    fun PastInsights(
+        priceDisplay: String,
+        isPurchasing: Boolean,
+        onSubscribe: () -> Unit,
+        onClose: () -> Unit
+    ) {
+        Sheet(
+            featureIcon = Icons.Filled.Insights,
+            featureName = "Past Insights",
+            headline = "Your finances,\nlooked at clearly.",
+            subhead = "Generate tax-ready summaries from any period — built from your real ledger, ready to hand to your CA.",
+            bullets = listOf(
+                Bullet(Icons.Filled.CalendarMonth, "Any period, instantly", "FY, quarter, month, custom dates — we slice the books however your CA needs."),
+                Bullet(Icons.Filled.Tune,          "CA-ready exports",      "PDF + Excel out of the box, with category breakdowns, vendor totals and tax buckets."),
+                Bullet(Icons.Filled.Insights,      "Spot the patterns",     "Where your money went, where it's growing, and where you're leaking — across years."),
             ),
             priceDisplay = priceDisplay,
             isPurchasing = isPurchasing,

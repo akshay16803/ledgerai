@@ -6,10 +6,21 @@ struct InvoiceListView: View {
 
 
     @Environment(LocalizationManager.self) var lang
+    @Environment(AuthManager.self) var authManager
+    @Environment(\.dismiss) private var dismiss
     @State private var viewModel = InvoicesViewModel()
     @State private var paymentInvoice: Invoice?
     @State private var debtorsExpanded = false
     @State private var agingExpanded = false
+
+    // Premium gate — Invoices is the paid Premium tier. If the user
+    // isn't subscribed, present the PremiumFeatureSheet on entry.
+    @State private var showPremiumSheet = false
+    @State private var justSubscribed = false
+
+    private var hasPremium: Bool {
+        authManager.user?.hasActiveSubscription == true
+    }
 
     // MARK: - Body
 
@@ -58,9 +69,23 @@ struct InvoiceListView: View {
             Text(viewModel.errorMessage ?? "")
         }
         .task {
+            if !hasPremium {
+                showPremiumSheet = true
+            }
             await viewModel.loadAll()
             await viewModel.loadCustomers()
             await viewModel.loadAccounts()
+        }
+        .sheet(isPresented: $showPremiumSheet, onDismiss: {
+            if !justSubscribed && !hasPremium { dismiss() }
+        }) {
+            PremiumFeatureSheet.invoices(
+                onClose: { showPremiumSheet = false },
+                onSubscribed: { justSubscribed = true }
+            )
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+            .interactiveDismissDisabled(false)
         }
     }
 

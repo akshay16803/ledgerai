@@ -25,15 +25,65 @@ import androidx.compose.ui.unit.sp
 import com.spentyai.app.core.components.*
 import com.spentyai.app.core.models.*
 import com.spentyai.app.core.theme.*
+import com.spentyai.app.features.billing.BillingRepository
+import com.spentyai.app.features.billing.BillingViewModel
+import com.spentyai.app.features.billing.PremiumFeatureSheet
+import android.app.Activity
+import androidx.compose.ui.platform.LocalContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ReconciliationScreen(
     viewModel: ReconciliationViewModel,
-    onStatementClick: (String) -> Unit
+    billingViewModel: BillingViewModel,
+    onStatementClick: (String) -> Unit,
+    onBack: () -> Unit
 ) {
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var deleteTargetId by remember { mutableStateOf<String?>(null) }
+
+    // ── Premium gate (Reconciliation is the paid Premium tier) ──────────
+    val billingState by billingViewModel.uiState.collectAsState()
+    val hasPremium = billingState.currentStatus?.isActive == true
+    val statusLoaded = billingState.currentStatus != null
+    var showPremiumSheet by remember { mutableStateOf(false) }
+    var initialGateChecked by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val activity = context as? Activity
+
+    LaunchedEffect(statusLoaded) {
+        if (!statusLoaded || initialGateChecked) return@LaunchedEffect
+        initialGateChecked = true
+        if (!hasPremium) showPremiumSheet = true
+    }
+
+    LaunchedEffect(hasPremium) {
+        if (hasPremium && showPremiumSheet) showPremiumSheet = false
+    }
+
+    if (showPremiumSheet) {
+        val closeSheet: () -> Unit = {
+            showPremiumSheet = false
+            if (!hasPremium) onBack()
+        }
+        ModalBottomSheet(
+            onDismissRequest = closeSheet,
+            containerColor = MaterialTheme.colorScheme.surface
+        ) {
+            PremiumFeatureSheet.Reconciliation(
+                priceDisplay = billingViewModel.displayPrice(BillingRepository.PRODUCT_MONTHLY) ?: "₹199",
+                isPurchasing = billingState.isPurchasing,
+                onSubscribe = onSub@{
+                    val act = activity ?: return@onSub
+                    val details = billingState.productDetailsList
+                        .firstOrNull { it.productId == BillingRepository.PRODUCT_MONTHLY }
+                        ?: return@onSub
+                    billingViewModel.purchaseSubscription(details, act)
+                },
+                onClose = closeSheet
+            )
+        }
+    }
 
     LaunchedEffect(Unit) { viewModel.loadInitial() }
 

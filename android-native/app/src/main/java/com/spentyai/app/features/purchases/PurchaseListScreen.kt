@@ -74,6 +74,12 @@ import com.spentyai.app.core.theme.SpentyStyle
 import com.spentyai.app.core.theme.SpentySuccess
 import com.spentyai.app.core.theme.SpentyType
 import com.spentyai.app.core.theme.SpentyWarning
+import com.spentyai.app.features.billing.BillingRepository
+import com.spentyai.app.features.billing.BillingViewModel
+import com.spentyai.app.features.billing.PremiumFeatureSheet
+import android.app.Activity
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.ui.platform.LocalContext
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
@@ -82,16 +88,61 @@ import java.time.format.FormatStyle
 @Composable
 fun PurchaseListScreen(
     viewModel: PurchasesViewModel,
+    billingViewModel: BillingViewModel,
     onNavigateToForm: (Bill?) -> Unit,
     onNavigateToPreview: (Bill) -> Unit,
     onNavigateToRecordPayment: (Bill) -> Unit,
-    onNavigateToUpload: () -> Unit
+    onNavigateToUpload: () -> Unit,
+    onBack: () -> Unit
 ) {
     val state by viewModel.uiState.collectAsState()
     val filtered by viewModel.filteredBills.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
     var creditorsExpanded by remember { mutableStateOf(false) }
     var agingExpanded by remember { mutableStateOf(false) }
+
+    // ── Premium gate (Purchases is the paid Premium tier) ────────────────
+    val billingState by billingViewModel.uiState.collectAsState()
+    val hasPremium = billingState.currentStatus?.isActive == true
+    val statusLoaded = billingState.currentStatus != null
+    var showPremiumSheet by remember { mutableStateOf(false) }
+    var initialGateChecked by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val activity = context as? Activity
+
+    LaunchedEffect(statusLoaded) {
+        if (!statusLoaded || initialGateChecked) return@LaunchedEffect
+        initialGateChecked = true
+        if (!hasPremium) showPremiumSheet = true
+    }
+
+    LaunchedEffect(hasPremium) {
+        if (hasPremium && showPremiumSheet) showPremiumSheet = false
+    }
+
+    if (showPremiumSheet) {
+        val closeSheet: () -> Unit = {
+            showPremiumSheet = false
+            if (!hasPremium) onBack()
+        }
+        ModalBottomSheet(
+            onDismissRequest = closeSheet,
+            containerColor = MaterialTheme.colorScheme.surface
+        ) {
+            PremiumFeatureSheet.Purchases(
+                priceDisplay = billingViewModel.displayPrice(BillingRepository.PRODUCT_MONTHLY) ?: "₹199",
+                isPurchasing = billingState.isPurchasing,
+                onSubscribe = onSub@{
+                    val act = activity ?: return@onSub
+                    val details = billingState.productDetailsList
+                        .firstOrNull { it.productId == BillingRepository.PRODUCT_MONTHLY }
+                        ?: return@onSub
+                    billingViewModel.purchaseSubscription(details, act)
+                },
+                onClose = closeSheet
+            )
+        }
+    }
 
     LaunchedEffect(Unit) { viewModel.loadAll() }
 

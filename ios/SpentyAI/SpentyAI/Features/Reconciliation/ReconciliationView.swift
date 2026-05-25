@@ -5,9 +5,19 @@ struct ReconciliationView: View {
 
 
     @Environment(LocalizationManager.self) var lang
+    @Environment(AuthManager.self) var authManager
+    @Environment(\.dismiss) private var dismiss
     @State private var viewModel = ReconciliationViewModel()
     @State private var showDeleteConfirm = false
     @State private var deleteTargetId: String?
+
+    // Premium gate — Reconciliation is the paid Premium tier.
+    @State private var showPremiumSheet = false
+    @State private var justSubscribed = false
+
+    private var hasPremium: Bool {
+        authManager.user?.hasActiveSubscription == true
+    }
 
     private static let rowDateFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -66,7 +76,23 @@ struct ReconciliationView: View {
         } message: {
             Text(lang.s("cannot_undo"))
         }
-        .task { await viewModel.loadInitial() }
+        .task {
+            if !hasPremium {
+                showPremiumSheet = true
+            }
+            await viewModel.loadInitial()
+        }
+        .sheet(isPresented: $showPremiumSheet, onDismiss: {
+            if !justSubscribed && !hasPremium { dismiss() }
+        }) {
+            PremiumFeatureSheet.reconciliation(
+                onClose: { showPremiumSheet = false },
+                onSubscribed: { justSubscribed = true }
+            )
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+            .interactiveDismissDisabled(false)
+        }
     }
 
     // MARK: - Statement List

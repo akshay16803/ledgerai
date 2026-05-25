@@ -39,7 +39,7 @@ enum class CashFlowDrillDown(val title: String) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CashFlowScreen(viewModel: CashFlowViewModel) {
+fun CashFlowScreen(viewModel: CashFlowViewModel, hasPremium: Boolean = true) {
     var activeDrillDown by remember { mutableStateOf<CashFlowDrillDown?>(null) }
     var showCalendar by remember { mutableStateOf(false) }
 
@@ -650,7 +650,7 @@ fun CashFlowDrillDownSheet(
                             RecurringDrillDownRow(item, SpentyError)
                         }
                     }
-                    if (viewModel.mandateItemsList.isNotEmpty()) {
+                    if (hasPremium && viewModel.mandateItemsList.isNotEmpty()) {
                         Text(
                             "Mandates",
                             style = SpentyType.Caption1.copy(fontWeight = FontWeight.Bold),
@@ -661,7 +661,7 @@ fun CashFlowDrillDownSheet(
                             MandateDrillDownRow(item)
                         }
                     }
-                    if (viewModel.expenseItems.isEmpty() && viewModel.mandateItemsList.isEmpty()) {
+                    if (viewModel.expenseItems.isEmpty() && (!hasPremium || viewModel.mandateItemsList.isEmpty())) {
                         DrillDownEmptyState("No recurring expense items found")
                     }
                 }

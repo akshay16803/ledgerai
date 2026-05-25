@@ -6,7 +6,17 @@ struct PastInsightsView: View {
 
 
     @Environment(LocalizationManager.self) var lang
+    @Environment(AuthManager.self) var authManager
+    @Environment(\.dismiss) private var dismiss
     @State private var viewModel = PastInsightsViewModel()
+
+    // Premium gate — Past Insights is the paid Premium tier.
+    @State private var showPremiumSheet = false
+    @State private var justSubscribed = false
+
+    private var hasPremium: Bool {
+        authManager.user?.hasActiveSubscription == true
+    }
 
     // MARK: - Body
 
@@ -46,7 +56,21 @@ struct PastInsightsView: View {
             Text(viewModel.errorMessage)
         }
         .task {
+            if !hasPremium {
+                showPremiumSheet = true
+            }
             await viewModel.loadSummaries()
+        }
+        .sheet(isPresented: $showPremiumSheet, onDismiss: {
+            if !justSubscribed && !hasPremium { dismiss() }
+        }) {
+            PremiumFeatureSheet.pastInsights(
+                onClose: { showPremiumSheet = false },
+                onSubscribed: { justSubscribed = true }
+            )
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+            .interactiveDismissDisabled(false)
         }
     }
 

@@ -2,6 +2,8 @@ import { s, getCurrentLanguage } from '../lib/localization';
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../lib/api';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../contexts/AuthContext.jsx';
+import PremiumGateModal from '../components/PremiumGateModal';
 import {
   MagnifyingGlass, DownloadSimple, FileText, Paperclip,
   FunnelSimple, CaretDown, CaretUp, EnvelopeSimple, Archive, Eye, X, Receipt, Image as ImageIcon, ArrowsLeftRight, UploadSimple
@@ -18,6 +20,21 @@ export default function Records() {
   const navigate = useNavigate();
   const [lang, setLang] = useState(getCurrentLanguage());
   useEffect(() => { const h = () => setLang(getCurrentLanguage()); window.addEventListener('languageChanged', h); return () => window.removeEventListener('languageChanged', h); }, []);
+
+  // Premium gate — Records is the paid Premium tier.
+  const { user, loading: authLoading } = useAuth();
+  const hasPremium = user?.subscription_status === 'active';
+  const [showPremiumModal, setShowPremiumModal] = useState(false);
+  const [initialGateChecked, setInitialGateChecked] = useState(false);
+  useEffect(() => {
+    if (authLoading || initialGateChecked) return;
+    setInitialGateChecked(true);
+    if (!hasPremium) setShowPremiumModal(true);
+  }, [authLoading, hasPremium, initialGateChecked]);
+  useEffect(() => {
+    if (hasPremium) setShowPremiumModal(false);
+  }, [hasPremium]);
+
   const [records, setRecords] = useState([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -728,6 +745,10 @@ export default function Records() {
             )}
           </div>
         </div>
+      )}
+
+      {showPremiumModal && (
+        <PremiumGateModal feature="records" onClose={() => setShowPremiumModal(false)} />
       )}
     </div>
   );

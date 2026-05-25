@@ -330,9 +330,11 @@ fun AppNavigation(
             composable(Screen.Invoices.route) {
                 InvoiceListScreen(
                     viewModel = invoicesViewModel,
+                    billingViewModel = billingViewModel,
                     onNavigateToForm = { /* handled internally */ },
                     onNavigateToPreview = { /* handled internally */ },
-                    onNavigateToRecordPayment = { /* handled internally */ }
+                    onNavigateToRecordPayment = { /* handled internally */ },
+                    onBack = { navController.popBackStack() }
                 )
             }
 
@@ -359,10 +361,12 @@ fun AppNavigation(
             composable(Screen.Bills.route) {
                 PurchaseListScreen(
                     viewModel = purchasesViewModel,
+                    billingViewModel = billingViewModel,
                     onNavigateToForm = { /* handled internally */ },
                     onNavigateToPreview = { /* handled internally */ },
                     onNavigateToRecordPayment = { /* handled internally */ },
-                    onNavigateToUpload = { /* handled internally */ }
+                    onNavigateToUpload = { /* handled internally */ },
+                    onBack = { navController.popBackStack() }
                 )
             }
 
@@ -391,7 +395,53 @@ fun AppNavigation(
             }
 
             composable(Screen.Mandates.route) {
-                CashFlowScreen(viewModel = cashFlowViewModel)
+                // Mandates route is gated as Premium. CashFlow itself stays free
+                // (alias "cash_flow" below); only the deep-link from Dashboard's
+                // projection card / More menu's Mandates entry triggers the gate.
+                val billingState by billingViewModel.uiState.collectAsState()
+                val hasPremium = billingState.currentStatus?.isActive == true
+                val statusLoaded = billingState.currentStatus != null
+                var showPremiumSheet by remember { mutableStateOf(false) }
+                var initialGateChecked by remember { mutableStateOf(false) }
+                val ctx = androidx.compose.ui.platform.LocalContext.current
+                val activity = ctx as? android.app.Activity
+
+                LaunchedEffect(statusLoaded) {
+                    if (!statusLoaded || initialGateChecked) return@LaunchedEffect
+                    initialGateChecked = true
+                    if (!hasPremium) showPremiumSheet = true
+                }
+                LaunchedEffect(hasPremium) {
+                    if (hasPremium && showPremiumSheet) showPremiumSheet = false
+                }
+
+                if (showPremiumSheet) {
+                    val closeSheet: () -> Unit = {
+                        showPremiumSheet = false
+                        if (!hasPremium) navController.popBackStack()
+                    }
+                    androidx.compose.material3.ModalBottomSheet(
+                        onDismissRequest = closeSheet,
+                        containerColor = MaterialTheme.colorScheme.surface
+                    ) {
+                        com.spentyai.app.features.billing.PremiumFeatureSheet.Mandates(
+                            priceDisplay = billingViewModel.displayPrice(
+                                com.spentyai.app.features.billing.BillingRepository.PRODUCT_MONTHLY
+                            ) ?: "₹199",
+                            isPurchasing = billingState.isPurchasing,
+                            onSubscribe = onSub@{
+                                val act = activity ?: return@onSub
+                                val details = billingState.productDetailsList
+                                    .firstOrNull { it.productId == com.spentyai.app.features.billing.BillingRepository.PRODUCT_MONTHLY }
+                                    ?: return@onSub
+                                billingViewModel.purchaseSubscription(details, act)
+                            },
+                            onClose = closeSheet
+                        )
+                    }
+                }
+
+                CashFlowScreen(viewModel = cashFlowViewModel, hasPremium = hasPremium)
             }
 
             // Alias used by MoreMenuScreen ("cash_flow" → CashFlow)
@@ -406,6 +456,7 @@ fun AppNavigation(
             composable(Screen.TaxSummary.route) {
                 PastInsightsScreen(
                     viewModel = pastInsightsViewModel,
+                    billingViewModel = billingViewModel,
                     onNavigateBack = { navController.popBackStack() },
                     onNavigateToDetail = { id ->
                         navController.navigate(Screen.PastInsightDetail.createRoute(id))
@@ -482,6 +533,7 @@ fun AppNavigation(
             composable(Screen.Records.route) {
                 RecordsScreen(
                     viewModel = recordsViewModel,
+                    billingViewModel = billingViewModel,
                     onNavigateToPreview = { id ->
                         navController.navigate("record_preview/$id")
                     },
@@ -504,9 +556,11 @@ fun AppNavigation(
             composable(Screen.Statements.route) {
                 ReconciliationScreen(
                     viewModel = reconciliationViewModel,
+                    billingViewModel = billingViewModel,
                     onStatementClick = { id ->
                         navController.navigate("statement_detail/$id")
-                    }
+                    },
+                    onBack = { navController.popBackStack() }
                 )
             }
 
@@ -514,9 +568,11 @@ fun AppNavigation(
             composable("reconciliation") {
                 ReconciliationScreen(
                     viewModel = reconciliationViewModel,
+                    billingViewModel = billingViewModel,
                     onStatementClick = { id ->
                         navController.navigate("statement_detail/$id")
-                    }
+                    },
+                    onBack = { navController.popBackStack() }
                 )
             }
 
@@ -562,6 +618,7 @@ fun AppNavigation(
             composable(Screen.PastInsights.route) {
                 PastInsightsScreen(
                     viewModel = pastInsightsViewModel,
+                    billingViewModel = billingViewModel,
                     onNavigateBack = { navController.popBackStack() },
                     onNavigateToDetail = { id ->
                         navController.navigate(Screen.PastInsightDetail.createRoute(id))

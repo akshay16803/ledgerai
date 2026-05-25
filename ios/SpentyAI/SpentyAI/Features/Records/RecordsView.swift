@@ -4,6 +4,8 @@ struct RecordsView: View {
 
 
     @Environment(LocalizationManager.self) var lang
+    @Environment(AuthManager.self) var authManager
+    @Environment(\.dismiss) private var dismiss
     @State private var viewModel = RecordsViewModel()
     @State private var showDeleteConfirm = false
     @State private var deleteTargetId: String?
@@ -12,6 +14,14 @@ struct RecordsView: View {
     @State private var showUploadSheet = false
     @State private var deleteReceiptId: String?
     @State private var showDeleteReceiptConfirm = false
+
+    // Premium gate — Records is the paid Premium tier.
+    @State private var showPremiumSheet = false
+    @State private var justSubscribed = false
+
+    private var hasPremium: Bool {
+        authManager.user?.hasActiveSubscription == true
+    }
 
     private static let rowDateFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -77,8 +87,22 @@ struct RecordsView: View {
             Text(lang.s("delete_receipt"))
         }
         .task {
+            if !hasPremium {
+                showPremiumSheet = true
+            }
             await viewModel.loadRecords()
             await viewModel.loadReceipts()
+        }
+        .sheet(isPresented: $showPremiumSheet, onDismiss: {
+            if !justSubscribed && !hasPremium { dismiss() }
+        }) {
+            PremiumFeatureSheet.records(
+                onClose: { showPremiumSheet = false },
+                onSubscribed: { justSubscribed = true }
+            )
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+            .interactiveDismissDisabled(false)
         }
     }
 
