@@ -38,6 +38,32 @@ import hmac
 # send_capi_event is fire-and-forget; never raises, never blocks.
 from lib.meta_capi import send_capi_event
 
+# Server-side analytics + Telegram notifier (added 2026-05-26).
+# Both are fire-and-forget — never raise, never block the user request.
+from lib.analytics import AnalyticsLogger, AnalyticsMiddleware, ensure_indexes as _analytics_ensure_indexes
+from lib import telegram as tg
+
+analytics_logger = AnalyticsLogger()
+
+
+async def _track_new_user(user_id: str, email: str, name: str, platform: str, method: str) -> None:
+    """Fire telegram + analytics on a brand-new user creation.
+
+    Never raises — both calls are already exception-swallowing.
+    Centralised so each db.users.insert_one site is one extra line.
+    """
+    try:
+        user_doc = {"id": user_id, "email": email, "name": name}
+        tg.notify_signup(user_doc, platform=platform, method=method)
+        await analytics_logger.log(
+            event="signup",
+            user_id=user_id,
+            platform=platform,
+            properties={"email": email, "name": name, "method": method},
+        )
+    except Exception as exc:
+        logger.warning(f"[track_new_user] failed: {exc}")
+
 load_dotenv()
 
 logging.basicConfig(level=logging.INFO)
@@ -126,8 +152,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Analytics middleware — logs every /api/* request to db.analytics_events.
+# Registered AFTER CORS so OPTIONS preflights bypass it (CORS handles those).
+# AnalyticsLogger.init(db) is called below once `db` exists.
+app.add_middleware(AnalyticsMiddleware, logger=analytics_logger)
+
 client = AsyncIOMotorClient(MONGO_URL, tz_aware=True)
 db = client[DB_NAME]
+
+# Wire the analytics logger to the live `db` handle. Index creation happens
+# inside the existing @app.on_event("startup") block (see below).
+analytics_logger.init(db)
 
 # Durable storage for uploaded statement files. Host disk is ephemeral
 # on the preview infra, so we keep a canonical copy in Mongo (GridFS)
@@ -557,6 +592,7 @@ async def google_callback(request: Request, response: Response, code: str = None
             "created_at": datetime.now(timezone.utc),
         })
         await seed_default_data(user_id)
+        await _track_new_user(user_id, email, name, platform="web", method="google")
         asyncio.create_task(send_verification_email(email, name, verification_token, frontend_url))
         # Meta CAPI: CompleteRegistration on NEW user only (web flow).
         try:
@@ -710,6 +746,7 @@ async def google_mobile_login(request: Request, response: Response):
             "created_at": datetime.now(timezone.utc),
         })
         await seed_default_data(user_id)
+        await _track_new_user(user_id, email, name, platform="mobile", method="google")
         # Meta CAPI: CompleteRegistration on NEW user only (Google mobile).
         try:
             await send_capi_event(
@@ -935,6 +972,8 @@ async def apple_mobile_login(request: Request):
             "auth_provider": "apple",
             "created_at": datetime.now(timezone.utc),
         })
+        await _track_new_user(user_id, email or f"{apple_sub}@apple.private", name, platform="web", method="apple")
+        await _track_new_user(user_id, email or f"{apple_sub}@apple.private", "", platform="ios", method="apple")
         await seed_default_data(user_id)
         # Meta CAPI: CompleteRegistration on NEW user only (Apple mobile).
         # Skip when Apple returned a private-relay-only stub email (no `email`
@@ -1277,6 +1316,12 @@ async def demo_login(request: Request):
             "subscription_expiry": (datetime.now(timezone.utc) + timedelta(days=365)).isoformat(),
             "created_at": datetime.now(timezone.utc),
         })
+        await analytics_logger.log(
+            event="signup",
+            user_id=user_id,
+            platform="demo",
+            properties={"email": DEMO_EMAIL, "method": "demo"},
+        )
         await seed_default_data(user_id)
         logger.info(f"[DemoLogin] Created demo account: user_id={user_id}")
 
@@ -9160,6 +9205,9 @@ async def _subscription_sweep_loop():
 
 @app.on_event("startup")
 async def startup_event():
+    # Analytics indexes — idempotent; safe to call on every startup.
+    await _analytics_ensure_indexes(db)
+
     # Subscription expiry sweep — kick off the periodic loop. Also run
     # once immediately so any rows that expired between deploys get
     # caught right away.
@@ -13144,6 +13192,27 @@ async def cancel_subscription(user: dict = Depends(get_current_user)):
         }},
     )
 
+    # Telegram + analytics notification for cancellation
+    try:
+        tg.notify_subscription(
+            user=user_doc,
+            plan=user_doc.get("subscription_plan", "—"),
+            price=user_doc.get("subscription_amount", "—"),
+            platform=user_doc.get("subscription_provider", "—"),
+            provider=user_doc.get("subscription_provider", "—"),
+            action="cancel",
+        )
+        await analytics_logger.log(
+            event="subscription_cancel",
+            user_id=user["user_id"],
+            properties={
+                "plan": user_doc.get("subscription_plan"),
+                "provider": user_doc.get("subscription_provider"),
+            },
+        )
+    except Exception as exc:
+        logger.warning(f"[cancel] notification failed: {exc}")
+
     return {
         "success": True,
         "message": "Subscription cancelled. Access continues until expiry.",
@@ -16046,3 +16115,176 @@ async def duplicate_bill(bill_id: str, user: dict = Depends(get_current_user)):
 @app.get("/api/health")
 async def health():
     return {"status": "ok", "service": "SpentyAI API"}
+
+# ════════════════════════════════════════════════════════════════════════
+# Admin dashboard — internal only. Access restricted to the founder's
+# email (settable via ADMIN_EMAILS env var, comma-separated).
+# ════════════════════════════════════════════════════════════════════════
+
+ADMIN_EMAILS = {
+    e.strip().lower()
+    for e in os.environ.get("ADMIN_EMAILS", "akshaychouhan16803@gmail.com").split(",")
+    if e.strip()
+}
+
+
+def _require_admin(user: dict) -> None:
+    email = (user.get("email") or "").lower()
+    if email not in ADMIN_EMAILS:
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+
+@app.get("/api/admin/stats")
+async def admin_stats(user: dict = Depends(get_current_user)):
+    """Return a snapshot of growth + revenue + behaviour metrics.
+
+    Access restricted to ADMIN_EMAILS. Reads only — never mutates.
+    Everything comes from existing collections (users, analytics_events,
+    payment_orders). No external services touched.
+    """
+    _require_admin(user)
+
+    now = datetime.now(timezone.utc)
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    week_ago = now - timedelta(days=7)
+    month_ago = now - timedelta(days=30)
+
+    # ── User counts ─────────────────────────────────────────────────
+    total_users = await db.users.count_documents({})
+    signups_today = await db.users.count_documents({"created_at": {"$gte": today_start}})
+    signups_week = await db.users.count_documents({"created_at": {"$gte": week_ago}})
+    signups_month = await db.users.count_documents({"created_at": {"$gte": month_ago}})
+
+    # ── Active subscribers by plan/provider ────────────────────────
+    active_subs = await db.users.count_documents({
+        "subscription_status": {"$in": ["active", "trialing", "in_grace_period"]},
+    })
+    plan_breakdown_cursor = db.users.aggregate([
+        {"$match": {"subscription_status": {"$in": ["active", "trialing", "in_grace_period"]}}},
+        {"$group": {"_id": {"plan": "$subscription_plan", "provider": "$subscription_provider"}, "count": {"$sum": 1}}},
+        {"$sort": {"count": -1}},
+    ])
+    plan_breakdown = [
+        {"plan": (r["_id"] or {}).get("plan", "—"),
+         "provider": (r["_id"] or {}).get("provider", "—"),
+         "count": r["count"]}
+        async for r in plan_breakdown_cursor
+    ]
+
+    # ── MRR (back-of-envelope) ─────────────────────────────────────
+    # Counts only "monthly" plan @ ₹199. Quarterly/yearly/lifetime are
+    # treated as deferred revenue and not amortised here — keep this
+    # simple; refine later if needed.
+    monthly_subs = await db.users.count_documents({
+        "subscription_status": {"$in": ["active", "trialing", "in_grace_period"]},
+        "subscription_plan": "monthly",
+    })
+    mrr_rupees = monthly_subs * 199
+
+    # ── Cancellations (auto_renew off) ─────────────────────────────
+    cancelled_today = await db.users.count_documents({
+        "subscription_cancelled_at": {"$gte": today_start},
+    })
+
+    # ── Top API endpoints (last 24h) ────────────────────────────────
+    top_endpoints = []
+    try:
+        cursor = db.analytics_events.aggregate([
+            {"$match": {"event": "api_call", "ts": {"$gte": today_start}}},
+            {"$group": {"_id": "$path", "count": {"$sum": 1}}},
+            {"$sort": {"count": -1}},
+            {"$limit": 10},
+        ])
+        top_endpoints = [{"path": r["_id"], "count": r["count"]} async for r in cursor]
+    except Exception as exc:
+        logger.warning(f"[admin] top_endpoints aggregation failed: {exc}")
+
+    # ── Error counts (last 24h, status >= 500) ──────────────────────
+    errors_today = 0
+    try:
+        errors_today = await db.analytics_events.count_documents({
+            "event": "api_call",
+            "status": {"$gte": 500},
+            "ts": {"$gte": today_start},
+        })
+    except Exception:
+        pass
+
+    # ── Platform breakdown of today's api_calls ────────────────────
+    platform_breakdown = []
+    try:
+        cursor = db.analytics_events.aggregate([
+            {"$match": {"event": "api_call", "ts": {"$gte": today_start}}},
+            {"$group": {"_id": "$platform", "count": {"$sum": 1}}},
+            {"$sort": {"count": -1}},
+        ])
+        platform_breakdown = [{"platform": r["_id"] or "unknown", "count": r["count"]} async for r in cursor]
+    except Exception:
+        pass
+
+    return {
+        "ok": True,
+        "generated_at": now.isoformat(),
+        "users": {
+            "total": total_users,
+            "signups_today": signups_today,
+            "signups_week": signups_week,
+            "signups_month": signups_month,
+        },
+        "subscriptions": {
+            "active": active_subs,
+            "monthly_subscribers": monthly_subs,
+            "cancelled_today": cancelled_today,
+            "plan_breakdown": plan_breakdown,
+        },
+        "revenue": {
+            "mrr_rupees": mrr_rupees,
+            "currency": "INR",
+            "note": "MRR = monthly subscribers × ₹199. Quarterly/yearly/lifetime not amortised.",
+        },
+        "traffic": {
+            "top_endpoints_today": top_endpoints,
+            "platform_breakdown_today": platform_breakdown,
+            "errors_today": errors_today,
+        },
+        "telegram": {
+            "configured": tg.is_enabled(),
+        },
+    }
+
+
+@app.post("/api/admin/test-telegram")
+async def admin_test_telegram(user: dict = Depends(get_current_user)):
+    """Send a test Telegram message — useful when first wiring up.
+    Returns immediately even if Telegram fails (send is fire-and-forget)."""
+    _require_admin(user)
+    tg.send(
+        "🧪 <b>Test message from SpentyAI backend</b>\n"
+        f"If you see this, Telegram is wired correctly.\n"
+        f"Sent by <code>{user.get('email')}</code> at {datetime.now(timezone.utc).isoformat()}"
+    )
+    return {"ok": True, "enabled": tg.is_enabled()}
+
+
+@app.post("/api/admin/send-daily-summary")
+async def admin_send_daily_summary(user: dict = Depends(get_current_user)):
+    """Manually trigger the daily Telegram summary.
+
+    Same logic as the (yet to be added) cron — call /api/admin/stats then
+    pipe the result into tg.send_daily_summary. Useful for testing or
+    when the cron job hasn't been wired up yet.
+    """
+    _require_admin(user)
+    stats = await admin_stats(user)  # reuse the same data
+    tg.send_daily_summary({
+        "total_users": stats["users"]["total"],
+        "signups_today": stats["users"]["signups_today"],
+        "signups_week": stats["users"]["signups_week"],
+        "active_subs": stats["subscriptions"]["active"],
+        "churned_today": stats["subscriptions"]["cancelled_today"],
+        "mrr": stats["revenue"]["mrr_rupees"],
+        "errors_today": stats["traffic"]["errors_today"],
+        "top_endpoints": stats["traffic"]["top_endpoints_today"][:5],
+    })
+    return {"ok": True}
+

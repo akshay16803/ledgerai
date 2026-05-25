@@ -128,6 +128,59 @@
         }
       })();
     </script>
+    <!-- ──────────────────────────────────────────────────────────────────
+         Analytics SDKs (added 2026-05-26).
+         Every snippet checks its env var and silently no-ops if unset, so a
+         fresh dev clone with no keys won't blow up. See SETUP_ANALYTICS.md
+         for which dashboards to sign up at.
+         ────────────────────────────────────────────────────────────────── -->
+
+    <!-- Microsoft Clarity — session recordings + heatmaps (free, forever) -->
+    <script>
+      (function() {
+        var projectId = "%VITE_CLARITY_PROJECT_ID%";
+        if (!projectId || projectId.indexOf("VITE_") !== -1) return; // unsubstituted → skip
+        (function(c,l,a,r,i,t,y){
+          c[a]=c[a]||function(){(c[a].q=c[a].q||[]).push(arguments)};
+          t=l.createElement(r);t.async=1;t.src="https://www.clarity.ms/tag/"+i;
+          y=l.getElementsByTagName(r)[0];y.parentNode.insertBefore(t,y);
+        })(window, document, "clarity", "script", projectId);
+      })();
+    </script>
+
+    <!-- PostHog Cloud — product analytics (funnels, retention, session capture) -->
+    <script>
+      (function() {
+        var key = "%VITE_POSTHOG_KEY%";
+        var host = "%VITE_POSTHOG_HOST%" || "https://us.i.posthog.com";
+        if (!key || key.indexOf("VITE_") !== -1) return;
+        !function(t,e){var o,n,p,r;e.__SV||(window.posthog=e,e._i=[],e.init=function(i,s,a){function g(t,e){var o=e.split(".");2==o.length&&(t=t[o[0]],e=o[1]),t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}}(p=t.createElement("script")).type="text/javascript",p.async=!0,p.src=s.api_host+"/static/array.js",(r=t.getElementsByTagName("script")[0]).parentNode.insertBefore(p,r);var u=e;for(void 0!==a?u=e[a]=[]:a="posthog",u.people=u.people||[],u.toString=function(t){var e="posthog";return"posthog"!==a&&(e+="."+a),t||(e+=" (stub)"),e},u.people.toString=function(){return u.toString(1)+".people (stub)"},o="capture identify alias people.set people.set_once set_config register register_once unregister opt_out_capturing has_opted_out_capturing opt_in_capturing reset isFeatureEnabled onFeatureFlags getFeatureFlag getFeatureFlagPayload reloadFeatureFlags group updateEarlyAccessFeatureEnrollment getEarlyAccessFeatures getActiveMatchingSurveys getSurveys onSessionId".split(" "),n=0;n<o.length;n++)g(u,o[n]);e._i.push([i,s,a])},e.__SV=1)}(document,window.posthog||[]);
+        posthog.init(key, {api_host: host, person_profiles: 'identified_only', capture_pageview: true, capture_pageleave: true});
+      })();
+    </script>
+
+    <!-- Sentry — error + performance monitoring -->
+    <script
+      src="https://browser.sentry-cdn.com/8.40.0/bundle.tracing.min.js"
+      integrity="sha384-rJX2A2RtAwK4lQ4Hf1eXfTbXMNAB0rUq6m1bzd7Tj69rE9pK1xWqK6XehLgIyAGZ"
+      crossorigin="anonymous"></script>
+    <script>
+      (function() {
+        var dsn = "%VITE_SENTRY_DSN%";
+        if (!dsn || dsn.indexOf("VITE_") !== -1 || typeof Sentry === "undefined") return;
+        Sentry.init({
+          dsn: dsn,
+          environment: (location.hostname.indexOf("localhost") !== -1) ? "dev" : "prod",
+          tracesSampleRate: 0.2,
+          replaysSessionSampleRate: 0.0,
+          replaysOnErrorSampleRate: 1.0,
+          integrations: [
+            Sentry.browserTracingIntegration ? Sentry.browserTracingIntegration() : undefined,
+          ].filter(Boolean),
+        });
+      })();
+    </script>
+
     <!-- Meta Pixel Code -->
     <script>
       !function(f,b,e,v,n,t,s)
