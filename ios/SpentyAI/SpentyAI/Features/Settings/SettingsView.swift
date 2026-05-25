@@ -129,13 +129,13 @@ struct SettingsView: View {
                             .foregroundStyle(.primary)
                         Text("Bigger screen for reconciliation, invoices and reports — same account, fully synced.")
                             .font(SpentyFonts.caption1)
-                            .foregroundStyle(.spentyTextSecondary)
+                            .foregroundColor(.spentyTextSecondary)
                             .multilineTextAlignment(.leading)
                     }
                     Spacer()
                     Image(systemName: "arrow.up.right.square")
                         .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.spentyTextSecondary)
+                        .foregroundColor(.spentyTextSecondary)
                 }
                 .padding(.vertical, 4)
             }
@@ -149,7 +149,7 @@ struct SettingsView: View {
         } footer: {
             Text("Open www.spentyai.com in any browser and sign in with the same Google or Apple account.")
                 .font(SpentyFonts.caption2)
-                .foregroundStyle(.spentyTextSecondary)
+                .foregroundColor(.spentyTextSecondary)
         }
     }
 
