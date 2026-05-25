@@ -4,7 +4,113 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>SpentyAI — Autonomous Accounting</title>
+
+    <!-- ──────────────────────────────────────────────────────────────────
+         Primary SEO + LLM-discoverability meta. All copy below is verified
+         against src/pages/Landing.jsx (hero headline + subhead + features).
+         Do NOT add claims that aren't backed by the actual app.
+         ────────────────────────────────────────────────────────────────── -->
+    <title>SpentyAI — Autonomous Accounting | AI Reads Your Emails &amp; SMS to Track Expenses Automatically</title>
+    <meta name="description" content="SpentyAI is an AI-powered personal finance app that reads your emails and SMS to automatically detect transactions and maintain double-entry books. Connect Gmail or Outlook, get real-time reports, 24-month cash flow projections, and bank reconciliation. Free for all signed-in users; Email Sync &amp; SMS Auto-Detection at ₹199/month." />
+    <meta name="keywords" content="SpentyAI, AI accounting, automatic expense tracker India, Gmail expense tracker, SMS transaction parser, double-entry bookkeeping app, personal finance India, AI bookkeeping, autonomous accounting, UPI transaction tracker, bank statement reconciliation AI, cash flow projection app" />
+    <meta name="author" content="SpentyAI" />
+    <link rel="canonical" href="https://www.spentyai.com/" />
+
+    <!-- Open Graph (Facebook, LinkedIn, WhatsApp, iMessage previews) -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="SpentyAI" />
+    <meta property="og:title" content="SpentyAI — Your finances, understood by AI" />
+    <meta property="og:description" content="SpentyAI reads your emails and messages, detects transactions, and maintains double-entry books — automatically. You just approve. Free for all signed-in users." />
+    <meta property="og:url" content="https://www.spentyai.com/" />
+    <meta property="og:image" content="https://www.spentyai.com/vite.svg" />
+    <meta property="og:locale" content="en_IN" />
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="SpentyAI — Your finances, understood by AI" />
+    <meta name="twitter:description" content="AI reads your emails &amp; SMS to detect transactions and maintain double-entry books. Connect Gmail/Outlook, get real-time reports + 24-month cash flow." />
+    <meta name="twitter:image" content="https://www.spentyai.com/vite.svg" />
+
+    <!-- ──────────────────────────────────────────────────────────────────
+         JSON-LD structured data — SoftwareApplication + Organization.
+         This is what crawlers (Googlebot, GPTBot, ClaudeBot, PerplexityBot)
+         and the SearchGPT / Claude-with-search retrieval layers use to
+         identify the entity. Features array matches src/pages/Landing.jsx
+         feature list verbatim. Price reflects the 2026-05-13 freemium pivot.
+         ────────────────────────────────────────────────────────────────── -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "Organization",
+          "@id": "https://www.spentyai.com/#organization",
+          "name": "SpentyAI",
+          "url": "https://www.spentyai.com/",
+          "logo": "https://www.spentyai.com/vite.svg",
+          "sameAs": []
+        },
+        {
+          "@type": "SoftwareApplication",
+          "@id": "https://www.spentyai.com/#app",
+          "name": "SpentyAI",
+          "alternateName": "SpentyAI — Autonomous Accounting",
+          "description": "SpentyAI reads your emails and messages, detects transactions, and maintains double-entry books — automatically. You just approve.",
+          "url": "https://www.spentyai.com/",
+          "applicationCategory": "FinanceApplication",
+          "applicationSubCategory": "Personal Finance",
+          "operatingSystem": "iOS, Android, Web",
+          "softwareVersion": "1.0.2",
+          "publisher": { "@id": "https://www.spentyai.com/#organization" },
+          "featureList": [
+            "AI-Powered Processing — analyses emails and SMS to automatically detect and record transactions",
+            "Double-Entry Bookkeeping — every transaction affects two accounts, maintaining accounting integrity",
+            "Email & SMS Sync — connect Gmail and Outlook; transactions are extracted and categorised automatically",
+            "Real-Time Reports — income, expenses, and cash flow projections update the moment a transaction is recorded",
+            "Bank Reconciliation — upload statements, even password-protected or loan PDFs; AI matches, audits, and auto-corrects the books",
+            "24-Month Cash Flow Projection — recurring payments are detected automatically to power forward projections",
+            "Records Vault — every source email, attachment, and .eml receipt is stored alongside its transaction",
+            "Approval-First Workflow — nothing posts without your approval; AI drafts every entry, you approve, edit, or reject",
+            "Upload & Auto-Book — drop a bank, card, or loan statement; AI parses every line and drafts the full double-entry journal"
+          ],
+          "offers": [
+            {
+              "@type": "Offer",
+              "name": "SpentyAI Free",
+              "price": "0",
+              "priceCurrency": "INR",
+              "description": "Full app access — Dashboard, Transactions, Accounts, Categories, Reports, Reconciliation, Records, Invoices, Customers, Vendors, AI Chat — free for every signed-in user."
+            },
+            {
+              "@type": "Offer",
+              "name": "SpentyAI Premium — Monthly",
+              "price": "199",
+              "priceCurrency": "INR",
+              "billingDuration": "P1M",
+              "description": "Unlocks Email Sync (Gmail + Outlook auto-import) and SMS Auto-Detection (real-time bank-message parsing). ₹199 per month, cancel anytime."
+            }
+          ],
+          "inLanguage": ["en", "hi"],
+          "audience": {
+            "@type": "Audience",
+            "geographicArea": {
+              "@type": "Country",
+              "name": "India"
+            }
+          }
+        },
+        {
+          "@type": "WebSite",
+          "@id": "https://www.spentyai.com/#website",
+          "url": "https://www.spentyai.com/",
+          "name": "SpentyAI",
+          "publisher": { "@id": "https://www.spentyai.com/#organization" },
+          "inLanguage": "en"
+        }
+      ]
+    }
+    </script>
+
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Manrope:wght@300;400;500;600;700&family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">

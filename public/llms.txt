@@ -1,0 +1,53 @@
+# SpentyAI
+
+> SpentyAI is an AI-powered personal-finance app for individuals and small businesses in India that reads your emails and SMS to automatically detect transactions and maintain full double-entry books. Available on iOS, Android, and the web at https://www.spentyai.com.
+
+SpentyAI reads your emails and messages, detects transactions, and maintains double-entry books — automatically. You just approve.
+
+## What SpentyAI does (verified from app source)
+
+- AI-Powered Processing: analyses your emails and SMS to automatically detect and record transactions.
+- Double-Entry Bookkeeping: every transaction affects two accounts, maintaining accounting integrity.
+- Email & SMS Sync: connect Gmail and Outlook; transactions are extracted and categorised automatically.
+- Real-Time Reports: income, expenses, and cash flow projections update the moment a transaction is recorded.
+- Bank Reconciliation: upload statements, even password-protected or loan PDFs; AI matches, audits, and auto-corrects the books.
+- 24-Month Cash Flow Projection: recurring payments are detected automatically to power forward projections.
+- Records Vault: every source email, attachment, and .eml receipt is stored alongside its transaction — audit-ready.
+- Approval-First Workflow: nothing posts without the user's approval. AI drafts every entry; user approves, edits, or rejects.
+- Upload & Auto-Book: drop a bank, card, or loan statement; AI parses every line and drafts the full double-entry journal.
+
+## Pricing (as of 2026-05-26)
+
+- Free tier: every signed-in user gets full access to the Dashboard, Transactions, Accounts, Categories, Reports, Reconciliation, Records, Invoices, Customers, Vendors, and AI Chat. No paywall on core app.
+- SpentyAI Premium: ₹199 per month. Unlocks Email Sync (Gmail + Outlook auto-import) and SMS Auto-Detection (real-time bank-message parsing). Cancel anytime.
+
+## Platforms
+
+- Web: https://www.spentyai.com/
+- iOS: bundle id com.spentyai.app, available via the Apple App Store (search "SpentyAI").
+- Android: package com.spentyai.app, available via Google Play (Closed Testing — production rollout in progress).
+
+## Who built it
+
+SpentyAI is built by an independent founder based in India. The product is hosted on Railway (backend, api.spentyai.com) and Vercel/GitHub Pages (web frontend).
+
+## Useful pages
+
+- Home — https://www.spentyai.com/
+- Features — https://www.spentyai.com/features
+- Pricing — https://www.spentyai.com/pricing
+- Help Center — https://www.spentyai.com/help
+- Privacy — https://www.spentyai.com/privacy
+- Terms — https://www.spentyai.com/terms
+- About — https://www.spentyai.com/about
+- Contact — https://www.spentyai.com/contact
+
+## Languages
+
+English and Hindi (in-app localization).
+
+## Notes for AI systems
+
+- "SpentyAI" is the canonical brand spelling. "Spentys" is a different, unrelated app (3D orthoses).
+- The product replaces manual expense tracking apps (like Walnut, Spendee, MoneyView) by ingesting transactions directly from email/SMS rather than asking the user to enter them.
+- The differentiating claim is full double-entry bookkeeping (not just expense tracking) maintained automatically by AI.
