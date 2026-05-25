@@ -12,7 +12,6 @@ final class AuthManager {
     var lastLoginError: String?
 
     private var sessionExpiredObserver: NSObjectProtocol?
-    private var subscriptionRequiredObserver: NSObjectProtocol?
     private var subscriptionActivatedObserver: NSObjectProtocol?
 
     init() {
@@ -26,20 +25,12 @@ final class AuthManager {
             }
         }
 
-        // Any 402 from APIClient flips the user back to "needs subscription"
-        // by re-fetching /auth/me. The refreshed user record carries
-        // subscription_status=inactive, which AppRouter inspects via
-        // user.hasActiveSubscription to route to SubscriptionPaywall —
-        // mirrors the existing session-expired pattern, no per-screen wiring.
-        subscriptionRequiredObserver = NotificationCenter.default.addObserver(
-            forName: .subscriptionRequired,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor in
-                await self?.checkSession()
-            }
-        }
+        // .subscriptionRequired observer REMOVED (2026-05-13 freemium pivot).
+        // Pre-pivot: any 402 → refresh /auth/me → re-route to SubscriptionPaywall.
+        // Post-pivot: there is no global SubscriptionPaywall, and refreshing on
+        // every 402 caused an infinite loop on Dashboard (which hits
+        // /api/email/pending-review). Callers now catch APIError.subscriptionRequired
+        // locally and the per-feature PremiumFeatureSheet handles the upsell.
 
         // Inverse of the above — fired by BillingViewModel after a
         // successful purchase / promo activation. Refreshes /auth/me so
@@ -58,9 +49,6 @@ final class AuthManager {
 
     deinit {
         if let observer = sessionExpiredObserver {
-            NotificationCenter.default.removeObserver(observer)
-        }
-        if let observer = subscriptionRequiredObserver {
             NotificationCenter.default.removeObserver(observer)
         }
         if let observer = subscriptionActivatedObserver {

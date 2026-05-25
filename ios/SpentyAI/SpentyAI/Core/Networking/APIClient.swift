@@ -223,20 +223,20 @@ final class APIClient: Sendable {
                 throw APIError.unauthorized
             }
 
-            // 402 = subscription required. Backend's require_active_subscription
-            // dep returns this on every paid endpoint when the user's plan is
-            // expired or cancelled. Body shape:
-            //   { "detail": { "error": "subscription_required",
-            //                 "message": "Your subscription has expired..." } }
-            // Post a notification so AuthManager can refresh /auth/me; the
-            // refreshed hasActiveSubscription=false will let AppRouter re-route
-            // the user to the existing SubscriptionPaywall — no per-screen
-            // changes needed.
+            // 402 = subscription required. Post-pivot (2026-05-13) only the
+            // 11 endpoints under /api/email/* and /api/sms/* still gate on
+            // subscription. We THROW APIError.subscriptionRequired so the
+            // caller (EmailSyncView / SMSSyncView / DashboardViewModel) can
+            // render the inline Premium sheet or silently swallow, but we
+            // NO LONGER post a global `.subscriptionRequired` notification.
+            //
+            // History: the notification used to trigger AuthManager.checkSession()
+            // → AppRouter routing the user to SubscriptionPaywall. Post-pivot
+            // there is no global paywall, and the notification was causing
+            // an infinite loop: Dashboard → 402 from /api/email/pending-review
+            // → notification → checkSession → re-render → 402 → notification → …
             if http.statusCode == 402 {
-                let message = parseDetail(from: data) ?? "Your subscription has expired. Please renew to continue."
-                Task { @MainActor in
-                    NotificationCenter.default.post(name: .subscriptionRequired, object: nil)
-                }
+                let message = parseDetail(from: data) ?? "This feature requires SpentyAI Premium."
                 throw APIError.subscriptionRequired(message)
             }
 
