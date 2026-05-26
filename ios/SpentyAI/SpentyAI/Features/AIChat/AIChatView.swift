@@ -101,8 +101,21 @@ struct AIChatView: View {
                 Text(viewModel.errorMessage ?? "")
             }
             .task {
-                await viewModel.loadSuggestions()
-                await viewModel.loadHistory()
+                // Parallelize so a slow/hung suggestions endpoint cannot block
+                // history (or vice versa) — symptom that looked like a "screen
+                // hang" when the AI tab was opened.
+                async let _: () = viewModel.loadSuggestions()
+                async let _: () = viewModel.loadHistory()
+            }
+            // Live-mirror the in-app voice transcription into the TextField so
+            // (a) the user sees their words appear as they speak, and (b) the
+            // Send button (which checks `viewModel.input`) activates naturally.
+            // Without this the transcription lived in a separate state, so
+            // tapping Send did nothing after speaking.
+            .onChange(of: viewModel.speechManager.transcribedText) { _, newValue in
+                if viewModel.speechManager.isListening && !viewModel.isVoiceModeActive {
+                    viewModel.input = newValue
+                }
             }
             .sheet(isPresented: $showConsentSheet) {
                 AIConsentSheet {
@@ -451,46 +464,68 @@ struct AIChatView: View {
 
     private var inputBar: some View {
         VStack(spacing: 0) {
-            // Live transcription preview
-            if viewModel.speechManager.isListening && !viewModel.speechManager.transcribedText.isEmpty {
-                HStack(spacing: 8) {
+            // Tap-to-speak hint — shown only when not listening so users
+            // discover the mic. Live transcription is no longer rendered here;
+            // it streams directly into the TextField via .onChange in body.
+            if !viewModel.speechManager.isListening && viewModel.input.isEmpty {
+                HStack(spacing: 6) {
                     Image(systemName: "mic.fill")
-                        .font(.system(size: 12))
+                        .font(.system(size: 11))
                         .foregroundStyle(Color.spentyPrimary)
-
-                    Text(viewModel.speechManager.transcribedText)
+                    Text("Tap the mic to speak — your words appear in the box.")
                         .font(SpentyFonts.caption1)
                         .foregroundStyle(Color.spentyTextSecondary)
-                        .lineLimit(2)
-
                     Spacer()
                 }
                 .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                .background(Color.spentyPrimary.opacity(0.06))
+                .padding(.vertical, 6)
+                .background(Color.spentyPrimary.opacity(0.04))
+            } else if viewModel.speechManager.isListening {
+                HStack(spacing: 6) {
+                    Image(systemName: "waveform")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Color.spentyError)
+                        .symbolEffect(.variableColor.iterative.dimInactiveLayers)
+                    Text("Listening… tap the mic again to stop.")
+                        .font(SpentyFonts.caption1)
+                        .foregroundStyle(Color.spentyError)
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 6)
+                .background(Color.spentyError.opacity(0.06))
             }
 
             Divider()
 
             HStack(alignment: .bottom, spacing: 10) {
-                // Microphone button
+                // Microphone button — labeled so users discover voice input.
                 Button {
-                    // Tapping the mic to STOP can trigger an immediate send-to-AI;
-                    // tapping to START is on-device speech recognition only. Gate both
-                    // for simplicity — consent is a one-time prompt.
+                    // Tap to START: live mirror writes the transcription into
+                    // the TextField. Tap to STOP: finalizes the text — user
+                    // still has to tap Send to actually send.
                     gateAI { Task { await viewModel.toggleMicrophone() } }
                 } label: {
-                    ZStack {
-                        Circle()
-                            .fill(
-                                viewModel.speechManager.isListening
-                                    ? Color.spentyError.opacity(0.12)
-                                    : Color.spentyPrimary.opacity(0.08)
-                            )
-                            .frame(width: 40, height: 40)
+                    VStack(spacing: 2) {
+                        ZStack {
+                            Circle()
+                                .fill(
+                                    viewModel.speechManager.isListening
+                                        ? Color.spentyError.opacity(0.18)
+                                        : Color.spentyPrimary.opacity(0.12)
+                                )
+                                .frame(width: 40, height: 40)
 
-                        Image(systemName: viewModel.speechManager.isListening ? "mic.slash.fill" : "mic.fill")
-                            .font(.system(size: 16, weight: .semibold))
+                            Image(systemName: viewModel.speechManager.isListening ? "stop.circle.fill" : "mic.fill")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundStyle(
+                                    viewModel.speechManager.isListening
+                                        ? Color.spentyError
+                                        : Color.spentyPrimary
+                                )
+                        }
+                        Text(viewModel.speechManager.isListening ? "Stop" : "Speak")
+                            .font(.system(size: 9, weight: .medium))
                             .foregroundStyle(
                                 viewModel.speechManager.isListening
                                     ? Color.spentyError
@@ -498,6 +533,8 @@ struct AIChatView: View {
                             )
                     }
                 }
+                .accessibilityLabel(viewModel.speechManager.isListening ? "Stop listening" : "Speak to AI")
+                .accessibilityHint("Records your voice and types it into the message box. Tap Send when ready.")
                 .disabled(viewModel.isSending)
 
                 TextField(lang.s("ask_spentyai"), text: $viewModel.input, axis: .vertical)
@@ -521,16 +558,22 @@ struct AIChatView: View {
                 Button {
                     gateAI { Task { await viewModel.sendMessage() } }
                 } label: {
-                    ZStack {
-                        Circle()
-                            .fill(viewModel.canSend ? Color.spentyPrimary : Color.spentyPrimary.opacity(0.3))
-                            .frame(width: 40, height: 40)
+                    VStack(spacing: 2) {
+                        ZStack {
+                            Circle()
+                                .fill(viewModel.canSend ? Color.spentyPrimary : Color.spentyPrimary.opacity(0.3))
+                                .frame(width: 40, height: 40)
 
-                        Image(systemName: "arrow.up")
-                            .font(.system(size: 16, weight: .bold))
-                            .foregroundStyle(.white)
+                            Image(systemName: "arrow.up")
+                                .font(.system(size: 18, weight: .bold))
+                                .foregroundStyle(.white)
+                        }
+                        Text("Send")
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundStyle(viewModel.canSend ? Color.spentyPrimary : Color.spentyTextSecondary)
                     }
                 }
+                .accessibilityLabel("Send message")
                 .disabled(!viewModel.canSend)
                 .animation(.easeInOut(duration: 0.15), value: viewModel.canSend)
             }

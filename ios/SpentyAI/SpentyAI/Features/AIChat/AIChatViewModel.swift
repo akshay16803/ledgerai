@@ -153,21 +153,33 @@ final class AIChatViewModel {
     // MARK: - Voice Actions
 
     /// Toggle the microphone on/off for speech-to-text.
+    ///
+    /// Behavior intentionally separates LISTEN from SEND so the user can
+    /// review and edit before sending:
+    ///   - Tap to START listening → clears the input field, starts capture.
+    ///     The AIChatView mirrors `speechManager.transcribedText` into
+    ///     `input` live (.onChange), so the TextField shows words as the
+    ///     user speaks and the Send button activates naturally.
+    ///   - Tap to STOP listening → leaves the final transcription in
+    ///     `input`. Does NOT auto-send. User taps the Send arrow themselves.
     @MainActor
     func toggleMicrophone() async {
         if speechManager.isListening {
             speechManager.stopListening()
-            // Send the transcribed text if there is any
-            if !speechManager.transcribedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                input = speechManager.transcribedText
-                speechManager.resetTranscription()
-                await sendMessage()
+            // Make sure the final transcription is in `input` (the live mirror
+            // .onChange in the view already does this, but be defensive).
+            let final = speechManager.transcribedText.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !final.isEmpty {
+                input = final
             }
+            speechManager.resetTranscription()
         } else {
             // Request permissions if needed
             if !speechManager.hasMicrophonePermission || !speechManager.hasSpeechPermission {
                 await speechManager.requestPermissions()
             }
+            // Clear the field so the live mirror starts from a clean slate.
+            input = ""
             speechManager.resetTranscription()
             speechManager.startListening()
         }
