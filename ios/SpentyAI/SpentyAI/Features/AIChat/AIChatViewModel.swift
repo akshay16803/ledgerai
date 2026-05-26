@@ -118,7 +118,14 @@ final class AIChatViewModel {
             messages = try await repository.loadHistory()
             scrollToBottom()
         } catch {
-            errorMessage = "Could not load chat history."
+            // Loading history is OPPORTUNISTIC. If it fails (network blip,
+            // first-time user with no history yet, transient decoding hiccup,
+            // anything) the user can still send messages — surfacing a
+            // blocking alert here was over-aggressive and hid the chat UI.
+            // Log for debugging; leave messages empty.
+            #if DEBUG
+            print("⚠️ AIChat loadHistory failed: \(error.localizedDescription)")
+            #endif
         }
     }
 

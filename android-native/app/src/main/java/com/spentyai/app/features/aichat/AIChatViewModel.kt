@@ -62,7 +62,12 @@ class AIChatViewModel(
                     }
                 }
                 is ApiResult.Failure -> {
-                    _uiState.update { it.copy(errorMessage = "Could not load chat history.") }
+                    // Loading history is OPPORTUNISTIC. If it fails (network blip,
+                    // first-time user with no history yet, transient hiccup, etc.)
+                    // the user can still send messages — surfacing a blocking
+                    // alert here was over-aggressive and hid the chat UI.
+                    // Log for debugging; leave messages empty.
+                    android.util.Log.w("AIChat", "loadHistory failed: ${result.error}")
                 }
             }
         }
@@ -175,15 +180,19 @@ class AIChatViewModel(
     suspend fun toggleMicrophone(context: Context) {
         if (speechManager.isListening.value) {
             speechManager.stopListening()
+            // Finalize transcription into the input field but do NOT auto-send.
+            // User reviews and taps Send themselves. Live-mirror in the screen
+            // also keeps input in sync while listening.
             val transcribed = speechManager.transcribedText.value.trim()
             if (transcribed.isNotEmpty()) {
                 _uiState.update { it.copy(input = transcribed) }
-                speechManager.resetTranscription()
-                sendMessage(context)
             }
+            speechManager.resetTranscription()
         } else {
             speechManager.checkPermissions(context)
             if (speechManager.hasMicrophonePermission.value) {
+                // Clear the field so live-mirror starts from a clean slate.
+                _uiState.update { it.copy(input = "") }
                 speechManager.resetTranscription()
                 speechManager.startListening(context)
             }

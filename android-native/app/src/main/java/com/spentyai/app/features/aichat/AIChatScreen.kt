@@ -81,6 +81,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.spentyai.app.core.theme.SpentyError
 import com.spentyai.app.core.theme.SpentyPrimary
 import com.spentyai.app.core.theme.SpentyStyle
@@ -153,9 +154,23 @@ fun AIChatScreen(
     }
 
     LaunchedEffect(Unit) {
-        viewModel.loadSuggestions()
-        viewModel.loadHistory()
+        // Parallelize: a slow / hung suggestions endpoint must not block
+        // history (or vice versa) — mirrors the iOS fix that prevented a
+        // perceived "screen hang" when the AI tab was opened.
+        launch { viewModel.loadSuggestions() }
+        launch { viewModel.loadHistory() }
         viewModel.speechManager.checkPermissions(context)
+    }
+
+    // Live-mirror the in-app voice transcription into the TextField so
+    // (a) the user sees their words appear as they speak and (b) the
+    // Send button (which checks `state.input.isNotBlank()`) activates
+    // naturally. Without this, transcription lived in a separate state
+    // and tapping Send did nothing after speaking — mirrors the iOS fix.
+    LaunchedEffect(transcribedText, isListening) {
+        if (isListening && !isVoiceModeActive) {
+            viewModel.onInputChange(transcribedText)
+        }
     }
 
     LaunchedEffect(state.scrollToBottomTrigger) {
@@ -742,19 +757,27 @@ private fun InputBar(
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.Bottom
     ) {
-        // Mic button (left of text field)
-        IconButton(
-            onClick = onToggleMic,
-            modifier = Modifier
-                .size(40.dp)
-                .clip(CircleShape)
-                .background(if (isListening) SpentyError else SpentyPrimary.copy(alpha = 0.12f))
-        ) {
-            Icon(
-                imageVector = if (isListening) Icons.Default.MicOff else Icons.Default.Mic,
-                contentDescription = if (isListening) "Stop listening" else "Start voice input",
-                tint = if (isListening) Color.White else SpentyPrimary,
-                modifier = Modifier.size(18.dp)
+        // Mic button (left of text field) — labeled so users discover voice input.
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            IconButton(
+                onClick = onToggleMic,
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(if (isListening) SpentyError else SpentyPrimary.copy(alpha = 0.12f))
+            ) {
+                Icon(
+                    imageVector = if (isListening) Icons.Default.MicOff else Icons.Default.Mic,
+                    contentDescription = if (isListening) "Stop listening" else "Speak to AI",
+                    tint = if (isListening) Color.White else SpentyPrimary,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+            Text(
+                text = if (isListening) "Stop" else "Speak",
+                style = SpentyType.Caption.copy(fontSize = 9.sp),
+                color = if (isListening) SpentyError else SpentyPrimary,
+                modifier = Modifier.padding(top = 2.dp)
             )
         }
 
@@ -778,19 +801,27 @@ private fun InputBar(
 
         Spacer(modifier = Modifier.width(8.dp))
 
-        IconButton(
-            onClick = onSend,
-            enabled = canSend,
-            modifier = Modifier
-                .size(40.dp)
-                .clip(CircleShape)
-                .background(if (canSend) SpentyPrimary else SpentyPrimary.copy(alpha = 0.3f))
-        ) {
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.Send,
-                contentDescription = "Send",
-                modifier = Modifier.size(18.dp),
-                tint = Color.White
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            IconButton(
+                onClick = onSend,
+                enabled = canSend,
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(if (canSend) SpentyPrimary else SpentyPrimary.copy(alpha = 0.3f))
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.Send,
+                    contentDescription = "Send",
+                    modifier = Modifier.size(18.dp),
+                    tint = Color.White
+                )
+            }
+            Text(
+                text = "Send",
+                style = SpentyType.Caption.copy(fontSize = 9.sp),
+                color = if (canSend) SpentyPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 2.dp)
             )
         }
     }
