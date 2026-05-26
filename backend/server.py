@@ -11065,6 +11065,30 @@ You can help the user record purchase bills (expenses from vendors/suppliers). S
     for msg in (body.get("conversation") or [])[-20:]:
         if msg.get("role") in ("user", "assistant") and msg.get("content"):
             messages.append({"role": msg["role"], "content": msg["content"]})
+
+    # ── Language constraint reinforcement ─────────────────────────────────
+    # The system prompt above already tells the LLM to reply in the user's
+    # language, but gpt-4o-mini sometimes drifts to Hindi/Devanagari even
+    # when the user typed pure English. Inject a HARD per-message constraint
+    # just before the user turn so the language rule is the freshest token
+    # the model sees. The TTS layer on iOS / Android then picks the right
+    # voice (en-IN vs hi-IN) based on the response script.
+    has_devanagari = any(0x0900 <= ord(c) <= 0x097F for c in message)
+    if has_devanagari:
+        lang_directive = (
+            "The user's CURRENT message contains Devanagari (Hindi) script. "
+            "Reply ENTIRELY in Hindi using Devanagari script."
+        )
+    else:
+        lang_directive = (
+            "The user's CURRENT message is in English or Hinglish (Roman script ONLY — "
+            "NO Devanagari characters present). You MUST reply in the SAME script and "
+            "language as the user. If the user wrote pure English, reply in pure English. "
+            "If the user wrote Hinglish (Hindi in Roman script like 'kitna kharcha hua'), "
+            "reply in Hinglish (Roman script). DO NOT use Devanagari characters anywhere "
+            "in your reply — not for a single word."
+        )
+    messages.append({"role": "system", "content": lang_directive})
     messages.append({"role": "user", "content": message})
 
     try:
