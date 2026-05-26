@@ -129,9 +129,7 @@ struct MoreMenuView: View {
                 NavigationLink { EmailSyncView() } label: {
                     MoreRow(title: lang.s("email_sync"), icon: "envelope.fill", color: .spentyInfo)
                 }
-                NavigationLink { SMSSyncView() } label: {
-                    MoreRow(title: lang.s("sms_sync"), icon: "message.fill", color: .spentyAccent3)
-                }
+                // SMS Sync removed on iOS — Apple sandbox blocks SMS access.
                 NavigationLink { RecordsView() } label: {
                     MoreRow(title: lang.s("records"), icon: "archivebox.fill", color: .spentyTextSecondary)
                 }

@@ -59,9 +59,8 @@ struct PremiumFeatureSheet: View {
         ("envelope.badge.shield.half.filled.fill",
          "Email Sync",
          "Auto-import expenses from Gmail and Outlook."),
-        ("message.badge.waveform.fill",
-         "SMS Sync",
-         "Capture bank transaction alerts automatically."),
+        // SMS Sync intentionally omitted on iOS — Apple sandbox does not expose
+        // SMS messages to third-party apps, so the feature is Android-only.
         ("doc.text.fill",
          "Invoices",
          "Create and send GST-ready invoices."),

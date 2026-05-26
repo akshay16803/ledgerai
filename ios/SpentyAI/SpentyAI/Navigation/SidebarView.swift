@@ -17,7 +17,7 @@ struct SidebarView: View {
         case vendors = "Vendors"
         case reconciliation = "Reconciliation"
         case emailSync = "Email Sync"
-        case smsSync = "SMS Sync"
+        // SMS Sync removed on iOS — Apple sandbox blocks SMS access.
         case records = "Records"
         case pastInsights = "Past Insights"
         case aiChat = "AI Chat"
@@ -42,7 +42,6 @@ struct SidebarView: View {
             case .vendors: return "shippingbox.fill"
             case .reconciliation: return "checkmark.circle.fill"
             case .emailSync: return "envelope.fill"
-            case .smsSync: return "message.fill"
             case .records: return "archivebox.fill"
             case .pastInsights: return "clock.fill"
             case .aiChat: return "bubble.left.and.bubble.right.fill"
@@ -56,7 +55,7 @@ struct SidebarView: View {
         static let mainItems: [SidebarItem] = [.dashboard, .transactions, .accounts, .reports]
         static let financeItems: [SidebarItem] = [.cashFlow, .invoices, .purchases, .categories]
         static let peopleItems: [SidebarItem] = [.customers, .vendors]
-        static let dataItems: [SidebarItem] = [.reconciliation, .emailSync, .smsSync, .records, .pastInsights]
+        static let dataItems: [SidebarItem] = [.reconciliation, .emailSync, .records, .pastInsights]
         static let toolItems: [SidebarItem] = [.aiChat, .featureRequests, .support]
         static let accountItems: [SidebarItem] = [.settings, .billing]
     }
@@ -157,8 +156,6 @@ struct SidebarView: View {
                 ReconciliationView()
             case .emailSync:
                 EmailSyncView()
-            case .smsSync:
-                SMSSyncView()
             case .records:
                 RecordsView()
             case .pastInsights:
