@@ -106,6 +106,14 @@ final class SpeechManager: NSObject {
         let inputNode = audioEngine.inputNode
         let recordingFormat = inputNode.outputFormat(forBus: 0)
 
+        // CRITICAL: Always remove any pre-existing tap on bus 0 before
+        // installing a new one. If startListening fails mid-flight and leaves
+        // a tap installed, the next installTap call crashes with
+        // "required condition is false: nullptr == Tap()". This caused the
+        // AI Chat "screen hang" the user reported — the app was actually
+        // crashing on second mic tap.
+        inputNode.removeTap(onBus: 0)
+
         inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { [weak self] buffer, _ in
             self?.recognitionRequest?.append(buffer)
         }
@@ -152,8 +160,11 @@ final class SpeechManager: NSObject {
     func stopListening() {
         if audioEngine.isRunning {
             audioEngine.stop()
-            audioEngine.inputNode.removeTap(onBus: 0)
         }
+        // Remove the tap UNCONDITIONALLY — even if the engine never started
+        // (which can happen if start() threw), the tap may still be installed.
+        // Leaving it installed crashes the next startListening call.
+        audioEngine.inputNode.removeTap(onBus: 0)
         recognitionRequest?.endAudio()
         recognitionRequest = nil
         recognitionTask?.cancel()
