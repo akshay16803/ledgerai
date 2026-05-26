@@ -128,8 +128,9 @@ fun InvoiceListScreen(
             onDismissRequest = closeSheet,
             containerColor = MaterialTheme.colorScheme.surface
         ) {
-            PremiumFeatureSheet.Invoices(
-                priceDisplay = billingViewModel.displayPrice(BillingRepository.PRODUCT_MONTHLY) ?: "₹199",
+            PremiumFeatureSheet.Bundle(
+                monthlyPriceDisplay = billingViewModel.displayPrice(BillingRepository.PRODUCT_MONTHLY) ?: "₹199",
+                lifetimePriceDisplay = billingViewModel.displayPrice(BillingRepository.PRODUCT_LIFETIME_OFFER) ?: "₹4,999",
                 isPurchasing = billingState.isPurchasing,
                 onSubscribe = onSub@{
                     val act = activity ?: return@onSub
@@ -138,13 +139,20 @@ fun InvoiceListScreen(
                         ?: return@onSub
                     billingViewModel.purchaseSubscription(details, act)
                 },
+                onSubscribeLifetime = onLife@{
+                    val act = activity ?: return@onLife
+                    billingViewModel.purchaseLifetimeOffer(act)
+                },
                 onClose = closeSheet
             )
         }
     }
 
-    LaunchedEffect(Unit) {
-        viewModel.loadAll()
+    // Gate the data-loading LaunchedEffect behind hasPremium — backend 402s
+    // these endpoints for free users now, and the resulting error toast
+    // races / clobbers the premium sheet.
+    LaunchedEffect(hasPremium) {
+        if (hasPremium) viewModel.loadAll()
     }
 
     LaunchedEffect(state.errorMessage) {

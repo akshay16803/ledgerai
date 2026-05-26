@@ -53,16 +53,19 @@ fun RecordsScreen(
     onNavigateToPreview: (String) -> Unit,
     onBack: () -> Unit
 ) {
-    LaunchedEffect(Unit) {
-        viewModel.loadRecords()
-        viewModel.loadReceipts()
-    }
-
     var showUploadSheet by remember { mutableStateOf(false) }
 
     // ── Premium gate (Records is the paid Premium tier) ─────────────────
     val billingState by billingViewModel.uiState.collectAsState()
     val hasPremium = billingState.currentStatus?.isActive == true
+
+    // Gate data load behind hasPremium — backend 402s for free users.
+    LaunchedEffect(hasPremium) {
+        if (hasPremium) {
+            viewModel.loadRecords()
+            viewModel.loadReceipts()
+        }
+    }
     val statusLoaded = billingState.currentStatus != null
     var showPremiumSheet by remember { mutableStateOf(false) }
     var initialGateChecked by remember { mutableStateOf(false) }
@@ -88,8 +91,9 @@ fun RecordsScreen(
             onDismissRequest = closeSheet,
             containerColor = MaterialTheme.colorScheme.surface
         ) {
-            PremiumFeatureSheet.Records(
-                priceDisplay = billingViewModel.displayPrice(BillingRepository.PRODUCT_MONTHLY) ?: "₹199",
+            PremiumFeatureSheet.Bundle(
+                monthlyPriceDisplay = billingViewModel.displayPrice(BillingRepository.PRODUCT_MONTHLY) ?: "₹199",
+                lifetimePriceDisplay = billingViewModel.displayPrice(BillingRepository.PRODUCT_LIFETIME_OFFER) ?: "₹4,999",
                 isPurchasing = billingState.isPurchasing,
                 onSubscribe = onSub@{
                     val act = activity ?: return@onSub
@@ -97,6 +101,10 @@ fun RecordsScreen(
                         .firstOrNull { it.productId == BillingRepository.PRODUCT_MONTHLY }
                         ?: return@onSub
                     billingViewModel.purchaseSubscription(details, act)
+                },
+                onSubscribeLifetime = onLife@{
+                    val act = activity ?: return@onLife
+                    billingViewModel.purchaseLifetimeOffer(act)
                 },
                 onClose = closeSheet
             )

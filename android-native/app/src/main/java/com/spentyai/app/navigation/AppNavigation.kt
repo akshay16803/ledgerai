@@ -424,10 +424,13 @@ fun AppNavigation(
                         onDismissRequest = closeSheet,
                         containerColor = MaterialTheme.colorScheme.surface
                     ) {
-                        com.spentyai.app.features.billing.PremiumFeatureSheet.Mandates(
-                            priceDisplay = billingViewModel.displayPrice(
+                        com.spentyai.app.features.billing.PremiumFeatureSheet.Bundle(
+                            monthlyPriceDisplay = billingViewModel.displayPrice(
                                 com.spentyai.app.features.billing.BillingRepository.PRODUCT_MONTHLY
                             ) ?: "₹199",
+                            lifetimePriceDisplay = billingViewModel.displayPrice(
+                                com.spentyai.app.features.billing.BillingRepository.PRODUCT_LIFETIME_OFFER
+                            ) ?: "₹4,999",
                             isPurchasing = billingState.isPurchasing,
                             onSubscribe = onSub@{
                                 val act = activity ?: return@onSub
@@ -435,6 +438,10 @@ fun AppNavigation(
                                     .firstOrNull { it.productId == com.spentyai.app.features.billing.BillingRepository.PRODUCT_MONTHLY }
                                     ?: return@onSub
                                 billingViewModel.purchaseSubscription(details, act)
+                            },
+                            onSubscribeLifetime = onLife@{
+                                val act = activity ?: return@onLife
+                                billingViewModel.purchaseLifetimeOffer(act)
                             },
                             onClose = closeSheet
                         )
@@ -445,8 +452,13 @@ fun AppNavigation(
             }
 
             // Alias used by MoreMenuScreen ("cash_flow" → CashFlow)
+            // CashFlow tab itself is FREE; only the mandates drill-down section
+            // inside it is gated. Pass hasPremium so CashFlowScreen can hide
+            // the mandate section for free users without showing the sheet here.
             composable("cash_flow") {
-                CashFlowScreen(viewModel = cashFlowViewModel)
+                val billingState by billingViewModel.uiState.collectAsState()
+                val hasPremium = billingState.currentStatus?.isActive == true
+                CashFlowScreen(viewModel = cashFlowViewModel, hasPremium = hasPremium)
             }
 
             composable(Screen.PaymentPlans.route) {

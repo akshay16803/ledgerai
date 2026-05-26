@@ -100,8 +100,9 @@ fun PastInsightsScreen(
             onDismissRequest = closeSheet,
             containerColor = MaterialTheme.colorScheme.surface
         ) {
-            PremiumFeatureSheet.PastInsights(
-                priceDisplay = billingViewModel.displayPrice(BillingRepository.PRODUCT_MONTHLY) ?: "₹199",
+            PremiumFeatureSheet.Bundle(
+                monthlyPriceDisplay = billingViewModel.displayPrice(BillingRepository.PRODUCT_MONTHLY) ?: "₹199",
+                lifetimePriceDisplay = billingViewModel.displayPrice(BillingRepository.PRODUCT_LIFETIME_OFFER) ?: "₹4,999",
                 isPurchasing = billingState.isPurchasing,
                 onSubscribe = onSub@{
                     val act = activity ?: return@onSub
@@ -110,13 +111,18 @@ fun PastInsightsScreen(
                         ?: return@onSub
                     billingViewModel.purchaseSubscription(details, act)
                 },
+                onSubscribeLifetime = onLife@{
+                    val act = activity ?: return@onLife
+                    billingViewModel.purchaseLifetimeOffer(act)
+                },
                 onClose = closeSheet
             )
         }
     }
 
-    LaunchedEffect(Unit) {
-        viewModel.loadSummaries()
+    // Gate data load behind hasPremium — backend 402s for free users.
+    LaunchedEffect(hasPremium) {
+        if (hasPremium) viewModel.loadSummaries()
     }
 
     if (state.showError) {

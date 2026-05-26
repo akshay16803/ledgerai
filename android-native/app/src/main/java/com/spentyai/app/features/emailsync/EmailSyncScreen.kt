@@ -52,8 +52,6 @@ fun EmailSyncScreen(
     onNavigateToPendingReview: () -> Unit,
     onBack: () -> Unit
 ) {
-    LaunchedEffect(Unit) { viewModel.loadAll() }
-
     // ── Premium gate (added 2026-05-13) ──────────────────────────────────────
     // Mirror of iOS EmailSyncView: Email Sync is the paid Premium tier
     // (com.spentyai.monthly @ ₹199/month). If the user isn't subscribed,
@@ -62,6 +60,10 @@ fun EmailSyncScreen(
     // makes the UX feel intentional rather than a punitive error toast.
     val billingState by billingViewModel.uiState.collectAsState()
     val hasPremium = billingState.currentStatus?.isActive == true
+
+    // Gate data load behind hasPremium — backend 402s for free users and
+    // the resulting error toast races / clobbers the premium sheet.
+    LaunchedEffect(hasPremium) { if (hasPremium) viewModel.loadAll() }
     val statusLoaded = billingState.currentStatus != null
     var showPremiumSheet by remember { mutableStateOf(false) }
     var initialGateChecked by remember { mutableStateOf(false) }
@@ -134,8 +136,9 @@ fun EmailSyncScreen(
             onDismissRequest = closeSheet,
             containerColor = MaterialTheme.colorScheme.surface
         ) {
-            PremiumFeatureSheet.EmailSync(
-                priceDisplay = billingViewModel.displayPrice(BillingRepository.PRODUCT_MONTHLY) ?: "₹199",
+            PremiumFeatureSheet.Bundle(
+                monthlyPriceDisplay = billingViewModel.displayPrice(BillingRepository.PRODUCT_MONTHLY) ?: "₹199",
+                lifetimePriceDisplay = billingViewModel.displayPrice(BillingRepository.PRODUCT_LIFETIME_OFFER) ?: "₹4,999",
                 isPurchasing = billingState.isPurchasing,
                 onSubscribe = onSub@{
                     val act = activity ?: return@onSub
@@ -147,6 +150,10 @@ fun EmailSyncScreen(
                     // success the backend flips currentStatus.isActive,
                     // the auto-close LaunchedEffect fires, and the !hasPremium
                     // check in closeSheet keeps the user on this screen.
+                },
+                onSubscribeLifetime = onLife@{
+                    val act = activity ?: return@onLife
+                    billingViewModel.purchaseLifetimeOffer(act)
                 },
                 onClose = closeSheet
             )

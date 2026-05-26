@@ -60,6 +60,7 @@ struct EmailSyncView: View {
             // dimmed preview behind the sheet.
             if !hasPremium {
                 showPremiumSheet = true
+                return  // Skip data fetch — backend 402s and the resulting alert clobbers the sheet.
             }
             await viewModel.loadAll()
         }
@@ -76,7 +77,7 @@ struct EmailSyncView: View {
             // user on this screen.
             if !justSubscribed && !hasPremium { dismiss() }
         }) {
-            PremiumFeatureSheet.emailSync(
+            PremiumFeatureSheet.bundle(
                 onClose: { showPremiumSheet = false },
                 onSubscribed: { justSubscribed = true }
             )

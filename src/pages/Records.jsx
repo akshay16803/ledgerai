@@ -69,8 +69,11 @@ export default function Records() {
   }, [page]);
 
   useEffect(() => {
+    // Skip fetch for non-premium users — the modal is showing and the
+    // backend would return 402, which clobbers the modal with an error.
+    if (!hasPremium) return;
     if (activeTab === 'receipts') loadReceipts();
-  }, [activeTab, loadReceipts]);
+  }, [hasPremium, activeTab, loadReceipts]);
 
   const loadRecords = useCallback(async () => {
     try {
@@ -93,10 +96,13 @@ export default function Records() {
   }, [search, dateFrom, dateTo, amountMin, amountMax, page]);
 
   useEffect(() => {
+    // Skip fetch for non-premium users — the modal is showing and the
+    // backend would return 402, which clobbers the modal with an error.
+    if (!hasPremium) { setLoading(false); return; }
     setLoading(true);
     const timer = setTimeout(loadRecords, 300);
     return () => clearTimeout(timer);
-  }, [loadRecords]);
+  }, [hasPremium, loadRecords]);
 
   const toggleSelect = (id) => {
     setSelected(prev => {

@@ -78,6 +78,10 @@ final class CashFlowViewModel {
     func loadMandates() async {
         do {
             mandates = try await repository.getMandates()
+        } catch APIError.subscriptionRequired(_) {
+            // 402 — Mandates is Premium since 2026-05-26. Silently keep an empty
+            // list; the MandatesListView's own .task surfaces the premium sheet.
+            mandates = []
         } catch {
             handleError(error)
         }
@@ -87,6 +91,8 @@ final class CashFlowViewModel {
     func loadUpcoming() async {
         do {
             upcomingMandates = try await repository.getUpcoming()
+        } catch APIError.subscriptionRequired(_) {
+            upcomingMandates = []
         } catch {
             handleError(error)
         }

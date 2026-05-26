@@ -493,12 +493,16 @@ export default function EmailSync() {
   }, []);
 
   useEffect(() => {
+    // Skip fetch for non-premium users — the modal is showing and the
+    // backend would return 402, which clobbers the modal with an error.
+    if (!hasPremium) { setLoading(false); return; }
     let active = true;
     loadStatus().then(() => { if (!active) return; }); // eslint-disable-line react-hooks/set-state-in-effect
     return () => { active = false; };
-  }, [loadStatus]);
+  }, [hasPremium, loadStatus]);
 
   useEffect(() => {
+    if (!hasPremium) return;
     const gmailSyncing = gmailStatus?.accounts?.some(a => a.syncing);
     const outlookSyncing = outlookStatus?.accounts?.some(a => a.syncing);
     const gmailPending = gmailStatus?.accounts?.some(a => a.stats?.ai_pending > 0);
@@ -507,7 +511,7 @@ export default function EmailSync() {
     if (!isActive) return;
     const interval = setInterval(loadStatus, 3000);
     return () => clearInterval(interval);
-  }, [gmailStatus, outlookStatus, loadStatus]);
+  }, [hasPremium, gmailStatus, outlookStatus, loadStatus]);
 
   const handleConnectGmail = async () => {
     setConnectingGmail(true);

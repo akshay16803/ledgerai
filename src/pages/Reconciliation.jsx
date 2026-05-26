@@ -257,20 +257,24 @@ export default function Reconciliation() {
   }, []);
 
   useEffect(() => {
+    // Skip fetch for non-premium users — the modal is showing and the
+    // backend would return 402, which clobbers the modal with an error.
+    if (!hasPremium) { setLoading(false); return; }
     let active = true;
     loadData().then(() => { if (!active) return; });
     return () => { active = false; };
-  }, [loadData]);
+  }, [hasPremium, loadData]);
 
   // Poll while any statement is still parsing so the progress bar advances
   // without the user having to refresh. Stops automatically once no rows are
   // in a processing state.
   useEffect(() => {
+    if (!hasPremium) return;
     const anyProcessing = statements.some(s => s.status === 'parsing');
     if (!anyProcessing) return;
     const id = setInterval(() => { loadData(); }, 1500);
     return () => clearInterval(id);
-  }, [statements, loadData]);
+  }, [hasPremium, statements, loadData]);
 
   // Tick every second so the "elapsed seconds" readout on each progress bar
   // updates smoothly even between polls.

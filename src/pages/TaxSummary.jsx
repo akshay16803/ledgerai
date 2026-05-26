@@ -57,15 +57,21 @@ export default function TaxSummary() {
     setLoading(false);
   }, []);
 
-  useEffect(() => { loadSummaries(); }, [loadSummaries]); // eslint-disable-line react-hooks/set-state-in-effect
+  useEffect(() => {
+    // Skip fetch for non-premium users — the modal is showing and the
+    // backend would return 402, which clobbers the modal with an error.
+    if (!hasPremium) { setLoading(false); return; }
+    loadSummaries();
+  }, [hasPremium, loadSummaries]);
 
   // Poll for processing summaries
   useEffect(() => {
+    if (!hasPremium) return;
     const hasProcessing = summaries.some(s => s.status === 'processing' || s.status === 'analyzing');
     if (!hasProcessing) return;
     const interval = setInterval(loadSummaries, 4000);
     return () => clearInterval(interval);
-  }, [summaries, loadSummaries]);
+  }, [hasPremium, summaries, loadSummaries]);
 
   const handleCreate = async (e) => {
     e.preventDefault();

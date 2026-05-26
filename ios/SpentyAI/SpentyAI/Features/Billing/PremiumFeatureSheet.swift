@@ -3,35 +3,26 @@ import StoreKit  // Required for `AppStore.sync()` in restorePurchases()
 
 // MARK: - Premium Feature Sheet
 //
-// Modern, focused upsell modal — presented when a free user opens a
-// Premium-gated surface (Email Sync, SMS Auto-detection). Replaces the
-// previous full-app SubscriptionPaywall (which kept the entire app
-// behind a wall after sign-in and was killing conversion). This sheet
-// is invoked CONTEXTUALLY: the user is mid-action on a feature they
-// already want, so the value prop is already clear; we just have to
-// look credible enough that ₹199/month feels right.
+// Unified upsell modal — presented when a free user opens ANY Premium-gated
+// surface (Email Sync, SMS Auto-detection, Invoices, Purchases, Mandates,
+// Reconciliation, Records, Past Insights).
 //
-// Design notes:
-//   - Dark hero with brand green gradient + animated soft glow. Mirrors
-//     the "premium" cards used by Linear / Cursor / Stripe paywalls.
-//   - Single CTA (subscribe) — no plan picker. Pivot from 4-plan ladder
-//     to one monthly SKU is intentional (decision fatigue was the bug).
-//   - Restore Purchases + Maybe later + price clarity = App Store
-//     guideline 3.1.1 + 3.1.2 compliance.
+// Pivot 2026-05-27:
+//   - The sheet was per-feature ("Unlock Invoices" with invoice bullets).
+//     We now show the FULL bundle: every premium feature listed, with both
+//     price options visible — ₹199/month and the ₹4,999 lifetime_offer.
+//   - The 8 convenience builders (`.emailSync`, `.invoices`, etc.) now all
+//     route through `.bundle(...)` and produce identical content. Kept the
+//     old names as no-op shims so existing call sites compile, but every
+//     new call site should use `.bundle()`.
 //
-// Caller responsibility: instantiate this with the feature's branded
-// copy (icon, title, two-line value prop, 3 bullets). The sheet handles
-// purchase, restore, dismiss.
+// Caller responsibility: present the sheet, dismiss on `onClose`, optionally
+// record the local "they paid" flag via `onSubscribed` (which fires AFTER
+// StoreKit + backend `/verify` succeed but BEFORE the /auth/me refresh).
 
 struct PremiumFeatureSheet: View {
 
     // MARK: - Configuration
-    let featureIcon: String       // SF Symbol, e.g. "envelope.badge.shield.half.filled.fill"
-    let featureName: String       // e.g. "Email Sync"
-    let headline: String          // 1 line, e.g. "Your inbox, parsed into clean transactions."
-    let subhead: String           // 1 line, e.g. "We scan every receipt, statement, UPI alert and bank email — automatically."
-    let bullets: [(icon: String, title: String, sub: String)]
-
     let onClose: () -> Void
 
     /// Called the moment the StoreKit purchase + backend /verify return
@@ -49,9 +40,8 @@ struct PremiumFeatureSheet: View {
     @State private var errorMessage = ""
 
     /// True between "StoreKit returned success" and "we've fully closed
-    /// the sheet". Used to keep the Subscribe button disabled across the
-    /// auth-refresh round-trip so a determined user can't double-tap and
-    /// trigger a second purchase in that ~500 ms window.
+    /// the sheet". Used to keep both CTAs disabled across the auth-refresh
+    /// round-trip so a determined user can't double-tap.
     @State private var isFinalizing = false
 
     // Brand palette
@@ -60,6 +50,38 @@ struct PremiumFeatureSheet: View {
     private let goldAccent = Color(red: 0.831, green: 0.686, blue: 0.216)
 
     private static let monthlyProductId = "com.spentyai.monthly"
+    private static let lifetimeProductId = "com.spentyai.lifetime_offer"
+
+    // Unified bundle bullets — same content regardless of which feature
+    // triggered the sheet. Keep in sync with Android PremiumFeatureSheet.kt
+    // and web PremiumGateModal.jsx.
+    private static let bundleBullets: [(icon: String, title: String, sub: String)] = [
+        ("envelope.badge.shield.half.filled.fill",
+         "Email Sync",
+         "Auto-import expenses from Gmail and Outlook."),
+        ("message.badge.waveform.fill",
+         "SMS Sync",
+         "Capture bank transaction alerts automatically."),
+        ("doc.text.fill",
+         "Invoices",
+         "Create and send GST-ready invoices."),
+        ("cart.fill",
+         "Purchases",
+         "Track every bill end-to-end."),
+        ("arrow.left.arrow.right.circle.fill",
+         "Reconciliation",
+         "Match bank statements in one tap."),
+        ("tray.full.fill",
+         "Records",
+         "Full email and attachment archive."),
+        ("chart.line.uptrend.xyaxis",
+         "Past Insights",
+         "Monthly and yearly analytics."),
+        ("arrow.triangle.2.circlepath",
+         "Mandates",
+         "Track UPI auto-pay subscriptions."),
+    ]
+
 
     var body: some View {
         ZStack {
@@ -111,9 +133,7 @@ struct PremiumFeatureSheet: View {
                 startPoint: .top, endPoint: .bottom
             )
 
-            // Animated glow blob — gives the "premium card" feeling without being
-            // gimmicky. Stays subtle (opacity 0.32) so it reads as ambient light
-            // rather than a graphic.
+            // Animated glow blob
             Circle()
                 .fill(glowGreen)
                 .frame(width: 320, height: 320)
@@ -139,7 +159,7 @@ struct PremiumFeatureSheet: View {
                 .clipShape(Capsule())
                 .overlay(Capsule().stroke(goldAccent.opacity(0.32), lineWidth: 1))
 
-                // Feature icon — big circular badge
+                // Bundle hero icon — sparkles-in-circle (not per-feature)
                 ZStack {
                     Circle()
                         .fill(glowGreen.opacity(0.18))
@@ -147,19 +167,19 @@ struct PremiumFeatureSheet: View {
                     Circle()
                         .fill(glowGreen.opacity(0.28))
                         .frame(width: 66, height: 66)
-                    Image(systemName: featureIcon)
-                        .font(.system(size: 32, weight: .semibold))
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 34, weight: .semibold))
                         .foregroundStyle(.white)
                 }
                 .padding(.top, 4)
 
-                // Title + subhead
+                // Title + subhead — same for every gated surface
                 VStack(spacing: 8) {
-                    Text(headline)
+                    Text("Unlock SpentyAI Premium")
                         .font(.system(size: 26, weight: .bold))
                         .foregroundStyle(.white)
                         .multilineTextAlignment(.center)
-                    Text(subhead)
+                    Text("One subscription. Every premium feature.")
                         .font(.system(size: 15))
                         .foregroundStyle(.white.opacity(0.65))
                         .multilineTextAlignment(.center)
@@ -172,15 +192,15 @@ struct PremiumFeatureSheet: View {
         }
     }
 
-    // MARK: - Body card (feature bullets + CTA)
+
+    // MARK: - Body card (feature bullets + price boxes + CTAs)
     private var body_card: some View {
         VStack(spacing: 0) {
-            // Feature bullets — clean rows mirroring the existing
-            // LifetimeOfferSheet pattern so the brand feels coherent.
+            // Full bundle bullets
             VStack(spacing: 0) {
-                ForEach(Array(bullets.enumerated()), id: \.offset) { idx, b in
+                ForEach(Array(Self.bundleBullets.enumerated()), id: \.offset) { idx, b in
                     bulletRow(icon: b.icon, title: b.title, sub: b.sub)
-                    if idx < bullets.count - 1 {
+                    if idx < Self.bundleBullets.count - 1 {
                         Divider().padding(.leading, 76).padding(.trailing, 24)
                     }
                 }
@@ -188,43 +208,51 @@ struct PremiumFeatureSheet: View {
             .padding(.top, 12)
             .padding(.bottom, 8)
 
-            // Price box
-            priceBox
+            // Two stacked price boxes — monthly + lifetime
+            VStack(spacing: 12) {
+                monthlyPriceBox
+                lifetimePriceBox
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 16)
+
+            // Primary CTA — Subscribe Monthly
+            primaryCTA
                 .padding(.horizontal, 20)
                 .padding(.top, 16)
 
-            // Primary CTA
-            primaryCTA
+            // Secondary CTA — Get Lifetime
+            secondaryCTA
                 .padding(.horizontal, 20)
-                .padding(.top, 18)
+                .padding(.top, 10)
 
-            // Secondary actions
+            // Restore + Maybe later
             HStack(spacing: 24) {
                 Button(action: restorePurchases) {
                     Text("Restore Purchases")
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(Color.spentyPrimary)
                 }
-                .disabled(viewModel.isPurchasing)
+                .disabled(viewModel.isPurchasing || isFinalizing)
 
                 Button(action: onClose) {
                     Text("Maybe later")
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(.secondary)
                 }
-                .disabled(viewModel.isPurchasing)
+                .disabled(viewModel.isPurchasing || isFinalizing)
             }
             .padding(.top, 16)
 
-            // Fine print — Apple guideline 3.1.2 compliance
-            Text("Auto-renews monthly until cancelled. Cancel anytime in iOS Settings → Apple Account → Subscriptions. Payment is charged to your Apple Account at confirmation of purchase.")
+            // Fine print
+            Text("Monthly auto-renews until cancelled. Lifetime is a one-time payment. Cancel anytime in iOS Settings → Apple Account → Subscriptions. Payment is charged to your Apple Account at confirmation of purchase.")
                 .font(.system(size: 11))
                 .foregroundStyle(.tertiary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 28)
                 .padding(.top, 14)
 
-            // Terms / Privacy links — App Store guideline 3.1.2
+            // Terms / Privacy
             HStack(spacing: 16) {
                 Link("Terms of Service", destination: URL(string: "https://www.spentyai.com/terms")!)
                 Text("·").foregroundStyle(.tertiary)
@@ -238,33 +266,30 @@ struct PremiumFeatureSheet: View {
         .background(Color.spentyBgPrimary)
     }
 
-    // MARK: - Price box
-    private var priceBox: some View {
+
+    // MARK: - Price boxes
+
+    private var monthlyPriceBox: some View {
         HStack(alignment: .firstTextBaseline, spacing: 4) {
             if let displayPrice = viewModel.displayPrice(for: Self.monthlyProductId) {
                 Text(displayPrice)
-                    .font(.system(size: 32, weight: .bold))
+                    .font(.system(size: 28, weight: .bold))
                     .foregroundStyle(.primary)
                 Text("/month")
-                    .font(.system(size: 15, weight: .medium))
+                    .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(.secondary)
             } else {
                 ProgressView()
                     .scaleEffect(0.9)
-                    .frame(height: 38)
+                    .frame(height: 34)
             }
             Spacer()
-            VStack(alignment: .trailing, spacing: 2) {
-                Text("Cancel anytime")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                Text("No hidden fees")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.tertiary)
-            }
+            Text("Cancel anytime")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.secondary)
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 18)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 16)
         .background(Color.spentyPrimary.opacity(0.07),
                     in: RoundedRectangle(cornerRadius: 14))
         .overlay(
@@ -273,16 +298,51 @@ struct PremiumFeatureSheet: View {
         )
     }
 
-    // MARK: - Primary CTA
+    private var lifetimePriceBox: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 4) {
+            if let displayPrice = viewModel.displayPrice(for: Self.lifetimeProductId) {
+                Text(displayPrice)
+                    .font(.system(size: 28, weight: .bold))
+                    .foregroundStyle(.primary)
+                Text("lifetime")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(.secondary)
+            } else {
+                ProgressView()
+                    .scaleEffect(0.9)
+                    .frame(height: 34)
+            }
+            Spacer()
+            VStack(alignment: .trailing, spacing: 2) {
+                Text("One-time payment")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Text("50% off")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(goldAccent)
+            }
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 16)
+        .background(goldAccent.opacity(0.08),
+                    in: RoundedRectangle(cornerRadius: 14))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(goldAccent.opacity(0.32), lineWidth: 1)
+        )
+    }
+
+    // MARK: - CTAs
+
     private var primaryCTA: some View {
-        Button(action: purchase) {
+        Button(action: purchaseMonthly) {
             HStack(spacing: 10) {
-                if viewModel.isPurchasing || isFinalizing {
+                if (viewModel.isPurchasing && viewModel.purchasingProductId == Self.monthlyProductId) || isFinalizing {
                     ProgressView().tint(.white)
                 } else {
                     Image(systemName: "sparkles")
                         .font(.system(size: 16, weight: .bold))
-                    Text("Unlock \(featureName)")
+                    Text("Subscribe Monthly")
                         .font(.system(size: 17, weight: .semibold))
                 }
             }
@@ -295,6 +355,34 @@ struct PremiumFeatureSheet: View {
                 in: RoundedRectangle(cornerRadius: 16)
             )
             .shadow(color: Color.spentyPrimary.opacity(0.32), radius: 16, x: 0, y: 8)
+        }
+        .disabled(viewModel.isPurchasing || isFinalizing || !viewModel.areProductsLoaded)
+        .opacity(viewModel.areProductsLoaded ? 1 : 0.55)
+    }
+
+    private var secondaryCTA: some View {
+        Button(action: purchaseLifetime) {
+            HStack(spacing: 10) {
+                if viewModel.isPurchasing && viewModel.purchasingProductId == Self.lifetimeProductId {
+                    ProgressView().tint(Color.spentyPrimary)
+                } else {
+                    Image(systemName: "infinity")
+                        .font(.system(size: 15, weight: .bold))
+                    Text("Get Lifetime")
+                        .font(.system(size: 16, weight: .semibold))
+                }
+            }
+            .foregroundStyle(Color.spentyPrimary)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 16)
+            .background(
+                Color.spentyPrimary.opacity(0.10),
+                in: RoundedRectangle(cornerRadius: 14)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(Color.spentyPrimary.opacity(0.35), lineWidth: 1.5)
+            )
         }
         .disabled(viewModel.isPurchasing || isFinalizing || !viewModel.areProductsLoaded)
         .opacity(viewModel.areProductsLoaded ? 1 : 0.55)
@@ -322,36 +410,26 @@ struct PremiumFeatureSheet: View {
             Spacer()
         }
         .padding(.horizontal, 24)
-        .padding(.vertical, 14)
+        .padding(.vertical, 12)
     }
+
 
     // MARK: - Actions
 
-    private func purchase() {
+    private func purchaseMonthly() {
+        runPurchase(productId: Self.monthlyProductId)
+    }
+
+    private func purchaseLifetime() {
+        runPurchase(productId: Self.lifetimeProductId)
+    }
+
+    private func runPurchase(productId: String) {
         Task {
-            let ok = await viewModel.purchasePlan(Self.monthlyProductId)
+            let ok = await viewModel.purchasePlan(productId)
             if ok {
-                // Lock the CTA across the finalize sequence so a determined
-                // user can't double-tap during the auth-refresh round-trip
-                // and kick off a second StoreKit purchase. viewModel.isPurchasing
-                // already flipped back to false (its `defer` block runs at the
-                // end of purchasePlan), which is why we need our own flag.
                 await MainActor.run { isFinalizing = true }
-
-                // Signal the parent BEFORE the network refresh. This way the
-                // parent's local "justSubscribed" state is set even if the
-                // subsequent /auth/me call fails — protecting the user from
-                // a logout that would otherwise cascade from `user=nil`.
-                // The backend has already verified + persisted the purchase,
-                // so this is the authoritative "they paid" signal locally.
                 await MainActor.run { onSubscribed?() }
-
-                // Best-effort refresh of /api/auth/me so AppRouter, gated
-                // surfaces, and Settings see the fresh subscription status.
-                // checkSession swallows errors internally; if it fails the
-                // user stays signed in with the LOCAL knowledge that they
-                // just paid (via onSubscribed), and the next foreground or
-                // navigation will retry the refresh.
                 await authManager.checkSession()
                 await MainActor.run { onClose() }
             } else if !viewModel.errorMessage.isEmpty {
@@ -371,9 +449,6 @@ struct PremiumFeatureSheet: View {
                 try await AppStore.sync()
                 await viewModel.checkEntitlements()
                 if viewModel.isSubscribed {
-                    // Mirror of purchase() finalize sequence — same hardening
-                    // for the restore path so a network-flaky checkSession
-                    // doesn't log the user out after a successful restore.
                     await MainActor.run { isFinalizing = true }
                     await MainActor.run { onSubscribed?() }
                     await authManager.checkSession()
@@ -390,220 +465,84 @@ struct PremiumFeatureSheet: View {
 }
 
 // MARK: - Convenience builders
+//
+// As of 2026-05-27 every gated surface advertises the FULL premium bundle —
+// see `bundleBullets` and the headline/subhead in `hero`. The 8 named
+// builders below are kept as no-op shims so existing call sites compile;
+// they all return the same unified sheet. Prefer `.bundle(...)` for new
+// callers.
 
 extension PremiumFeatureSheet {
 
-    /// Premium sheet preset for Email Sync. Use this when a free user
-    /// opens EmailSyncView (or tries to start a sync via that screen).
+    /// Unified bundle sheet — every gated surface uses this builder.
+    static func bundle(
+        onClose: @escaping () -> Void,
+        onSubscribed: (() -> Void)? = nil
+    ) -> PremiumFeatureSheet {
+        PremiumFeatureSheet(
+            onClose: onClose,
+            onSubscribed: onSubscribed
+        )
+    }
+
     static func emailSync(
         onClose: @escaping () -> Void,
         onSubscribed: (() -> Void)? = nil
     ) -> PremiumFeatureSheet {
-        PremiumFeatureSheet(
-            featureIcon: "envelope.badge.shield.half.filled.fill",
-            featureName: "Email Sync",
-            headline: "Your inbox,\nturned into your books.",
-            subhead: "We read every UPI alert, bank statement and receipt — and post the transactions for you, automatically.",
-            bullets: [
-                ("bolt.fill",
-                 "Set it once, forget it",
-                 "Connect Gmail in 30 seconds. New emails auto-parse on arrival."),
-                ("checkmark.seal.fill",
-                 "Smart review queue",
-                 "Anything we're unsure about waits for you — never silently wrong."),
-                ("lock.shield.fill",
-                 "Read-only & encrypted",
-                 "We never send, delete or modify mail. Tokens are bank-grade encrypted."),
-            ],
-            onClose: onClose,
-            onSubscribed: onSubscribed
-        )
+        bundle(onClose: onClose, onSubscribed: onSubscribed)
     }
 
-    /// Premium sheet preset for Invoices.
     static func invoices(
         onClose: @escaping () -> Void,
         onSubscribed: (() -> Void)? = nil
     ) -> PremiumFeatureSheet {
-        PremiumFeatureSheet(
-            featureIcon: "doc.text.fill",
-            featureName: "Invoices",
-            headline: "Invoice clients,\nget paid faster.",
-            subhead: "Create GST-ready invoices in seconds, share them as PDF, and track every rupee that's still owed.",
-            bullets: [
-                ("doc.badge.plus",
-                 "One-tap invoices",
-                 "Pick a customer, add line items, hit send — we generate the GST PDF for you."),
-                ("indianrupeesign.circle.fill",
-                 "Track receivables",
-                 "See exactly who owes you what, how old it is, and chase only the late ones."),
-                ("checkmark.seal.fill",
-                 "Record payments cleanly",
-                 "Mark paid, capture partials, and stay reconciled with your ledger automatically."),
-            ],
-            onClose: onClose,
-            onSubscribed: onSubscribed
-        )
+        bundle(onClose: onClose, onSubscribed: onSubscribed)
     }
 
-    /// Premium sheet preset for Purchases (Bills).
     static func purchases(
         onClose: @escaping () -> Void,
         onSubscribed: (() -> Void)? = nil
     ) -> PremiumFeatureSheet {
-        PremiumFeatureSheet(
-            featureIcon: "cart.fill",
-            featureName: "Purchases",
-            headline: "Every vendor bill,\norganised and on time.",
-            subhead: "Log purchase bills, track what you owe each vendor, and never miss a payment deadline again.",
-            bullets: [
-                ("tray.and.arrow.down.fill",
-                 "Bill in seconds",
-                 "Snap a bill or fill the form — itemised, GST-aware and saved against the vendor."),
-                ("clock.badge.exclamationmark.fill",
-                 "Aging at a glance",
-                 "0-30, 31-60, 60+ days — see which payables are about to slip into overdue."),
-                ("creditcard.fill",
-                 "Record payments fast",
-                 "Pay in full, split across modes, or close with a credit note — all stay tied to the bill."),
-            ],
-            onClose: onClose,
-            onSubscribed: onSubscribed
-        )
+        bundle(onClose: onClose, onSubscribed: onSubscribed)
     }
 
-    /// Premium sheet preset for Mandates / Recurring.
     static func mandates(
         onClose: @escaping () -> Void,
         onSubscribed: (() -> Void)? = nil
     ) -> PremiumFeatureSheet {
-        PremiumFeatureSheet(
-            featureIcon: "arrow.triangle.2.circlepath",
-            featureName: "Mandates",
-            headline: "Never get surprised\nby a recurring charge.",
-            subhead: "Track every SIP, EMI, subscription and auto-debit in one place — and see exactly what's hitting your account next.",
-            bullets: [
-                ("calendar.badge.clock",
-                 "Upcoming debits, mapped",
-                 "Know what's debiting tomorrow, this week, this month — before the bank does it."),
-                ("bell.badge.fill",
-                 "No more missed renewals",
-                 "We surface auto-renew dates from your statements and SMS so nothing slips through."),
-                ("chart.bar.fill",
-                 "Plan your cash flow",
-                 "Project balances forward, accounting for every committed recurring outflow."),
-            ],
-            onClose: onClose,
-            onSubscribed: onSubscribed
-        )
+        bundle(onClose: onClose, onSubscribed: onSubscribed)
     }
 
-    /// Premium sheet preset for Reconciliation.
     static func reconciliation(
         onClose: @escaping () -> Void,
         onSubscribed: (() -> Void)? = nil
     ) -> PremiumFeatureSheet {
-        PremiumFeatureSheet(
-            featureIcon: "arrow.left.arrow.right.circle.fill",
-            featureName: "Reconciliation",
-            headline: "Match every line\nto your statement.",
-            subhead: "Upload your bank or card statement and we'll reconcile it against your ledger — finding misses, duplicates and mismatches.",
-            bullets: [
-                ("doc.text.magnifyingglass",
-                 "Statement upload",
-                 "PDF, CSV or scanned — we parse every transaction and line it up against what you've logged."),
-                ("exclamationmark.triangle.fill",
-                 "Catch the gaps",
-                 "Missing entries, double-posts and amount mismatches surface in a clear review queue."),
-                ("checkmark.circle.fill",
-                 "Close the period clean",
-                 "Approve a statement and your books are locked, audited and ready for tax season."),
-            ],
-            onClose: onClose,
-            onSubscribed: onSubscribed
-        )
+        bundle(onClose: onClose, onSubscribed: onSubscribed)
     }
 
-    /// Premium sheet preset for Records.
     static func records(
         onClose: @escaping () -> Void,
         onSubscribed: (() -> Void)? = nil
     ) -> PremiumFeatureSheet {
-        PremiumFeatureSheet(
-            featureIcon: "tray.full.fill",
-            featureName: "Records",
-            headline: "Every receipt,\nfiled and searchable.",
-            subhead: "Every email receipt, statement and attachment we ingest is archived, indexed and one search away — forever.",
-            bullets: [
-                ("magnifyingglass",
-                 "Find any receipt fast",
-                 "Search by vendor, amount, date or category — across years of statements and emails."),
-                ("paperclip",
-                 "Originals stay attached",
-                 "PDFs, images and EML files stay linked to the transaction they belong to."),
-                ("lock.shield.fill",
-                 "Encrypted at rest",
-                 "Your records are AES-encrypted in our vault and only ever decrypted for you."),
-            ],
-            onClose: onClose,
-            onSubscribed: onSubscribed
-        )
+        bundle(onClose: onClose, onSubscribed: onSubscribed)
     }
 
-    /// Premium sheet preset for Past Insights (Tax Summary).
     static func pastInsights(
         onClose: @escaping () -> Void,
         onSubscribed: (() -> Void)? = nil
     ) -> PremiumFeatureSheet {
-        PremiumFeatureSheet(
-            featureIcon: "chart.line.uptrend.xyaxis",
-            featureName: "Past Insights",
-            headline: "Your finances,\nlooked at clearly.",
-            subhead: "Generate tax-ready summaries from any period — built from your real ledger, ready to hand to your CA.",
-            bullets: [
-                ("calendar",
-                 "Any period, instantly",
-                 "FY, quarter, month, custom dates — we slice the books however your CA needs."),
-                ("doc.richtext.fill",
-                 "CA-ready exports",
-                 "PDF + Excel out of the box, with category breakdowns, vendor totals and tax buckets."),
-                ("brain.head.profile",
-                 "Spot the patterns",
-                 "Where your money went, where it's growing, and where you're leaking — across years."),
-            ],
-            onClose: onClose,
-            onSubscribed: onSubscribed
-        )
+        bundle(onClose: onClose, onSubscribed: onSubscribed)
     }
 
-    /// Premium sheet preset for SMS Auto-Detection.
     static func smsSync(
         onClose: @escaping () -> Void,
         onSubscribed: (() -> Void)? = nil
     ) -> PremiumFeatureSheet {
-        PremiumFeatureSheet(
-            featureIcon: "message.badge.waveform.fill",
-            featureName: "Auto Transaction Detection",
-            headline: "Every UPI ping\nbecomes a transaction.",
-            subhead: "We watch your bank SMS, detect every debit, credit and transfer, and turn them into clean ledger entries.",
-            bullets: [
-                ("antenna.radiowaves.left.and.right",
-                 "Realtime SMS parsing",
-                 "Bank, card, UPI, wallet — all the major Indian formats out of the box."),
-                ("rectangle.and.text.magnifyingglass",
-                 "Smart categorization",
-                 "Merchant, amount, account — auto-filled. You just confirm."),
-                ("shield.checkered",
-                 "Stays on your device",
-                 "Messages are parsed locally. We only store the transaction, never the SMS."),
-            ],
-            onClose: onClose,
-            onSubscribed: onSubscribed
-        )
+        bundle(onClose: onClose, onSubscribed: onSubscribed)
     }
 }
 
 #Preview {
-    PremiumFeatureSheet.emailSync(onClose: {})
+    PremiumFeatureSheet.bundle(onClose: {})
         .environment(AuthManager())
 }

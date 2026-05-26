@@ -79,13 +79,14 @@ struct ReconciliationView: View {
         .task {
             if !hasPremium {
                 showPremiumSheet = true
+                return  // Skip data fetch — backend 402s for free users.
             }
             await viewModel.loadInitial()
         }
         .sheet(isPresented: $showPremiumSheet, onDismiss: {
             if !justSubscribed && !hasPremium { dismiss() }
         }) {
-            PremiumFeatureSheet.reconciliation(
+            PremiumFeatureSheet.bundle(
                 onClose: { showPremiumSheet = false },
                 onSubscribed: { justSubscribed = true }
             )

@@ -546,10 +546,13 @@ export default function Invoices() {
   }, []);
 
   useEffect(() => {
+    // Skip fetch for non-premium users — the modal is showing and the
+    // backend would return 402, which clobbers the modal with an error.
+    if (!hasPremium) return;
     loadInvoices();
     loadAccounts();
     loadSettings();
-  }, [loadInvoices, loadAccounts, loadSettings]);
+  }, [hasPremium, loadInvoices, loadAccounts, loadSettings]);
 
   // Gate: redirect to settings if firm name is not set
   const handleNewInvoice = () => {

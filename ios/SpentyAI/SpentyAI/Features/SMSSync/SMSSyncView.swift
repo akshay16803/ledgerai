@@ -46,6 +46,7 @@ struct SMSSyncView: View {
         .task {
             if !hasPremium {
                 showPremiumSheet = true
+                return  // Skip data fetch — backend 402s for free users.
             }
             await viewModel.loadStats()
         }
@@ -54,7 +55,7 @@ struct SMSSyncView: View {
             // out if /auth/me hasn't refreshed yet (or failed transiently).
             if !justSubscribed && !hasPremium { dismiss() }
         }) {
-            PremiumFeatureSheet.smsSync(
+            PremiumFeatureSheet.bundle(
                 onClose: { showPremiumSheet = false },
                 onSubscribed: { justSubscribed = true }
             )

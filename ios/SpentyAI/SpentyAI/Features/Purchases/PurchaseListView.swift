@@ -100,13 +100,14 @@ struct PurchaseListView: View {
         .task {
             if !hasPremium {
                 showPremiumSheet = true
+                return  // Skip data fetch — backend 402s for free users.
             }
             await viewModel.loadAll()
         }
         .sheet(isPresented: $showPremiumSheet, onDismiss: {
             if !justSubscribed && !hasPremium { dismiss() }
         }) {
-            PremiumFeatureSheet.purchases(
+            PremiumFeatureSheet.bundle(
                 onClose: { showPremiumSheet = false },
                 onSubscribed: { justSubscribed = true }
             )

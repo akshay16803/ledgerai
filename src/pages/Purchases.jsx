@@ -555,10 +555,13 @@ export default function Purchases() {
   }, []);
 
   useEffect(() => {
+    // Skip fetch for non-premium users — the modal is showing and the
+    // backend would return 402, which clobbers the modal with an error.
+    if (!hasPremium) return;
     loadBills();
     loadAccounts();
     loadSettings();
-  }, [loadBills, loadAccounts, loadSettings]);
+  }, [hasPremium, loadBills, loadAccounts, loadSettings]);
 
   // Gate: redirect to settings if firm name is not set
   const handleNewBill = () => {
