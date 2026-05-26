@@ -45,8 +45,24 @@ final class AIChatViewModel {
 
     @MainActor
     func sendMessage() async {
+        // Reentry guard: a fast double-tap on the Send button or a voice-mode
+        // tap arriving while a previous request is still in flight would queue
+        // two requests and double-fire. Protect at the source — `isSending`
+        // is read by the UI to disable the button but UI redraw has a frame
+        // of latency; guard here too.
+        guard !isSending else {
+            #if DEBUG
+            print("⚠️ AIChat sendMessage ignored — already sending")
+            #endif
+            return
+        }
+
         let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
+
+        #if DEBUG
+        print("📤 AIChat sendMessage start — \(text.prefix(60))")
+        #endif
 
         // Add user message immediately
         let userMessage = ChatMessage(
@@ -87,19 +103,36 @@ final class AIChatViewModel {
             // In voice mode, restart listening after the AI finishes responding
             if isVoiceModeActive {
                 // Wait briefly for TTS to finish before re-listening
-                Task {
+                Task { @MainActor in
                     // Give TTS a moment to start, then wait for it to finish
                     try? await Task.sleep(for: .milliseconds(500))
                     while speechManager.isSpeaking {
                         try? await Task.sleep(for: .milliseconds(200))
                     }
+                    // Guard: user may have exited voice mode while we were
+                    // waiting for TTS — don't restart listening if so.
+                    guard isVoiceModeActive else {
+                        #if DEBUG
+                        print("ℹ️ AIChat voice-mode auto-restart aborted (user exited)")
+                        #endif
+                        return
+                    }
                     speechManager.resetTranscription()
                     speechManager.startListening()
                 }
             }
+            #if DEBUG
+            print("✅ AIChat sendMessage success")
+            #endif
         } catch let error as APIError {
+            #if DEBUG
+            print("❌ AIChat sendMessage APIError: \(error.localizedDescription)")
+            #endif
             errorMessage = error.localizedDescription
         } catch {
+            #if DEBUG
+            print("❌ AIChat sendMessage error: \(error.localizedDescription)")
+            #endif
             errorMessage = "Failed to get a response. Please try again."
         }
 

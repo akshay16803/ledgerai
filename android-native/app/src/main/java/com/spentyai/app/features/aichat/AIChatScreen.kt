@@ -489,8 +489,9 @@ private fun VoiceModeOverlay(
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Send button
-            val canSend = transcribedText.isNotEmpty()
+            // Send button — also disable while a request is in flight so the
+            // user can't queue duplicates by double-tapping during the response.
+            val canSend = transcribedText.isNotEmpty() && !isSending
             IconButton(
                 onClick = onSend,
                 enabled = canSend,

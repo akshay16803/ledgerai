@@ -78,8 +78,19 @@ class AIChatViewModel(
     }
 
     fun sendMessage(context: Context? = null) {
+        // Reentry guard: a fast double-tap on Send or a voice-mode tap
+        // arriving while a previous request is still in flight would queue
+        // two requests and double-fire. Protect at the source — UI redraw
+        // of the .disabled state has a frame of latency.
+        if (_uiState.value.isSending) {
+            android.util.Log.w("AIChat", "sendMessage ignored — already sending")
+            return
+        }
+
         val text = _uiState.value.input.trim()
         if (text.isEmpty()) return
+
+        android.util.Log.d("AIChat", "sendMessage start — ${text.take(60)}")
 
         val userMessage = ChatMessage(
             id = UUID.randomUUID().toString(),

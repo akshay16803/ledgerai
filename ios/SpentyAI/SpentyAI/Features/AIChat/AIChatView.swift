@@ -259,7 +259,14 @@ struct AIChatView: View {
                             .foregroundStyle(Color.spentyTextSecondary)
                     }
                 }
-                .disabled(viewModel.speechManager.transcribedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                // Disable when there's nothing to send OR a request is already
+                // in flight — without the `isSending` clause the user could
+                // re-tap during the response round-trip and queue duplicates.
+                .disabled(
+                    viewModel.speechManager.transcribedText
+                        .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    || viewModel.isSending
+                )
 
                 // Mic toggle
                 Button {
