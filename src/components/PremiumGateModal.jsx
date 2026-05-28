@@ -25,17 +25,73 @@ import {
 import { api } from '../lib/api';
 import { trackInitiateCheckout, trackAddPaymentInfo } from '../lib/pixel';
 
-// Bundle bullets — same content for every gated surface; kept in sync with
-// iOS BundleBullets and Android BundleBullets.
-const BUNDLE_BULLETS = [
-  { icon: <EnvelopeSimple size={18} weight="fill" />,  title: 'Email Sync',     sub: 'Auto-import expenses from Gmail and Outlook' },
-  { icon: <ChatCircleText size={18} weight="fill" />,  title: 'SMS Sync',       sub: 'Capture bank transaction alerts automatically' },
-  { icon: <Receipt size={18} weight="fill" />,         title: 'Invoices',       sub: 'Create and send GST-ready invoices' },
-  { icon: <ShoppingCart size={18} weight="fill" />,    title: 'Purchases',      sub: 'Track every bill end-to-end' },
-  { icon: <ArrowsLeftRight size={18} weight="fill" />, title: 'Reconciliation', sub: 'Match bank statements in one tap' },
-  { icon: <Archive size={18} weight="fill" />,         title: 'Records',        sub: 'Full email and attachment archive' },
-  { icon: <ChartLineUp size={18} weight="fill" />,     title: 'Past Insights',  sub: 'Monthly and yearly analytics' },
-  { icon: <ArrowsClockwise size={18} weight="fill" />, title: 'Mandates',       sub: 'Track UPI auto-pay subscriptions' },
+// Feature catalog — kept in sync with iOS PremiumFeatureSheet.Feature
+// and Android PremiumFeatureSheet.Feature.
+// Each entry drives BOTH (a) the spotlight card at the top of the sheet
+// when this feature is the one the user just tapped and (b) the one-line
+// row in the "ALSO UNLOCKED WITH PREMIUM" list when it's not.
+const FEATURES = {
+  email_sync: {
+    icon: <EnvelopeSimple size={18} weight="fill" />,
+    title: 'Email Sync',
+    detail:
+      'Connect your Gmail or Outlook inbox once and SpentyAI quietly reads every bank statement, UPI receipt, subscription invoice, and shopping confirmation — turning each transaction email into a categorised entry in your books. No typing, no copy-paste, no missed expenses. Most users save 3–5 hours of bookkeeping a month.',
+    oneLiner: 'Auto-import expenses from Gmail and Outlook.',
+  },
+  sms_sync: {
+    icon: <ChatCircleText size={18} weight="fill" />,
+    title: 'SMS Sync',
+    detail:
+      "Your phone already gets a text from your bank for every UPI payment, debit-card swipe, ATM withdrawal, and credit-card charge. SpentyAI reads those SMS alerts (with permission) and books them as transactions the moment they arrive, so your dashboard always reflects reality without you opening a single app.",
+    oneLiner: 'Capture bank UPI/debit/credit alerts the second they arrive.',
+  },
+  invoices: {
+    icon: <Receipt size={18} weight="fill" />,
+    title: 'Invoices',
+    detail:
+      'Create GST-ready invoices in seconds — line items, HSN/SAC codes, tax slabs, payment terms, and a professional PDF — then send to customers and track who has paid and who is overdue. Perfect for freelancers, consultants, and small business owners who want billing inside the same app they use for personal money.',
+    oneLiner: 'Create GST-ready invoices and track payments.',
+  },
+  purchases: {
+    icon: <ShoppingCart size={18} weight="fill" />,
+    title: 'Purchases',
+    detail:
+      "Track every bill you receive — from your CA's retainer to your cloud hosting to your office rent — with vendor records, due dates, partial-payment tracking, and aging reports. Stop paying the same bill twice and never miss a vendor due date again.",
+    oneLiner: 'Track every bill end-to-end with vendor history.',
+  },
+  reconciliation: {
+    icon: <ArrowsLeftRight size={18} weight="fill" />,
+    title: 'Reconciliation',
+    detail:
+      'Upload your bank statement PDF and SpentyAI matches every line to a transaction in your books in one tap. Mismatches are flagged so you spot fraud, duplicate charges, or missing entries instantly. What used to take an accountant a weekend now takes you 90 seconds.',
+    oneLiner: 'Match bank statements in one tap to catch errors.',
+  },
+  records: {
+    icon: <Archive size={18} weight="fill" />,
+    title: 'Records',
+    detail:
+      'Every email receipt, every attached invoice, every uploaded bill is archived and instantly searchable. Filter by vendor, date, category, or amount — and download the original email or PDF anytime. Tax season becomes a five-minute task instead of a weekend hunt through Gmail.',
+    oneLiner: 'Searchable archive of every receipt and attachment.',
+  },
+  past_insights: {
+    icon: <ChartLineUp size={18} weight="fill" />,
+    title: 'Past Insights',
+    detail:
+      "See exactly where your money went last month, last quarter, last year. Monthly and yearly breakdowns by category, vendor, and account, with trends, anomalies, and year-on-year comparisons. The 'why is my balance so low this month?' question — answered on one screen.",
+    oneLiner: 'Monthly and yearly analytics with trend breakdowns.',
+  },
+  mandates: {
+    icon: <ArrowsClockwise size={18} weight="fill" />,
+    title: 'Mandates',
+    detail:
+      "Every UPI auto-pay, every Netflix renewal, every recurring SIP — SpentyAI sees them coming, lays them out on a calendar, and warns you if your account balance won't cover the next hit. The 'forgotten subscription' tax most Indians pay every month? Gone.",
+    oneLiner: 'Track UPI auto-pay and recurring charges with a forecast.',
+  },
+};
+
+const FEATURE_ORDER = [
+  'email_sync', 'sms_sync', 'invoices', 'purchases',
+  'reconciliation', 'records', 'past_insights', 'mandates',
 ];
 
 function BulletRow({ icon, title, sub }) {
@@ -77,7 +133,11 @@ function submitPayUForm(action, params) {
   form.submit();
 }
 
-export default function PremiumGateModal({ onClose }) {
+export default function PremiumGateModal({ feature = 'invoices', onClose }) {
+  // Look up the spotlight feature; fall back to invoices if an unknown key
+  // is passed (defensive — every existing caller passes a valid one today).
+  const featured = FEATURES[feature] || FEATURES.invoices;
+  const otherKeys = FEATURE_ORDER.filter((k) => k !== (FEATURES[feature] ? feature : 'invoices'));
   const navigate = useNavigate();
   const [loadingPlan, setLoadingPlan] = useState(null); // 'monthly' | 'lifetime' | null
 
@@ -171,21 +231,71 @@ export default function PremiumGateModal({ onClose }) {
             <Sparkle size={11} weight="fill" /> SPENTYAI PREMIUM
           </div>
 
+          {/* Feature-specific hero icon */}
+          <div style={{
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            width: 76, height: 76, borderRadius: '50%',
+            background: 'rgba(52,199,89,0.18)',
+            marginBottom: 16,
+            color: '#fff',
+          }}>
+            {/* Render with a larger size for the hero */}
+            <span style={{ display: 'inline-flex', transform: 'scale(1.8)' }}>{featured.icon}</span>
+          </div>
+
           <div style={{
             fontSize: 26, fontWeight: 700, color: '#fff', lineHeight: 1.2, marginBottom: 8,
           }}>
-            Unlock SpentyAI Premium
+            Unlock {featured.title}
           </div>
           <div style={{ fontSize: 14, color: 'rgba(255,255,255,0.7)', lineHeight: 1.5 }}>
-            One subscription. Every premium feature.
+            Plus every other premium feature on one plan.
           </div>
         </div>
 
-        {/* ── Bullets ── */}
-        <div style={{ padding: '10px 0 4px' }}>
-          {BUNDLE_BULLETS.map((b, i) => (
-            <BulletRow key={i} icon={b.icon} title={b.title} sub={b.sub} />
-          ))}
+        {/* ── Feature spotlight (detail for the tapped feature) ── */}
+        <div style={{
+          margin: '14px 16px 0',
+          padding: '16px 18px',
+          background: 'rgba(52,199,89,0.06)',
+          borderLeft: '3px solid var(--brand-primary)',
+          borderRadius: '0 8px 8px 0',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+            <div style={{
+              width: 28, height: 28, borderRadius: '50%',
+              background: 'rgba(52,199,89,0.12)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              color: 'var(--brand-primary)',
+            }}>
+              {featured.icon}
+            </div>
+            <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--text-primary)' }}>
+              {featured.title}
+            </div>
+          </div>
+          <div style={{ fontSize: 14, color: 'var(--text-secondary)', lineHeight: 1.55 }}>
+            {featured.detail}
+          </div>
+        </div>
+
+        {/* ── "Also unlocked" section header ── */}
+        <div style={{
+          padding: '22px 24px 4px',
+          fontSize: 11, fontWeight: 700, letterSpacing: 0.9,
+          color: 'var(--text-secondary)',
+        }}>
+          ALSO UNLOCKED WITH PREMIUM
+        </div>
+
+        {/* ── "Also unlocked" list — every other feature with a one-liner ── */}
+        <div style={{ padding: '4px 0 4px' }}>
+          {otherKeys.map((key) => {
+            const f = FEATURES[key];
+            return (
+              <BulletRow key={key} icon={f.icon} title={f.title} sub={f.oneLiner} />
+            );
+          })}
         </div>
 
         {/* ── Price boxes (2-up on desktop, stacked on mobile) ── */}
