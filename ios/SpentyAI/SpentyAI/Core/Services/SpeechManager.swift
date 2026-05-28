@@ -32,7 +32,15 @@ final class SpeechManager: NSObject {
     private let synthesizer = AVSpeechSynthesizer()
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     private var recognitionTask: SFSpeechRecognitionTask?
-    private let audioEngine = AVAudioEngine()
+    // Recreated on every startListening so iOS doesn't carry forward a
+    // "config change pending" state from a previous session. Sharing a
+    // single AVAudioEngine across multiple installTap calls reliably
+    // triggers "AVAudioEngineGraph.mm:2037 Failed to create tap, config
+    // change pending!" on the 2nd-Nth session — the tap install fails
+    // silently, the recognizer receives no audio, transcribedText stays
+    // empty, and the Send button has nothing to send. Per-session engine
+    // is heavier but is the only reliable fix for that race.
+    private var audioEngine = AVAudioEngine()
 
     // MARK: - Init
 
@@ -86,18 +94,18 @@ final class SpeechManager: NSObject {
             return
         }
 
-        // Cancel any existing task
+        // Cancel any existing task + fully discard the previous AVAudioEngine.
         stopListening()
 
-        // CRITICAL: fully tear down the audio engine before reconfiguring.
-        // Without this, calling installTap right after a previous session
-        // ended produces "AVAudioEngineGraph.mm:2037 Failed to create tap,
-        // config change pending!" — the tap install silently fails,
-        // recognitionTask never receives audio, transcribedText stays empty
-        // and the user sees "Listening…" with nothing actually being
-        // captured. Send then has nothing to send.
+        // CRITICAL: throw away the old AVAudioEngine and create a fresh one.
+        // Re-using a single instance across multiple startListening calls
+        // reliably produces "AVAudioEngineGraph.mm:2037 Failed to create
+        // tap, config change pending!" on the 2nd+ session because iOS
+        // hasn't finished propagating the previous engine's config change
+        // by the time installTap runs on the same instance. A brand-new
+        // engine has no pending config so installTap always succeeds.
         if audioEngine.isRunning { audioEngine.stop() }
-        audioEngine.reset()
+        audioEngine = AVAudioEngine()
 
         do {
             let audioSession = AVAudioSession.sharedInstance()
@@ -114,23 +122,12 @@ final class SpeechManager: NSObject {
         recognitionRequest.shouldReportPartialResults = true
 
         let inputNode = audioEngine.inputNode
-        // Read the format AFTER the reset so we get the current hardware
-        // format (sample rate / channel count may have changed if a Bluetooth
-        // device connected/disconnected since the last session).
+        // Read the format from the fresh engine's inputNode so we get the
+        // current hardware format (sample rate / channel count may have
+        // changed if a Bluetooth device connected/disconnected since the
+        // previous session).
         let recordingFormat = inputNode.outputFormat(forBus: 0)
 
-        // Defensive remove — covers the case where a previous installTap
-        // succeeded but stopListening never ran. With the audioEngine.reset()
-        // above this is usually a no-op but cheap insurance against the
-        // "required condition is false: nullptr == Tap()" crash.
-        inputNode.removeTap(onBus: 0)
-
-        // Guard the installTap with a do/catch. The Obj-C exception "Failed
-        // to create tap, config change pending!" surfaces as a runtime error
-        // logged to stderr but does NOT propagate to Swift — wrap the call
-        // anyway and detect failure by checking that we actually start the
-        // engine below; if the engine refuses to start we surface a real
-        // error to the user instead of silently sitting on a dead session.
         inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { [weak self] buffer, _ in
             self?.recognitionRequest?.append(buffer)
         }
