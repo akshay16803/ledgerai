@@ -246,6 +246,9 @@ struct AIChatView: View {
             HStack(spacing: 40) {
                 // Send button (stop listening and send)
                 Button {
+                    #if DEBUG
+                    print("📤 AIChat VoiceMode Send tapped — transcribed='\(viewModel.speechManager.transcribedText.prefix(40))', isListening=\(viewModel.speechManager.isListening), isSending=\(viewModel.isSending)")
+                    #endif
                     gateAI { Task { await viewModel.sendVoiceInput() } }
                 } label: {
                     VStack(spacing: 6) {

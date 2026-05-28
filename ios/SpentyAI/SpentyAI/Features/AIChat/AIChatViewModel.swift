@@ -332,14 +332,55 @@ final class AIChatViewModel {
     /// In voice mode, send the current transcription and re-listen.
     @MainActor
     func sendVoiceInput() async {
-        speechManager.stopListening()
-        let text = speechManager.transcribedText.trimmingCharacters(in: .whitespacesAndNewlines)
+        #if DEBUG
+        print("🎙️ AIChat sendVoiceInput tapped — transcribed='\(speechManager.transcribedText.prefix(60))', isListening=\(speechManager.isListening), isSending=\(isSending)")
+        #endif
+
+        // Reentry guard mirrors sendMessage's — protects against double-tap
+        // while a previous voice send is still in flight.
+        guard !isSending else {
+            #if DEBUG
+            print("⚠️ AIChat sendVoiceInput ignored — already sending")
+            #endif
+            return
+        }
+
+        // Stop the mic immediately so the recognizer flushes its final partial.
+        if speechManager.isListening {
+            speechManager.stopListening()
+        }
+
+        var text = speechManager.transcribedText.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // If the transcript is empty, wait up to 500ms for SFSpeech to deliver
+        // the last partial it was holding before we gave up. The recognition
+        // callback fires on a background dispatch and the @MainActor write
+        // can lag the user's Send tap by a frame or two.
+        if text.isEmpty {
+            #if DEBUG
+            print("ℹ️ AIChat sendVoiceInput — empty transcript, waiting up to 500ms for SFSpeech flush")
+            #endif
+            for _ in 0..<10 {                                  // 10 × 50ms = 500ms max
+                try? await Task.sleep(for: .milliseconds(50))
+                text = speechManager.transcribedText.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !text.isEmpty { break }
+            }
+        }
+
         guard !text.isEmpty else {
-            // Nothing transcribed; restart listening
+            #if DEBUG
+            print("⚠️ AIChat sendVoiceInput — still no transcript after wait; restarting mic")
+            #endif
+            // Surface a hint to the user and restart listening so they can retry.
+            errorMessage = "I didn't catch that. Try speaking a bit louder, or tap the mic and start over."
             speechManager.resetTranscription()
             speechManager.startListening()
             return
         }
+
+        #if DEBUG
+        print("📤 AIChat sendVoiceInput sending — '\(text.prefix(60))'")
+        #endif
         input = text
         speechManager.resetTranscription()
         await sendMessage()
