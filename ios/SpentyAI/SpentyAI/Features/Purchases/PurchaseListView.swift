@@ -107,7 +107,7 @@ struct PurchaseListView: View {
         .sheet(isPresented: $showPremiumSheet, onDismiss: {
             if !justSubscribed && !hasPremium { dismiss() }
         }) {
-            PremiumFeatureSheet.bundle(
+            PremiumFeatureSheet.purchases(
                 onClose: { showPremiumSheet = false },
                 onSubscribed: { justSubscribed = true }
             )

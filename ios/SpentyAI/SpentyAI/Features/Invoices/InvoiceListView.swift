@@ -80,7 +80,7 @@ struct InvoiceListView: View {
         .sheet(isPresented: $showPremiumSheet, onDismiss: {
             if !justSubscribed && !hasPremium { dismiss() }
         }) {
-            PremiumFeatureSheet.bundle(
+            PremiumFeatureSheet.invoices(
                 onClose: { showPremiumSheet = false },
                 onSubscribed: { justSubscribed = true }
             )

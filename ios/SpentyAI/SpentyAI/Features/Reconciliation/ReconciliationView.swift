@@ -86,7 +86,7 @@ struct ReconciliationView: View {
         .sheet(isPresented: $showPremiumSheet, onDismiss: {
             if !justSubscribed && !hasPremium { dismiss() }
         }) {
-            PremiumFeatureSheet.bundle(
+            PremiumFeatureSheet.reconciliation(
                 onClose: { showPremiumSheet = false },
                 onSubscribed: { justSubscribed = true }
             )

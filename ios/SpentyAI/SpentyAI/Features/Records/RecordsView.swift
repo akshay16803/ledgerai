@@ -97,7 +97,7 @@ struct RecordsView: View {
         .sheet(isPresented: $showPremiumSheet, onDismiss: {
             if !justSubscribed && !hasPremium { dismiss() }
         }) {
-            PremiumFeatureSheet.bundle(
+            PremiumFeatureSheet.records(
                 onClose: { showPremiumSheet = false },
                 onSubscribed: { justSubscribed = true }
             )

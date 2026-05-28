@@ -77,7 +77,7 @@ struct EmailSyncView: View {
             // user on this screen.
             if !justSubscribed && !hasPremium { dismiss() }
         }) {
-            PremiumFeatureSheet.bundle(
+            PremiumFeatureSheet.emailSync(
                 onClose: { showPremiumSheet = false },
                 onSubscribed: { justSubscribed = true }
             )

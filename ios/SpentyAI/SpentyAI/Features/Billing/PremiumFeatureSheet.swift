@@ -22,8 +22,87 @@ import StoreKit  // Required for `AppStore.sync()` in restorePurchases()
 
 struct PremiumFeatureSheet: View {
 
+    // MARK: - Feature catalog
+    //
+    // Each gated surface passes the matching `Feature` so the spotlight at
+    // the top of the sheet describes THAT feature in plain language, and
+    // the "Also unlocked with Premium" list below shows the other six.
+    enum Feature: CaseIterable {
+        case emailSync
+        case invoices
+        case purchases
+        case mandates
+        case reconciliation
+        case records
+        case pastInsights
+
+        var icon: String {
+            switch self {
+            case .emailSync:      return "envelope.badge.shield.half.filled.fill"
+            case .invoices:       return "doc.text.fill"
+            case .purchases:      return "cart.fill"
+            case .mandates:       return "arrow.triangle.2.circlepath"
+            case .reconciliation: return "arrow.left.arrow.right.circle.fill"
+            case .records:        return "tray.full.fill"
+            case .pastInsights:   return "chart.line.uptrend.xyaxis"
+            }
+        }
+
+        var title: String {
+            switch self {
+            case .emailSync:      return "Email Sync"
+            case .invoices:       return "Invoices"
+            case .purchases:      return "Purchases"
+            case .mandates:       return "Mandates"
+            case .reconciliation: return "Reconciliation"
+            case .records:        return "Records"
+            case .pastInsights:   return "Past Insights"
+            }
+        }
+
+        /// 3–4 sentence pitch describing what the feature does and why a
+        /// real person should care. Shown at the top of the sheet.
+        var detail: String {
+            switch self {
+            case .emailSync:
+                return "Connect your Gmail or Outlook inbox once and SpentyAI quietly reads every bank statement, UPI receipt, subscription invoice, and shopping confirmation — turning each transaction email into a categorised entry in your books. No typing, no copy-paste, no missed expenses. Most users save 3–5 hours of bookkeeping a month."
+            case .invoices:
+                return "Create GST-ready invoices in seconds — line items, HSN/SAC codes, tax slabs, payment terms, and a professional PDF — then send to customers and track who has paid and who is overdue. Perfect for freelancers, consultants, and small business owners who want billing inside the same app they use for personal money."
+            case .purchases:
+                return "Track every bill you receive — from your CA's retainer to your cloud hosting to your office rent — with vendor records, due dates, partial-payment tracking, and aging reports. Stop paying the same bill twice and never miss a vendor due date again."
+            case .mandates:
+                return "Every UPI auto-pay, every Netflix renewal, every recurring SIP — SpentyAI sees them coming, lays them out on a calendar, and warns you if your account balance won't cover the next hit. The 'forgotten subscription' tax most Indians pay every month? Gone."
+            case .reconciliation:
+                return "Upload your bank statement PDF and SpentyAI matches every line to a transaction in your books in one tap. Mismatches are flagged so you spot fraud, duplicate charges, or missing entries instantly. What used to take an accountant a weekend now takes you 90 seconds."
+            case .records:
+                return "Every email receipt, every attached invoice, every uploaded bill is archived and instantly searchable. Filter by vendor, date, category, or amount — and download the original email or PDF anytime. Tax season becomes a five-minute task instead of a weekend hunt through Gmail."
+            case .pastInsights:
+                return "See exactly where your money went last month, last quarter, last year. Monthly and yearly breakdowns by category, vendor, and account, with trends, anomalies, and year-on-year comparisons. The 'why is my balance so low this month?' question — answered on one screen."
+            }
+        }
+
+        /// One-liner shown when the feature appears in the "Also unlocked"
+        /// list (i.e. when it is NOT the spotlight feature).
+        var oneLiner: String {
+            switch self {
+            case .emailSync:      return "Auto-import expenses from Gmail and Outlook."
+            case .invoices:       return "Create GST-ready invoices and track payments."
+            case .purchases:      return "Track every bill end-to-end with vendor history."
+            case .mandates:       return "Track UPI auto-pay and recurring charges with a forecast."
+            case .reconciliation: return "Match bank statements in one tap to catch errors."
+            case .records:        return "Searchable archive of every receipt and attachment."
+            case .pastInsights:   return "Monthly and yearly analytics with trend breakdowns."
+            }
+        }
+    }
+
     // MARK: - Configuration
     let onClose: () -> Void
+
+    /// The feature the user just tapped. Drives the spotlight section at
+    /// the top of the sheet. If unspecified the sheet falls back to a
+    /// generic bundle layout (today: `.invoices` — the most-tapped gate).
+    var featured: Feature = .invoices
 
     /// Called the moment the StoreKit purchase + backend /verify return
     /// success — BEFORE we await `authManager.checkSession()` and BEFORE
@@ -158,7 +237,7 @@ struct PremiumFeatureSheet: View {
                 .clipShape(Capsule())
                 .overlay(Capsule().stroke(goldAccent.opacity(0.32), lineWidth: 1))
 
-                // Bundle hero icon — sparkles-in-circle (not per-feature)
+                // Feature-specific hero icon
                 ZStack {
                     Circle()
                         .fill(glowGreen.opacity(0.18))
@@ -166,20 +245,20 @@ struct PremiumFeatureSheet: View {
                     Circle()
                         .fill(glowGreen.opacity(0.28))
                         .frame(width: 66, height: 66)
-                    Image(systemName: "sparkles")
-                        .font(.system(size: 34, weight: .semibold))
+                    Image(systemName: featured.icon)
+                        .font(.system(size: 30, weight: .semibold))
                         .foregroundStyle(.white)
                 }
                 .padding(.top, 4)
 
-                // Title + subhead — same for every gated surface
+                // Title + subhead — names the feature the user just tapped.
                 VStack(spacing: 8) {
-                    Text("Unlock SpentyAI Premium")
+                    Text("Unlock \(featured.title)")
                         .font(.system(size: 26, weight: .bold))
                         .foregroundStyle(.white)
                         .multilineTextAlignment(.center)
-                    Text("One subscription. Every premium feature.")
-                        .font(.system(size: 15))
+                    Text("Plus every other premium feature on one plan.")
+                        .font(.system(size: 14))
                         .foregroundStyle(.white.opacity(0.65))
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 12)
@@ -192,19 +271,66 @@ struct PremiumFeatureSheet: View {
     }
 
 
-    // MARK: - Body card (feature bullets + price boxes + CTAs)
+    // MARK: - Body card (spotlight + bullets + price boxes + CTAs)
     private var body_card: some View {
         VStack(spacing: 0) {
-            // Full bundle bullets
+            // ── Feature spotlight ──────────────────────────────────────────
+            // The block the user came here for. Detailed pitch explaining
+            // what the featured premium feature does and why it matters.
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 10) {
+                    Image(systemName: featured.icon)
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(Color.spentyPrimary)
+                        .frame(width: 28, height: 28)
+                        .background(Color.spentyPrimary.opacity(0.12), in: Circle())
+                    Text(featured.title)
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundStyle(.primary)
+                }
+                Text(featured.detail)
+                    .font(.system(size: 14))
+                    .foregroundStyle(.secondary)
+                    .lineSpacing(3)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 22)
+            .padding(.vertical, 18)
+            .background(Color.spentyPrimary.opacity(0.05))
+            .overlay(
+                Rectangle()
+                    .frame(width: 3)
+                    .foregroundStyle(Color.spentyPrimary),
+                alignment: .leading
+            )
+            .padding(.horizontal, 16)
+            .padding(.top, 14)
+
+            // ── Section header ─────────────────────────────────────────────
+            HStack {
+                Text("ALSO UNLOCKED WITH PREMIUM")
+                    .font(.system(size: 11, weight: .bold))
+                    .tracking(0.9)
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+            .padding(.horizontal, 24)
+            .padding(.top, 22)
+            .padding(.bottom, 4)
+
+            // ── "Also unlocked" list — every other premium feature, with
+            //    a one-line benefit each. Featured feature is filtered out
+            //    since it's already detailed in the spotlight above.
+            let others = Feature.allCases.filter { $0 != featured }
             VStack(spacing: 0) {
-                ForEach(Array(Self.bundleBullets.enumerated()), id: \.offset) { idx, b in
-                    bulletRow(icon: b.icon, title: b.title, sub: b.sub)
-                    if idx < Self.bundleBullets.count - 1 {
+                ForEach(Array(others.enumerated()), id: \.offset) { idx, f in
+                    bulletRow(icon: f.icon, title: f.title, sub: f.oneLiner)
+                    if idx < others.count - 1 {
                         Divider().padding(.leading, 76).padding(.trailing, 24)
                     }
                 }
             }
-            .padding(.top, 12)
             .padding(.bottom, 8)
 
             // Two stacked price boxes — monthly + lifetime
@@ -473,66 +599,67 @@ struct PremiumFeatureSheet: View {
 
 extension PremiumFeatureSheet {
 
-    /// Unified bundle sheet — every gated surface uses this builder.
+    /// Generic builder. Prefer the per-feature builders below so the sheet
+    /// spotlights the specific feature the user just tapped.
     static func bundle(
         onClose: @escaping () -> Void,
         onSubscribed: (() -> Void)? = nil
     ) -> PremiumFeatureSheet {
-        PremiumFeatureSheet(
-            onClose: onClose,
-            onSubscribed: onSubscribed
-        )
+        PremiumFeatureSheet(onClose: onClose, onSubscribed: onSubscribed)
     }
 
     static func emailSync(
         onClose: @escaping () -> Void,
         onSubscribed: (() -> Void)? = nil
     ) -> PremiumFeatureSheet {
-        bundle(onClose: onClose, onSubscribed: onSubscribed)
+        PremiumFeatureSheet(onClose: onClose, featured: .emailSync, onSubscribed: onSubscribed)
     }
 
     static func invoices(
         onClose: @escaping () -> Void,
         onSubscribed: (() -> Void)? = nil
     ) -> PremiumFeatureSheet {
-        bundle(onClose: onClose, onSubscribed: onSubscribed)
+        PremiumFeatureSheet(onClose: onClose, featured: .invoices, onSubscribed: onSubscribed)
     }
 
     static func purchases(
         onClose: @escaping () -> Void,
         onSubscribed: (() -> Void)? = nil
     ) -> PremiumFeatureSheet {
-        bundle(onClose: onClose, onSubscribed: onSubscribed)
+        PremiumFeatureSheet(onClose: onClose, featured: .purchases, onSubscribed: onSubscribed)
     }
 
     static func mandates(
         onClose: @escaping () -> Void,
         onSubscribed: (() -> Void)? = nil
     ) -> PremiumFeatureSheet {
-        bundle(onClose: onClose, onSubscribed: onSubscribed)
+        PremiumFeatureSheet(onClose: onClose, featured: .mandates, onSubscribed: onSubscribed)
     }
 
     static func reconciliation(
         onClose: @escaping () -> Void,
         onSubscribed: (() -> Void)? = nil
     ) -> PremiumFeatureSheet {
-        bundle(onClose: onClose, onSubscribed: onSubscribed)
+        PremiumFeatureSheet(onClose: onClose, featured: .reconciliation, onSubscribed: onSubscribed)
     }
 
     static func records(
         onClose: @escaping () -> Void,
         onSubscribed: (() -> Void)? = nil
     ) -> PremiumFeatureSheet {
-        bundle(onClose: onClose, onSubscribed: onSubscribed)
+        PremiumFeatureSheet(onClose: onClose, featured: .records, onSubscribed: onSubscribed)
     }
 
     static func pastInsights(
         onClose: @escaping () -> Void,
         onSubscribed: (() -> Void)? = nil
     ) -> PremiumFeatureSheet {
-        bundle(onClose: onClose, onSubscribed: onSubscribed)
+        PremiumFeatureSheet(onClose: onClose, featured: .pastInsights, onSubscribed: onSubscribed)
     }
 
+    /// SMS Sync exists on Android but not iOS (Apple sandbox blocks SMS).
+    /// Kept as a no-op shim that falls back to a generic bundle sheet so
+    /// any stray call site compiles cleanly.
     static func smsSync(
         onClose: @escaping () -> Void,
         onSubscribed: (() -> Void)? = nil
