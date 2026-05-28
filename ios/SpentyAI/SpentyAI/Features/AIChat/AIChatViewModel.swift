@@ -67,27 +67,53 @@ final class AIChatViewModel {
             return
         }
 
-        // Belt-and-suspenders: if `input` is empty but the user is mid-dictation
-        // (mic on with a transcript), fall through to the transcribed text and
-        // also stop the mic. This catches a race where the user taps Send before
-        // .onChange has propagated the latest transcribedText into input.
-        if input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            let fallback = speechManager.transcribedText.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !fallback.isEmpty {
+        // If input is empty, try to rescue from the live speech transcript.
+        // We may need to wait briefly for SFSpeech to deliver the final partial
+        // — its callback fires on a background dispatch and the @MainActor write
+        // can lag behind the tap by a frame or two.
+        var inputTrimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        if inputTrimmed.isEmpty {
+            // First pass — read current transcription.
+            var transcript = speechManager.transcribedText.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            // If still nothing but the mic is on, give SFSpeech up to ~500ms to
+            // deliver the partial it's holding. This is the real fix for the
+            // "tap Send right after speaking → nothing happens" case.
+            if transcript.isEmpty && speechManager.isListening {
                 #if DEBUG
-                print("ℹ️ AIChat sendMessage rescuing from transcribedText (input was empty)")
+                print("ℹ️ AIChat sendMessage waiting up to 500ms for SFSpeech to flush partial transcript")
+                #endif
+                for _ in 0..<10 {                              // 10 × 50ms = 500ms max
+                    try? await Task.sleep(for: .milliseconds(50))
+                    transcript = speechManager.transcribedText.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !transcript.isEmpty { break }
+                }
+            }
+
+            if !transcript.isEmpty {
+                #if DEBUG
+                print("ℹ️ AIChat sendMessage rescuing from transcribedText (input was empty): '\(transcript.prefix(40))'")
                 #endif
                 if speechManager.isListening { speechManager.stopListening() }
-                input = fallback
+                input = transcript
                 speechManager.resetTranscription()
+                inputTrimmed = transcript
+            } else if speechManager.isListening {
+                // Mic was on but produced no transcript — stop it so the user
+                // can retry without the audio session being stuck active.
+                #if DEBUG
+                print("⚠️ AIChat sendMessage — mic was listening but produced no transcript; stopping mic")
+                #endif
+                speechManager.stopListening()
             }
         }
 
-        let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = inputTrimmed
         guard !text.isEmpty else {
             #if DEBUG
-            print("⚠️ AIChat sendMessage ignored — input is empty after fallback")
+            print("⚠️ AIChat sendMessage ignored — input is empty after fallback (and any SFSpeech wait)")
             #endif
+            errorMessage = "I didn't catch that. Tap the mic and try again."
             return
         }
 

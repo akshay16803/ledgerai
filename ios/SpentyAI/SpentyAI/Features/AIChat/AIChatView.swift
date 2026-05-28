@@ -566,6 +566,18 @@ struct AIChatView: View {
                     }
 
                 Button {
+                    // VERBOSE diagnostic — every tap logs the full state so we
+                    // can see WHY a send fails next time. Also, snapshot the
+                    // text RIGHT NOW (before any redraws) so we always send
+                    // what the user just said even if SwiftUI observation has
+                    // a hiccup.
+                    let snapshotInput = viewModel.input
+                    let snapshotTranscribed = viewModel.speechManager.transcribedText
+                    let isListening = viewModel.speechManager.isListening
+                    let isSending = viewModel.isSending
+                    #if DEBUG
+                    print("📤 AIChat Send tapped — input='\(snapshotInput.prefix(40))', transcribed='\(snapshotTranscribed.prefix(40))', isListening=\(isListening), isSending=\(isSending)")
+                    #endif
                     gateAI { Task { await viewModel.sendMessage() } }
                 } label: {
                     VStack(spacing: 2) {
@@ -584,7 +596,13 @@ struct AIChatView: View {
                     }
                 }
                 .accessibilityLabel("Send message")
-                .disabled(!viewModel.canSend)
+                // Only block taps while a request is mid-flight. The button
+                // stays tappable even when input/transcribedText look empty —
+                // sendMessage()'s rescue path picks up the latest speech
+                // transcript and refuses gracefully if nothing is captured.
+                // This dodges any @Observable observation hiccup that could
+                // leave a stale canSend = false even when speech is flowing.
+                .disabled(viewModel.isSending)
                 .animation(.easeInOut(duration: 0.15), value: viewModel.canSend)
             }
             .padding(.horizontal, 12)
