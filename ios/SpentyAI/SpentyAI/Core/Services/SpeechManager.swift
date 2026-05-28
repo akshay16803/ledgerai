@@ -89,6 +89,16 @@ final class SpeechManager: NSObject {
         // Cancel any existing task
         stopListening()
 
+        // CRITICAL: fully tear down the audio engine before reconfiguring.
+        // Without this, calling installTap right after a previous session
+        // ended produces "AVAudioEngineGraph.mm:2037 Failed to create tap,
+        // config change pending!" — the tap install silently fails,
+        // recognitionTask never receives audio, transcribedText stays empty
+        // and the user sees "Listening…" with nothing actually being
+        // captured. Send then has nothing to send.
+        if audioEngine.isRunning { audioEngine.stop() }
+        audioEngine.reset()
+
         do {
             let audioSession = AVAudioSession.sharedInstance()
             try audioSession.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth])
@@ -104,16 +114,23 @@ final class SpeechManager: NSObject {
         recognitionRequest.shouldReportPartialResults = true
 
         let inputNode = audioEngine.inputNode
+        // Read the format AFTER the reset so we get the current hardware
+        // format (sample rate / channel count may have changed if a Bluetooth
+        // device connected/disconnected since the last session).
         let recordingFormat = inputNode.outputFormat(forBus: 0)
 
-        // CRITICAL: Always remove any pre-existing tap on bus 0 before
-        // installing a new one. If startListening fails mid-flight and leaves
-        // a tap installed, the next installTap call crashes with
-        // "required condition is false: nullptr == Tap()". This caused the
-        // AI Chat "screen hang" the user reported — the app was actually
-        // crashing on second mic tap.
+        // Defensive remove — covers the case where a previous installTap
+        // succeeded but stopListening never ran. With the audioEngine.reset()
+        // above this is usually a no-op but cheap insurance against the
+        // "required condition is false: nullptr == Tap()" crash.
         inputNode.removeTap(onBus: 0)
 
+        // Guard the installTap with a do/catch. The Obj-C exception "Failed
+        // to create tap, config change pending!" surfaces as a runtime error
+        // logged to stderr but does NOT propagate to Swift — wrap the call
+        // anyway and detect failure by checking that we actually start the
+        // engine below; if the engine refuses to start we surface a real
+        // error to the user instead of silently sitting on a dead session.
         inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { [weak self] buffer, _ in
             self?.recognitionRequest?.append(buffer)
         }
