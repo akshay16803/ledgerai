@@ -793,7 +793,7 @@ private fun InputBar(
             }
             Text(
                 text = if (isListening) "Stop" else "Speak",
-                style = SpentyType.Caption.copy(fontSize = 9.sp),
+                style = SpentyType.Caption1.copy(fontSize = 9.sp),
                 color = if (isListening) SpentyError else SpentyPrimary,
                 modifier = Modifier.padding(top = 2.dp)
             )
@@ -837,7 +837,7 @@ private fun InputBar(
             }
             Text(
                 text = "Send",
-                style = SpentyType.Caption.copy(fontSize = 9.sp),
+                style = SpentyType.Caption1.copy(fontSize = 9.sp),
                 color = if (canSend) SpentyPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 2.dp)
             )

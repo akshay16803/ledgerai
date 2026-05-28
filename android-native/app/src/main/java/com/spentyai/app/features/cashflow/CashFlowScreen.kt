@@ -111,6 +111,7 @@ fun CashFlowScreen(viewModel: CashFlowViewModel, hasPremium: Boolean = true) {
         CashFlowDrillDownSheet(
             drillDown = drillDown,
             viewModel = viewModel,
+            hasPremium = hasPremium,
             onDismiss = { activeDrillDown = null }
         )
     }
@@ -600,6 +601,7 @@ private fun TableCell(
 fun CashFlowDrillDownSheet(
     drillDown: CashFlowDrillDown,
     viewModel: CashFlowViewModel,
+    hasPremium: Boolean = true,
     onDismiss: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
