@@ -113,6 +113,7 @@ fun AIChatScreen(
 
     /** Run [action] now if consent is granted, otherwise stash and prompt. */
     val gateAI: ((() -> Unit) -> Unit) = { action ->
+        android.util.Log.d("AIChat", "gateAI tapped (hasConsented=${AIConsentManager.hasConsented(context)})")
         if (AIConsentManager.hasConsented(context)) {
             action()
         } else {
@@ -378,7 +379,13 @@ fun AIChatScreen(
                 input = state.input,
                 onInputChange = viewModel::onInputChange,
                 onSend = { gateAI { viewModel.sendMessage(context) } },
-                canSend = state.input.isNotBlank() && !state.isSending,
+                // Allow Send when EITHER the visible input has text OR the
+                // live speech transcript has words — covers the race where
+                // the user taps Send before the LaunchedEffect live-mirror
+                // has propagated transcribedText into uiState.input.
+                // sendMessage() then rescues from transcribedText if input
+                // is still empty when it actually reads it.
+                canSend = (state.input.isNotBlank() || transcribedText.isNotBlank()) && !state.isSending,
                 isListening = isListening,
                 onToggleMic = {
                     scope.launch {

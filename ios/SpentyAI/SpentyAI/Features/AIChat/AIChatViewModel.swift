@@ -38,7 +38,17 @@ final class AIChatViewModel {
     // MARK: - Computed
 
     var canSend: Bool {
-        !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isSending
+        // The button is sendable when there's text to send AND we're not
+        // already mid-request. "Text to send" comes from either the visible
+        // input field OR the live speech transcript — the latter covers the
+        // race where the user taps Send before the .onChange live-mirror has
+        // propagated the latest words into the input. sendMessage() then
+        // rescues the transcript if input is still empty when it actually
+        // reads it.
+        let inputEmpty = input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let transcribedEmpty = speechManager.transcribedText
+            .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return !isSending && !(inputEmpty && transcribedEmpty)
     }
 
     // MARK: - Actions
@@ -57,8 +67,29 @@ final class AIChatViewModel {
             return
         }
 
+        // Belt-and-suspenders: if `input` is empty but the user is mid-dictation
+        // (mic on with a transcript), fall through to the transcribed text and
+        // also stop the mic. This catches a race where the user taps Send before
+        // .onChange has propagated the latest transcribedText into input.
+        if input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let fallback = speechManager.transcribedText.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !fallback.isEmpty {
+                #if DEBUG
+                print("ℹ️ AIChat sendMessage rescuing from transcribedText (input was empty)")
+                #endif
+                if speechManager.isListening { speechManager.stopListening() }
+                input = fallback
+                speechManager.resetTranscription()
+            }
+        }
+
         let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
+        guard !text.isEmpty else {
+            #if DEBUG
+            print("⚠️ AIChat sendMessage ignored — input is empty after fallback")
+            #endif
+            return
+        }
 
         #if DEBUG
         print("📤 AIChat sendMessage start — \(text.prefix(60))")

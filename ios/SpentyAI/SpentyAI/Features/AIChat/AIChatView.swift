@@ -133,6 +133,9 @@ struct AIChatView: View {
     /// otherwise stash it in `pendingAIAction` and present `AIConsentSheet`. The action
     /// will fire after the user taps "Allow AI features".
     private func gateAI(_ action: @escaping () -> Void) {
+        #if DEBUG
+        print("🔓 AIChat gateAI tapped (hasConsented=\(AIConsentManager.hasConsented))")
+        #endif
         if AIConsentManager.hasConsented {
             action()
         } else {

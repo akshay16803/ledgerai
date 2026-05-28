@@ -87,8 +87,28 @@ class AIChatViewModel(
             return
         }
 
+        // Belt-and-suspenders: if `input` is empty but the user is mid-
+        // dictation (mic on with a transcript), fall through to the
+        // transcribed text and also stop the mic. Catches a race where the
+        // user taps Send before the live-mirror LaunchedEffect has
+        // propagated the latest transcribedText into uiState.input.
+        if (_uiState.value.input.trim().isEmpty()) {
+            val fallback = speechManager.transcribedText.value.trim()
+            if (fallback.isNotEmpty()) {
+                android.util.Log.i("AIChat", "sendMessage rescuing from transcribedText (input was empty)")
+                if (speechManager.isListening.value) {
+                    speechManager.stopListening()
+                }
+                _uiState.update { it.copy(input = fallback) }
+                speechManager.resetTranscription()
+            }
+        }
+
         val text = _uiState.value.input.trim()
-        if (text.isEmpty()) return
+        if (text.isEmpty()) {
+            android.util.Log.w("AIChat", "sendMessage ignored — input is empty after fallback")
+            return
+        }
 
         android.util.Log.d("AIChat", "sendMessage start — ${text.take(60)}")
 
