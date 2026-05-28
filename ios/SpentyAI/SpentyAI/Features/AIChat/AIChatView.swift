@@ -265,14 +265,15 @@ struct AIChatView: View {
                             .foregroundStyle(Color.spentyTextSecondary)
                     }
                 }
-                // Disable when there's nothing to send OR a request is already
-                // in flight — without the `isSending` clause the user could
-                // re-tap during the response round-trip and queue duplicates.
-                .disabled(
-                    viewModel.speechManager.transcribedText
-                        .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    || viewModel.isSending
-                )
+                // ONLY disable while a request is mid-flight. Do NOT gate on
+                // transcribedText being empty: sendVoiceInput() has a 500ms
+                // poll for SFSpeech's held partial + a friendly error if
+                // nothing comes through. Previously this .disabled clause
+                // was hiding every empty-transcript tap (no log, no rescue,
+                // no error) — the user saw the button greyed out exactly when
+                // they needed to press it. Matching the regular Send button
+                // which is now also .disabled(isSending) only.
+                .disabled(viewModel.isSending)
 
                 // Mic toggle
                 Button {
