@@ -11014,6 +11014,8 @@ You can help the user post transactions. STRICT RULES:
 9. NEVER post without explicit user confirmation of the details.
 10. ⚠️ CRITICAL — DO NOT FAKE-POST. If the user's CURRENT message confirms (says "yes", "post it", "go ahead", "confirm", "haan", "kar do", "ok do it", "post", "save", "record it", or any clear affirmative), and you previously summarized a transaction the user can post, you MUST include the |||TRANSACTION||| JSON block in THIS reply. NEVER reply with text like "Posting now", "I've recorded it", "Transaction posted", "Done", "Okay, saving" UNLESS the JSON block is also present in the same reply — the server cannot create the transaction without that block, so saying you posted without the block is a lie. If you don't have all required fields yet, say so explicitly and ask for what's missing — do NOT pretend to post.
 
+11. ⚠️ CRITICAL — DO NOT DOUBLE-POST. Each transaction is posted EXACTLY ONCE. After you have emitted a |||TRANSACTION||| block in a previous turn (you can tell because your previous assistant message in this conversation mentions "recorded", "posted", "saved", "added to your ledger", a transaction ID, or shows a success indicator like "✓" / "✅"), the dialogue for that transaction is COMPLETE. If the user's next message is "yes" / "haan" / "thanks" / "ok" / "done" / anything ambiguous, do NOT re-ask for confirmation and do NOT emit another |||TRANSACTION||| block — instead reply with something like "Already done! Is there anything else I can help with?" The block has already been processed by the server and emitting it again would create a duplicate transaction. The only time it's correct to emit a NEW |||TRANSACTION||| block is when the user has described a NEW, DIFFERENT transaction.
+
 ═══ CREATING INVOICES ═══
 You can help the user create sales invoices. STRICT RULES:
 1. You MUST have AT MINIMUM: customer_id (pick from existing customers or ask to create), at least one line item with description and rate, invoice_type ("simple" or "gst"), and payment_status ("paid", "partial", or "unpaid").
@@ -11082,12 +11084,26 @@ You can help the user record purchase bills (expenses from vendors/suppliers). S
         )
     else:
         lang_directive = (
-            "The user's CURRENT message is in English or Hinglish (Roman script ONLY — "
-            "NO Devanagari characters present). You MUST reply in the SAME script and "
-            "language as the user. If the user wrote pure English, reply in pure English. "
-            "If the user wrote Hinglish (Hindi in Roman script like 'kitna kharcha hua'), "
-            "reply in Hinglish (Roman script). DO NOT use Devanagari characters anywhere "
-            "in your reply — not for a single word."
+            "═══ LANGUAGE LOCK ═══\n"
+            "The user's CURRENT message contains ZERO Devanagari characters — every "
+            "byte is ASCII / Latin / Roman script. This is an absolute signal that the "
+            "user is communicating in English (or Hinglish in Roman script). You MUST "
+            "reply in the same script.\n\n"
+            "HARD CONSTRAINTS:\n"
+            "• Your reply MUST contain ZERO Devanagari characters (U+0900–U+097F). Not "
+            "  for a single word. Not for currency. Not for politeness. Zero.\n"
+            "• If the user wrote PURE ENGLISH ('I spent 500 on fuel'), reply in PURE "
+            "  ENGLISH. Do not switch to Hindi or even Hinglish.\n"
+            "• If the user wrote HINGLISH in Roman ('kitna kharcha hua'), reply in "
+            "  HINGLISH in Roman ('Aapne is mahine 45,200 rupaye kharch kiye hain').\n"
+            "• Currency: write 'rupees' or '₹' — NEVER 'रुपये'. Numbers stay as digits.\n\n"
+            "CORRECT EXAMPLE (user English → reply English):\n"
+            "  User: 'post a 500 rupee fuel expense paid by cash today'\n"
+            "  Reply: 'I'll record a ₹500 fuel expense for today, paid by cash. Say yes to confirm.'\n\n"
+            "FORBIDDEN (user English → reply Hindi/Devanagari):\n"
+            "  User: 'post a 500 rupee fuel expense paid by cash today'\n"
+            "  Reply: 'मैं आज के लिए ₹500 का ईंधन खर्च दर्ज करूंगा...' ← THIS IS WRONG. Never do this.\n"
+            "═══════════════════"
         )
     messages.append({"role": "system", "content": lang_directive})
 
@@ -11180,10 +11196,56 @@ You can help the user record purchase bills (expenses from vendors/suppliers). S
                         if not to_acc:
                             errors.append(f"Destination account {to_acc_id} not found")
 
+                # Tracks whether we suppressed a duplicate so the create-block
+                # below knows to skip. Initialized here so it exists on the
+                # `errors` branch too (otherwise NameError below).
+                is_duplicate = False
+
                 if errors:
                     clean_reply = ai_reply.replace(f"|||TRANSACTION|||{parts[1]}|||TRANSACTION|||", "")
                     clean_reply += f"\n\n⚠️ Could not post: {', '.join(errors)}"
                 else:
+                    # ── DUPLICATE GUARD ────────────────────────────────────
+                    # Prevents the LLM amnesia bug: history is stored with
+                    # the |||TRANSACTION||| block stripped, so on the next
+                    # turn the LLM doesn't see that it already posted and
+                    # may re-emit the same block when the user says "yes" /
+                    # "thanks" / etc. Block any transaction whose
+                    # (amount, account, category, date, description) matches
+                    # one inserted by this user in the last 120 seconds.
+                    desc_for_check = (txn_data.get("description") or "").strip().lower()
+                    sixty_sec_ago = datetime.now(timezone.utc) - timedelta(seconds=120)
+                    dup = await db.transactions.find_one({
+                        "user_id": user_id,
+                        "transaction_type": t_type,
+                        "amount": float(amount),
+                        "date": date_str,
+                        "account_id": account_id,
+                        "category_id": txn_data.get("category_id"),
+                        "created_at": {"$gte": sixty_sec_ago},
+                    }, {"_id": 0})
+                    is_duplicate = (
+                        dup is not None
+                        and (dup.get("description") or "").strip().lower() == desc_for_check
+                    )
+
+                    if is_duplicate:
+                        # Same transaction already posted very recently —
+                        # this is the LLM re-emitting after amnesia. Don't
+                        # post again. Replace the reply with an
+                        # "already-recorded" acknowledgement and skip the
+                        # DB write. Falls through to persistence so this
+                        # turn IS saved in chat history — critical so the
+                        # LLM next turn sees its own "already recorded"
+                        # message and stops trying.
+                        clean_reply = ai_reply.replace(f"|||TRANSACTION|||{parts[1]}|||TRANSACTION|||", "").strip()
+                        if not clean_reply:
+                            clean_reply = "✓ Already recorded."
+                        clean_reply += "\n\n(Note: this transaction was already posted a moment ago — nothing duplicated. What else can I help with?)"
+                        logger.info(f"[AIChat] Duplicate transaction suppressed for user {user_id}: amount={amount}, date={date_str}")
+                        # transaction_posted stays False, posted_txn stays None.
+
+                if not errors and not is_duplicate:
                     # Create the transaction
                     txn = {
                         "transaction_id": f"txn_{uuid.uuid4().hex[:12]}",
