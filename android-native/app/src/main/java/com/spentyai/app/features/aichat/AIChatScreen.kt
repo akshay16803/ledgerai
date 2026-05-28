@@ -496,11 +496,21 @@ private fun VoiceModeOverlay(
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Send button — also disable while a request is in flight so the
-            // user can't queue duplicates by double-tapping during the response.
-            val canSend = transcribedText.isNotEmpty() && !isSending
+            // Send button — ONLY disable while a request is in flight. Do NOT
+            // gate on transcribedText being empty: sendVoiceInput has a 500ms
+            // poll for SpeechRecognizer's held partial + a friendly error if
+            // nothing comes through. Previously the canSend clause was hiding
+            // every empty-transcript tap (no log, no rescue, no error) —
+            // exact mirror of the iOS voice-mode dead-button bug.
+            val canSend = !isSending
             IconButton(
-                onClick = onSend,
+                onClick = {
+                    android.util.Log.d(
+                        "AIChat",
+                        "VoiceMode Send tapped — transcribed='${transcribedText.take(40)}', isListening=$isListening, isSending=$isSending"
+                    )
+                    onSend()
+                },
                 enabled = canSend,
                 modifier = Modifier
                     .size(56.dp)

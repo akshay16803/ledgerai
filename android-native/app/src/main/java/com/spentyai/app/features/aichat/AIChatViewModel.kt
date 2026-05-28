@@ -271,16 +271,62 @@ class AIChatViewModel(
      * Used by the "Send" button inside the voice mode overlay.
      */
     suspend fun sendVoiceInput(context: Context) {
-        speechManager.stopListening()
-        val transcribed = speechManager.transcribedText.value.trim()
-        if (transcribed.isNotEmpty()) {
-            _uiState.update { it.copy(input = transcribed) }
-            speechManager.resetTranscription()
-            sendMessage(context)
-        } else {
-            // Nothing to send — restart listening.
-            speechManager.startListening(context)
+        android.util.Log.d(
+            "AIChat",
+            "sendVoiceInput tapped — transcribed='${speechManager.transcribedText.value.take(60)}', " +
+                "isListening=${speechManager.isListening.value}, isSending=${_uiState.value.isSending}"
+        )
+
+        // Reentry guard mirrors sendMessage's — protects against double-tap
+        // while a previous voice send is still in flight.
+        if (_uiState.value.isSending) {
+            android.util.Log.w("AIChat", "sendVoiceInput ignored — already sending")
+            return
         }
+
+        // Stop the mic immediately so the recognizer flushes its final partial.
+        if (speechManager.isListening.value) {
+            speechManager.stopListening()
+        }
+
+        var transcript = speechManager.transcribedText.value.trim()
+
+        // If the transcript is empty, wait up to 500ms for SpeechRecognizer
+        // to deliver the partial it was holding before we give up. The
+        // recognition callback fires on a background thread and the
+        // StateFlow update can lag the user's Send tap by a frame or two.
+        if (transcript.isEmpty()) {
+            android.util.Log.i(
+                "AIChat",
+                "sendVoiceInput — empty transcript, waiting up to 500ms for SpeechRecognizer flush"
+            )
+            repeat(10) {                                       // 10 × 50ms = 500ms max
+                kotlinx.coroutines.delay(50)
+                transcript = speechManager.transcribedText.value.trim()
+                if (transcript.isNotEmpty()) return@repeat
+            }
+        }
+
+        if (transcript.isEmpty()) {
+            android.util.Log.w(
+                "AIChat",
+                "sendVoiceInput — still no transcript after wait; restarting mic"
+            )
+            _uiState.update {
+                it.copy(
+                    errorMessage = "I didn't catch that. Try speaking a bit louder, " +
+                        "or tap the mic and start over."
+                )
+            }
+            speechManager.resetTranscription()
+            speechManager.startListening(context)
+            return
+        }
+
+        android.util.Log.d("AIChat", "sendVoiceInput sending — '${transcript.take(60)}'")
+        _uiState.update { it.copy(input = transcript) }
+        speechManager.resetTranscription()
+        sendMessage(context)
     }
 
     // ─── Lifecycle ────────────────────────────────────────────────────────────
