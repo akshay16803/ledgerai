@@ -12,10 +12,15 @@ class AIChatRepository(private val apiClient: ApiClient) {
 
     suspend fun sendMessage(
         text: String,
-        conversation: List<ChatMessage>
+        conversation: List<ChatMessage>,
+        voiceMode: Boolean = false,
     ): ApiResult<ChatMessage> {
         val body = buildJsonObject {
             put("message", text)
+            // Tell the backend the user is in fullscreen voice mode so it
+            // shortens the SPOKEN portion of the reply (avoids reading every
+            // field of a transaction confirmation line-by-line).
+            put("voice_mode", voiceMode)
             put("conversation", buildJsonArray {
                 conversation.forEach { msg ->
                     add(buildJsonObject {

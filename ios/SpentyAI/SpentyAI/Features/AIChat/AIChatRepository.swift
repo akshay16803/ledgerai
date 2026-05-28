@@ -5,6 +5,10 @@ import Foundation
 struct ChatRequest: Codable {
     let message: String
     let conversation: [ChatMessageDTO]
+    /// When true, the user is in fullscreen voice mode — AI's reply will be
+    /// read aloud via TTS. Backend uses this to shorten the SPOKEN summary
+    /// so the user isn't read every field of the transaction line by line.
+    let voiceMode: Bool?
 }
 
 struct ChatMessageDTO: Codable {
@@ -65,11 +69,11 @@ final class AIChatRepository {
 
     // MARK: - Send Message
 
-    func sendMessage(_ text: String, conversation: [ChatMessage]) async throws -> ChatMessage {
+    func sendMessage(_ text: String, conversation: [ChatMessage], voiceMode: Bool = false) async throws -> ChatMessage {
         let dto = conversation.map {
             ChatMessageDTO(role: $0.role ?? "user", content: $0.content ?? "")
         }
-        let body = ChatRequest(message: text, conversation: dto)
+        let body = ChatRequest(message: text, conversation: dto, voiceMode: voiceMode)
         let response: ChatResponse = try await APIClient.shared.post(APIEndpoints.aiChat, body: body)
         return response.asChatMessage
     }

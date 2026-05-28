@@ -129,7 +129,7 @@ class AIChatViewModel(
         }
 
         viewModelScope.launch {
-            when (val result = repository.sendMessage(text, _uiState.value.messages)) {
+            when (val result = repository.sendMessage(text, _uiState.value.messages, voiceMode = _isVoiceModeActive.value)) {
                 is ApiResult.Success -> {
                     _uiState.update {
                         it.copy(

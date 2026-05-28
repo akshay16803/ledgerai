@@ -11004,7 +11004,7 @@ You can help the user post transactions. STRICT RULES:
 2. For transfer you MUST have ALL of: transaction_type, amount, date (YYYY-MM-DD), account_id (source), to_account_id (destination), description.
 3. If ANY required field is missing or ambiguous, ASK the user. Do NOT guess account or category — show them the options and ask them to pick.
 4. If the user says "today" use {today_str}. If they say a date like "15th April", convert to ISO format.
-5. Before posting, show a clear summary of what you'll record.
+5. Before posting, show a CONCISE summary of what you'll record (one line per field, max 5 lines) and ASK the user to confirm.
 6. Check recent transactions for duplicates — if a similar transaction exists within 3 days, WARN the user.
 7. When ALL fields are confirmed, output the transaction JSON wrapped EXACTLY like this (on its own lines):
 |||TRANSACTION|||
@@ -11012,6 +11012,7 @@ You can help the user post transactions. STRICT RULES:
 |||TRANSACTION|||
 8. Only include to_account_id for transfers. Only include category_id for income/expense.
 9. NEVER post without explicit user confirmation of the details.
+10. ⚠️ CRITICAL — DO NOT FAKE-POST. If the user's CURRENT message confirms (says "yes", "post it", "go ahead", "confirm", "haan", "kar do", "ok do it", "post", "save", "record it", or any clear affirmative), and you previously summarized a transaction the user can post, you MUST include the |||TRANSACTION||| JSON block in THIS reply. NEVER reply with text like "Posting now", "I've recorded it", "Transaction posted", "Done", "Okay, saving" UNLESS the JSON block is also present in the same reply — the server cannot create the transaction without that block, so saying you posted without the block is a lie. If you don't have all required fields yet, say so explicitly and ask for what's missing — do NOT pretend to post.
 
 ═══ CREATING INVOICES ═══
 You can help the user create sales invoices. STRICT RULES:
@@ -11089,6 +11090,31 @@ You can help the user record purchase bills (expenses from vendors/suppliers). S
             "in your reply — not for a single word."
         )
     messages.append({"role": "system", "content": lang_directive})
+
+    # ── Voice-mode brevity directive ──────────────────────────────────────
+    # When the user is in fullscreen voice mode, the reply is read aloud by
+    # the device TTS. Reading 5+ lines of field-by-field transaction details
+    # is annoying. Tell the model to keep the SPOKEN portion short and
+    # point the user at the on-screen summary for review.
+    if body.get("voice_mode") is True or body.get("voiceMode") is True:
+        messages.append({
+            "role": "system",
+            "content": (
+                "The user is in fullscreen VOICE MODE — your reply will be "
+                "READ ALOUD by text-to-speech. Keep your spoken reply short "
+                "and natural — at most TWO sentences. If you're summarising "
+                "a transaction / invoice / bill before posting, say something "
+                "like 'I've prepared a 500 rupee fuel expense for today. "
+                "Please look at the screen and say yes to post.' — DO NOT "
+                "read every field aloud line by line. The full details are "
+                "already visible on screen. If you are POSTING (rule 7 of "
+                "TRANSACTION INSTRUCTIONS), the JSON sentinel block is still "
+                "REQUIRED in the reply — it's invisible to the user and will "
+                "be stripped before TTS, so include it after your short "
+                "spoken confirmation."
+            ),
+        })
+
     messages.append({"role": "user", "content": message})
 
     try:

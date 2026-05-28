@@ -140,7 +140,7 @@ final class AIChatViewModel {
         scrollToBottom()
 
         do {
-            let response = try await repository.sendMessage(text, conversation: messages)
+            let response = try await repository.sendMessage(text, conversation: messages, voiceMode: isVoiceModeActive)
             messages.append(response)
             scrollToLastMessageTop()
 
