@@ -44,7 +44,7 @@ final class Analytics {
             return
         }
         #if canImport(PostHog)
-        let config = PostHogConfig(apiKey: key, host: host)
+        let config = PostHogConfig(projectToken: key, host: host)
         // Anonymous-only: PostHog will never create an identified person
         // unless `identify()` is called (we never call it).
         config.personProfiles = .identifiedOnly
