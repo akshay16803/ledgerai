@@ -37,6 +37,7 @@ struct PurchaseListView: View {
                 }
             }
         }
+        .trackScreen("PurchaseList")
         .navigationTitle(lang.s("purchases"))
         .searchable(text: $viewModel.searchText, prompt: lang.s("search_bills"))
         .toolbar {

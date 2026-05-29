@@ -32,6 +32,7 @@ struct AccountListView: View {
                     accountList
                 }
             }
+            .trackScreen("AccountList")
             .navigationTitle(lang.s("accounts"))
             .searchable(text: $viewModel.searchText, prompt: lang.s("search_accounts"))
             .toolbar {

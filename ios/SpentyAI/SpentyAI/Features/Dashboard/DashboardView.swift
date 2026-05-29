@@ -30,6 +30,7 @@ struct DashboardView: View {
                 floatingButtons
             }
             .background(Color.spentyBgPrimary)
+            .trackScreen("Dashboard")
             .navigationTitle(lang.s("dashboard"))
             .navigationBarTitleDisplayMode(.large)
             .toolbar {

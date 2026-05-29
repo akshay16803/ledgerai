@@ -28,6 +28,7 @@ struct SettingsView: View {
                 settingsForm
             }
         }
+        .trackScreen("Settings")
         .navigationTitle(lang.s("settings"))
         .navigationBarTitleDisplayMode(.large)
         .task {

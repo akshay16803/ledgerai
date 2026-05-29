@@ -28,6 +28,7 @@ struct ReportsView: View {
                 .padding(.bottom, 32)
             }
             .background(Color.spentyBgPrimary.ignoresSafeArea())
+            .trackScreen("Reports")
             .navigationTitle(lang.s("reports"))
             .refreshable {
                 await vm.loadData()

@@ -47,6 +47,7 @@ struct ReconciliationView: View {
                 }
             }
         }
+        .trackScreen("Reconciliation")
         .navigationTitle(lang.s("reconciliation"))
         .navigationBarTitleDisplayMode(.large)
         .toolbar {

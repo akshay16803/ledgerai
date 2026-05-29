@@ -38,6 +38,7 @@ struct InvoiceListView: View {
                 }
             }
         }
+        .trackScreen("InvoiceList")
         .navigationTitle(lang.s("invoices"))
         .searchable(text: $viewModel.searchText, prompt: lang.s("search_invoice"))
         .toolbar {

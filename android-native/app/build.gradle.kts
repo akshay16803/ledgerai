@@ -27,6 +27,16 @@ android {
         }
 
         buildConfigField("String", "API_BASE_URL", "\"https://api.spentyai.com\"")
+
+        // PostHog (anonymous) — read project API key from local.properties so
+        // it never lands in git. Falls back to "" → SDK stays disabled.
+        val localProps = Properties()
+        val localFile = rootProject.file("local.properties")
+        if (localFile.exists()) localFile.inputStream().use { localProps.load(it) }
+        val postHogKey = localProps.getProperty("posthog.key") ?: System.getenv("POSTHOG_KEY") ?: ""
+        val postHogHost = localProps.getProperty("posthog.host") ?: "https://us.i.posthog.com"
+        buildConfigField("String", "POSTHOG_KEY", "\"$postHogKey\"")
+        buildConfigField("String", "POSTHOG_HOST", "\"$postHogHost\"")
     }
 
     signingConfigs {
@@ -131,6 +141,11 @@ dependencies {
 
     // Google Play Billing
     implementation("com.android.billingclient:billing-ktx:7.0.0")
+
+    // PostHog (anonymous product analytics).
+    // Key is supplied via local.properties → BuildConfig.POSTHOG_KEY.
+    // No identify() is ever called → events live under an anonymous distinct_id.
+    implementation("com.posthog:posthog-android:3.11.0")
 
     // Debug
     debugImplementation("androidx.compose.ui:ui-tooling")

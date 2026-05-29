@@ -200,7 +200,8 @@ struct PremiumFeatureSheet: View {
         } message: {
             Text(errorMessage)
         }
-    }
+            .trackScreen("PremiumFeatureSheet")
+}
 
     // MARK: - Hero
     private var hero: some View {

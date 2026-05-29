@@ -10,6 +10,11 @@ struct SpentyAIApp: App {
         // Must live outside any per-screen view model so the listener
         // survives paywall + billing-settings dismissals.
         AppleTransactionObserver.shared.start()
+
+        // Bootstrap anonymous product analytics (PostHog). No-ops if the
+        // POSTHOG_KEY Info.plist entry is empty or the SPM package isn't
+        // installed yet — safe to call regardless.
+        Analytics.shared.bootstrap()
     }
 
     var body: some Scene {

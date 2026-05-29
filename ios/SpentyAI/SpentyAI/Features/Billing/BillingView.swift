@@ -89,6 +89,7 @@ struct BillingView: View {
             .padding()
         }
         .background(brandBg.ignoresSafeArea())
+        .trackScreen("Billing")
         .navigationTitle(lang.s("subscription"))
         .navigationBarTitleDisplayMode(.large)
         .task {

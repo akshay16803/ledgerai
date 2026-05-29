@@ -65,6 +65,12 @@ struct MainTabView: View {
                 .tag(Tab.more)
         }
         .tint(Color.spentyPrimary)
+        .onAppear {
+            Analytics.shared.viewedScreen(selectedTab.rawValue)
+        }
+        .onChange(of: selectedTab) { _, newValue in
+            Analytics.shared.viewedScreen(newValue.rawValue)
+        }
         .onOpenURL { url in
             // spentyai://nav/<tab> — used by the SpentyAI Brain simulator automation
             guard url.scheme == "spentyai", url.host == "nav" else { return }

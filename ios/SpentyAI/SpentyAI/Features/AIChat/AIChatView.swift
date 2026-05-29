@@ -33,6 +33,7 @@ struct AIChatView: View {
                     }
                 }
             }
+            .trackScreen("AIChat")
             .navigationTitle(lang.s("ai_assistant"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

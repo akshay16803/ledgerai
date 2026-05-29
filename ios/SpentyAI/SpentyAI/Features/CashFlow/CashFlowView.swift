@@ -39,6 +39,7 @@ struct CashFlowView: View {
             }
         }
         .background(Color.spentyBgPrimary)
+        .trackScreen("CashFlow")
         .navigationTitle(lang.s("cash_flow"))
         .navigationBarTitleDisplayMode(.large)
         .task {

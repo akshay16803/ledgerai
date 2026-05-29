@@ -66,7 +66,8 @@ struct LoginView: View {
                 authManager.lastLoginError = nil
             }
         }
-    }
+            .trackScreen("Login")
+}
 
     // MARK: - Sub-views
 

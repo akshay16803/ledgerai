@@ -31,6 +31,7 @@ struct TransactionListView: View {
                     contentArea
                 }
             }
+            .trackScreen("TransactionList")
             .navigationTitle(lang.s("transactions"))
             .navigationBarTitleDisplayMode(.large)
             .toolbar { toolbarContent }

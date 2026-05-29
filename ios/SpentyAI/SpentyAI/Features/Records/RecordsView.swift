@@ -51,6 +51,7 @@ struct RecordsView: View {
                 }
             }
         }
+        .trackScreen("Records")
         .navigationTitle(lang.s("records"))
         .navigationBarTitleDisplayMode(.large)
         .toolbar { toolbarContent }

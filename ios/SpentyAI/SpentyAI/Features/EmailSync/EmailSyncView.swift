@@ -48,6 +48,7 @@ struct EmailSyncView: View {
             .padding(16)
         }
         .background(Color.spentyBgPrimary)
+        .trackScreen("EmailSync")
         .navigationTitle(lang.s("email_sync"))
         .navigationBarTitleDisplayMode(.large)
         .refreshable {

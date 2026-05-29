@@ -203,6 +203,15 @@ fun AppNavigation(
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
 
+    // Anonymous screen-view tracking: fires once per route change.
+    LaunchedEffect(currentRoute) {
+        currentRoute?.let { route ->
+            // Strip route arguments (everything after the first '{' or '?')
+            val cleanName = route.substringBefore('{').substringBefore('?').trimEnd('/')
+            com.spentyai.app.core.analytics.Analytics.viewedScreen(cleanName.ifBlank { route })
+        }
+    }
+
     // Routes where the bottom bar should be hidden
     val hideBottomBarRoutes = listOf(
         Screen.TransactionDetail.route,
