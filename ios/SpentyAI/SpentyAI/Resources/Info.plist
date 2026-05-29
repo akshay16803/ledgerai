@@ -74,6 +74,10 @@
     </array>
     <key>ITSAppUsesNonExemptEncryption</key>
     <false/>
+    <key>POSTHOG_KEY</key>
+    <string>phc_viRviuyeoGaajrnU2KLbDLPWxFXMYYphxfCj6En4Y9vT</string>
+    <key>POSTHOG_HOST</key>
+    <string>https://us.i.posthog.com</string>
     <key>NSAppTransportSecurity</key>
     <dict>
         <key>NSAllowsArbitraryLoads</key>
