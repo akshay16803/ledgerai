@@ -8484,11 +8484,19 @@ USER'S EXISTING CATEGORIES + SUBCATEGORIES (the ONLY options for category_id / s
 {chr(10).join(category_info) if category_info else "No categories configured."}
 
 ═══════════════════════════════════════════════════════════════
+STEP 0 — READ THE WHOLE EMAIL & UNDERSTAND INTENT (do this first)
+═══════════════════════════════════════════════════════════════
+Read the ENTIRE email — subject and full body — and work out the sender's INTENT before deciding anything. Ask yourself: "What is this email actually telling me — is it confirming that money LEFT or ENTERED one of the user's own accounts, or is it doing something else (advertising, confirming an order/delivery, bragging about savings, awarding points, nudging me to act)?"
+The mere presence of a number or a currency symbol (₹, Rs, $, etc.) is NOT evidence of a transaction. Promotional, savings, reward and informational emails are FULL of numbers that the user did NOT actually pay or receive. Decide based on the email's MEANING, not on the fact that a figure appears.
+
+═══════════════════════════════════════════════════════════════
 STEP 1 — CLASSIFY
 ═══════════════════════════════════════════════════════════════
-Read the document and decide:
-- Is this a CONFIRMED completed cash movement (money actually moved in/out/between accounts)?
-- If NO (it's a statement summary, marketing email, OTP, balance reminder, mandate-registration notice, etc.) → set is_transaction=false and return. (If it's specifically a MANDATE/AUTO-PAY REGISTRATION, fill in the mandate_* fields and set is_mandate=true but still is_transaction=false.)
+Based on the intent you understood in Step 0, decide:
+- Is this a CONFIRMED completed cash movement (money actually moved in/out/between the user's accounts)?
+- If the email's intent is NOT a completed money movement → set is_transaction=false and return. The following are ILLUSTRATIVE EXAMPLES of intents that are NOT transactions (treat them as guidance to recognise intent, NOT as an exhaustive checklist): order/booking confirmations and "your order has been placed / shipped / out for delivery / delivered" notices; "you saved ₹X" / "you could have saved ₹X" / "you got ₹X off" discount or savings callouts; reward / loyalty / cashback POINTS or coins earned; "X% off", coupons, offers, deals, promo and sale emails; price-drop, back-in-stock or wishlist alerts; referral, "invite & earn" or "earn ₹X" invitations; shipping / tracking / delivery status updates; OTPs; balance or low-balance reminders; statement summaries and spend recaps; and general marketing / newsletters. The unifying principle: if the email is informing, advertising, confirming an order, or describing money the user did NOT actually move, it is NOT a transaction — even when it prominently displays an amount. (If it's specifically a MANDATE/AUTO-PAY REGISTRATION, fill in the mandate_* fields and set is_mandate=true but still is_transaction=false.)
+- A real transaction confirms that a specific amount was actually DEBITED from / CREDITED to / PAID via one of the user's accounts (e.g. "₹247 debited", "₹247 paid to Swiggy via UPI", "Rs.500 credited to your account"). Only then → is_transaction=true.
+- IMPORTANT distinction (do not over-suppress real income): an actual cashback amount, a refund, or any reward that is genuinely CREDITED as spendable money to the user's wallet or bank account (e.g. "₹50 cashback credited to your Paytm wallet", "₹300 refund credited to your account") IS a real transaction (income) — record it. It is ONLY the non-withdrawable reward / loyalty POINTS or coins (not real currency) that are NOT transactions.
 - If YES → transaction_type is one of: "income" (money came in from an external party), "expense" (money went out to an external party), "transfer" (money moved between two of the user's own accounts, e.g. credit-card bill payment).
 
 ═══════════════════════════════════════════════════════════════
@@ -8496,7 +8504,7 @@ STEP 2 — EXTRACT FACTS (strict, only from the document)
 ═══════════════════════════════════════════════════════════════
 All of these must come directly from the document. If the document does not state a field, leave it null.
 
-- amount: the exact number printed in the document (never approximate).
+- amount: the exact amount the user ACTUALLY PAID or RECEIVED (never approximate). When the document contains MULTIPLE numbers — e.g. amount paid vs. "you saved ₹X", discount, MRP / original price, cart total vs. amount payable, taxes, tip, delivery fee, or reward points — extract ONLY the actual money that moved (the amount debited / paid / credited). NEVER use the savings, discount, MRP, "you saved", offer, or points figure as the amount. If the only figures present are savings / discount / reward / promotional numbers and nothing was actually paid or received, this is not a transaction (see Step 1) → leave amount null and is_transaction=false.
 - currency: ISO 4217 code detected from the document (default INR for Indian banks / UPI).
 - date: the date printed in the document in YYYY-MM-DD. If multiple dates appear (e.g. transaction date vs statement date), use the transaction date.
 - account_id: match from the user's EXISTING ACCOUNTS list above using the bank/account name printed in the document (e.g. "HDFC Savings XX1234" in the doc → the existing HDFC account). If no existing account matches, set account_id=null and put what you saw in detected_bank_name (+ detected_bank_type). Do NOT fabricate an account.
@@ -8588,7 +8596,7 @@ async def analyze_email_with_ai(email_doc: dict, account_names: list, category_i
         response = await async_openai_client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "You extract one transaction from a supporting document using a strict 5-step process: classify, extract only what the document states, understand the vendor via world knowledge, match to user's existing categories (or leave blank), judge recurring strictly. Never guess. Respond only with valid JSON."},
+                {"role": "system", "content": "You extract one transaction from a supporting document. First READ THE WHOLE EMAIL and understand the sender's INTENT; the mere presence of a number or currency symbol is NOT a transaction. Promotional / 'you saved ₹X' / order-delivered / rewards / offer / marketing emails are NOT transactions even when they show an amount. Only a confirmed money movement (amount actually debited / credited / paid via the user's account) is a transaction, and when several numbers appear extract only the amount actually paid or received — never the savings, discount, MRP or points figure. Then follow the strict steps: classify, extract only what the document states, understand the vendor via world knowledge, match to user's existing categories (or leave blank), judge recurring strictly. Never guess. Respond only with valid JSON."},
                 {"role": "user", "content": prompt},
             ],
             temperature=0.1,
@@ -8777,10 +8785,13 @@ AVAILABLE CATEGORIES:
 {chr(10).join(category_info) if category_info else "No categories configured"}
 
 INSTRUCTIONS:
+- READ THE WHOLE SMS FIRST and understand the sender's INTENT before deciding anything. The mere presence of a number or a currency symbol (₹, Rs, $) is NOT evidence of a transaction — promotional and reward SMS are full of numbers the user never actually paid or received. Decide based on the message's MEANING, not on the fact that a figure appears.
 - Bank SMS alerts typically contain: amount, account details, transaction type (debited/credited), balance, reference number.
 - UPI payment alerts: amount, payee name, UPI ID, reference.
-- If this SMS contains a financial transaction, extract details.
-- If NOT a financial transaction (OTP, promo, alert without transaction), set is_transaction to false.
+- A real transaction confirms a specific amount was actually DEBITED from / CREDITED to / PAID via the user's account (e.g. "Rs.247 debited", "₹247 paid to Swiggy via UPI", "Rs.500 credited").
+- If NOT a confirmed money movement, set is_transaction to false. ILLUSTRATIVE EXAMPLES of intents that are NOT transactions (guidance to recognise intent, NOT an exhaustive checklist): OTPs; "you saved ₹X" / "you could have saved ₹X" / discount or savings callouts; reward / loyalty / cashback POINTS or coins earned; "X% off", coupons, offers, deals, promo/sale messages; order / delivery / shipping / tracking status ("order delivered", "out for delivery"); price-drop or wishlist alerts; referral / "invite & earn" / "earn ₹X" invitations; balance or low-balance reminders; statement summaries; and general marketing. The unifying principle: if the SMS is informing, advertising, confirming an order, or describing money the user did NOT actually move, it is NOT a transaction even when it prominently displays an amount.
+- IMPORTANT distinction (do not over-suppress real income): an actual cashback amount, a refund, or any reward genuinely CREDITED as spendable money to the user's wallet/bank account (e.g. "Rs.50 cashback credited to Paytm wallet", "₹300 refund credited") IS a real transaction (income) — record it. Only non-withdrawable reward / loyalty POINTS or coins (not real currency) are NOT transactions.
+- AMOUNT (multi-number case): extract ONLY the amount the user ACTUALLY PAID or RECEIVED. When several numbers appear (amount paid vs. "you saved ₹X", discount, MRP / original price, cart total vs. payable, taxes, tip, reward points), NEVER use the savings / discount / MRP / "you saved" / offer / points figure as the amount — use only the money that actually moved. If the only figures are savings / discount / reward / promotional numbers and nothing was actually paid or received, set is_transaction=false and leave amount null.
 - For transaction_type: "income" for credit/received, "expense" for debit/spent/paid, "transfer" for moved between accounts.
 - For account_id: Try to match from AVAILABLE ACCOUNTS. If you detect a SPECIFIC bank name/account number not in the list (e.g., "HDFC XX1234", "ICICI 5678"), include it in detected_bank_name.
 - For payment_method: Detect the payment method from the SMS. Common: "upi", "credit_card", "debit_card", "net_banking", "cash", "wallet", "cheque", "neft", "rtgs", "imps", "other".
@@ -8814,7 +8825,7 @@ Respond ONLY with valid JSON (no markdown):
         response = await async_openai_client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "You are a financial transaction analyzer specializing in SMS bank alerts and payment notifications. Extract transaction details from SMS. Respond only with valid JSON."},
+                {"role": "system", "content": "You are a financial transaction analyzer specializing in SMS bank alerts and payment notifications. READ THE WHOLE SMS and understand its INTENT first; the mere presence of a number or currency symbol is NOT a transaction. Promotional / 'you saved ₹X' / order-delivered / rewards / offer / OTP / marketing SMS are NOT transactions even when they show an amount. Only a confirmed money movement (amount actually debited / credited / paid via the user's account) is a transaction, and when several numbers appear extract only the amount actually paid or received — never the savings, discount, MRP or points figure. Extract transaction details from SMS. Respond only with valid JSON."},
                 {"role": "user", "content": prompt},
             ],
             temperature=0.1,
