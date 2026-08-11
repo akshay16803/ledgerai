@@ -1,0 +1,5 @@
+# A slow walk across Marine Drive. Use with: route examples/short-walk.txt --speed 5
+18.9435, 72.8235
+18.9410, 72.8228
+18.9385, 72.8222
+18.9360, 72.8219

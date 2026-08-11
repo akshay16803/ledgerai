@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="ios-gps-sim" xmlns="http://www.topografix.com/GPX/1/1">
+  <trk>
+    <name>Bandra to Lower Parel</name>
+    <trkseg>
+      <trkpt lat="19.0596" lon="72.8295"/>
+      <trkpt lat="19.0508" lon="72.8321"/>
+      <trkpt lat="19.0412" lon="72.8402"/>
+      <trkpt lat="19.0330" lon="72.8461"/>
+      <trkpt lat="19.0250" lon="72.8500"/>
+      <trkpt lat="19.0176" lon="72.8305"/>
+      <trkpt lat="19.0075" lon="72.8280"/>
+      <trkpt lat="18.9985" lon="72.8290"/>
+    </trkseg>
+  </trk>
+</gpx>
