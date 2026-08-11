@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>iPhone GPS Simulator</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  :root {
+    --bg: #12141a; --panel: #1b1e26; --line: #2c313d;
+    --text: #e8eaf0; --muted: #9aa3b5; --accent: #4c8dff; --danger: #ff5f56; --ok: #3ecf8e;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; height: 100vh; display: flex; font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; background: var(--bg); color: var(--text); }
+  #map { flex: 1; min-width: 0; }
+  aside { width: 340px; flex-shrink: 0; padding: 18px; overflow-y: auto; background: var(--panel); border-left: 1px solid var(--line); }
+  h1 { font-size: 15px; margin: 0 0 4px; letter-spacing: .01em; }
+  .sub { color: var(--muted); font-size: 12px; margin-bottom: 18px; }
+  h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 22px 0 8px; font-weight: 600; }
+  input, select, textarea, button { font: inherit; font-size: 13px; color: var(--text); background: #232733; border: 1px solid var(--line); border-radius: 7px; padding: 8px 10px; width: 100%; }
+  textarea { resize: vertical; min-height: 68px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  button { cursor: pointer; background: #2a2f3d; transition: background .12s; }
+  button:hover:not(:disabled) { background: #333a4b; }
+  button:disabled { opacity: .45; cursor: default; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 500; }
+  button.primary:hover:not(:disabled) { background: #3d7ded; }
+  button.danger { background: transparent; border-color: #55343a; color: var(--danger); }
+  .row { display: flex; gap: 8px; margin-bottom: 8px; }
+  .row > * { flex: 1; }
+  label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+  .status { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font-size: 12px; background: #171a22; }
+  .status b { font-weight: 600; }
+  .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--muted); margin-right: 6px; vertical-align: middle; }
+  .dot.live { background: var(--ok); }
+  .dot.err { background: var(--danger); }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .presets { display: flex; flex-wrap: wrap; gap: 6px; }
+  .presets button { width: auto; flex: none; padding: 5px 9px; font-size: 12px; border-radius: 999px; }
+  .hint { font-size: 11px; color: var(--muted); margin-top: 6px; }
+  #err { display: none; margin-top: 10px; padding: 9px 11px; border-radius: 7px; background: #3a1f22; border: 1px solid #5b2f34; color: #ffb3ae; font-size: 12px; }
+  @media (max-width: 760px) { body { flex-direction: column; } aside { width: 100%; border-left: 0; border-top: 1px solid var(--line); } #map { height: 45vh; flex: none; } }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<aside>
+  <h1>iPhone GPS Simulator</h1>
+  <div class="sub">Click the map to move the device. Shift-click to build a route.</div>
+
+  <div class="status">
+    <div><span class="dot" id="dot"></span><b id="state">connecting…</b></div>
+    <div class="mono" id="coords" style="margin-top:6px;color:var(--muted)">no fix set</div>
+  </div>
+  <div id="err"></div>
+
+  <h2>Set a location</h2>
+  <div class="row">
+    <input id="latlon" class="mono" placeholder="19.0760, 72.8777" autocomplete="off">
+  </div>
+  <div class="row">
+    <button class="primary" id="btnSet">Set location</button>
+    <button class="danger" id="btnClear">Clear</button>
+  </div>
+  <div class="hint">Clearing hands control back to the phone's real GPS.</div>
+
+  <h2>Presets</h2>
+  <div class="presets" id="presets"></div>
+
+  <h2>Route</h2>
+  <div class="row">
+    <div><label for="speed">Speed (km/h)</label><input id="speed" type="number" value="40" min="1" step="1"></div>
+    <div><label for="hz">Fixes / sec</label><input id="hz" type="number" value="1" min="0.1" step="0.1"></div>
+  </div>
+  <div class="row" style="align-items:center">
+    <label style="margin:0"><input type="checkbox" id="loop" style="width:auto;margin-right:6px">Loop the route</label>
+  </div>
+  <div class="row">
+    <button class="primary" id="btnPlay" disabled>Play route</button>
+    <button id="btnStop" disabled>Stop</button>
+  </div>
+  <div class="row">
+    <button id="btnUndo">Undo point</button>
+    <button id="btnReset">Clear route</button>
+  </div>
+  <div class="hint" id="routeInfo">No waypoints yet — shift-click the map.</div>
+
+  <h2>Paste coordinates or GPX</h2>
+  <textarea id="paste" placeholder="19.0760, 72.8777&#10;19.0800, 72.8810&#10;&#10;…or paste a full GPX document"></textarea>
+  <div class="row" style="margin-top:8px"><button id="btnParse">Load as route</button></div>
+</aside>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const map = L.map('map', { zoomControl: true }).setView([19.0760, 72.8777], 12);
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 19, attribution: '&copy; OpenStreetMap'
+}).addTo(map);
+
+let marker = null;      // current simulated fix
+let waypoints = [];     // route being built
+let wpMarkers = [];
+let line = null;
+
+const $ = id => document.getElementById(id);
+
+function showError(msg) {
+  const el = $('err');
+  if (!msg) { el.style.display = 'none'; return; }
+  el.textContent = msg;
+  el.style.display = 'block';
+}
+
+async function api(path, body) {
+  const res = await fetch(path, {
+    method: body === undefined ? 'GET' : 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body)
+  });
+  const data = await res.json().catch(() => ({ error: 'bad response from server' }));
+  if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+  showError('');
+  return data;
+}
+
+function setMarker(lat, lon) {
+  if (!marker) {
+    marker = L.circleMarker([lat, lon], {
+      radius: 8, color: '#fff', weight: 2, fillColor: '#4c8dff', fillOpacity: 1
+    }).addTo(map);
+  } else {
+    marker.setLatLng([lat, lon]);
+  }
+}
+
+function renderStatus(s) {
+  const playing = s.route && s.route.playing;
+  const err = s.route && s.route.error;
+  $('dot').className = 'dot' + (err ? ' err' : (s.lastFix || playing ? ' live' : ''));
+  if (err) {
+    $('state').textContent = 'Playback error';
+    showError(err);
+  } else if (playing) {
+    $('state').textContent = `Playing route (${s.route.index}/${s.route.total})`;
+  } else {
+    $('state').textContent = s.lastFix ? 'Location simulated' : 'Idle';
+  }
+  $('state').title = 'backend: ' + (s.backend || 'unknown');
+
+  const cur = (s.route && s.route.current) || s.lastFix;
+  if (cur) {
+    $('coords').textContent = `${(+cur[0]).toFixed(6)}, ${(+cur[1]).toFixed(6)}`;
+    setMarker(cur[0], cur[1]);
+  } else {
+    $('coords').textContent = 'no fix set';
+  }
+  $('btnStop').disabled = !playing;
+  $('btnPlay').disabled = playing || waypoints.length < 2;
+}
+
+function redrawRoute() {
+  wpMarkers.forEach(m => map.removeLayer(m));
+  wpMarkers = waypoints.map((p, i) => L.circleMarker(p, {
+    radius: 5, color: '#3ecf8e', weight: 2, fillColor: '#12141a', fillOpacity: 1
+  }).addTo(map).bindTooltip('#' + (i + 1)));
+
+  if (line) map.removeLayer(line);
+  line = waypoints.length > 1
+    ? L.polyline(waypoints, { color: '#3ecf8e', weight: 3, opacity: .75 }).addTo(map)
+    : null;
+
+  $('routeInfo').textContent = waypoints.length
+    ? `${waypoints.length} waypoint${waypoints.length > 1 ? 's' : ''}` +
+      (waypoints.length < 2 ? ' — add one more to play' : '')
+    : 'No waypoints yet — shift-click the map.';
+  $('btnPlay').disabled = waypoints.length < 2;
+}
+
+map.on('click', async e => {
+  const { lat, lng } = e.latlng;
+  if (e.originalEvent.shiftKey) {
+    waypoints.push([lat, lng]);
+    redrawRoute();
+    return;
+  }
+  $('latlon').value = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+  try { renderStatus(await api('/api/location', { lat, lon: lng })); }
+  catch (err) { showError(err.message); }
+});
+
+$('btnSet').onclick = async () => {
+  const parts = $('latlon').value.split(/[, ]+/).map(s => s.trim()).filter(Boolean);
+  if (parts.length < 2) return showError('Enter coordinates as "lat, lon".');
+  const lat = parseFloat(parts[0]), lon = parseFloat(parts[1]);
+  if (Number.isNaN(lat) || Number.isNaN(lon)) return showError('Those are not valid numbers.');
+  try {
+    renderStatus(await api('/api/location', { lat, lon }));
+    map.setView([lat, lon], Math.max(map.getZoom(), 13));
+  } catch (err) { showError(err.message); }
+};
+
+$('btnClear').onclick = async () => {
+  try {
+    const s = await api('/api/clear', {});
+    if (marker) { map.removeLayer(marker); marker = null; }
+    renderStatus(s);
+  } catch (err) { showError(err.message); }
+};
+
+$('btnPlay').onclick = async () => {
+  try {
+    renderStatus(await api('/api/route/start', {
+      points: waypoints,
+      speed: parseFloat($('speed').value) || 40,
+      hz: parseFloat($('hz').value) || 1,
+      loop: $('loop').checked
+    }));
+  } catch (err) { showError(err.message); }
+};
+
+$('btnStop').onclick = async () => {
+  try { renderStatus(await api('/api/route/stop', {})); }
+  catch (err) { showError(err.message); }
+};
+
+$('btnUndo').onclick = () => { waypoints.pop(); redrawRoute(); };
+$('btnReset').onclick = () => { waypoints = []; redrawRoute(); };
+
+$('btnParse').onclick = async () => {
+  try {
+    const data = await api('/api/parse', { text: $('paste').value });
+    waypoints = data.points;
+    redrawRoute();
+    if (waypoints.length) map.fitBounds(L.latLngBounds(waypoints).pad(0.2));
+  } catch (err) { showError(err.message); }
+};
+
+(async function loadPresets() {
+  try {
+    const presets = await api('/api/presets');
+    const box = $('presets');
+    Object.entries(presets).forEach(([name, p]) => {
+      const b = document.createElement('button');
+      b.textContent = p.label || name;
+      b.onclick = async () => {
+        $('latlon').value = `${p.lat}, ${p.lon}`;
+        try {
+          renderStatus(await api('/api/location', { lat: p.lat, lon: p.lon }));
+          map.setView([p.lat, p.lon], 13);
+        } catch (err) { showError(err.message); }
+      };
+      box.appendChild(b);
+    });
+  } catch (err) { /* presets are optional */ }
+})();
+
+// Poll so route progress and errors show up without a manual refresh.
+setInterval(async () => {
+  try { renderStatus(await api('/api/status')); } catch (err) { /* transient */ }
+}, 1000);
+
+redrawRoute();
+api('/api/status').then(renderStatus).catch(e => showError(e.message));
+</script>
+</body>
+</html>
